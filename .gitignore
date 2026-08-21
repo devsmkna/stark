@@ -1,0 +1,28 @@
+# PromptOps context snapshot
+.promptops/
+
+# PromptOps session assets
+.promptops-assets/
+
+# --- Spike: artefatti riproducibili, NON versionare ---
+# Contengono email, organizzazione e tipo di abbonamento (payload initialize),
+# trascrizioni di sessione e percorsi assoluti della macchina.
+spike/captures/
+spike/sandbox/
+
+# --- Segreti e configurazione locale ---
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+*.local.json
+
+# --- Dipendenze e build ---
+node_modules/
+dist/
+build/
+.vite/
+
+# --- Rumore ---
+*.log
+.DS_Store
