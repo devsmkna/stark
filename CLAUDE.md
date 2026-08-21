@@ -15,6 +15,11 @@ Le decisioni, le motivazioni e la roadmap NON stanno in questo repo: stanno su *
 
 Pagina radice: https://app.notion.com/p/3c3fef5cacd98116bbedfc31ce29c6f1
 
+**PARTI DA QUI** → **Punto della situazione** — https://app.notion.com/p/3c3fef5cacd9817ea071eb098c381dc6
+Dice dove siamo, qual e' la domanda aperta in questo momento e cosa viene subito dopo.
+Le conversazioni con l'agent non si sincronizzano fra le macchine: quella pagina e' il ponte,
+e va aggiornata a fine sessione prima di cambiare PC.
+
 - **Visione e principi di prodotto** — https://app.notion.com/p/3c3fef5cacd981fa914feb29624de853
 - **Registro delle decisioni (ADR)** — https://app.notion.com/p/3c3fef5cacd98121ac5bf2b4a7597121
   - ADR-001 — Canale di comunicazione con gli agent
@@ -23,6 +28,9 @@ Pagina radice: https://app.notion.com/p/3c3fef5cacd98116bbedfc31ce29c6f1
 - **Architettura del core** — https://app.notion.com/p/3c3fef5cacd981ea8b9ee41142c7aa3e
 - **Roadmap** — https://app.notion.com/p/3c3fef5cacd981b7a796df6f09a16f2d
 - **Domande aperte** — https://app.notion.com/p/3c3fef5cacd981f688d2c486c3119b04
+
+Nota: ADR-003 definisce dove vive cosa. Le specifiche accoppiate al codice (modello di eventi
+canonico, contratti degli adapter) NON vanno su Notion ma in `docs/` in questo repo.
 
 Ogni decisione strutturale va registrata come **ADR con la motivazione**, così che se in futuro
 la si rimette in discussione si sappia su quali premesse era stata presa.
