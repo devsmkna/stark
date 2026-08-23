@@ -37,9 +37,10 @@ e va aggiornata a fine sessione prima di cambiare PC.
 - **Spike tecnico — Risultati** — https://app.notion.com/p/3c3fef5cacd9817c8612ea39506f9bf9
 - **Architettura del core** — https://app.notion.com/p/3c3fef5cacd981ea8b9ee41142c7aa3e
 - **Roadmap** — https://app.notion.com/p/3c3fef5cacd981b7a796df6f09a16f2d
-- **Brief della UI — cosa deve mostrare STARK** — https://app.notion.com/p/3c5fef5cacd98109b2bede9a07442f11
-  Esito del brainstorming del 23 agosto 2026. Dice **cosa** deve essere visibile e riconoscibile,
-  non come. La forma la porta l'utente con un mockup: vedi la regola qui sotto.
+- **Interfaccia — decisioni e perché** — https://app.notion.com/p/3c5fef5cacd98109b2bede9a07442f11
+  Le decisioni sulla UI e le premesse su cui sono state prese, comprese quelle **scartate**.
+  Com'è fatta oggi invece sta nel repo, perché cambia col codice (ADR-003):
+  `docs/ui-schermate.md` a parole, `docs/ui-anteprima.html` come anteprima da pubblicare.
 - **Domande aperte** — https://app.notion.com/p/3c3fef5cacd981f688d2c486c3119b04
 
 Nota: ADR-003 definisce dove vive cosa. Le specifiche accoppiate al codice (modello di eventi
