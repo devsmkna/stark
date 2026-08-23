@@ -336,10 +336,22 @@ type Command =
 type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'
 ```
 
-Sono le sei modalità reali di Claude Code 2.1.238. STARK ne espone tre: `auto` (default),
-`acceptEdits` e `default`/Manual. `plan` è una funzione di prodotto a sé e non un livello di
-attrito; `dontAsk` serve alla CI; `bypassPermissions` **non va esposto affatto**, nemmeno
-disabilitato, perché si opera come root.
+Sono le sei modalità reali di Claude Code. **STARK le espone tutte e sei.**
+
+> ⚠️ **Corretto dal codice.** La bozza 1 diceva che `bypassPermissions` non andava esposto
+> affatto, "nemmeno disabilitato, perché si opera come root". Era una restrizione **nostra**,
+> aggiunta a un limite che non ci appartiene, e va contro lo scopo del progetto: STARK deve
+> poter fare tutto ciò che si fa da CLI, con una interfaccia migliore. Una GUI che vieta ciò che
+> il terminale consente è un motivo per non usarla.
+>
+> Verificato che il limite lo mette **il CLI**, non noi: da root sia
+> `--dangerously-skip-permissions` sia `--permission-mode bypassPermissions` falliscono con
+> *"cannot be used with root/sudo privileges for security reasons"*. Le altre cinque modalità
+> funzionano tutte da root.
+>
+> Quindi la regola giusta è: STARK mostra la voce e, quando il CLI la rifiuterebbe, **la
+> disabilita spiegando perché**. Mai nasconderla, mai lasciarla attiva e rotta in silenzio. È il
+> Principio 3 applicato a una funzione che l'utente si aspetta di trovare.
 
 `permissions.setRules` non è un comando verso l'agent: riscrive la tabella dei toggle di STARK e,
 come effetto, cambia l'insieme dei `matcher` con cui la sessione successiva dichiara l'hook.
@@ -436,9 +448,10 @@ Vincoli di lancio, dallo spike:
 - `--strict-mcp-config` è **obbligatorio**. Senza, la sessione eredita tutti i server MCP globali
   della macchina: canale di uscita dati non presidiato e circa 5× di contesto per turno, cioè
   quota bruciata prima. `--tools ""` da solo non basta.
-- `--dangerously-skip-permissions` non è utilizzabile: si opera come root. **`--permission-mode auto`
-  invece sì**, ed è il default di STARK (ADR-008): verificato da root, in headless, cinque tool call
-  e zero richieste di permesso.
+- Da root il CLI rifiuta `--dangerously-skip-permissions` **e** `--permission-mode
+  bypassPermissions`, con lo stesso messaggio. Non è una scelta di STARK: è un limite di Claude
+  Code, e STARK deve riportarlo, non aggiungerne di propri. `auto` invece funziona da root ed è
+  il default (ADR-008).
 - I toggle dei permessi **non possono passare dalla callback**: in `auto` mode il classificatore
   risolve prima e la callback non viene mai chiamata (misurato). L'unico punto che gira su **ogni**
   chiamata è l'hook `PreToolUse`, ed è documentato esattamente per questo. Il set dei matcher **è**

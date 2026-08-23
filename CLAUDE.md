@@ -83,6 +83,18 @@ Il patch dell'SDK insegue quello del CLI (0.3.**241** ↔ 2.1.**241**): vanno ag
 Per capire cosa una versione supporta **non si confrontano stringhe**: `system/init` porta un array
 `capabilities` con i nomi dei comportamenti di protocollo, ed è documentato usare quello.
 
+## STARK non deve mai poter meno del CLI
+
+Lo scopo è **fare tutto quello che si fa da CLI, con una UI/UX migliore**. Ogni volta che si sta
+per non esporre qualcosa "per sicurezza", la domanda giusta è: *il CLI lo consente?* Se sì, STARK
+deve consentirlo. Se il CLI lo rifiuta, STARK mostra la voce **disabilitata con la spiegazione**,
+mai nascosta.
+
+Distinzione da tenere ferma: i controlli del daemon (token, `Origin`, `Host`) **non** limitano ciò
+che l'utente può fare. Limitano *chi altro* può guidare l'agent. Il CLI non ne ha bisogno perché
+non ha superficie di rete: ci si scrive dentro solo dalla tastiera. Una web app quella protezione
+implicita la perde, e il token la restituisce.
+
 ## La UI non si inizia da soli
 
 **Regola dell'utente, 23 agosto 2026.** Quando il lavoro arriva alla UI: **fermarsi e non
@@ -94,7 +106,9 @@ Vale anche per bozze, mockup, "solo per capirci": non si anticipa.
 
 ## Vincoli dell'ambiente da tenere presenti
 
-- Si opera come **root**: `--dangerously-skip-permissions` è vietato per policy.
+- Si opera come **root**: `--dangerously-skip-permissions` e `--permission-mode
+  bypassPermissions` sono rifiutati **dal CLI stesso**, non da una policy nostra
+  ("cannot be used with root/sudo privileges"). Le altre cinque modalità funzionano.
   **Attenzione a non dedurne troppo**: `--permission-mode auto` è una modalità DIVERSA, non è un
   bypass, e da root funziona (verificato in headless). È il default di STARK per ADR-008.
   Con un modello che non supporta auto mode — Haiku non lo supporta — la sessione riparte in
