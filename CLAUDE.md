@@ -25,7 +25,8 @@ Pagina radice: https://app.notion.com/p/3c3fef5cacd98116bbedfc31ce29c6f1
   - ADR-005 — Ciclo di vita delle sessioni (daemon persistente + Sleep)
   - ADR-006 — Modello dei permessi — SUPERATA da ADR-008
   - ADR-008 — Permessi basati su auto mode (default: zero card, toggle opzionali)
-  - ADR-007 — Stack tecnologico e persistenza (Node ≥20 + TS, journal JSONL)
+  - ADR-007 — Stack tecnologico e persistenza (Node + TS, journal JSONL)
+  - ADR-009 — Agent SDK ufficiale invece del protocollo a mano (supera in parte ADR-001)
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -53,6 +54,8 @@ Passo corrente: **decidere il prossimo pezzo** fra daemon multi-sessione, risveg
 
 Decisioni già prese:
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
+- il canale lo implementa l'**Agent SDK ufficiale**, non codice nostro (ADR-009). Il vocabolario
+  canonico, il journal e la UI restano nostri: l'SDK sostituisce il trasporto, non la traduzione.
 - web app locale: daemon + UI nel browser, NON app nativa (ADR-002)
 - un solo adapter nell'MVP: Claude Code (ADR-004)
 - daemon persistente, con Sleep esplicito per sessione; TTL automatico rimandato (ADR-005)
@@ -66,7 +69,12 @@ Decisioni già prese:
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: layout della UI, accesso (solo localhost o anche LAN con auth), uso da mobile,
-il nome STARK per il branding.
+il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il branding di un
+prodotto; "STARK, Powered by Claude" sì).
+
+**Principio permanente, dato dall'utente il 23 agosto 2026:** se esiste qualcosa di **ufficiale e
+già pronto**, si preferisce sempre — così si scala e ci si adatta aggiornandosi, invece di
+riparare qualcosa costruito in casa. A dover essere motivato è il *non* usarlo.
 
 ## Versioni su cui stiamo costruendo (verificate il 23 agosto 2026)
 
