@@ -33,6 +33,9 @@ Pagina radice: https://app.notion.com/p/3c3fef5cacd98116bbedfc31ce29c6f1
 - **Spike tecnico — Risultati** — https://app.notion.com/p/3c3fef5cacd9817c8612ea39506f9bf9
 - **Architettura del core** — https://app.notion.com/p/3c3fef5cacd981ea8b9ee41142c7aa3e
 - **Roadmap** — https://app.notion.com/p/3c3fef5cacd981b7a796df6f09a16f2d
+- **Brief della UI — cosa deve mostrare STARK** — https://app.notion.com/p/3c5fef5cacd98109b2bede9a07442f11
+  Esito del brainstorming del 23 agosto 2026. Dice **cosa** deve essere visibile e riconoscibile,
+  non come. La forma la porta l'utente con un mockup: vedi la regola qui sotto.
 - **Domande aperte** — https://app.notion.com/p/3c3fef5cacd981f688d2c486c3119b04
 
 Ogni decisione strutturale va registrata come **ADR con la motivazione**, così che se in futuro
