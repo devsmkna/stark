@@ -26,6 +26,9 @@ Pagina radice: https://app.notion.com/p/3c3fef5cacd98116bbedfc31ce29c6f1
   - ADR-006 — Modello dei permessi — SUPERATA da ADR-008
   - ADR-008 — Permessi basati su auto mode (default: zero card, toggle opzionali)
   - ADR-007 — Stack tecnologico e persistenza (Node ≥20 + TS, journal JSONL)
+- **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
+  Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
+  toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
 - **Spike tecnico — Risultati** — https://app.notion.com/p/3c3fef5cacd9817c8612ea39506f9bf9
 - **Architettura del core** — https://app.notion.com/p/3c3fef5cacd981ea8b9ee41142c7aa3e
 - **Roadmap** — https://app.notion.com/p/3c3fef5cacd981b7a796df6f09a16f2d
@@ -64,6 +67,13 @@ Decisioni già prese:
 
 Ancora aperte: layout della UI, accesso (solo localhost o anche LAN con auth), uso da mobile,
 il nome STARK per il branding.
+
+## Versioni su cui stiamo costruendo (verificate il 23 agosto 2026)
+
+Claude Code CLI **2.1.241** · `@anthropic-ai/claude-agent-sdk` **0.3.241** · Node 24.13.1.
+Il patch dell'SDK insegue quello del CLI (0.3.**241** ↔ 2.1.**241**): vanno aggiornati insieme.
+Per capire cosa una versione supporta **non si confrontano stringhe**: `system/init` porta un array
+`capabilities` con i nomi dei comportamenti di protocollo, ed è documentato usare quello.
 
 ## Vincoli dell'ambiente da tenere presenti
 
