@@ -79,13 +79,9 @@ Decisioni già prese:
   **Conseguenza: ADR-007 va corretto su Notion, il prerequisito Node passa da ≥20 a ≥22.18.**
 - pannello terminale per sessione: **dopo** l'MVP
 
-Ancora aperte: layout della UI, accesso (solo localhost o anche LAN con auth), uso da mobile,
-il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il branding di un
-prodotto; "STARK, Powered by Claude" sì).
-
-**Principio permanente, dato dall'utente il 23 agosto 2026:** se esiste qualcosa di **ufficiale e
-già pronto**, si preferisce sempre — così si scala e ci si adatta aggiornandosi, invece di
-riparare qualcosa costruito in casa. A dover essere motivato è il *non* usarlo.
+Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
+branding (vincolo: "Claude Code" non è utilizzabile per il branding di un prodotto;
+"STARK, Powered by Claude" sì).
 
 ## Versioni su cui stiamo costruendo (verificate il 23 agosto 2026)
 
@@ -106,14 +102,57 @@ che l'utente può fare. Limitano *chi altro* può guidare l'agent. Il CLI non ne
 non ha superficie di rete: ci si scrive dentro solo dalla tastiera. Una web app quella protezione
 implicita la perde, e il token la restituisce.
 
-## La UI non si inizia da soli
+## Come lavorare su questo progetto
 
-**Regola dell'utente, 23 agosto 2026.** Quando il lavoro arriva alla UI: **fermarsi e non
-scrivere niente.** Prima si fa una sessione di brainstorming insieme per definire cosa si aspetta
-di vedere; poi lui passa quelle informazioni a un generatore di immagini AI e itera finché non
-trova una UI che gli piace; infine manda quella versione, che è ciò che si implementa.
+Regole date dall'utente. Non sono preferenze di stile: ognuna nasce da una volta in cui ho
+sbagliato, e la ragione conta quanto la regola.
 
-Vale anche per bozze, mockup, "solo per capirci": non si anticipa.
+### Se esiste qualcosa di ufficiale e già pronto, si preferisce sempre
+
+Un SDK, una libreria, un protocollo documentato. Vale anche quando la versione fatta in casa
+funziona già e adottare quella ufficiale costringe a rifare del lavoro. La ragione non è la
+comodità: è **scalare e adattarsi aggiornandosi**, invece di riparare qualcosa che imita una
+cosa che cambia. A dover essere motivato è il **non** usarlo.
+
+*Da dove nasce:* l'adapter era stato scritto a mano quando esisteva l'Agent SDK ufficiale, in
+TypeScript come noi. Vedi ADR-009.
+
+### Non dedurre vincoli: verificarli, o chiedere
+
+Prima di dire che qualcosa non si può fare, o di dedurre un limite da com'è messo l'ambiente,
+va **verificato**. Se non è verificabile da soli, si **chiede all'utente se quel vincolo esiste
+davvero** invece di darlo per buono.
+
+Un'assenza osservata in una configurazione non è un'assenza in generale. Quando l'osservazione è
+"questa cosa non c'è", il passo successivo non è prenderne atto ma chiedersi **perché** non c'è.
+
+*Da dove nasce:* avevo registrato come un fatto che `AskUserQuestion`, `ExitPlanMode` e
+`TodoWrite` "non esistono in headless", concludendone che una GUI sarebbe valsa sempre meno della
+TUI. Era falso, e quella premessa aveva già iniziato a rimpicciolire il perimetro dell'MVP.
+Stessa cosa con la versione di Node, che sembrava un vincolo e non lo era.
+
+### Sulla UI: l'anteprima prima delle parole
+
+L'impianto **è deciso** (vedi sotto), quindi non serve più fermarsi prima di toccarla. Resta però
+il modo: quando si propone qualcosa di grafico, si **pubblica l'anteprima e si dà il collegamento
+per primo**, poi si spiega. Mai il contrario.
+
+Una descrizione a parole di una grafica costringe a immaginarla, e su un'immagine mentale non si
+giudica niente. Guardandola prima, tutto ciò che viene scritto dopo è commento a qualcosa che
+l'utente ha già visto, e può contraddire subito invece che a lettura finita.
+
+Sorgente dell'anteprima: `docs/ui-anteprima.html`. Si ripubblica **sullo stesso indirizzo**
+passandolo come `url`: https://claude.ai/code/artifact/ea5bfede-34b3-4fa7-b267-286409f964fb
+
+### L'impianto della UI, in breve
+
+Elenco compatto sempre a fianco — raggruppato per stato e, dentro, per progetto **sempre**.
+Conversazione larga, turni richiudibili. Tutti i comandi in basso attorno alla casella di
+scrittura, e **quello stesso blocco si espande** per permessi e domande, che quindi non compaiono
+nel flusso. Sotto, una barra di stato. Gli effetti prendono il posto della conversazione, in due
+letture: per file e in ordine di tempo.
+
+Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato, su Notion.
 
 ## Vincoli dell'ambiente da tenere presenti
 
