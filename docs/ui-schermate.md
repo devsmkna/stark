@@ -49,6 +49,26 @@ disegni deve reggere quel volume.
 
 ---
 
+# L'impianto scelto
+
+> **Deciso il 23 agosto 2026**, scegliendo fra tre anteprime.
+> Anteprime: https://claude.ai/code/artifact/ea5bfede-34b3-4fa7-b267-286409f964fb
+
+**Elenco compatto sempre a fianco.** Nessuna barra di navigazione separata: **l'elenco è la
+navigazione**, ridotto all'essenziale — colore, nome, stato, da quanto tempo. Tutto lo spazio
+che avanza va alla conversazione, che resta larga.
+
+Le due conseguenze che hanno deciso la scelta:
+
+- l'insieme dei lavori è **sempre visibile**, già ordinato per urgenza: chi aspetta sta in cima
+  e non va cercato
+- la conversazione ha **spazio vero**, quindi il confronto affiancato ci sta dentro il flusso
+  invece di doversi aprire sopra tutto
+
+Lo stile: laterale scura, pill di stato, un colore per progetto, densità alta ma leggibile.
+
+---
+
 # Le schermate
 
 ## 1. L'insieme dei lavori
