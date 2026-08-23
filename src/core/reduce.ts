@@ -71,6 +71,7 @@ export type SessionSnapshot = {
   cost: Cost
   quota?: QuotaView
   lastSeq: number
+  resumeRef?: string
   error?: string
 }
 
@@ -106,6 +107,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     case 'session.model': s.model = p.model; break
     case 'session.tools': s.tools = p.tools; break
+    case 'session.resumeRef': s.resumeRef = p.ref; break
     case 'session.mode': s.mode = p.mode; break
     case 'session.slept': s.state = 'sleeping'; break
     case 'session.woke': s.state = 'idle'; break

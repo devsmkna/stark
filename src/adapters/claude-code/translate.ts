@@ -9,8 +9,9 @@
 // registrata e ottenere esattamente gli stessi eventi canonici. È ciò che rende
 // verificabile la traduzione senza spendere quota.
 
-import type { Cost, Hunk, Payload, Usage } from '../../core/events.ts'
+import type { Cost, Payload, Usage } from '../../core/events.ts'
 import type { NativeEvent } from './native.ts'
+import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
 
 type OpenBlock =
   | { kind: 'text'; partId: string; acc: string }
@@ -49,8 +50,14 @@ export class Translator {
         // all'handshake (verificato — aspettarlo prima di poter promptare è un
         // deadlock). La sessione nasce dalla risposta all'initialize, che l'adapter
         // riceve prima. Qui resta solo ciò che davvero si scopre adesso: i tool.
+        const out: Payload[] = []
         const tools = Array.isArray(e['tools']) ? e['tools'].map(String) : []
-        return tools.length > 0 ? [{ k: 'session.tools', tools }] : []
+        if (tools.length > 0) out.push({ k: 'session.tools', tools })
+        const ref = e['session_id']
+        // Su un fork l'id cambia: se non si riscrivesse il riferimento, il risveglio
+        // successivo tornerebbe alla sessione madre invece che alla copia.
+        if (typeof ref === 'string' && ref) out.push({ k: 'session.resumeRef', ref })
+        return out
       }
       case 'status':
         return e['status'] === 'requesting'
@@ -175,41 +182,10 @@ export class Translator {
       }
       if (isError || !call) continue
 
-      const effect = this.effect(call.name, call.input, rich, callId)
+      const effect = toolEffect(call.name, call.input, rich, callId)
       if (effect) out.push(effect)
     }
     return out
-  }
-
-  private effect(name: string, input: unknown, rich: NativeEvent, callId: string): Payload | null {
-    const inp = (input ?? {}) as Record<string, unknown>
-    if (name === 'Bash') {
-      return {
-        k: 'command.executed',
-        command: String(inp['command'] ?? ''),
-        stdout: String(rich['stdout'] ?? ''),
-        stderr: String(rich['stderr'] ?? ''),
-        interrupted: rich['interrupted'] === true,
-        ...(num(rich['exitCode']) !== undefined ? { exitCode: num(rich['exitCode'])! } : {}),
-        callId,
-      }
-    }
-    if (name === 'Write' || name === 'Edit' || name === 'MultiEdit' || name === 'NotebookEdit') {
-      const path = String(rich['filePath'] ?? inp['file_path'] ?? '')
-      if (!path) return null
-      const patch = Array.isArray(rich['structuredPatch']) ? rich['structuredPatch'] as Hunk[] : []
-      // Trappola verificata (§9): su una Write di un file NUOVO `structuredPatch` è
-      // vuoto, perché non c'è un originale da cui fare il diff. Inoltrarlo così
-      // mostrerebbe "file modificato" con un diff vuoto nel caso più comune di tutti.
-      const created = patch.length === 0
-      const hunks = created ? [additionHunk(String(rich['content'] ?? inp['content'] ?? ''))] : patch
-      const original = rich['originalFile']
-      return {
-        k: 'file.edited', path, hunks, created, callId,
-        ...(typeof original === 'string' ? { originalFile: original } : {}),
-      }
-    }
-    return null
   }
 
   // ─── chiusura del turno ───────────────────────────────────────────────────
@@ -256,12 +232,6 @@ function parseJson(s: string): unknown {
   try { return JSON.parse(s) } catch { return { __unparsed: s } }
 }
 
-function flattenContent(c: unknown): string {
-  if (typeof c === 'string') return c
-  if (Array.isArray(c)) return c.map(x => typeof x?.['text'] === 'string' ? x['text'] : '').join('')
-  return ''
-}
-
 function readUsage(u: unknown): Usage {
   const o = (u ?? {}) as Record<string, unknown>
   return {
@@ -270,25 +240,4 @@ function readUsage(u: unknown): Usage {
     cacheRead: num(o['cache_read_input_tokens']) ?? 0,
     cacheWrite: num(o['cache_creation_input_tokens']) ?? 0,
   }
-}
-
-/** §9: hunk di sola aggiunta, sintetizzato quando il file non esisteva. */
-function additionHunk(content: string): Hunk {
-  const lines = content.split('\n')
-  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
-  return {
-    oldStart: 0, oldLines: 0, newStart: 1, newLines: lines.length,
-    lines: lines.map(l => '+' + l),
-  }
-}
-
-/**
- * Finché l'hook `PermissionDenied` non è verificato (§16.4), il blocco si riconosce
- * dal testo dell'errore. È fragile e sta scritto qui in chiaro proprio per questo:
- * quando l'hook sarà verificato, questa funzione sparisce.
- */
-function classifyBlock(text: string): 'classifier' | 'denyRule' | null {
-  if (/auto mode classifier/i.test(text)) return 'classifier'
-  if (/haven't granted it yet|permission to use .* has been denied/i.test(text)) return 'denyRule'
-  return null
 }

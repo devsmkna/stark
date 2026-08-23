@@ -11,7 +11,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "node src/cli/offline-check.ts",
     "slice": "node src/cli/vertical-slice.ts",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "resume": "node src/cli/resume-check.ts",
+    "takeover": "node src/cli/takeover-check.ts",
+    "import": "node src/cli/import-check.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

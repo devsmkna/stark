@@ -23,6 +23,18 @@ export type LaunchOptions = {
    * Attenzione: '*' qui annulla auto mode (vincolo 1 del §8).
    */
   askMatchers?: string[]
+  /**
+   * Riprendere una conversazione esistente. `ref` e l'id di sessione di Claude Code.
+   *
+   * Attenzione: `--no-session-persistence` e incompatibile con tutto questo. Senza
+   * trascritto persistito non c'e niente da riprendere, quindi una sessione che STARK
+   * vuole poter risvegliare NON puo essere effimera. Il journal di STARK non basta:
+   * ricostruisce cosa e successo per la UI, ma il contesto del modello vive nel
+   * trascritto dell'agent.
+   */
+  resume?: { ref: string; fork?: boolean }
+  /** Imporre l'id invece di scoprirlo: cosi STARK sa come risvegliare gia in partenza. */
+  sessionId?: string
   extraArgs?: string[]
 }
 
@@ -39,7 +51,9 @@ export function buildArgs(o: LaunchOptions): string[] {
     // macchina. Canale di uscita dati non presidiato e ~5x di contesto per turno,
     // cioè quota bruciata. `--tools ""` da solo non basta (§14).
     '--strict-mcp-config',
-    '--no-session-persistence',
+    ...(o.resume ? ['--resume', o.resume.ref] : []),
+    ...(o.resume?.fork ? ['--fork-session'] : []),
+    ...(o.sessionId && !o.resume ? ['--session-id', o.sessionId] : []),
     '--permission-mode', o.mode,
     '--include-partial-messages',
     ...(o.askMatchers && o.askMatchers.length > 0 ? ['--include-hook-events'] : []),

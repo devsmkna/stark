@@ -19,11 +19,23 @@ export class Journal {
     this.path = path
     this.sessionId = sessionId
     mkdirSync(dirname(path), { recursive: true })
+    // Riaprire un journal esistente deve CONTINUARE i seq, non ripartire da 1.
+    // Ripartire produrrebbe due eventi con lo stesso seq nello stesso file, e a quel
+    // punto "ho gia visto fino a N" smette di voler dire qualcosa: la UI che si
+    // riaggancia dopo un risveglio salterebbe meta della conversazione.
+    this.seq = lastSeq(path)
     this.fd = openSync(path, 'a')
   }
 
+  /** Da dove riparte la numerazione. Serve a `session.woke`. */
+  get lastSeq(): number { return this.seq }
+
   /**
-   * Assegna `seq` e `ts`, scrive la riga e restituisce l'evento completo.
+   * Assegna `seq`, scrive la riga e restituisce l'evento completo.
+   *
+   * `ts` si puo imporre: importando un trascritto, l'ora vera e quella in cui i fatti
+   * sono accaduti, non quella in cui li abbiamo letti. Una conversazione di due giorni
+   * fa che si mostra tutta con l'orario di adesso e sbagliata in modo silenzioso.
    *
    * La scrittura è sincrona di proposito: `seq` deve essere senza buchi e nell'ordine
    * in cui i fatti sono accaduti. Con una scrittura asincrona due append ravvicinati
@@ -31,12 +43,12 @@ export class Journal {
    * non è mai esistito. Se un giorno diventerà un problema di prestazioni, la risposta
    * è una coda ordinata, non l'asincrono nudo.
    */
-  append(payload: Payload): CanonicalEvent {
+  append(payload: Payload, ts = Date.now()): CanonicalEvent {
     if (this.fd === null) throw new Error('journal chiuso')
     const event: CanonicalEvent = {
       v: MODEL_VERSION,
       seq: ++this.seq,
-      ts: Date.now(),
+      ts,
       sessionId: this.sessionId,
       payload,
     }
@@ -58,6 +70,17 @@ export class Journal {
     }
     return out
   }
+}
+
+/** Ultimo `seq` presente nel file, 0 se il file non esiste o e vuoto. */
+function lastSeq(path: string): number {
+  if (!existsSync(path)) return 0
+  let max = 0
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try { max = Math.max(max, (JSON.parse(line) as CanonicalEvent).seq) } catch { /* riga monca */ }
+  }
+  return max
 }
 
 /**

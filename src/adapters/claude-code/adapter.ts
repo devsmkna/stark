@@ -14,6 +14,8 @@ export type AdapterOptions = {
   mode: PermissionMode
   /** Vuoto = nessun hook = zero card. È il default di ADR-008. */
   askMatchers?: string[]
+  resume?: { ref: string; fork?: boolean }
+  sessionId?: string
   onPayload: (p: Payload) => void
   onRaw?: (line: string) => void
   /**
@@ -43,6 +45,8 @@ export class ClaudeCodeAdapter {
     const matchers = this.opts.askMatchers ?? []
     const args = buildArgs({
       cwd: this.opts.cwd, model: this.opts.model, mode: this.opts.mode, askMatchers: matchers,
+      ...(this.opts.resume ? { resume: this.opts.resume } : {}),
+      ...(this.opts.sessionId ? { sessionId: this.opts.sessionId } : {}),
     })
     this.emit({ k: 'session.state', state: 'starting' })
     const child = spawn('claude', args, { cwd: this.opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })

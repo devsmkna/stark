@@ -82,6 +82,9 @@ export type Payload =
   // La lista dei tool non è nota alla nascita della sessione: arriva col primo turno.
   // Vedi la correzione al §14 in fondo a docs/event-model.md.
   | { k: 'session.tools'; tools: string[] }
+  // Il manico con cui questa sessione si riapre. Sta nel journal perche senza, il
+  // journal non basta a risvegliare: saprebbe dire cosa e successo ma non come tornarci.
+  | { k: 'session.resumeRef'; ref: string }
   | { k: 'session.slept' }
   | { k: 'session.woke'; resumedFromSeq: number }
   | { k: 'session.error'; message: string; fatal: boolean }
