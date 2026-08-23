@@ -45,13 +45,24 @@ const adapter = new ClaudeCodeAdapter({
   cwd: SANDBOX,
   model: MODEL,
   mode: MODE,
-  askMatchers: ASK,
-  onRaw: line => raw.write(line),
+  askTools: ASK,
+  onRaw: m => raw.write(JSON.stringify(m)),
   onPermission: async ({ toolName }) => {
     // Qui, in STARK vero, si consulta la tabella dei toggle e solo ciò che non è già
     // consentito diventa una card. Nella fetta verticale si consente e si annota.
-    console.log(`  [permesso] ${toolName} -> allow (nessuna tabella regole nella fetta)`)
-    return 'allow'
+    console.log(`\n  [permesso] ${toolName} -> consenti (nessuna tabella regole nella fetta)`)
+    return { allow: true }
+  },
+  onQuestion: async ({ questions }) => {
+    // Una GUI mostrerebbe le card. Qui si sceglie la prima opzione e si annota, così
+    // la prova resta automatica: serve a verificare il canale, non a decidere.
+    const answers: Record<string, string> = {}
+    for (const q of questions) {
+      const scelta = q.options[0]?.label ?? ''
+      console.log(`\n  [domanda] ${q.header}: ${q.question} -> ${scelta}`)
+      answers[q.question] = scelta
+    }
+    return { answers }
   },
   onPayload: p => {
     const e = journal.append(p)   // prima il disco, poi la UI: il journal è la verità

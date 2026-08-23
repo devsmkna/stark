@@ -6,7 +6,7 @@
 // o l'abbia riaperta il giorno dopo — e non c'e modo di accorgersene guardando la UI.
 
 import type { Hunk, Payload } from '../../core/events.ts'
-import type { NativeEvent } from './native.ts'
+import type { NativeEvent } from './raw.ts'
 
 export function toolEffect(
   name: string, input: unknown, rich: NativeEvent, callId: string,

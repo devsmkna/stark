@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import type { Payload, Usage } from '../../core/events.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
-import type { NativeEvent } from './native.ts'
+import type { NativeEvent } from './raw.ts'
 
 export type ImportedEvent = { payload: Payload; ts: number }
 

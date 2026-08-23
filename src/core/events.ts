@@ -40,6 +40,17 @@ export type Cost = { nominalUsd: number }
 
 export type SlashCommand = { name: string; description?: string }
 
+/**
+ * Una domanda dell'agent, nella forma documentata di `AskUserQuestion`.
+ * Da 1 a 4 domande per richiesta, da 2 a 4 opzioni ciascuna, `header` max 12 caratteri.
+ */
+export type AgentQuestion = {
+  question: string
+  header: string
+  multiSelect: boolean
+  options: { label: string; description: string; preview?: string }[]
+}
+
 /** §16.3 resta aperto: nell'MVP il prompt è testo semplice. */
 export type PromptPart = { type: 'text'; text: string }
 
@@ -75,7 +86,10 @@ export type Capabilities = {
 export type Payload =
   // §6 sessione
   | { k: 'session.created'; agent: string; cwd: string; model: string
-      capabilities: Capabilities; tools: string[]; commands: SlashCommand[] }
+      capabilities: Capabilities; tools: string[]; commands: SlashCommand[]
+      // I comportamenti di protocollo che questa versione implementa. È documentato
+      // usare questi nomi per la feature detection invece di confrontare versioni.
+      protocolCapabilities?: string[] }
   | { k: 'session.state'; state: SessionState; reason?: string }
   | { k: 'session.model'; model: string }
   | { k: 'session.mode'; mode: PermissionMode }
@@ -114,8 +128,13 @@ export type Payload =
       savable: string[]; source: { callId?: string } }
   | { k: 'permission.replied'; requestId: string
       decision: 'once' | 'always' | 'reject'; scope?: string; message?: string }
-  | { k: 'question.asked'; requestId: string; text: string; options?: string[] }
-  | { k: 'question.replied'; requestId: string; answer: string }
+  // §16.1 risolto: le domande arrivano come una normale richiesta di permesso sul tool
+  // `AskUserQuestion`. Non sono un canale a parte, ma restano un evento a parte: per
+  // l'utente "scegli fra queste opzioni" e "posso eseguire questo comando?" sono due
+  // cose diverse, e una UI che le mostrasse uguali mentirebbe.
+  | { k: 'question.asked'; requestId: string; questions: AgentQuestion[] }
+  | { k: 'question.replied'; requestId: string
+      answers: Record<string, string | string[]>; response?: string }
   | { k: 'question.rejected'; requestId: string }
 
   // §9 effetti collaterali

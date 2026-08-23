@@ -1,12 +1,13 @@
 # STARK — Modello di eventi canonico
 
-> **Stato:** bozza 2. La fetta verticale (`src/`) implementa le sezioni 4-14 e le ha
-> corrette in tre punti: le correzioni sono segnate qui sotto con ⚠️ **corretto dal codice**.
+> **Stato:** bozza 3. Le sezioni 4-14 sono implementate in `src/`, sopra l'**Agent SDK
+> ufficiale** (ADR-009). Le correzioni che il codice ha imposto alla bozza 1 sono segnate
+> con ⚠️ **corretto dal codice**.
 > **Dove vive:** in questo repo e non su Notion, per ADR-003: questa specifica cambia
 > insieme al codice, quindi non può stare in una pagina che nessun test può verificare.
 > **Vincolata da:** ADR-001 (canale strutturato), ADR-004 (un solo adapter nell'MVP),
 > ADR-005 (daemon persistente + Sleep), ADR-008 (permessi basati su auto mode; supera ADR-006),
-> ADR-007 (Node + journal JSONL).
+> ADR-007 (Node + journal JSONL), ADR-009 (l'Agent SDK ufficiale implementa il canale).
 
 ## 1. Che problema risolve
 
@@ -187,9 +188,15 @@ di mostrare "sta per scrivere in `src/foo.ts`" prima che il file sia scritto.
 | { k: 'permission.replied', requestId: string,
                              decision: 'once'|'always'|'reject', scope?: string, message?: string }
 
-| { k: 'question.asked',     requestId: string, text: string, options?: string[] }
-| { k: 'question.replied',   requestId: string, answer: string }
+| { k: 'question.asked',     requestId: string, questions: AgentQuestion[] }
+| { k: 'question.replied',   requestId: string,
+                             answers: Record<string, string|string[]>, response?: string }
 | { k: 'question.rejected',  requestId: string }
+
+type AgentQuestion = {
+  question: string, header: string, multiSelect: boolean,
+  options: { label: string, description: string, preview?: string }[]
+}
 ```
 
 Il vocabolario `action` + `resources` + `savable` è preso da OpenCode
@@ -199,9 +206,13 @@ perché è più generale di quello di Claude Code ed è già al livello giusto. 
 l'adapter a tradurli in `action` e `resources`.
 
 Le tre decisioni `once | always | reject` sono Consenti / Consenti sempre / Nega, ed è il corpo
-della richiesta `POST /api/session/{id}/permission/{requestID}/reply` di OpenCode. Claude Code non
-ha `always` a livello di protocollo: risponde solo `permissionDecision: allow | deny`, quindi
-**è STARK a implementare `always`**.
+della richiesta `POST /api/session/{id}/permission/{requestID}/reply` di OpenCode.
+
+> ⚠️ **Corretto dal codice.** La bozza 1 diceva che `always` doveva implementarlo STARK, perché
+> il protocollo conosce solo `allow` e `deny`. È superato: la callback dei permessi riceve
+> `suggestions`, un elenco di regole già pronte, e rimandarne una indietro in
+> `updatedPermissions` la scrive in `.claude/settings.local.json`. Le sessioni successive
+> smettono di chiedere da sole. Quindi `always` **non è emulato**: è la strada documentata.
 
 ### Quando questi eventi esistono, e quando non esistono affatto
 
@@ -410,10 +421,15 @@ al journal.
 | `tool.ended` | messaggio `user` con `tool_result` |
 | `file.edited` | `tool_use_result.structuredPatch` + `originalFile` (vedi trappola §9) |
 | `command.executed` | `tool_use_result` di Bash: `stdout`, `stderr`, `interrupted` |
-| `permission.asked` | `control_request{subtype:"hook_callback"}` — solo per i tool con matcher |
+| `permission.asked` | callback dei permessi, più l'hook `PreToolUse` per i tool su "chiedi" |
+| `question.asked` | stessa callback, con `toolName === 'AskUserQuestion'` |
 | `action.blocked` | `tool_result` con `is_error` e testo del classificatore di auto mode |
 | `usage.updated` | `result.usage` e `result.modelUsage` |
 | `quota.updated` | `rate_limit_event` |
+
+> ⚠️ **Corretto dal codice.** Le sorgenti qui sopra non si leggono più a mano: le fornisce
+> l'Agent SDK (ADR-009), che emette le stesse forme di messaggio. Cambia **chi** trasporta, non
+> **cosa** viene tradotto — ed è il punto: senza quel confine il secondo adapter non esiste.
 
 Vincoli di lancio, dallo spike:
 
@@ -423,9 +439,10 @@ Vincoli di lancio, dallo spike:
 - `--dangerously-skip-permissions` non è utilizzabile: si opera come root. **`--permission-mode auto`
   invece sì**, ed è il default di STARK (ADR-008): verificato da root, in headless, cinque tool call
   e zero richieste di permesso.
-- L'hook `PreToolUse` va dichiarato nell'`initialize` **e solo per i tool che l'utente ha messo su
-  "chiedi"**. Dichiararlo con `matcher: '*'` annulla auto mode. Non dichiararlo affatto è il caso
-  normale.
+- I toggle dei permessi **non possono passare dalla callback**: in `auto` mode il classificatore
+  risolve prima e la callback non viene mai chiamata (misurato). L'unico punto che gira su **ogni**
+  chiamata è l'hook `PreToolUse`, ed è documentato esattamente per questo. Il set dei matcher **è**
+  il pannello dei permessi. Nessun matcher è il caso normale.
 - Senza hook, un tool coperto da una regola `permissions.ask` viene **negato**, non chiesto.
 - `auto` richiede Opus 4.6+, Sonnet 4.6+ o Fable 5. Con Haiku la sessione riparte in Manual: se
   STARK non se ne accorge, l'utente si ritrova a chiedere tutto senza sapere perché.
@@ -487,8 +504,12 @@ cui `Capabilities` dovrà lavorare davvero.
 
 ## 16. Cosa resta aperto
 
-1. **Le domande dell'agent su Claude Code.** OpenCode ha `question.v2.asked`; per Claude Code non
-   è stato sondato. Finché non si verifica, `capabilities.questions` resta `false`.
+1. ~~**Le domande dell'agent su Claude Code.**~~ **Risolto.** Arrivano dalla stessa porta dei
+   permessi: la callback viene chiamata con `toolName === 'AskUserQuestion'` e l'input contiene
+   `questions[]`. Restano un evento canonico distinto perché per l'utente "scegli fra queste
+   opzioni" e "posso eseguire questo comando?" sono due cose diverse, e una UI che le mostrasse
+   uguali mentirebbe. Da 1 a 4 domande, da 2 a 4 opzioni, `header` max 12 caratteri.
+   `capabilities.questions` è `true`.
 2. ~~**Identità stabile delle parti.**~~ **Risolto dal codice.** Il `partId` è
    `${messageId}#${index}`: l'indice si ricicla a ogni messaggio, l'id del messaggio no.
    Verificato che i partId restano distinti attraverso più messaggi dello stesso turno.
@@ -519,11 +540,13 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/events.ts` | i tipi di questo documento, uno a uno |
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
-| `src/adapters/claude-code/` | l'unico punto che nomina Claude Code |
+| `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
 | `src/cli/offline-check.ts` | `npm run check` — 15 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 
-Misurato sulla sessione reale: 63 eventi canonici, `Write` ed `Edit` passati in silenzio dal
-classificatore, solo `Bash` tornato indietro come `permission.asked` grazie al singolo matcher —
-cioè ADR-008 che funziona sul codice e non solo sulla carta. Stato dal vivo e stato ricostruito
-dal journal: identici.
+Misurato su sessioni reali, dopo il passaggio all'SDK: 122 eventi canonici con `Write`, `Edit` e
+quattro comandi, zero richieste di permesso in `auto` mode — cioè ADR-008 che funziona sul codice
+e non solo sulla carta. Una domanda a scelta multipla percorsa da capo a fondo
+(`question.asked` → risposta → il turno prosegue). Un risveglio con `seq` contigui su un solo
+journal e il modello che ricorda ciò che era stato detto prima. In tutti i casi lo stato dal vivo
+e quello ricostruito dal journal sono identici.

@@ -10,7 +10,7 @@
 // verificabile la traduzione senza spendere quota.
 
 import type { Cost, Payload, Usage } from '../../core/events.ts'
-import type { NativeEvent } from './native.ts'
+import type { NativeEvent } from './raw.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
 
 type OpenBlock =

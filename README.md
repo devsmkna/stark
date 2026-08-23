@@ -6,12 +6,13 @@ codice. Vedi `CLAUDE.md` per i link e `docs/event-model.md` per il modello di ev
 
 ## Stato
 
-Fetta verticale funzionante: avvio di una sessione Claude Code, traduzione nel vocabolario
-canonico, journal JSONL, Sleep e ricostruzione dello stato dal journal. Nessuna UI.
+Fetta verticale funzionante sopra l'**Agent SDK ufficiale** (ADR-009): avvio di una sessione,
+traduzione nel vocabolario canonico, permessi e domande a scelta multipla, journal JSONL, Sleep,
+risveglio e ricostruzione dello stato dal journal. Nessuna UI.
 
 ## Requisiti
 
-Node **≥ 22.18**. I sorgenti TypeScript girano direttamente (`node src/…​.ts`), senza build:
+Node **≥ 22.18**. Claude Code **non** va installato a parte: l'SDK porta il proprio. I sorgenti TypeScript girano direttamente (`node src/…​.ts`), senza build:
 è da 22.18 che l'esecuzione dei `.ts` è attiva senza flag. `tsc` resta necessario per il
 controllo dei tipi, che lo stripping **non** fa.
 

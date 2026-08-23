@@ -12,7 +12,8 @@ import { resolve } from 'node:path'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
-import { capabilitiesFor, resolveModel, slashCommands, type NativeEvent } from '../adapters/claude-code/native.ts'
+import { capabilitiesFor, resolveModel, slashCommands } from '../adapters/claude-code/sdk-options.ts'
+import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
 // La risposta all'handshake: è QUI che nasce la sessione, non in system:init.
 const HANDSHAKE = {

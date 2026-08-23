@@ -9,7 +9,8 @@
 import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
-  type PermissionMode, type PromptPart, type SessionState, type SlashCommand, type Usage,
+  type AgentQuestion, type PermissionMode, type PromptPart, type SessionState,
+  type SlashCommand, type Usage,
 } from './events.ts'
 
 export type TextPartView = { kind: 'text'; partId: string; text: string; open: boolean }
@@ -46,6 +47,7 @@ export type PendingPermissionView = {
 export type QuotaView = {
   status: string; kind: string; resetsAt: number; usingOverage: boolean
 }
+export type PendingQuestionView = { requestId: string; questions: AgentQuestion[] }
 export type NoticeView = { level: 'info' | 'warn' | 'error'; text: string }
 export type BlockedView = { by: 'classifier' | 'denyRule'; callId?: string; reason: string }
 
@@ -65,6 +67,7 @@ export type SessionSnapshot = {
   files: FileEditView[]
   shell: CommandRunView[]
   pendingPermissions: PendingPermissionView[]
+  pendingQuestions: PendingQuestionView[]
   blocked: BlockedView[]
   notices: NoticeView[]
   usage: Usage
@@ -78,7 +81,8 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
-    turns: [], files: [], shell: [], pendingPermissions: [], blocked: [], notices: [],
+    turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
+    blocked: [], notices: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0,
   }
 }
@@ -188,10 +192,14 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       if (s.pendingPermissions.length === 0 && s.state === 'awaiting') s.state = 'busy'
       break
     case 'question.asked':
-      s.state = 'awaiting'; break
+      s.pendingQuestions.push({ requestId: p.requestId, questions: p.questions })
+      s.state = 'awaiting'
+      break
     case 'question.replied':
     case 'question.rejected':
-      if (s.state === 'awaiting') s.state = 'busy'
+      s.pendingQuestions = s.pendingQuestions.filter(x => x.requestId !== p.requestId)
+      if (s.pendingQuestions.length === 0 && s.pendingPermissions.length === 0
+        && s.state === 'awaiting') s.state = 'busy'
       break
 
     case 'file.edited':
