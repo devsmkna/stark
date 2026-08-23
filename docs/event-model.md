@@ -543,6 +543,24 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
 | `src/cli/offline-check.ts` | `npm run check` — 15 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
+| `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
+
+## 18. Il daemon: come i comandi del §11 viaggiano
+
+I `Command` del §11 non hanno bisogno di un protocollo proprio: vanno in `POST
+/api/sessions/:id/command` come corpo JSON, e la risposta dice solo se sono stati accettati.
+Ciò che accade dopo torna dal **flusso degli eventi**, non dalla risposta. Non è una
+semplificazione: è l'invariante del §4 applicata al trasporto — se un comando rispondesse con
+il proprio effetto, quell'effetto esisterebbe in un posto che il journal non conosce.
+
+Il flusso è **SSE**, non WebSocket. Ciò che conta va in una direzione sola, e SSE è uno standard
+che sta già in Node e nel browser: nessuna dipendenza. Per giunta è la stessa forma che usa
+OpenCode, quindi il secondo adapter troverà la strada fatta.
+
+Chi si collega passa `?from=N` e riceve **prima ciò che si è perso, poi il resto**, in un
+travaso che non cede il controllo: se aspettasse qualcosa in mezzo, un evento nuovo potrebbe
+infilarsi fra la storia e il flusso e arrivare due volte, o mai. Ogni evento porta `id: <seq>`,
+così una connessione caduta riparte dal punto giusto senza rileggere tutto.
 
 Misurato su sessioni reali, dopo il passaggio all'SDK: 122 eventi canonici con `Write`, `Edit` e
 quattro comandi, zero richieste di permesso in `auto` mode — cioè ADR-008 che funziona sul codice

@@ -180,6 +180,8 @@ export type Command =
   | { c: 'session.close' }
   | { c: 'permission.reply'; requestId: string
       decision: 'once' | 'always' | 'reject'; scope?: string }
-  | { c: 'question.reply'; requestId: string; answer: string }
+  | { c: 'question.reply'; requestId: string
+      answers: Record<string, string | string[]>; response?: string }
+  | { c: 'question.reject'; requestId: string }
 
 export const EMPTY_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }

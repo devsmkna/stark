@@ -14,7 +14,9 @@
     "build": "tsc -p tsconfig.json",
     "resume": "node src/cli/resume-check.ts",
     "takeover": "node src/cli/takeover-check.ts",
-    "import": "node src/cli/import-check.ts"
+    "import": "node src/cli/import-check.ts",
+    "stark": "node src/cli/stark.ts",
+    "daemon": "node src/cli/daemon-check.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

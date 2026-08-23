@@ -83,6 +83,15 @@ Il patch dell'SDK insegue quello del CLI (0.3.**241** ↔ 2.1.**241**): vanno ag
 Per capire cosa una versione supporta **non si confrontano stringhe**: `system/init` porta un array
 `capabilities` con i nomi dei comportamenti di protocollo, ed è documentato usare quello.
 
+## La UI non si inizia da soli
+
+**Regola dell'utente, 23 agosto 2026.** Quando il lavoro arriva alla UI: **fermarsi e non
+scrivere niente.** Prima si fa una sessione di brainstorming insieme per definire cosa si aspetta
+di vedere; poi lui passa quelle informazioni a un generatore di immagini AI e itera finché non
+trova una UI che gli piace; infine manda quella versione, che è ciò che si implementa.
+
+Vale anche per bozze, mockup, "solo per capirci": non si anticipa.
+
 ## Vincoli dell'ambiente da tenere presenti
 
 - Si opera come **root**: `--dangerously-skip-permissions` è vietato per policy.
