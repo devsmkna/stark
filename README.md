@@ -32,6 +32,7 @@ npm install
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
 | `npm run stark` | **avvia il daemon** e stampa indirizzo e token |
 | `npm run daemon` | prova il daemon da capo a fondo, perimetro di sicurezza compreso |
+| `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
 | `npm run build` | emette JS in `dist/`. Serve solo se un giorno si vuole distribuire compilato. |
 
 `npm run check` è quello da eseguire spesso: la risorsa scarsa è la quota, non i dollari, e un

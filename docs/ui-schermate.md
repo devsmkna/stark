@@ -215,6 +215,13 @@ a controllare.
 Nella conversazione i fatti stanno **dove sono accaduti**; in questo elenco stanno **tutti
 insieme**, per rivedere alla fine.
 
+> **Un file può essere modificato più volte nello stesso turno**, e ogni modifica è un fatto
+> a sé. Nella conversazione vanno mostrate separate, perché sono avvenute in momenti diversi
+> e in mezzo l'assistente ha fatto altro. In questo elenco invece il file va nominato **una
+> volta sola**, con quante volte è stato toccato: qui si guarda *cosa è cambiato*, non
+> *quando*. Verificato su una modifica reale: due cambi allo stesso file arrivano come due
+> confronti distinti, non come uno solo cumulativo.
+
 ---
 
 ## 6. Avviare un nuovo lavoro

@@ -12,6 +12,7 @@ import { resolve } from 'node:path'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
+import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { capabilitiesFor, resolveModel, slashCommands } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -127,6 +128,61 @@ check('§6: nessun avviso di declassamento quando la modalità combacia',
   replayed.notices.length === 0, replayed.notices.map(n => n.text).join('; '))
 check('turno chiuso come completato',
   replayed.turns[0]?.reason === 'completed')
+
+// ─── il confronto affiancato (§9) ───────────────────────────────────────────
+
+// Hunk vero, catturato da una Edit reale e riportato nel §9 della specifica.
+const REALE = [{
+  oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
+  lines: ['-ciao', '\\ No newline at end of file', '+ciao mondo', '\\ No newline at end of file'],
+}]
+const rReale = sideBySide(REALE)
+check('diff: +N −M contati senza i marcatori di fine riga',
+  JSON.stringify(stats(REALE)) === JSON.stringify({ added: 1, removed: 1 }),
+  JSON.stringify(stats(REALE)))
+check('diff: riga tolta e riga aggiunta finiscono alla stessa altezza',
+  rReale.length === 1 && rReale[0]?.kind === 'changed')
+check('diff: il "manca l\'a capo finale" annota la riga, non ne occupa una',
+  (rReale[0] as { left: { noNewline?: boolean } })?.left?.noNewline === true)
+check('diff: evidenziata solo la parte cambiata dentro la riga',
+  JSON.stringify((rReale[0] as { rightSpan?: unknown })?.rightSpan) === JSON.stringify({ start: 4, end: 10 }),
+  JSON.stringify((rReale[0] as { rightSpan?: unknown })?.rightSpan))
+
+// File nuovo: è l'hunk che sintetizziamo noi, con oldStart a 0.
+const NUOVO = [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 3, lines: ['+a', '+b', '+c'] }]
+const rNuovo = sideBySide(NUOVO)
+check('diff: file creato → tre righe aggiunte, nessun intervallo saltato',
+  rNuovo.length === 3 && rNuovo.every(r => r.kind === 'added'),
+  rNuovo.map(r => r.kind).join(','))
+check('diff: la numerazione di un file creato parte da 1',
+  (rNuovo[0] as { right: { no: number } })?.right?.no === 1)
+
+// Due hunk distanti: in mezzo c'è un intervallo non mostrato.
+const DUE = [
+  { oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [' a', '-b', '+B', ' c'] },
+  { oldStart: 10, oldLines: 1, newStart: 10, newLines: 2, lines: [' z', '+w'] },
+]
+const rDue = sideBySide(DUE)
+const salto = rDue.find(r => r.kind === 'gap') as { oldFrom: number; oldTo: number } | undefined
+check('diff: fra due hunk viene annunciato l\'intervallo saltato',
+  salto?.oldFrom === 4 && salto.oldTo === 9, JSON.stringify(salto))
+check('diff: la numerazione riparte dal secondo hunk',
+  rDue.some(r => r.kind === 'context' && r.left.no === 10))
+
+// Sostituzione sbilanciata: due righe diventano una.
+const SBIL = [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 1, lines: ['-uno', '-due', '+unico'] }]
+const rSbil = sideBySide(SBIL)
+check('diff: due righe sostituite da una → una coppia più una riga sola a sinistra',
+  rSbil.length === 2 && rSbil[0]?.kind === 'changed' && rSbil[1]?.kind === 'removed',
+  rSbil.map(r => r.kind).join(','))
+
+check('diff: una riga riscritta da capo non viene evidenziata a pezzi',
+  JSON.stringify(intraLine('alfa beta gamma', 'niente in comune qui')) === '{}')
+
+const uDue = unified(DUE)
+check('diff: forma unificata, numeri di riga coerenti',
+  uDue.filter(r => r.kind === 'removed').every(r => r.oldNo === 2)
+  && uDue.filter(r => r.kind === 'added').some(r => r.newNo === 2))
 
 let failed = 0
 for (const [name, ok, detail] of checks) {

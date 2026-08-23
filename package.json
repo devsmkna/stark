@@ -16,7 +16,8 @@
     "takeover": "node src/cli/takeover-check.ts",
     "import": "node src/cli/import-check.ts",
     "stark": "node src/cli/stark.ts",
-    "daemon": "node src/cli/daemon-check.ts"
+    "daemon": "node src/cli/daemon-check.ts",
+    "diff": "node src/cli/diff-live-check.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
