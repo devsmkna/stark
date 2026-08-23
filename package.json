@@ -1,0 +1,20 @@
+{
+  "name": "stark",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GUI locale che sostituisce la TUI degli agent AI",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "node src/cli/offline-check.ts",
+    "slice": "node src/cli/vertical-slice.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,6 +1,7 @@
 # STARK — Modello di eventi canonico
 
-> **Stato:** bozza 1, da rivedere insieme prima di scrivere codice.
+> **Stato:** bozza 2. La fetta verticale (`src/`) implementa le sezioni 4-14 e le ha
+> corrette in tre punti: le correzioni sono segnate qui sotto con ⚠️ **corretto dal codice**.
 > **Dove vive:** in questo repo e non su Notion, per ADR-003: questa specifica cambia
 > insieme al codice, quindi non può stare in una pagina che nessun test può verificare.
 > **Vincolata da:** ADR-001 (canale strutturato), ADR-004 (un solo adapter nell'MVP),
@@ -115,15 +116,29 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 | { k: 'session.state',    state: SessionState, reason?: string }
 | { k: 'session.model',    model: string }
 | { k: 'session.mode',     mode: PermissionMode }
+| { k: 'session.tools',    tools: string[] }
 | { k: 'session.slept' }
 | { k: 'session.woke',     resumedFromSeq: number }
 | { k: 'session.error',    message: string, fatal: boolean }
 ```
 
 `session.created` porta con sé tutto ciò che serve a popolare la UI *prima* del primo prompt.
-Su Claude Code arriva dall'evento `system:init`, che nella cattura di oggi espone fra l'altro
-`cwd`, `session_id`, `tools`, `model`, `permissionMode`, `slash_commands` (48 voci),
-`mcp_servers`, `agents`, `skills`, `capabilities` e `memory_paths`.
+
+> ⚠️ **Corretto dal codice.** La bozza 1 lo faceva nascere da `system:init`. Sbagliato:
+> `system:init` **non arriva all'handshake, arriva col primo turno**. Aspettarlo prima di
+> poter mandare un prompt è un deadlock, misurato. La sessione nasce invece dalla risposta
+> alla `control_request{initialize}`, che torna subito e porta `commands` (48 voci con
+> descrizione), `models` (la tabella che risolve l'alias `default` nel modello vero),
+> `current_permission_mode`, `hooks_applied` e `session_state`.
+>
+> Due conseguenze di prodotto, entrambe migliori. La prima: si sa **prima del primo prompt**
+> se la modalità richiesta è stata accettata e se i toggle su "chiedi" si sono registrati
+> davvero — `hooks_applied: false` con dei matcher dichiarati è il caso peggiore possibile,
+> l'utente si crede protetto e non lo è. La seconda: l'unica cosa che `system:init` sa e
+> l'handshake no è la lista dei tool, ed è per questo che esiste `session.tools`.
+>
+> La stessa risposta contiene `account` con email, organizzazione e tipo di abbonamento.
+> **Non entra nel journal.** È l'invariante 4 del §13 applicata al primo caso reale.
 
 ---
 
@@ -227,7 +242,8 @@ da indovinare, è **la riga della tabella dei permessi** che il "Consenti sempre
 ```ts
 type Hunk = { oldStart: number, oldLines: number, newStart: number, newLines: number, lines: string[] }
 
-| { k: 'file.edited',      path: string, hunks: Hunk[], originalFile?: string, callId?: string }
+| { k: 'file.edited',      path: string, hunks: Hunk[], created: boolean,
+                          originalFile?: string, callId?: string }
 | { k: 'command.executed', command: string, stdout: string, stderr: string,
                            exitCode?: number, interrupted: boolean, callId?: string }
 ```
@@ -242,6 +258,10 @@ oggi su una Edit reale:
 ```
 
 È il motivo per cui il diff viewer è quasi gratis: non c'è nessun diff da calcolare.
+
+> ⚠️ **Corretto dal codice.** `created` non c'era nel tipo della bozza 1, ma la trappola qui
+> sotto lo esigeva già a parole: senza quel campo la UI non ha modo di distinguere "creato"
+> da "modificato" e mostrerebbe un diff di sola aggiunta come se fosse una modifica.
 
 > ⚠️ **Trappola verificata oggi.** Su una `Write` di un file **nuovo**, `structuredPatch` è un
 > array **vuoto**: non essendoci un originale, Claude Code non produce hunk. Se l'adapter si
@@ -377,7 +397,9 @@ al journal.
 
 | Evento canonico | Sorgente Claude Code |
 |---|---|
-| `session.created` | `system:init` |
+| `session.created` | risposta a `control_request{initialize}` — **non** `system:init` |
+| `session.tools` | `system:init` (arriva col primo turno) |
+| `session.mode` + avviso di declassamento | `current_permission_mode` nella risposta all'`initialize` |
 | `session.state: busy` | `system:status` con `status: "requesting"` |
 | `turn.ended` | `result` — `reason` da `terminal_reason` / `stop_reason` |
 | `step.started` / `step.ended` | `stream_event: message_start` / `message_stop` + `message_delta` |
@@ -467,9 +489,9 @@ cui `Capabilities` dovrà lavorare davvero.
 
 1. **Le domande dell'agent su Claude Code.** OpenCode ha `question.v2.asked`; per Claude Code non
    è stato sondato. Finché non si verifica, `capabilities.questions` resta `false`.
-2. **Identità stabile delle parti.** Claude Code identifica i blocchi per indice dentro il
-   messaggio, OpenCode per `textID` / `callID`. L'adapter deve generare un `partId` stabile:
-   riconciliare gli indici quando si riapre un journal è una fonte di bug silenziosi.
+2. ~~**Identità stabile delle parti.**~~ **Risolto dal codice.** Il `partId` è
+   `${messageId}#${index}`: l'indice si ricicla a ogni messaggio, l'id del messaggio no.
+   Verificato che i partId restano distinti attraverso più messaggi dello stesso turno.
 3. **Rappresentazione del prompt utente.** Testo semplice nell'MVP; allegati e riferimenti a file
    sono da definire.
 4. **L'hook `PermissionDenied`.** Esiste e servirebbe a intercettare i blocchi del classificatore
@@ -482,3 +504,26 @@ cui `Capabilities` dovrà lavorare davvero.
 6. **Costo in quota del classificatore.** Ogni azione ispezionata è una chiamata a un secondo
    modello. Non è stato misurato, e su abbonamento a quota fissa è la risorsa che conta.
 7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa.
+8. **Il risveglio vero.** La fetta verticale dimostra metà dello Sleep: il processo muore e lo
+   stato si ricostruisce identico dal journal. Manca l'altra metà, cioè rilanciare con
+   `--resume` e riagganciare il journal esistente senza duplicare `seq`.
+
+---
+
+## 17. Cosa è già codice
+
+`src/` implementa le sezioni 4-14 per il solo adapter Claude Code.
+
+| | |
+|---|---|
+| `src/core/events.ts` | i tipi di questo documento, uno a uno |
+| `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
+| `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
+| `src/adapters/claude-code/` | l'unico punto che nomina Claude Code |
+| `src/cli/offline-check.ts` | `npm run check` — 15 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
+
+Misurato sulla sessione reale: 63 eventi canonici, `Write` ed `Edit` passati in silenzio dal
+classificatore, solo `Bash` tornato indietro come `permission.asked` grazie al singolo matcher —
+cioè ADR-008 che funziona sul codice e non solo sulla carta. Stato dal vivo e stato ricostruito
+dal journal: identici.

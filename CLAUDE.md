@@ -36,12 +36,17 @@ la si rimette in discussione si sappia su quali premesse era stata presa.
 
 ## Stato attuale
 
-Spike concluso senza blocchi. Perimetro strutturale dell'MVP definito.
-**Nessuna implementazione avviata.**
-Sintesi rapida dello spike: `spike/FINDINGS.md`.
+Spike concluso. Specifica del modello di eventi scritta (`docs/event-model.md`).
+**Fetta verticale implementata e funzionante**: sessione Claude Code reale → eventi canonici →
+journal JSONL → Sleep → stato ricostruito dal journal, identico a quello dal vivo.
+Non esiste ancora nessuna UI, né il daemon vero (una sessione sola, niente HTTP).
 
-Passo corrente: **scrivere la specifica del modello di eventi canonico in `docs/`**
-(per ADR-003 quella specifica sta nel repo, non su Notion, perché cambia insieme al codice).
+Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` girano diretti, senza build).
+`npm run check` prova tutta la catena a costo zero di quota; `npm run slice` apre una
+sessione vera.
+
+Passo corrente: **decidere il prossimo pezzo** fra daemon multi-sessione, risveglio con
+`--resume`, e layout della UI.
 
 Decisioni già prese:
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
@@ -49,7 +54,12 @@ Decisioni già prese:
 - un solo adapter nell'MVP: Claude Code (ADR-004)
 - daemon persistente, con Sleep esplicito per sessione; TTL automatico rimandato (ADR-005)
 - permessi: sessioni in `auto`, zero card di default; i toggle aggiungono attrito dove serve (ADR-008)
-- Node ≥20 + TypeScript, journal JSONL append-only per sessione (ADR-007)
+- Node + TypeScript, journal JSONL append-only per sessione (ADR-007)
+- TypeScript **eseguito diretto**, non compilato: ciclo modifica→esegui da 1,8 s a 0,125 s e
+  tracce di stack che puntano al sorgente vero. `tsc --noEmit` resta obbligatorio, perché lo
+  stripping dei tipi non controlla nulla. Il sorgente resta compilabile
+  (`rewriteRelativeImportExtensions`), quindi la scelta è reversibile con un comando.
+  **Conseguenza: ADR-007 va corretto su Notion, il prerequisito Node passa da ≥20 a ≥22.18.**
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: layout della UI, accesso (solo localhost o anche LAN con auth), uso da mobile,
