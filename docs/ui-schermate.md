@@ -51,8 +51,9 @@ disegni deve reggere quel volume.
 
 # L'impianto scelto
 
-> **Deciso il 23 agosto 2026**, scegliendo fra tre anteprime.
-> Anteprime: https://claude.ai/code/artifact/ea5bfede-34b3-4fa7-b267-286409f964fb
+> **Deciso il 23 agosto 2026**, scegliendo fra tre anteprime, e rifinito il 24 agosto.
+> Anteprima viva: https://claude.ai/code/artifact/ea5bfede-34b3-4fa7-b267-286409f964fb
+> Sorgente: `docs/ui-anteprima.html` — **è il file da modificare** per aggiornare quell'indirizzo.
 
 **Elenco compatto sempre a fianco.** Nessuna barra di navigazione separata: **l'elenco è la
 navigazione**, ridotto all'essenziale — colore, nome, stato, da quanto tempo. Tutto lo spazio
@@ -65,7 +66,31 @@ Le due conseguenze che hanno deciso la scelta:
 - la conversazione ha **spazio vero**, quindi il confronto affiancato ci sta dentro il flusso
   invece di doversi aprire sopra tutto
 
-Lo stile: laterale scura, pill di stato, un colore per progetto, densità alta ma leggibile.
+### Le rifiniture del 24 agosto
+
+- **La barra a sinistra** raggruppa per stato e, dentro ogni stato, **per progetto — sempre**,
+  anche quando il progetto è uno solo: la struttura non deve cambiare forma sotto gli occhi.
+  In cima nessun numero, solo un **pallino** che dice che c'è qualcosa da vedere.
+- **Tutti i comandi stanno in basso**, attorno alla casella di scrittura. Sopra di essa un blocco
+  con l'operazione in corso e, a destra, il **pulsante per fermare** — solo l'icona, un ottagono
+  pieno dentro un cerchio, in rosso.
+- **Quello stesso blocco è ciò che si espande** quando l'agent chiede un permesso o fa una domanda.
+  Le richieste **non compaiono più in mezzo alla conversazione**: guardi sempre nello stesso posto.
+  Nel flusso resta solo *cosa hai risposto*, dopo. Il pulsante per fermare **resta visibile anche
+  quando il blocco è espanso**: una domanda arriva mentre l'agent lavora ancora, e se lo stop
+  sparisse proprio lì si perderebbe il controllo nel momento in cui serve di più.
+- **Sotto la casella una barra di stato**: a sinistra modalità, cartella e branch; a destra modello
+  e percentuale di contesto. La percentuale, al passaggio del mouse, apre un pannellino con
+  contesto, sessione corrente e settimana, e quando si azzerano le ultime due.
+- **Gli effetti prendono il posto della conversazione**, con una freccia per tornare, e un
+  interruttore compatto fra due letture: **per file** (blocchi che si aprono, stile pull request)
+  e **in ordine di tempo** (comandi e singole modifiche in sequenza, quindi lo stesso file tre
+  volte se è stato toccato tre volte).
+- **Ogni tipo di blocco ha il suo segno**: cervello per il ragionamento, terminale per i comandi,
+  mattone per le scritture, documento per le letture, globo per la rete, spina per gli strumenti
+  esterni. Segni disegnati, non emoji.
+
+Lo stile: laterale chiara, pill di stato, un colore per progetto, densità alta ma leggibile.
 
 ---
 
