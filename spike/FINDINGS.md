@@ -167,3 +167,57 @@ Ci sono circa 100 sottotipi di `control_request`. Fra quelli utili a una GUI:
 
 Non è un canale di output da leggere: è il protocollo con cui il CLI parla ai suoi
 host di prima classe (VS Code, Remote Control). STARK deve implementarlo, non aggirarlo.
+
+---
+
+## P16 — Risveglio e presa in carico (23 agosto 2026)
+
+Verifiche fatte sul codice vero, non su sonde usa e getta. Si rieseguono con
+`npm run resume` e `npm run takeover`.
+
+### Il risveglio funziona, e sono due memorie separate
+
+Spento il processo e riacceso con `--resume`, il modello **ricorda** ciò che era stato
+detto prima. Il punto non è ovvio: il journal di STARK serve alla UI, il trascritto
+dell'agent serve al modello. Un risveglio che ne ripristinasse una sola sembrerebbe
+funzionare finché l'utente non fa la prima domanda che dipende dal contesto.
+
+Il journal riaperto **continua i `seq`** invece di ripartire da 1. Ripartire produrrebbe
+due eventi con lo stesso numero nello stesso file, e "ho già visto fino a N" smetterebbe
+di voler dire qualcosa: un browser che si riaggancia salterebbe metà conversazione.
+
+**`--no-session-persistence` è incompatibile con lo Sleep**: senza trascritto non c'è
+niente da riprendere. In cambio `--session-id` lascia **imporre** l'id, quindi STARK sa
+come risvegliare una sessione già prima di aprirla.
+
+### Due processi sulla stessa sessione: cosa succede davvero
+
+Scenario della "presa in carico": STARK riprende una conversazione che l'utente sta già
+usando dalla CLI. Per un momento i processi sono due. Misurato:
+
+| | |
+|---|---|
+| il secondo eredita il contesto del primo | **sì** |
+| il primo si accorge di ciò che fa il secondo | **no**, resta al suo mondo in memoria |
+| il trascritto su disco conserva il lavoro di entrambi | **sì** |
+
+**Non si perde e non si corrompe niente.** L'unica regola operativa è non parlare da due
+parti insieme: il disco resta coerente, i processi vivi divergono.
+
+### Un timore che si è rivelato infondato
+
+Si era ipotizzato che due **versioni** diverse del CLI sullo stesso trascritto fossero
+terreno inesplorato. Falso: il trascritto di quella stessa sessione era stato scritto da
+**tre** versioni — 2.1.238 per 453 righe, 2.1.239 per 9, 2.1.241 per 617. Succede ogni
+volta che il CLI si aggiorna da solo mentre si lavora.
+
+Il vincolo vero è un altro e non dipende dall'eseguibile: **`CLAUDE_CONFIG_DIR`**. Se non
+viene propagato al processo figlio, quello guarda in `~/.claude` invece che dove vivono
+davvero le sessioni, non trova nulla da riprendere e forse nemmeno il login — con l'aria
+di essere rotto senza motivo.
+
+### Ancora non misurato
+
+**Quanto costa in quota risvegliare una conversazione lunga.** Le sonde usano prompt
+minuscoli, quindi non dicono niente su un trascritto reale da diversi MB. Va misurato
+prima di presentare lo Sleep come indolore.
