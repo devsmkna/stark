@@ -89,3 +89,81 @@ Da root, in headless `stream-json`. Colonna che conta: quante card STARK dovrebb
   vuoti su tutti i progetti**, nessun managed settings. La fluidità osservata viene interamente
   dal classificatore, non da allow accumulati.
 - Costo nominale complessivo delle sonde: ~$0.65 (auto mode richiede Sonnet 5, non Haiku).
+
+---
+
+## P15 — Le funzioni "assenti in headless" non sono assenti (23 agosto 2026)
+
+Premessa sbagliata da cui ero partito: in headless mancano `AskUserQuestion`,
+`ExitPlanMode` e `TodoWrite`, quindi una GUI varrà sempre meno della TUI. È falso, e
+lo dice il codice del CLI 2.1.241 letto direttamente dal binario.
+
+### Perché sembravano assenti
+
+`AskUserQuestion.isEnabled()` è:
+
+```js
+if (allowedChannels().length > 0 && !isInteractive()) return false
+if (!isInteractive() && !permissionPromptToolName()) return false
+return true
+```
+
+Cioè: in non interattivo il tool esiste **se è configurato un permission-prompt tool**.
+Il flag `--permission-prompt-tool <tool>` esiste ma è **nascosto dall'help**.
+
+### Verificato
+
+Con `--permission-prompt-tool mcp__stark__permission`, nella stessa identica sessione
+headless in cui prima non c'era, `AskUserQuestion` compare nell'elenco e il modello lo
+chiama. L'unico errore residuo è che quel tool MCP non esiste ancora lato nostro:
+*"MCP tool mcp__stark__permission (passed via --permission-prompt-tool) not found."*
+
+### I tre pezzi che rendono un client un host di prima classe
+
+1. **`--permission-prompt-tool`** — sblocca i tool che richiedono interazione.
+2. **`sdkMcpServers`** nell'`initialize` più i `control_request{subtype:"mcp_message"}`:
+   il client serve un server MCP sul canale di controllo. È lì che vive il tool di
+   permesso, e le card dei permessi diventano una nostra implementazione.
+3. **`supportedDialogKinds`** nell'`initialize`. Dallo schema zod:
+   *"The CLI treats ABSENCE as 'cannot display' and fails closed: without the kind
+   declared here, a dialog-gated flow degrades to its no-dialog behavior."*
+
+### I 27 dialog kind del registro interno
+
+```
+permission_ask_user_question  permission_enter_plan_mode   permission_bash
+permission_browser            permission_file              permission_monitor
+permission_powershell         permission_prompt            permission_skill
+permission_webfetch           permission_workflow          auto_mode_flagged_allow
+auto_mode_setup_review        auto_default_nudge           cost_threshold
+fable_overage_consent_prompt  goal_proposal                refusal_fallback_prompt
+resume_return                 sandbox_network_access       computer_use_approval
+mcp_url_elicitation           managed_settings_security    peer_inbound_approval
+ide_onboarding                chrome_install_setup         chrome_install_upsell
+```
+
+Massimo 32 dichiarabili (`MAX_DECLARED_DIALOG_KINDS`). Protocollo:
+`control_request{subtype:"request_user_dialog", dialog_kind, payload, tool_use_id?}`,
+risposta `{behavior:"completed"|"cancelled", result?}`.
+
+**Trappola dichiarata nello schema:** a un kind non dichiarato non si deve rispondere.
+Una risposta d'errore viene scartata e il dialogo resta appeso; un `cancelled` invece
+viene letto come "l'utente ha chiuso la finestra", che è una risposta vera e diversa.
+
+### Conseguenza su ADR-008
+
+`auto_mode_flagged_allow` **è** la card che l'utente vede quando auto mode chiede
+conferma su un comando serio. Senza dichiararla il flusso ripiega sul comportamento
+senza dialogo, cioè nega. L'`action.blocked` osservato nelle sonde precedenti non era
+l'unico comportamento possibile: era il ripiego di un client che non sapeva mostrare
+nulla. La scelta di ADR-008 resta giusta, ma la sua descrizione va corretta.
+
+### Il resto del protocollo
+
+Ci sono circa 100 sottotipi di `control_request`. Fra quelli utili a una GUI:
+`get_context_usage`, `get_session_cost`, `get_usage`, `list_models`, `get_plan`,
+`get_workspace_diff`, `rewind_files`, `file_suggestions`, `background_tasks`,
+`rename_session`, `set_cwd`, `memory_recall`, `task_*`, `session_state_changed`.
+
+Non è un canale di output da leggere: è il protocollo con cui il CLI parla ai suoi
+host di prima classe (VS Code, Remote Control). STARK deve implementarlo, non aggirarlo.

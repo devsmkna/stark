@@ -35,10 +35,33 @@ export type LaunchOptions = {
   resume?: { ref: string; fork?: boolean }
   /** Imporre l'id invece di scoprirlo: cosi STARK sa come risvegliare gia in partenza. */
   sessionId?: string
+  /**
+   * I dialoghi che STARK sa disegnare. Dichiararli NON e un dettaglio: il CLI tratta
+   * l'assenza come "questo client non sa mostrarlo" e ripiega sul comportamento senza
+   * dialogo — che per un permesso vuol dire negare, e per una domanda vuol dire che il
+   * tool sparisce del tutto dall'elenco. E il motivo per cui in headless sembrava che
+   * meta delle funzioni non esistessero.
+   */
+  dialogKinds?: string[]
   extraArgs?: string[]
 }
 
 export const HOOK_CALLBACK_ID = 'stark-pretooluse'
+
+/**
+ * I 27 dialoghi che il CLI sa delegare, letti dal registro interno della 2.1.241.
+ * Sono l'elenco di cio che una GUI deve saper disegnare per non valere meno della TUI.
+ */
+export const DIALOG_KINDS = [
+  'permission_ask_user_question', 'permission_enter_plan_mode', 'permission_bash',
+  'permission_browser', 'permission_file', 'permission_monitor', 'permission_powershell',
+  'permission_prompt', 'permission_skill', 'permission_webfetch', 'permission_workflow',
+  'auto_mode_flagged_allow', 'auto_mode_setup_review', 'auto_default_nudge',
+  'cost_threshold', 'fable_overage_consent_prompt', 'goal_proposal', 'refusal_fallback_prompt',
+  'resume_return', 'sandbox_network_access', 'computer_use_approval', 'mcp_url_elicitation',
+  'managed_settings_security', 'peer_inbound_approval', 'ide_onboarding',
+  'chrome_install_setup', 'chrome_install_upsell',
+] as const
 
 export function buildArgs(o: LaunchOptions): string[] {
   return [
@@ -62,8 +85,9 @@ export function buildArgs(o: LaunchOptions): string[] {
 }
 
 /** L'handshake. L'hook si dichiara SOLO per i tool messi su "chiedi" (§8, vincolo 1). */
-export function buildInitialize(askMatchers: string[]): NativeEvent {
+export function buildInitialize(askMatchers: string[], dialogKinds: string[] = []): NativeEvent {
   const request: NativeEvent = { subtype: 'initialize' }
+  if (dialogKinds.length > 0) request['supportedDialogKinds'] = dialogKinds
   if (askMatchers.length > 0) {
     request['hooks'] = {
       PreToolUse: askMatchers.map(m => ({ matcher: m, hookCallbackIds: [HOOK_CALLBACK_ID] })),

@@ -16,6 +16,17 @@ export type AdapterOptions = {
   askMatchers?: string[]
   resume?: { ref: string; fork?: boolean }
   sessionId?: string
+  /** I dialoghi che la UI sa disegnare. Vuoto = il CLI ripiega e li toglie di mezzo. */
+  dialogKinds?: string[]
+  extraArgs?: string[]
+  /**
+   * Un dialogo da mostrare. Deve restituire il risultato che quel `kind` si aspetta.
+   * Non rispondere lascia il dialogo appeso finche il CLI non lo annulla da solo;
+   * rispondere `cancelled` invece vuol dire "l'utente l'ha chiuso", che e una risposta
+   * vera e diversa dal silenzio.
+   */
+  onDialog?: (d: { kind: string; payload: Record<string, unknown>; toolUseId?: string })
+    => Promise<{ behavior: 'completed' | 'cancelled'; result?: unknown }>
   onPayload: (p: Payload) => void
   onRaw?: (line: string) => void
   /**
@@ -47,6 +58,7 @@ export class ClaudeCodeAdapter {
       cwd: this.opts.cwd, model: this.opts.model, mode: this.opts.mode, askMatchers: matchers,
       ...(this.opts.resume ? { resume: this.opts.resume } : {}),
       ...(this.opts.sessionId ? { sessionId: this.opts.sessionId } : {}),
+      ...(this.opts.extraArgs ? { extraArgs: this.opts.extraArgs } : {}),
     })
     this.emit({ k: 'session.state', state: 'starting' })
     const child = spawn('claude', args, { cwd: this.opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -61,7 +73,7 @@ export class ClaudeCodeAdapter {
       this.exited?.(code)
     })
     const created = new Promise<void>((res, rej) => { this.ready = res; this.failStart = rej })
-    this.send(buildInitialize(matchers))
+    this.send(buildInitialize(matchers, this.opts.dialogKinds ?? []))
     await created
   }
 
@@ -180,6 +192,27 @@ export class ClaudeCodeAdapter {
   private async control(e: NativeEvent): Promise<void> {
     const requestId = String(e['request_id'] ?? randomUUID())
     const req = e['request'] ?? {}
+
+    if (req['subtype'] === 'request_user_dialog') {
+      const kind = String(req['dialog_kind'] ?? '')
+      // Un kind che non abbiamo dichiarato NON va risposto: una risposta d'errore viene
+      // scartata e il dialogo resta appeso, mentre un `cancelled` verrebbe letto come
+      // "l'utente ha chiuso la finestra". Meglio il silenzio, che il CLI sa gestire.
+      if (!(this.opts.dialogKinds ?? []).includes(kind) || !this.opts.onDialog) {
+        this.emit({ k: 'notice', level: 'warn', text: `dialogo non gestito: ${kind}` })
+        return
+      }
+      this.emit({ k: 'session.state', state: 'awaiting', reason: kind })
+      const esito = await this.opts.onDialog({
+        kind,
+        payload: (req['payload'] ?? {}) as Record<string, unknown>,
+        ...(req['tool_use_id'] ? { toolUseId: String(req['tool_use_id']) } : {}),
+      })
+      this.reply(requestId, esito)
+      this.emit({ k: 'session.state', state: 'busy' })
+      return
+    }
+
     if (req['subtype'] !== 'hook_callback' || req['callback_id'] !== HOOK_CALLBACK_ID) {
       this.reply(requestId, { async: false })
       return
