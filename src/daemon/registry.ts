@@ -12,6 +12,7 @@ import { resolve } from 'node:path'
 import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
 import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
+import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import type { AgentQuestion, CanonicalEvent, Command, PermissionMode } from '../core/events.ts'
@@ -35,6 +36,19 @@ export type SessionRow = {
   turns: number
   lastSeq: number
   lastTs: number
+  /**
+   * Da quando sta in questo stato. Diverso da `lastTs`, che dice quando ha scritto
+   * l'ultima riga: è la differenza fra «lavora da due minuti» e «è ferma da quattro»,
+   * e `ui-schermate.md` §1 la mette fra le cose che fanno decidere se entrare.
+   */
+  since: number
+  /**
+   * Cosa sta facendo **adesso**. C'è solo se dietro c'è un processo: su una sessione
+   * senza, l'ultimo turno del journal è rimasto aperto a metà e ripeterlo direbbe che
+   * sta girando qualcosa che non gira — la bugia peggiore, perché è quella su cui si
+   * aspetta.
+   */
+  doing?: Activity
   live: boolean
 }
 
@@ -188,20 +202,29 @@ export class Registry {
         if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
         const id = f.replace(/\.jsonl$/, '')
         const s = reduce(Journal.read(resolve(SESSIONS, f)), id)
+        const state = settled(s.state)
         rows.set(id, {
-          id, title: titleOf(s), state: settled(s.state), turns: s.turns.length,
-          lastSeq: s.lastSeq, lastTs: s.lastTs, live: false,
+          id, title: titleOf(s), state, turns: s.turns.length,
+          lastSeq: s.lastSeq, lastTs: s.lastTs,
+          // Quando `settled` ha corretto lo stato, `stateSince` conta da quando era
+          // diventata `busy`: direbbe «ferma da due minuti» di una che è ferma da ieri.
+          // Il momento vero in cui si è fermata è quando il journal ha smesso di crescere.
+          since: state === s.state ? s.stateSince : s.lastTs,
+          live: false,
           ...(s.cwd ? { cwd: s.cwd } : {}), ...(s.model ? { model: s.model } : {}),
         })
       }
     }
     for (const [id, l] of this.live) {
+      const s = l.snapshot
+      const doing = activity(s)
       rows.set(id, {
-        id, title: titleOf(l.snapshot), state: l.snapshot.state,
-        turns: l.snapshot.turns.length,
-        lastSeq: l.snapshot.lastSeq, lastTs: l.snapshot.lastTs, live: true,
-        ...(l.snapshot.cwd ? { cwd: l.snapshot.cwd } : {}),
-        ...(l.snapshot.model ? { model: l.snapshot.model } : {}),
+        id, title: titleOf(s), state: s.state,
+        turns: s.turns.length,
+        lastSeq: s.lastSeq, lastTs: s.lastTs, since: s.stateSince, live: true,
+        ...(doing ? { doing } : {}),
+        ...(s.cwd ? { cwd: s.cwd } : {}),
+        ...(s.model ? { model: s.model } : {}),
       })
     }
     return [...rows.values()]

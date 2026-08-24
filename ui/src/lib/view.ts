@@ -4,8 +4,8 @@
 // Sta qui e non dentro i componenti perché sono decisioni di prodotto scritte in
 // docs/ui-schermate.md, non dettagli di disegno: se cambiano, cambiano in un posto.
 
+import type { Activity } from '$core/activity.ts'
 import type { SessionState } from '$core/events.ts'
-import type { SessionSnapshot } from '$core/reduce.ts'
 import type { SessionRow } from './api.ts'
 
 export type Group = 'Waiting' | 'Working' | 'Sleeping'
@@ -105,25 +105,27 @@ export function since(from: number, to: number): string {
 }
 
 /**
- * Cosa sta facendo adesso, per il blocco sopra la casella di scrittura.
- *
- * Si legge a ritroso dall'ultima parte perché l'operazione in corso è l'ultima aperta:
- * scorrere in avanti darebbe la prima, che è quasi sempre già finita. Quando non c'è
- * un tool aperto l'agent sta scrivendo o pensando, e allora il tempo che conta è
- * quello del turno — l'unico che il journal sappia dire.
+ * Come si legge «cosa sta facendo adesso». Il fatto lo calcola `core/activity.ts`,
+ * perché serve identico al blocco in basso e alla riga dell'elenco — che il daemon
+ * riempie per tutte le sessioni, comprese quelle che non stai guardando. Qui restano
+ * solo le parole e il segno, che sono presentazione.
  */
-export function doing(snap: SessionSnapshot): { text: string; from: number } | null {
-  const t = snap.turns[snap.turns.length - 1]
-  if (!t) return null
-  for (let i = t.parts.length - 1; i >= 0; i--) {
-    const p = t.parts[i]!
-    if (p.kind === 'tool' && !p.done) {
-      return { text: p.summary ? `${p.name} · ${p.summary}` : p.name, from: p.startedAt }
-    }
-    if (p.kind === 'text' && p.open) return { text: 'writing the answer…', from: t.startedAt }
-    if (p.kind === 'reasoning' && p.open) return { text: 'thinking…', from: t.startedAt }
+export function activityText(a: Activity): string {
+  switch (a.kind) {
+    case 'tool': return a.summary ? `${a.name} · ${a.summary}` : a.name
+    case 'writing': return 'writing the answer…'
+    case 'thinking': return 'thinking…'
+    default: return 'working…'
   }
-  return { text: 'working…', from: t.startedAt }
+}
+
+export function activityIcon(a: Activity): string {
+  switch (a.kind) {
+    case 'tool': return toolIcon(a.name)
+    case 'writing': return 'i-pencil'
+    case 'thinking': return 'i-brain'
+    default: return 'i-loader'
+  }
 }
 
 /**

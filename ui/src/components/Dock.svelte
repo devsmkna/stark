@@ -9,7 +9,8 @@
   import Ask from './Ask.svelte'
   import Status from './Status.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
-  import { doing, since } from '../lib/view.ts'
+  import { activity } from '$core/activity.ts'
+  import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
@@ -27,7 +28,7 @@
   const busy = $derived(store.live && (snap.state === 'busy' || snap.state === 'starting'))
   const pending = $derived(snap.pendingPermissions.length + snap.pendingQuestions.length > 0)
   const asking = $derived(store.live && pending)
-  const op = $derived(busy ? doing(snap) : null)
+  const op = $derived(busy ? activity(snap) : null)
 
   $effect(() => {
     if (!busy) return
@@ -82,7 +83,7 @@
   {:else if op}
     <div class="doing">
       <span class="spin"></span>
-      <div class="txt">{op.text}</div>
+      <div class="txt">{activityText(op)}</div>
       <div class="el">{since(op.from, now)}</div>
       {#if store.live}
         <button class="stopb" title="Stop" onclick={() => void store.stop()}>

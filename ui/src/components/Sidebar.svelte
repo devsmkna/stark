@@ -6,10 +6,24 @@
   import Icon from './Icon.svelte'
   import Logo from './Logo.svelte'
   import type { SessionRow } from '../lib/api.ts'
-  import { ORDER, colours, group, hhmm, label, needsYou, project } from '../lib/view.ts'
+  import {
+    ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, since,
+  } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
+
+  // L'orologio che fa avanzare «da quanto». Batte sempre, e l'effetto non legge NIENTE
+  // di reattivo di proposito: legarlo alle righe — per battere piano quando non c'è
+  // niente di vivo — rifà l'intervallo a ogni aggiornamento dell'elenco, e durante un
+  // turno chiacchierone gli aggiornamenti arrivano più spesso di un secondo. Il tempo
+  // si fermerebbe proprio mentre qualcosa succede. Un `setInterval` al secondo su una
+  // decina di righe non costa niente; le stringhe che non cambiano non toccano il DOM.
+  let now = $state(Date.now())
+  $effect(() => {
+    const t = setInterval(() => { now = Date.now() }, 1000)
+    return () => clearInterval(t)
+  })
 
   const palette = $derived(colours(store.rows))
 
@@ -48,6 +62,15 @@
 <div class="side">
   <div class="sidetop">
     <Logo height={13} />
+    <!-- La campanella sta qui e non nella barra di stato perché le notifiche non sono
+         di una chat ma di tutte. Premerla la prima volta è anche il momento in cui si
+         chiede il permesso al browser: fuori da un gesto non si può nemmeno chiedere. -->
+    <button class="bell" class:off={!store.calls.on}
+      title={store.calls.explain} aria-label="Notifications"
+      onclick={() => void store.calls.toggle()}>
+      <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
+      {#if store.calls.on && store.calls.permission === 'default'}<i class="ask"></i>{/if}
+    </button>
     <button class="plus" title="New chat" aria-label="New chat"
       onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
       <Icon name="i-plus" />
@@ -85,7 +108,19 @@
                 <div class="meta">
                   {hhmm(row.lastTs)}
                   <span class="sst {label(row.state)}">{label(row.state)}</span>
+                  <!-- Da quanto sta così, che non è l'ora dell'ultima riga scritta:
+                       è quello che distingue un lavoro che procede da uno piantato. -->
+                  {#if row.since}<span class="el">· {since(row.since, now)}</span>{/if}
                 </div>
+                <!-- Cosa sta facendo adesso. Solo sulle righe vive: chi ha finito, chi
+                     dorme e chi è stato fermato non sta facendo niente, e una riga in
+                     più su ognuna costerebbe l'altezza dell'elenco per dire nulla. -->
+                {#if row.doing}
+                  <div class="act">
+                    <Icon name={activityIcon(row.doing)} />
+                    <span>{activityText(row.doing)}</span>
+                  </div>
+                {/if}
               </div>
               {#if needsYou(row.state)}<span class="unread"></span>{/if}
             </button>
@@ -107,16 +142,23 @@
 <style>
   /* Le righe sono <button> perché si premono: il vestito viene da app.css, qui c'è
      solo ciò che serve a togliere l'aspetto di pulsante senza perderne il mestiere. */
-  .sit, .sidefoot, .plus {
+  .sit, .sidefoot, .plus, .bell {
     background: none;
     border: 0;
     width: 100%;
     font: inherit;
     color: inherit;
   }
-  .plus { width: auto; padding: 0; display: flex; }
+  .plus, .bell { width: auto; padding: 0; display: flex; cursor: pointer; }
+  /* Il puntino dice che il browser non ha ancora dato il permesso, e che premendo lo
+     si chiede. Non è un errore: il suono intanto funziona già. */
+  .bell { position: relative; }
+  .bell .ask {
+    position: absolute; top: -1px; right: -1px; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--accent);
+  }
   .sit { width: calc(100% - 10px); }
-  .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible {
+  .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible, .bell:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }

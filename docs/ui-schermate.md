@@ -145,6 +145,17 @@ dormienti, raggruppate per progetto.
 Ogni conversazione ha un **colore** che la rende riconoscibile senza leggere, un **titolo**
 che si genera da solo ma che si può cambiare, e la **cartella** a cui si riferisce.
 
+Come sta nella riga, deciso implementando il 24 agosto 2026:
+
+- sotto il titolo, **l'orario, lo stato e da quanto ci sta** — `working · 2m 14s`,
+  `asking · 5m 12s`, `done · 12m`. «Da quanto» conta dall'**ultimo cambio di stato**, non
+  dall'ultima riga scritta: su un lavoro che procede sono la stessa cosa, su uno piantato
+  divergono, ed è lì che serve saperlo.
+- una **terza riga** con l'operazione in corso, e **solo sulle righe vive**. Chi ha finito,
+  chi dorme e chi è stato fermato non sta facendo niente: una riga in più su ognuna
+  costerebbe l'altezza dell'elenco per non dire nulla. Su una sessione senza processo
+  dietro sarebbe anche **falsa** — il suo journal è rimasto aperto a metà di un turno.
+
 ### Il comportamento che conta
 
 Quando una conversazione si ferma ad aspettare una risposta, **non deve essere cercata**.
@@ -164,6 +175,37 @@ guardare quando sei già dentro.
 
 Il suono deve distinguere **«ho finito»** da **«ti sto aspettando»**: per chi ascolta sono
 due situazioni opposte.
+
+Come è fatto, deciso implementando il 24 agosto 2026:
+
+- **tre chiamate**, che sono le stesse tre che le impostazioni sapranno spegnere una per una:
+  *ti aspetta*, *ha finito*, *si è fermata da sola*. Suoni diversi, e i primi due opposti per
+  costruzione — due note che salgono contro due che scendono.
+- la notifica dice **chi ti vuole e di che progetto** nel titolo (`Needs you · api-pagamenti`),
+  e nel corpo il titolo della chat più **cosa stava facendo**. Senza la seconda riga bisogna
+  aprire per sapere cosa vuole, che è esattamente ciò che la notifica doveva evitare.
+- **premerla apre quella chat**, e porta la finestra davanti.
+- una chat non impila due notifiche: la seconda **sostituisce** la prima. Con quattro lavori
+  in parallelo è la differenza fra essere avvisati ed essere sommersi.
+- **non chiama se stai già guardando quella chat** e la finestra è in primo piano: lì il
+  blocco in basso l'ha già detto.
+- **aprire una chat non è «ha finito»**. Una conversazione appena nata passa da *starting* a
+  *idle* senza che nessuno abbia fatto niente, e una notifica falsa insegna a spegnerle tutte.
+
+**L'interruttore è una campanella in cima all'elenco**, perché le notifiche non sono di una
+chat ma di tutte. Premerla la prima volta è anche il momento in cui **il browser chiede il
+permesso**: fuori da un gesto dell'utente non si può nemmeno chiedere, e chiederlo all'apertura
+della pagina è il modo migliore per farsi rispondere di no una volta per sempre.
+
+Se il permesso viene negato la campanella **resta**, spenta e con scritto perché: il **suono
+non ha bisogno di alcun permesso** e continua a funzionare, e quel che si perde è solo il
+riquadro fuori dalla finestra. Nascondere il comando avrebbe fatto sembrare rotto STARK al
+posto del browser.
+
+Non c'è ancora, e arriva con le impostazioni: scegliere il suono di ciascun evento e
+**silenziare un progetto intero**. L'acceso/spento di adesso vive nel browser, perché «voglio
+sentire i suoni su questo computer» non è un fatto della conversazione; il silenziamento per
+progetto invece dovrà stare dal lato del daemon, perché vale su qualunque browser lo apra.
 
 ---
 

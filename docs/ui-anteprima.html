@@ -80,14 +80,16 @@ hr{border:0;border-top:1px solid var(--line);margin:52px 0}
 .mock{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:var(--surface);display:flex;font-size:11.5px;line-height:1.45;margin-top:16px;box-shadow:0 1px 2px rgba(16,20,32,.05),0 8px 24px rgba(16,20,32,.05)}
 .mock *{min-width:0}
 .scroller{overflow:auto}
-/* icone: Lucide 1.33 (ISC), disegnate su griglia 24 */
+/* icone: Lucide 1.34 (ISC), disegnate su griglia 24 */
 svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
 /* barra sinistra */
 .side{width:212px;flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line)}
 .sidetop{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
 .sidetop .nm{font-weight:700;font-size:12.5px;letter-spacing:-.01em}
-.sidetop .plus{margin-left:auto;color:var(--muted);display:flex}
+.sidetop .bell{margin-left:auto;color:var(--muted);display:flex}
+.sidetop .bell.off{opacity:.45}
+.sidetop .plus{color:var(--muted);display:flex}
 .gstate{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:11px 10px 4px}
 .gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px}
@@ -95,6 +97,18 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .sit .ttl{font-weight:600;color:var(--ink);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sit .meta{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
 .sit .sst{font-weight:600}
+/* da quanto sta in quello stato: e cio che distingue un lavoro che procede da uno piantato */
+.sit .el{opacity:.85}
+/* cosa sta facendo adesso: solo sulle righe vive, dove la domanda esiste */
+.sit .act{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);margin-top:2px}
+.sit .act span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sit .act svg.ic{width:11px;height:11px;opacity:.75}
+/* la notifica di sistema: la disegna il sistema operativo, questa e solo la forma */
+.osn{width:340px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);box-shadow:0 8px 26px rgba(16,20,32,.16);padding:11px 12px;display:flex;gap:10px;align-items:flex-start}
+.osn .app{width:26px;height:26px;border-radius:7px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}
+.osn .t{font-weight:700;font-size:11.5px}
+.osn .b{color:var(--ink-2);font-size:11px;margin-top:2px}
+.osn .s{color:var(--muted);font-size:10px;margin-top:4px;display:flex;align-items:center;gap:4px}
 .sst.asking{color:var(--wait)}
 .sst.done{color:var(--done)}
 .sst.stopped{color:var(--stop)}
@@ -369,6 +383,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
   <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" /></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0" /> <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></symbol>
+  <symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0" /> <path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742" /> <path d="m2 2 20 20" /> <path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" /></symbol>
   <symbol id="i-disk" viewBox="0 0 24 24"><path d="M10 16h.01" /> <path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /> <path d="M21.946 12.013H2.054" /> <path d="M6 16h.01" /></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M10 5H3" /> <path d="M12 19H3" /> <path d="M14 3v4" /> <path d="M16 17v4" /> <path d="M21 12h-9" /> <path d="M21 19h-5" /> <path d="M21 5h-7" /> <path d="M8 10v4" /> <path d="M8 12H3" /></symbol>
 </svg>
@@ -422,30 +437,38 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <p>Sotto il titolo: prima l&rsquo;orario, poi lo stato &mdash; <i>asking</i> quando aspetta un permesso o una
     risposta, <i>done</i> quando ha finito il compito, <i>stopped</i> quando l&rsquo;hai fermata tu.
     <b>Finito non vuol dire chiuso</b>: l&rsquo;agent ha risposto e ora aspetta te, quindi resta in Waiting.</p>
+    <p>Poi <b>da quanto tempo sta in quello stato</b>, e non da quando ha scritto l&rsquo;ultima riga: sono
+    due cose diverse appena qualcosa si pianta. <i>working &middot; 2m 14s</i> &egrave; un lavoro che procede;
+    <i>asking &middot; 5m 12s</i> &egrave; qualcuno che ti aspetta da cinque minuti. &Egrave; l&rsquo;informazione che pi&ugrave;
+    spesso fa entrare in una chat.</p>
+    <p>Sotto, solo sulle righe <b>vive</b>, una terza riga dice <b>cosa sta facendo adesso</b>: il comando
+    che sta eseguendo o il file che sta scrivendo. Le righe che hanno finito, che dormono o che sono
+    state fermate non ce l&rsquo;hanno &mdash; non stanno facendo niente, e una riga in pi&ugrave; su ognuna
+    costerebbe l&rsquo;altezza dell&rsquo;elenco senza dire nulla.</p>
     <p style="color:var(--accent)">&darr; Passa il mouse sulla percentuale di contesto, in basso a destra.</p>
 
     <div class="mock" style="height:560px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1;padding-bottom:6px">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Daemon and security</div><div class="meta">11:20 <span class="sst done">done</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Daemon and security</div><div class="meta">11:20 <span class="sst done">done</span><span class="el">&middot; 2h 54m</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Webhook signature</div><div class="meta">09:47 <span class="sst stopped">stopped</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Webhook signature</div><div class="meta">09:47 <span class="sst stopped">stopped</span><span class="el">&middot; 4h 27m</span></div></div><span class="unread"></span></div>
 
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-site)"></i> sito-cliente</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Contact form</div><div class="meta">14:10 <span class="sst working">working</span></div></div></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Optimize images</div><div class="meta">14:06 <span class="sst working">working</span></div></div></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Contact form</div><div class="meta">14:10 <span class="sst working">working</span><span class="el">&middot; 4m 02s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Write &middot; src/routes/contact/+page.svelte</span></div></div></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Optimize images</div><div class="meta">14:06 <span class="sst working">working</span><span class="el">&middot; 8m 30s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; sharp --resize 1600 public/img/*</span></div></div></div>
 
           <div class="gstate">Sleeping</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit zz"><div style="flex:1"><div class="ttl">Database migration</div><div class="meta">ieri 18:40 <span class="sst sleeping">sleeping</span></div></div></div>
+          <div class="sit zz"><div style="flex:1"><div class="ttl">Database migration</div><div class="meta">ieri 18:40 <span class="sst sleeping">sleeping</span><span class="el">&middot; 19h 34m</span></div></div></div>
         </div>
         <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
@@ -525,6 +548,66 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     </div>
   </section>
 
+  <!-- come vieni chiamato -->
+  <section>
+    <h2>Quando guardi altrove</h2>
+    <p>Il pallino nell&rsquo;elenco funziona solo se stai <b>gi&agrave;</b> guardando STARK, e il punto era
+    poter guardare altrove. Sono due mestieri diversi: <b>la notifica ti chiama</b>, il pallino ti
+    dice dove guardare quando sei gi&agrave; dentro.</p>
+    <p>Tre cose meritano di chiamarti, e sono le stesse tre che le impostazioni sapranno spegnere una
+    per una: <b>ti aspetta</b> (un permesso o una domanda), <b>ha finito</b>, <b>si &egrave; fermata da
+    sola</b>. Ognuna ha un <b>suono diverso</b>, e i primi due sono diversi <i>fra loro</i> per
+    costruzione: due note che salgono per &laquo;ti aspetto&raquo;, due che scendono per &laquo;ho finito&raquo;. Per chi
+    ascolta dall&rsquo;altra stanza sono situazioni opposte, e un suono solo le renderebbe la stessa cosa.</p>
+
+    <div class="mock" style="height:330px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1;padding-bottom:6px">
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
+        </div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
+      </div>
+
+      <div class="col" style="background:var(--surface-2);display:grid;place-items:center;padding:20px">
+        <div>
+          <div class="osn">
+            <div class="app">S</div>
+            <div style="flex:1">
+              <div class="t">Needs you &middot; api-pagamenti</div>
+              <div class="b">Retry failed payments</div>
+              <div class="s"><svg class="ic"><use href="#i-term"/></svg> Bash &middot; psql -f retry.sql</div>
+            </div>
+          </div>
+          <p style="color:var(--muted);font-size:11px;margin:10px 2px 0;max-width:340px">Questa non la
+          disegniamo noi: la disegna il sistema operativo, e questa &egrave; solo la forma che avr&agrave;.
+          Quello che decidiamo &egrave; <b>cosa c&rsquo;&egrave; scritto</b> &mdash; chi ti vuole, di che progetto, e cosa
+          stava facendo &mdash; e che <b>premendola</b> si apre quella chat. Una chat sola non pu&ograve; impilarne
+          due: la seconda notifica <b>sostituisce</b> la prima.</p>
+        </div>
+      </div>
+    </div>
+
+    <p style="margin-top:14px">La campanella in alto a sinistra &egrave; l&rsquo;interruttore, ed &egrave; l&igrave; perch&eacute; le
+    notifiche non sono di una chat ma di tutte. La prima volta che la premi &egrave; anche il momento in cui
+    <b>il browser chiede il permesso</b>: non si pu&ograve; chiedere all&rsquo;apertura della pagina, e chiedere
+    senza che tu abbia toccato niente &egrave; il modo migliore per farsi rispondere di no per sempre.</p>
+    <p>Se il permesso &egrave; stato negato, la campanella <b>resta</b>, spenta e con scritto perch&eacute;: il
+    suono continua a funzionare &mdash; non ha bisogno di nessun permesso &mdash; e quello che si &egrave; perso &egrave;
+    solo il riquadro fuori dalla finestra. Nascondere il comando avrebbe fatto sembrare rotto STARK
+    al posto del browser.</p>
+    <p style="color:var(--muted)">Cosa non c&rsquo;&egrave; ancora, e arriva con le impostazioni: scegliere il
+    suono di ciascun evento e <b>silenziare un progetto intero</b>, per quando ne ha uno lungo che non
+    vuoi sentire mentre due corti s&igrave;.</p>
+  </section>
+
+  <hr>
+
   <!-- il blocco in basso -->
   <section class="sec">
     <h2>Il blocco in basso, nei suoi tre stati</h2>
@@ -584,16 +667,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <div class="eyebrow" style="margin-top:22px">By file &mdash; ogni file un blocco che si apre</div>
     <div class="mock" style="height:400px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
       </div>
       <div class="col">
@@ -632,14 +715,14 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <div class="eyebrow" style="margin-top:30px">By time &mdash; ogni modifica dove &egrave; successa</div>
     <div class="mock" style="height:360px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
       </div>
       <div class="col">
@@ -715,16 +798,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
     <div class="mock rel" style="height:400px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
         <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
@@ -857,16 +940,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
     <div class="mock rel" style="height:330px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit" style="background:var(--surface-3)"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit" style="background:var(--surface-3)"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
         <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
@@ -910,16 +993,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
     <div class="mock rel" style="height:430px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
         <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
@@ -996,16 +1079,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <div class="eyebrow" style="margin-top:22px">La forma: sopra l'app, che resta visibile dietro</div>
     <div class="mock rel" style="height:520px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
           <div class="gstate">Waiting</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span><span class="el">&middot; 2h 10m</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; ls ~/.claude/projects</span></div></div><span class="unread"></span></div>
           <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span><span class="el">&middot; 5m 12s</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; psql -f retry.sql</span></div></div><span class="unread"></span></div>
           <div class="gstate">Working</div>
           <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span><span class="el">&middot; 2m 14s</span></div><div class="act"><svg class="ic"><use href="#i-brick"/></svg><span>Edit &middot; ui/src/components/Diff.svelte</span></div></div></div>
         </div>
         <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
@@ -1378,10 +1461,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       <li><b>La versione stretta segue WhatsApp e Telegram</b>: su schermo stretto l&rsquo;elenco
       <i>&egrave;</i> la schermata principale, e toccando una chat si apre solo quella, a tutto schermo,
       con una freccia per tornare. Non due colonne rimpicciolite &mdash; una alla volta.</li>
+      <li><b>La riga dice cosa sta facendo e da quanto sta cos&igrave;</b> &mdash; il tempo su tutte le righe,
+      l&rsquo;operazione in corso solo su quelle vive. Era la prima cosa che il &sect;1 chiedeva per decidere
+      se entrare in una chat, e la riga non la diceva.</li>
+      <li><b>Come vieni chiamato quando guardi altrove</b> &mdash; notifica di sistema e suono, tre
+      eventi con tre suoni, la campanella in cima all&rsquo;elenco come interruttore. Vedi la sezione
+      <i>Quando guardi altrove</i>.</li>
     </ol>
   </div>
 
-  <p style="margin-top:26px;font-size:12px;color:var(--muted)">Icone: <b>Lucide</b> 1.33 (licenza ISC),
+  <p style="margin-top:26px;font-size:12px;color:var(--muted)">Icone: <b>Lucide</b> 1.34 (licenza ISC),
   incorporate come sprite SVG. Il sandbox degli artifact blocca gli host esterni, quindi nessuna CDN:
   nell&rsquo;app vera si installa il pacchetto e si usa la libreria normalmente.</p>
 

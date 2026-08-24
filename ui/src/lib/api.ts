@@ -7,6 +7,7 @@
 // In cambio, parsando il flusso a mano controlliamo anche la riconnessione, che
 // `EventSource` farebbe con `Last-Event-ID` mentre il daemon legge `?from=`.
 
+import type { Activity } from '$core/activity.ts'
 import type { CanonicalEvent, Command } from '$core/events.ts'
 import type { SessionSnapshot } from '$core/reduce.ts'
 
@@ -19,6 +20,10 @@ export type SessionRow = {
   turns: number
   lastSeq: number
   lastTs: number
+  /** Da quando sta in questo stato — non da quando ha scritto l'ultima riga. */
+  since: number
+  /** Cosa sta facendo adesso. C'è solo sulle righe vive: vedi il daemon. */
+  doing?: Activity
   live: boolean
 }
 

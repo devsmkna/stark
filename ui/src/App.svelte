@@ -113,11 +113,17 @@
   {/if}
 </div>
 
-<svelte:document onkeydown={e => {
-  if (e.key !== 'Escape') return
-  if (store.menu) store.menu = null
-  else if (store.dialog) store.dialog = null
-}} />
+<!-- L'audio parte sospeso finché l'utente non tocca la pagina: è una regola del
+     browser, non una scelta nostra. Il primo gesto qualunque lo sblocca, così il primo
+     lavoro che finisce si sente davvero invece di essere il gesto che sblocca e basta. -->
+<svelte:document
+  onpointerdown={() => store.calls.unlock()}
+  onkeydown={e => {
+    store.calls.unlock()
+    if (e.key !== 'Escape') return
+    if (store.menu) store.menu = null
+    else if (store.dialog) store.dialog = null
+  }} />
 
 <style>
   .mid p { margin: 0 0 8px; max-width: 46ch; }

@@ -13,7 +13,8 @@ const ICONS = {
   'i-bars': 'align-justify', 'i-plus': 'plus', 'i-check': 'check', 'i-down': 'chevron-down',
   'i-warn': 'triangle-alert', 'i-trash': 'trash-2', 'i-moon': 'moon', 'i-pencil': 'pencil',
   'i-shield': 'shield', 'i-palette': 'palette', 'i-monitor': 'monitor', 'i-search': 'search',
-  'i-bell': 'bell', 'i-disk': 'hard-drive', 'i-sliders': 'sliders-horizontal',
+  'i-bell': 'bell', 'i-bell-off': 'bell-off', 'i-disk': 'hard-drive',
+  'i-sliders': 'sliders-horizontal',
   'i-wifi-off': 'wifi-off', 'i-loader': 'loader-circle', 'i-x': 'x',
   'i-import': 'download',
 }

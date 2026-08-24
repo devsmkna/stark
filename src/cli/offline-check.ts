@@ -10,6 +10,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { Translator } from '../adapters/claude-code/translate.ts'
+import { activity } from '../core/activity.ts'
+import { EMPTY_USAGE, MODEL_VERSION, type CanonicalEvent } from '../core/events.ts'
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
@@ -156,6 +158,47 @@ check('§6: nessun avviso di declassamento quando la modalità combacia',
   replayed.notices.length === 0, replayed.notices.map(n => n.text).join('; '))
 check('turno chiuso come completato',
   replayed.turns[0]?.reason === 'completed')
+
+// ─── la riga viva dell'elenco (ui-schermate.md §1) ──────────────────────────
+
+// Le due cose che la riga deve dire e che il journal deve saper ricostruire: da quanto
+// sta in quello stato, e cosa sta facendo adesso. Serve una storia in cui l'ultimo
+// evento e l'ultimo *cambio di stato* NON coincidano: è il caso in cui una sessione
+// sembra viva perché scrive, e invece è ferma sulla stessa richiesta da un quarto d'ora.
+const ev = (seq: number, ts: number, payload: CanonicalEvent['payload']): CanonicalEvent =>
+  ({ v: MODEL_VERSION, seq, ts, sessionId: 'sess-riga', payload })
+const RIGA = reduce([
+  ev(1, 1_000, { k: 'session.state', state: 'busy' }),
+  ev(2, 2_000, { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'prova' }] }),
+  ev(3, 2_500, { k: 'reasoning.started', partId: 'p1' }),
+  ev(4, 2_800, { k: 'reasoning.ended', partId: 'p1' }),
+  ev(5, 3_000, { k: 'tool.started', callId: 'c0', name: 'Read' }),
+  ev(6, 3_500, { k: 'tool.ended', callId: 'c0', ok: true }),
+  ev(7, 5_000, { k: 'tool.started', callId: 'c1', name: 'Bash' }),
+  ev(8, 6_000, { k: 'tool.input.ended', callId: 'c1', input: {}, summary: 'npm test' }),
+], 'sess-riga')
+
+check('§1: `stateSince` conta dal cambio di stato, non dall\'ultimo evento',
+  RIGA.stateSince === 1_000 && RIGA.lastTs === 6_000,
+  `${RIGA.stateSince} / ${RIGA.lastTs}`)
+
+const adesso = activity(RIGA)
+check('§1: «cosa sta facendo» è l\'ultima operazione aperta, non la prima chiusa',
+  adesso?.kind === 'tool' && adesso.name === 'Bash' && adesso.summary === 'npm test',
+  JSON.stringify(adesso))
+
+applyTo(RIGA, ev(9, 10_000, { k: 'tool.ended', callId: 'c1', ok: true }))
+applyTo(RIGA, ev(10, 10_500, { k: 'text.started', partId: 'p2' }))
+check('§1: finiti i tool sta scrivendo, e il tempo è quello del turno',
+  activity(RIGA)?.kind === 'writing' && activity(RIGA)?.from === 2_000,
+  JSON.stringify(activity(RIGA)))
+
+applyTo(RIGA, ev(11, 11_000, {
+  k: 'turn.ended', turnId: 't1', reason: 'completed',
+  usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+}))
+check('§1: a turno finito non sta facendo niente, e la riga non deve inventarselo',
+  activity(RIGA) === null)
 
 // ─── il confronto affiancato (§9) ───────────────────────────────────────────
 

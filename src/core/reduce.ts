@@ -112,6 +112,13 @@ export type SessionSnapshot = {
   /** Quando è successo l'ultimo evento. La barra laterale mostra l'ora, e per il §4
    *  ogni cosa che la UI mostra deve nascere dal journal e non da altrove. */
   lastTs: number
+  /**
+   * Da quando sta in questo stato. **Non** è `lastTs`, ed è la differenza che conta:
+   * `lastTs` dice quando ha scritto l'ultima riga, questo dice da quanto è fermo lì.
+   * Su un lavoro che procede sono la stessa cosa; su uno piantato divergono, ed è
+   * esattamente il caso in cui si vuole saperlo (`ui-schermate.md` §1).
+   */
+  stateSince: number
   resumeRef?: string
   error?: string
 }
@@ -123,6 +130,7 @@ function emptySnapshot(sessionId: string): SessionSnapshot {
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
     blocked: [], notices: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
+    stateSince: 0,
   }
 }
 
@@ -137,6 +145,10 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
   s.lastSeq = e.seq
   s.lastTs = e.ts
   if (!s.sessionId) s.sessionId = e.sessionId
+  // Lo stato cambia da sei posti diversi — `session.state`, i due Sleep, l'errore, e i
+  // permessi e le domande che portano ad `awaiting` e ne tornano. Guardarlo prima e
+  // dopo è l'unico modo perché `stateSince` non dimentichi uno di quei sei.
+  const before = s.state
   const p = e.payload
   const turn = (): TurnView | undefined => s.turns[s.turns.length - 1]
 
@@ -315,6 +327,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     }
   }
+  if (s.state !== before || s.stateSince === 0) s.stateSince = e.ts
   return s
 }
 

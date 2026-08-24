@@ -47,6 +47,26 @@ una regola del progetto**, non un vezzo: vedi `CLAUDE.md`.
 > quello dell'elenco e quello della chat — quindi la rete non sta mai ferma e l'attesa scade
 > sempre. È già `'load'` più una pausa; se un giorno torna un timeout, la causa è questa.
 
+Il browser lo scarica playwright con `npx playwright-core install chromium`, e **il percorso
+non si scrive a mano**: il numero di build cambia da macchina a macchina, e `shot.mjs` lo
+aveva dentro — funzionava su una sola.
+
+### Guardare le notifiche
+
+Due cose vanno sapute prima di provarle, e nessuna delle due si indovina:
+
+- `http://127.0.0.1` **è un contesto sicuro** (verificato: `isSecureContext === true`), quindi
+  `Notification` e `AudioContext` esistono. Non serve HTTPS.
+- l'**headless shell** di playwright — quello che usa `launch()` per default — nega le
+  notifiche comunque, anche con `grantPermissions`. Per provarle serve il chromium intero:
+  `chromium.launch({ channel: 'chromium' })` più
+  `ctx.grantPermissions(['notifications'], { origin })`. Con l'headless shell si prova un
+  percorso che nel browser vero non esiste.
+
+Per vedere *cosa* dice una notifica senza avere il sistema che la disegna, si avvolge il
+costruttore in un `addInitScript` e si legge quello che è passato di lì. Va **avvolto**, non
+sostituito: `Notification.permission` deve restare quella del browser.
+
 ### Guardare gli stati che hanno bisogno di un processo vero
 
 Casella di scrittura, Stop, permessi e domande esistono solo se dietro c'è un processo: la UI
@@ -69,19 +89,21 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 30 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 34 verifiche sulla catena, costo zero di quota |
 
 ---
 
 ## 2. Cos'è già scritto
 
 ```
+src/core/activity.ts        «cosa sta facendo adesso», condiviso fra daemon e UI
 vite.config.ts              root su ui/, alias $core → src/core, proxy /api in sviluppo
 ui/src/main.ts              monta App
 ui/src/app.css              il vestito, estratto da docs/ui-anteprima.html
 ui/src/App.svelte           guscio: barra laterale + area principale, stati di errore
 ui/src/lib/api.ts           client del daemon: token, fetch, SSE a mano, riconnessione
 ui/src/lib/store.svelte.ts  lo stato dell'app: righe, selezione, snapshot, collegamento
+ui/src/lib/notify.svelte.ts come vieni chiamato: le tre chiamate, i suoni, la campanella
 ui/src/lib/view.ts          traduzioni: gruppo, etichetta, progetto, colore, orario
 ui/src/components/Sidebar.svelte       elenco per stato e progetto, tasto destro, rinomina in riga
 ui/src/components/Conversation.svelte  turni richiudibili, parti, risposte date, file in linea
@@ -133,7 +155,7 @@ scuro.
 
 | Rotta | |
 |---|---|
-| `GET /api/sessions` | elenco: `id, title, state, cwd, model, turns, lastSeq, lastTs, live` |
+| `GET /api/sessions` | elenco: `id, title, state, cwd, model, turns, lastSeq, lastTs, since, doing, live` |
 | `GET /api/stream` | **flusso dell'elenco**: manda le righe quando cambiano, al più ogni 250 ms |
 | `POST /api/sessions` | apre o **risveglia**: `{cwd, model?, mode?, resume?, askTools?}` |
 | `GET /api/sessions/:id` | lo snapshot |
@@ -148,6 +170,10 @@ scuro.
 
 `session.rename` è l'unico che il registro gestisce **prima** del controllo «è attiva?»: si
 rinomina soprattutto ciò che dorme.
+
+`since` è **l'ultimo cambio di stato**, non `lastTs`, che è l'ultimo evento qualunque: su un
+lavoro che procede coincidono, su uno piantato no, ed è lì che serve. `doing` c'è **solo sulle
+righe vive**, per la stessa ragione per cui esiste `settled` qui sotto.
 
 `state` nelle righe dell'elenco **non** ripete alla lettera l'ultimo stato scritto: una sessione
 senza processo dietro che risulterebbe `busy`, `starting` o `awaiting` viene riportata `closed`.
@@ -257,7 +283,32 @@ conversazione finisce senza cartella, senza progetto, senza colore e senza il mo
 risvegliarla. `importTranscript` ora legge `cwd` e `model` dalle voci del trascritto e li
 scrive in testa, e chiude con `session.state: 'idle'`.
 
-### 5.6 Impostazioni
+### 5.6 La riga viva e le notifiche
+
+`core/activity.ts` sta in `core/` e non nella UI perché la stessa frase serve al blocco in
+basso **e** alla riga dell'elenco, che il daemon calcola per tutte le sessioni — comprese
+quelle che non stai guardando. Torna il fatto canonico (`{kind, name, summary, from}`), non le
+parole: a vestirlo è `view.ts`. Nello snapshot è entrato `stateSince`, che è ciò che la riga
+mostra come «da quanto».
+
+**Trappola nuova, e non era prevista:** lo stato cambia da **sei** posti dentro `applyTo` —
+`session.state`, i due Sleep, l'errore, e i permessi e le domande che portano ad `awaiting` e
+ne tornano. Aggiornare `stateSince` in ognuno vuol dire dimenticarne uno: si guarda lo stato
+prima e dopo lo `switch`, una volta sola.
+
+**Trappola nuova:** aprire una chat la porta da `starting` a `idle` senza che nessuno abbia
+fatto niente. Chiamarti «ha finito» per una conversazione appena nata è la prima notifica
+falsa, e una notifica falsa insegna a spegnerle tutte.
+
+Le notifiche vivono sul **flusso dell'elenco**, non su quello della chat: il senso di tutto
+questo è sapere di una conversazione che non stai guardando, e le righe arrivano già. Il
+permesso si chiede dentro il click sulla campanella, perché fuori da un gesto il browser non
+lascia nemmeno chiedere; il suono invece non chiede niente a nessuno, ed è il motivo per cui
+un permesso negato non spegne la campanella ma la spiega.
+
+Come si provano davvero, headless shell compreso: §1, *Guardare le notifiche*.
+
+### 5.7 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 
@@ -272,15 +323,16 @@ scrive in testa, e chiude con `session.state: 'idle'`.
 - ~~Il titolo non si può rinominare~~ — **chiuso**: `session.rename` → `session.renamed`.
 - **Non c'è instradamento**: la chat scelta vive in memoria, quindi un ricaricamento la perde.
   Il daemon serve già la pagina su qualunque rotta, quindi `/chat/<id>` è pronto quando servirà.
-- **Nessuna notifica di sistema e nessun suono.** Il pallino nell'elenco funziona solo se stai
-  già guardando STARK, e il punto era poter guardare altrove (`ui-schermate.md` §1).
+- ~~Nessuna notifica di sistema e nessun suono~~ — **chiuso**: `ui/src/lib/notify.svelte.ts`,
+  tre chiamate con tre suoni e la campanella in cima all'elenco. Restano da fare, e stanno
+  nelle impostazioni: **scegliere il suono** di ciascun evento e **silenziare un progetto**
+  intero — quest'ultimo dal lato del daemon, perché deve valere su qualunque browser.
 - **L'avviso «forse è aperta in un terminale»** nell'import è una stima sull'ora dell'ultima
   scrittura (cinque minuti), non un fatto: il trascritto non dice se un processo è vivo.
   Sbagliare per eccesso costa una frase in più da leggere; per difetto, non avvisare qualcuno
   che sta per guidare la stessa conversazione da due posti.
-- **La riga dell'elenco non dice cosa sta facendo adesso** né da quanto tempo è ferma, che
-  `ui-schermate.md` §1 mette fra le cose che fanno decidere se entrare. Il dato c'è nello
-  snapshot; manca nella riga, che oggi porta solo `lastTs`.
+- ~~La riga dell'elenco non dice cosa sta facendo adesso né da quanto tempo è ferma~~ —
+  **chiuso**: `since` e `doing` nelle righe, `stateSince` nello snapshot.
 
 ---
 

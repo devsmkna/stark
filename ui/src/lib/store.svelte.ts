@@ -13,6 +13,31 @@
 import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
 import type { Command, PermissionMode } from '$core/events.ts'
 import { Api, bootToken, type ImportableRow, type LinkStatus, type SessionRow } from './api.ts'
+import { Notifier, type Call } from './notify.svelte.ts'
+import { activityText, project } from './view.ts'
+
+/** Gli stati in cui una chat *stava lavorando*: solo da lì ha senso dire «ha finito». */
+const WORKING = new Set(['busy', 'starting', 'awaiting'])
+
+/**
+ * Quale delle tre chiamate merita un passaggio di stato. Fermarsi da sola e fermarsi
+ * perché gliel'hai detto tu portano allo stesso stato, e non si distinguono da qui:
+ * a non gridarti in faccia mentre sei sulla chat ci pensa il filtro in `#ring`.
+ */
+function callFor(was: string, now: string): Call | null {
+  if (now === 'awaiting') return 'needsYou'
+  if (!WORKING.has(was)) return null
+  // Aprire una chat la porta da `starting` a `idle` senza che nessuno abbia fatto
+  // niente: chiamarti «ha finito» per una conversazione appena nata sarebbe la prima
+  // notifica falsa, e una notifica falsa insegna a spegnerle tutte.
+  if (now === 'idle') return was === 'starting' ? null : 'done'
+  if (now === 'closed' || now === 'error') return 'stopped'
+  return null
+}
+
+const HEAD: Record<Call, string> = {
+  needsYou: 'Needs you', done: 'Done', stopped: 'Stopped',
+}
 
 /** Cosa occupa l'area grande: la conversazione, o gli effetti al suo posto. */
 export type View = 'chat' | 'effects'
@@ -36,6 +61,8 @@ export type ContextMenu = { id: string; x: number; y: number } | null
 
 export class Store {
   readonly api = new Api(bootToken())
+  /** Come vieni chiamato quando guardi altrove. Vedi `notify.svelte.ts`. */
+  readonly calls = new Notifier()
 
   rows = $state<SessionRow[]>([])
   selected = $state<string | null>(null)
@@ -68,6 +95,10 @@ export class Store {
 
   #stopStream: (() => void) | null = null
   #stopList: (() => void) | null = null
+  /** Lo stato di ogni riga com'era l'ultima volta: è da qui che si vede il passaggio. */
+  #was = new Map<string, string>()
+  /** Il primo elenco non chiama nessuno: sono le chat che c'erano già, non novità. */
+  #greeted = false
 
   get hasToken(): boolean { return this.api.hasToken }
 
@@ -87,7 +118,7 @@ export class Store {
 
   async start(): Promise<void> {
     this.#stopList = this.api.sessionsStream(
-      rows => { this.rows = rows; this.loaded = true; this.fatal = null },
+      rows => { this.#ring(rows); this.rows = rows; this.loaded = true; this.fatal = null },
       s => {
         this.listLink = s
         // Un elenco che non arriva è l'unico guasto che vale la pena gridare: senza
@@ -96,6 +127,36 @@ export class Store {
         else if (s === 'live') this.fatal = null
       },
     )
+  }
+
+  /**
+   * Chi ti chiama, e perché.
+   *
+   * Si guarda **l'elenco**, non la chat aperta: il senso di tutto questo è sapere di
+   * una conversazione che non stai guardando. Il flusso globale (`GET /api/stream`)
+   * porta tutte le righe, quindi il dato c'è già e non costa niente in più.
+   */
+  #ring(rows: SessionRow[]): void {
+    const was = this.#was
+    this.#was = new Map(rows.map(r => [r.id, r.state]))
+    if (!this.#greeted) { this.#greeted = true; return }
+    for (const r of rows) {
+      const before = was.get(r.id)
+      if (before === undefined || before === r.state) continue
+      const kind = callFor(before, r.state)
+      if (!kind) continue
+      // Se stai guardando proprio quella chat, il blocco in basso e il pallino l'hanno
+      // già detto: chiamarti sarebbe gridare a qualcuno che è nella stanza.
+      if (this.selected === r.id && document.visibilityState === 'visible') continue
+      this.calls.call(kind, {
+        title: `${HEAD[kind]} · ${project(r.cwd)}`,
+        // Il titolo dice *quale* lavoro, l'operazione dice *cosa* voleva fare: senza la
+        // seconda riga «Needs you» costringe comunque ad aprire per sapere cosa vuole.
+        body: r.doing ? `${r.title}\n${activityText(r.doing)}` : r.title,
+        tag: r.id,
+        onClick: () => { void this.select(r.id) },
+      })
+    }
   }
 
   async select(id: string): Promise<void> {

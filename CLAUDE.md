@@ -71,9 +71,14 @@ nelle due letture con il confronto affiancato; **barra di stato** che cambia mod
 a caldo; **nuova chat, import da terminale, risveglio, rinomina, sleep, elimina**; tema chiaro
 e scuro. Tutte le schermate sono disegnate in `docs/ui-anteprima.html`.
 
+**E ti chiama quando guardi altrove** (24 agosto 2026): notifica di sistema e suono per *ti
+aspetta*, *ha finito*, *si è fermata da sola*, con la campanella in cima all'elenco come
+interruttore; e la riga dell'elenco dice **cosa sta facendo adesso e da quanto sta così**.
+Provato dal vivo, notifica compresa.
+
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 30 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 34 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -86,11 +91,10 @@ che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
-Cosa manca nella UI, oltre alle impostazioni: nessuna **notifica di sistema né suono** — il
-pallino funziona solo se stai già guardando STARK, e il punto era poter guardare altrove;
-nessun **instradamento**, quindi un ricaricamento perde la chat scelta; la riga dell'elenco non
-dice **cosa sta facendo adesso** né da quanto è ferma; e i **server MCP per chat** non si
-scelgono, perché il daemon non li elenca.
+Cosa manca nella UI, oltre alle impostazioni: nessun **instradamento**, quindi un ricaricamento
+perde la chat scelta; i **server MCP per chat** non si scelgono, perché il daemon non li
+elenca; e delle notifiche mancano le due parti che vivono nelle impostazioni — **scegliere il
+suono** di ciascun evento e **silenziare un progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -122,6 +126,13 @@ Decisioni già prese:
 - avviare un lavoro e importarne uno dal terminale stanno nello **stesso riquadro, dietro due
   linguette**: una tendina sul `+` si apre solo se sai già che c'è qualcosa da scegliere, e la
   seconda porta va vista per essere usata.
+- la riga dell'elenco dice **da quanto sta in quello stato**, non da quando ha scritto
+  l'ultima riga: su un lavoro che procede coincidono, su uno piantato no — ed è il caso in cui
+  si vuole saperlo. «Cosa sta facendo adesso» invece compare **solo sulle righe vive**: su una
+  sessione senza processo dietro sarebbe falsa, perché il suo journal è rimasto aperto a metà.
+- le notifiche si spengono e si accendono da **una campanella sola**, non per chat: il permesso
+  del browser si può chiedere solo dentro un gesto, e il **suono non ne ha bisogno** — perciò
+  un permesso negato non toglie il comando, lo spiega.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il

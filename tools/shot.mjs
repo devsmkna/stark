@@ -4,10 +4,10 @@
 // dall'apertura — gli effetti, per esempio, sono «scegli una chat» poi «apri».
 import { chromium } from 'playwright-core'
 const [url, out, ...clicks] = process.argv.slice(2)
-const browser = await chromium.launch({
-  executablePath: '/root/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome',
-  args: ['--no-sandbox'],
-})
+// Nessun percorso a mano: playwright-core sa dov'è il browser che ha scaricato lui, e
+// il numero di build cambia da macchina a macchina — scritto qui dentro, funzionava su
+// una sola. Se manca: `npx playwright-core install chromium`.
+const browser = await chromium.launch({ args: ['--no-sandbox'] })
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 },
   colorScheme: process.env['DARK'] ? 'dark' : 'light' })
 // NON `networkidle`: la UI tiene aperti due flussi SSE — quello dell'elenco e
