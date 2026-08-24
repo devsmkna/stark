@@ -14,7 +14,8 @@ const ICONS = {
   'i-warn': 'triangle-alert', 'i-trash': 'trash-2', 'i-moon': 'moon', 'i-pencil': 'pencil',
   'i-shield': 'shield', 'i-palette': 'palette', 'i-monitor': 'monitor', 'i-search': 'search',
   'i-bell': 'bell', 'i-disk': 'hard-drive', 'i-sliders': 'sliders-horizontal',
-  'i-wifi-off': 'wifi-off', 'i-loader': 'loader-circle',
+  'i-wifi-off': 'wifi-off', 'i-loader': 'loader-circle', 'i-x': 'x',
+  'i-import': 'download',
 }
 
 const symbols = Object.entries(ICONS).map(([id, name]) => {

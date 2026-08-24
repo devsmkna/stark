@@ -22,7 +22,31 @@ export type SessionRow = {
   live: boolean
 }
 
+export type OpenSpec = {
+  cwd: string
+  model?: string
+  mode?: string
+  resume?: { ref: string; fork?: boolean }
+}
+
+/** Una conversazione nata nel terminale, come la elenca il daemon. */
+export type ImportableRow = {
+  sessionId: string
+  title: string
+  firstPrompt?: string
+  cwd?: string
+  branch?: string
+  lastModified: number
+  sizeBytes?: number
+  path?: string
+  already: boolean
+  recent: boolean
+}
+
 export type LinkStatus = 'connecting' | 'live' | 'lost'
+
+/** Cosa risponde un comando. §18: solo «accettato», mai il proprio effetto. */
+export type Ack = { ok: boolean; error?: string }
 
 /**
  * Il token arriva una volta sola, nell'indirizzo che il daemon stampa all'avvio: il
@@ -47,10 +71,14 @@ export class Api {
 
   get hasToken(): boolean { return this.token.length > 0 }
 
+  private get auth(): Record<string, string> {
+    return { authorization: `Bearer ${this.token}` }
+  }
+
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(path, {
       ...init,
-      headers: { authorization: `Bearer ${this.token}`, ...(init?.headers ?? {}) },
+      headers: { ...this.auth, ...(init?.headers ?? {}) },
     })
     if (!res.ok) throw new Error(`${res.status} su ${path}`)
     return await res.json() as T
@@ -64,12 +92,45 @@ export class Api {
     return this.json(`/api/sessions/${id}`)
   }
 
-  command(id: string, cmd: Command): Promise<{ ok: boolean; error?: string }> {
-    return this.json(`/api/sessions/${id}/command`, {
+  open(spec: OpenSpec): Promise<{ id: string; snapshot: SessionSnapshot }> {
+    return this.json('/api/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(spec),
+    })
+  }
+
+  importable(): Promise<{ sessions: ImportableRow[] }> {
+    return this.json('/api/importable')
+  }
+
+  async doImport(sessionId: string): Promise<Ack & { id?: string }> {
+    const res = await fetch('/api/importable', {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    })
+    try { return await res.json() as Ack & { id?: string } }
+    catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
+  /**
+   * Un comando rifiutato non è un guasto della rete: il daemon risponde 409 e dice
+   * perché — «sessione non attiva», «richiesta sconosciuta». Trattarlo come un errore
+   * di trasporto trasformerebbe una frase leggibile in «409 su /api/…».
+   */
+  async command(id: string, cmd: Command): Promise<Ack> {
+    const res = await fetch(`/api/sessions/${id}/command`, {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
       body: JSON.stringify(cmd),
     })
+    try { return await res.json() as Ack } catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
+  async remove(id: string): Promise<Ack> {
+    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE', headers: this.auth })
+    try { return await res.json() as Ack } catch { return { ok: false, error: `HTTP ${res.status}` } }
   }
 
   /**
@@ -85,6 +146,36 @@ export class Api {
     onEvent: (e: CanonicalEvent) => void,
     onStatus: (s: LinkStatus) => void,
   ): () => void {
+    return this.sse(
+      () => `/api/sessions/${id}/stream?from=${from()}`,
+      data => onEvent(JSON.parse(data) as CanonicalEvent),
+      onStatus,
+    )
+  }
+
+  /**
+   * Il flusso dell'**elenco**. Prima c'era una richiesta ogni tre secondi, perché il
+   * daemon esponeva un flusso per sessione e non uno globale: la barra laterale non
+   * aveva altro modo di sapere che *un'altra* chat era cambiata. Ora lo dice il daemon.
+   * Alla connessione manda subito le righe, quindi non serve un caricamento a parte.
+   */
+  sessionsStream(
+    onRows: (rows: SessionRow[]) => void,
+    onStatus: (s: LinkStatus) => void,
+  ): () => void {
+    return this.sse(
+      () => '/api/stream',
+      data => onRows((JSON.parse(data) as { sessions: SessionRow[] }).sessions),
+      onStatus,
+    )
+  }
+
+  /** Il meccanismo comune ai due flussi: connessione, lettura, riconnessione. */
+  private sse(
+    url: () => string,
+    onData: (data: string) => void,
+    onStatus: (s: LinkStatus) => void,
+  ): () => void {
     const ac = new AbortController()
     let stopped = false
     let attempt = 0
@@ -93,14 +184,14 @@ export class Api {
       while (!stopped) {
         onStatus(attempt === 0 ? 'connecting' : 'lost')
         try {
-          const res = await fetch(`/api/sessions/${id}/stream?from=${from()}`, {
-            headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
+          const res = await fetch(url(), {
+            headers: { ...this.auth, accept: 'text/event-stream' },
             signal: ac.signal,
           })
           if (!res.ok || !res.body) throw new Error(`stream ${res.status}`)
           attempt = 0
           onStatus('live')
-          await pump(res.body, onEvent, () => stopped)
+          await pump(res.body, onData, () => stopped)
         } catch (err) {
           if (stopped || (err as Error).name === 'AbortError') return
         }
@@ -121,7 +212,7 @@ export class Api {
 /** Legge il corpo e ricompone i blocchi SSE, che possono arrivare spezzati a metà. */
 async function pump(
   body: ReadableStream<Uint8Array>,
-  onEvent: (e: CanonicalEvent) => void,
+  onData: (data: string) => void,
   stopped: () => boolean,
 ): Promise<void> {
   const reader = body.getReader()
@@ -145,7 +236,7 @@ async function pump(
       // Le righe che iniziano con `:` sono commenti: il daemon le usa come battito
       // per tenere aperte le connessioni mute. Qui semplicemente non producono dati.
       if (data) {
-        try { onEvent(JSON.parse(data) as CanonicalEvent) } catch { /* blocco rotto */ }
+        try { onData(data) } catch { /* blocco rotto */ }
       }
       cut = buffer.indexOf('\n\n')
     }

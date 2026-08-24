@@ -58,7 +58,12 @@ html,body{height:100%}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
   font-size:12px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
 #app{height:100%}
-.shell{height:100%;display:flex;background:var(--surface);overflow:hidden}
+.shell{height:100%;display:flex;background:var(--surface);overflow:hidden;position:relative}
+/* `.scrim` e `.dlg` sono assoluti: nell'anteprima il riferimento era il riquadro del
+   mock, qui è il guscio — che È la finestra. Senza `position` sul guscio andrebbero a
+   cercarne uno più su e finirebbero fuori posto. */
+.scrim{z-index:8}
+.dlg{z-index:9}
 .shell *{min-width:0}
 .scroller{overflow:auto}
 button{font-family:inherit;cursor:pointer}
@@ -111,7 +116,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .effbtn b{font-weight:600;color:var(--ink)}
 
 .conv{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
-.turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+/* `flex:none` non è decorativo: `.conv` è una colonna flex, e senza, un turno lungo
+   fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
+   conversazione vera, che è esattamente il caso che deve reggere. */
+.turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface);flex:none}
 .turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2)}
 .turn.open>.th{background:var(--surface)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
@@ -179,6 +187,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .diff{font-family:var(--mono);font-size:10.5px;border-top:1px solid var(--line);overflow-x:auto}
 .dgrid{display:grid;grid-template-columns:26px 1fr 26px 1fr;min-width:420px}
 .dgrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}
+/* su schermo stretto l'affiancato non ci sta: si cambia forma, non si rimpicciolisce */
+.ugrid{display:grid;grid-template-columns:26px 1fr}
+.ugrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}
 .dn{color:var(--muted);text-align:right;background:var(--surface-2);font-variant-numeric:tabular-nums}
 .dold{background:var(--del-bg)}
 .dnew{background:var(--add-bg)}

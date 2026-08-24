@@ -2,6 +2,9 @@
   import Sprite from './components/Sprite.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import Conversation from './components/Conversation.svelte'
+  import Effects from './components/Effects.svelte'
+  import NewChat from './components/NewChat.svelte'
+  import Icon from './components/Icon.svelte'
   import { Store } from './lib/store.svelte.ts'
 
   const store = new Store()
@@ -10,6 +13,18 @@
     void store.start()
     return () => store.dispose()
   })
+
+  // Sotto una certa larghezza l'affiancato non ci sta: là non si rimpicciolisce, si
+  // cambia forma (docs/ui-schermate.md §4). Un ascoltatore solo per tutta l'app.
+  $effect(() => {
+    const mq = matchMedia('(max-width: 860px)')
+    const apply = (): void => { store.narrow = mq.matches }
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  })
+
+  const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
 </script>
 
 <Sprite />
@@ -24,28 +39,101 @@
       </div>
     </div>
   {:else}
-    <Sidebar rows={store.rows} selected={store.selected} onpick={id => void store.select(id)} />
+    <Sidebar {store} />
 
     {#if store.fatal}
       <div class="mid">The daemon is not answering: {store.fatal}</div>
+    {:else if store.snap && store.view === 'effects'}
+      <Effects {store} snap={store.snap} />
     {:else if store.snap}
-      <Conversation snap={store.snap} link={store.link} />
+      <Conversation {store} snap={store.snap} link={store.link} />
     {:else if store.selected}
       <div class="mid">Opening…</div>
     {:else if store.loaded && store.rows.length === 0}
       <div class="mid">
         <div>
           <p><b>No chats yet.</b></p>
-          <p>Starting a chat from here is not wired yet — this slice only reads.
-          Use <code>npm run slice</code> to create a real one, then reload.</p>
+          <p>Press <b>+</b> at the top left to start one, or run <code>npm run slice</code>
+          in a terminal.</p>
         </div>
       </div>
     {:else}
       <div class="mid">Pick a chat on the left.</div>
     {/if}
   {/if}
+
+  <!-- Le azioni stanno dove sta l'oggetto: col tasto destro sulla riga. Non esiste
+       una schermata «modifica chat» perché, con cartella e agent bloccati per
+       costruzione, sarebbe un contenitore con dentro un campo solo. -->
+  {#if store.menu && menuRow}
+    <div class="ctx-menu" style="left:{store.menu.x}px;top:{store.menu.y}px">
+      <button class="mi" onclick={() => { store.renaming = menuRow.id; store.menu = null }}>
+        <Icon name="i-pencil" /> Rename
+      </button>
+      <button class="mi" disabled={!menuRow.live}
+        title={menuRow.live ? 'Frees memory, not quota' : 'Already stopped'}
+        onclick={() => { const id = menuRow.id; store.menu = null; void store.sleep(id) }}>
+        <Icon name="i-moon" /> Put to sleep
+      </button>
+      <hr />
+      <button class="mi dgr"
+        onclick={() => { store.dialog = { kind: 'delete', row: menuRow }; store.menu = null }}>
+        <Icon name="i-trash" /> Delete
+      </button>
+    </div>
+    <div class="catch" role="presentation" onclick={() => { store.menu = null }}
+      oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
+  {/if}
+
+  {#if store.dialog?.kind === 'new'}
+    <NewChat {store} />
+  {:else if store.dialog?.kind === 'delete'}
+    {@const row = store.dialog.row}
+    <div class="scrim" role="presentation" onclick={() => { store.dialog = null }}></div>
+    <div class="dlg" style="width:380px">
+      <div class="dlgh"><div class="dt">Delete this chat?</div></div>
+      <div class="dlgb">
+        <div class="hint" style="font-size:11px">
+          <b>{row.title}</b>
+        </div>
+        <!-- Nessun cestino: il journal è la conversazione, e cancellarlo la cancella. -->
+        <div class="warn">
+          <Icon name="i-warn" />
+          <span>This removes its journal — the whole history, {row.turns}
+            {row.turns === 1 ? 'turn' : 'turns'}. There is no undo.</span>
+        </div>
+      </div>
+      <div class="dlgf">
+        <button class="btn" onclick={() => { store.dialog = null }}>Cancel</button>
+        <button class="btn dgr" onclick={() => { store.dialog = null; void store.remove(row.id) }}>
+          Delete
+        </button>
+      </div>
+    </div>
+  {/if}
 </div>
+
+<svelte:document onkeydown={e => {
+  if (e.key !== 'Escape') return
+  if (store.menu) store.menu = null
+  else if (store.dialog) store.dialog = null
+}} />
 
 <style>
   .mid p { margin: 0 0 8px; max-width: 46ch; }
+
+  /* Il menu è ancorato al puntatore, quindi alla finestra e non al documento:
+     l'elenco scorre sotto, e un menu che scorresse con lui punterebbe a una riga
+     diversa da quella su cui è stato aperto. */
+  .ctx-menu { position: fixed; }
+  .ctx-menu .mi {
+    width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer;
+  }
+  .ctx-menu .mi:not([disabled]):hover { background: var(--surface-2); }
+  .ctx-menu .mi[disabled] { opacity: .45; cursor: default; }
+  .ctx-menu .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Sotto il menu, e sopra tutto il resto: il primo clic altrove lo chiude e basta. */
+  .catch { position: fixed; inset: 0; z-index: 5; }
+
+  .btn { cursor: pointer; }
 </style>
