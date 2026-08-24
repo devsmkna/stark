@@ -8,14 +8,31 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
-import { Registry, type OpenSpec } from './registry.ts'
+import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
+import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 
 export type DaemonOptions = {
   port?: number
   model?: string
   configDir?: string
+  /** Il token da usare. Omesso: usa **quello di questa macchina**, che è persistente. */
+  token?: string
 }
+
+/**
+ * La porta di default, e il fatto che ce ne sia una fissa è il punto.
+ *
+ * Era `0`, cioè «una qualunque»: con un daemon che nasceva e moriva col terminale
+ * andava bene, perché l'indirizzo lo leggevi lì sopra. Ma un indirizzo che cambia a
+ * ogni avvio non si può mettere fra i preferiti né lasciare aperto in una scheda, che
+ * è esattamente come si usa una cosa che deve sopravvivere.
+ *
+ * Come mutua esclusione: due daemon sulla stessa `STARK_HOME` si contenderebbero i
+ * journal delle stesse conversazioni. Il secondo non riesce a mettersi in ascolto, e
+ * fallire è il comportamento giusto.
+ */
+export const PORTA = 4571
 
 export type Daemon = {
   url: string
@@ -25,8 +42,8 @@ export type Daemon = {
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
-  let port = opts.port ?? 0
-  const guard = createGuard(() => port)
+  let port = opts.port ?? PORTA
+  const guard = createGuard(() => port, opts.token ?? readToken(STARK_HOME))
   const guardToken = guard.token
   const registry = new Registry({
     ...(opts.model ? { model: opts.model } : {}),

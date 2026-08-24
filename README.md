@@ -86,18 +86,31 @@ senza flag. `tsc` resta necessario per il controllo dei tipi, che lo stripping *
 
 ```
 npm install
-npm run ui:build     # la UI è servita dal daemon, va compilata una volta
-npm run stark        # stampa l'indirizzo da aprire
+npm run ui:build      # la UI è servita dal daemon, va compilata una volta
+npm run stark:start   # daemon staccato: sopravvive alla chiusura del terminale
 ```
 
 L'indirizzo stampato contiene il token una volta sola. Al primo caricamento STARK lo sposta
 in un cookie e lo toglie dalla barra degli indirizzi.
 
+**L'indirizzo è sempre lo stesso** — `http://127.0.0.1:4571` — e il token **non cambia più a
+ogni avvio**: si può tenere una scheda aperta, che dopo un riavvio del daemon si ricollega da
+sola. Il motivo non è la comodità: quando il daemon muore, muoiono con lui i processi degli
+agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa quota**.
+
+| | |
+|---|---|
+| `npm run stark:start` | lo avvia **staccato**: chiudere il terminale non lo tocca |
+| `npm run stark:status` | se è vivo, dove, e quante conversazioni ha |
+| `npm run stark:stop` | lo ferma con garbo: gli agent si chiudono e i journal restano coerenti |
+| `npm run stark` | in primo piano, per guardarlo lavorare. Ctrl-C lo ferma |
+| `npm run stark:token -- --new` | ne fa uno nuovo, se il vecchio è finito dove non doveva |
+
 ## Comandi
 
 | | |
 |---|---|
-| `npm run stark` | **avvia il daemon** e stampa l'indirizzo con il token |
+| `npm run stark` | il daemon in primo piano (staccato: `stark:start`, vedi sopra) |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
 | `npm run check` | catena completa su eventi finti: 37 verifiche, **zero quota spesa** |
@@ -106,7 +119,7 @@ in un cookie e lo toglie dalla barra degli indirizzi.
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
-| `npm run daemon` | prova il daemon da capo a fondo, perimetro di sicurezza compreso |
+| `npm run daemon` | prova il daemon da capo a fondo: 16 verifiche, perimetro compreso |
 | `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
 | `npm run icons` · `python3 tools/gen-logo.py` | rigenerano icone e marchio dalle sorgenti |
 
@@ -138,8 +151,13 @@ diversi:
 - **token** in `Authorization: Bearer` o in un cookie `SameSite=Strict`, confrontato a tempo
   costante — distingue STARK da qualunque altro processo sulla macchina
 
-Nessuna intestazione CORS, di proposito. Il token cambia a ogni avvio: non è un segreto da
-conservare.
+Nessuna intestazione CORS, di proposito.
+
+**Il token sta su disco**, in `~/.stark/token` con permessi `0600`, e non cambia più a ogni
+avvio: senza, un daemon che sopravvive al terminale cambierebbe indirizzo ogni volta e nessuna
+scheda aperta funzionerebbe due volte. Il costo va detto: è un segreto a riposo. Sta accanto ai
+journal, che nella stessa cartella contengono già tutto ciò che l'agent ha letto — chi può
+leggere il token può già leggere quelli. `npm run stark:token -- --new` ne fa uno nuovo.
 
 Distinzione che vale la pena tenere ferma: questi controlli **non** limitano ciò che puoi
 fare. Limitano *chi altro* può guidare l'agent. Il CLI non ne ha bisogno perché non ha

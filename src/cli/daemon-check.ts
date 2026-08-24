@@ -2,6 +2,7 @@
 // flusso SSE, comando, e coerenza fra ciò che è arrivato dal flusso e ciò che sta sul
 // disco. Le prove di sicurezza non costano quota; il turno finale costa pochissimo.
 
+import { mkdirSync } from 'node:fs'
 import { connect } from 'node:net'
 import { startDaemon } from '../daemon/server.ts'
 import type { CanonicalEvent } from '../core/events.ts'
@@ -24,7 +25,13 @@ function richiestaGrezza(porta: number, host: string, token: string): Promise<nu
   })
 }
 
-const daemon = await startDaemon({ ...(process.env['STARK_MODEL'] ? { model: process.env['STARK_MODEL'] } : {}) })
+// Porta 0 e token usa e getta: una prova non deve litigare con il daemon vero, che
+// adesso ha una porta fissa e un token che sta su disco.
+const daemon = await startDaemon({
+  port: 0,
+  token: 'prova'.padEnd(64, '0'),
+  ...(process.env['STARK_MODEL'] ? { model: process.env['STARK_MODEL'] } : {}),
+})
 const { url, token } = daemon
 const auth = { authorization: `Bearer ${token}` }
 const esiti: [string, boolean, string][] = []
@@ -48,9 +55,29 @@ check('token giusto → 200', (await fetch(`${url}/api/sessions`, { headers: aut
 check('Origin nostro → 200',
   (await fetch(`${url}/api/sessions`, { headers: { ...auth, origin: url } })).status === 200)
 
+// ─── una sessione che non parte ─────────────────────────────────────────────
+
+// Costa zero quota, e prova la cosa che conta di più in un daemon che deve
+// sopravvivere: **una conversazione nata male non porta giù le altre**. È successo il
+// contrario — una cartella che non esisteva chiudeva il journal mentre il ciclo dei
+// messaggi girava ancora, e l'eccezione, che nessuno stava aspettando, spegneva tutto.
+const nata = await fetch(`${url}/api/sessions`, {
+  method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+  body: JSON.stringify({ cwd: '/non/esiste/davvero' }),
+})
+check('una cartella inesistente non apre una sessione', !nata.ok, String(nata.status))
+// L'eccezione arrivava da un ciclo che gira per conto suo: senza aspettare un attimo
+// si guarderebbe il daemon prima che il colpo lo raggiunga.
+await new Promise(r => setTimeout(r, 1500))
+check('e il daemon resta in piedi',
+  (await fetch(`${url}/api/sessions`, { headers: auth })).status === 200)
+
 // ─── sessione ───────────────────────────────────────────────────────────────
 
+// La cartella va creata: sta in /tmp, che prima o poi viene svuotata. Senza, la prova
+// falliva con un errore che non c'entrava niente con quello che stava provando.
 const SANDBOX = '/tmp/stark-daemon-check'
+mkdirSync(SANDBOX, { recursive: true })
 const aperta = await fetch(`${url}/api/sessions`, {
   method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
   body: JSON.stringify({ cwd: SANDBOX }),

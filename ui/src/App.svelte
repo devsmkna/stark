@@ -42,7 +42,17 @@
     <Sidebar {store} />
 
     {#if store.fatal}
-      <div class="mid">The daemon is not answering: {store.fatal}</div>
+      <!-- Il testo era «The daemon is not answering: the daemon is not answering»: il
+           motivo dal negozio ripeteva la frase del riquadro. Qui la frase sta in un
+           posto solo, e dice anche cosa fare — che è l'unica cosa utile in quel momento. -->
+      <div class="mid">
+        <div>
+          <p><b>The daemon is not answering.</b></p>
+          <p>STARK keeps trying. If you stopped it, start it again with
+          <code>npm run stark:start</code>: this tab reconnects on its own, and the
+          address stays the same.</p>
+        </div>
+      </div>
     {:else if store.snap && store.view === 'effects'}
       <Effects {store} snap={store.snap} />
     {:else if store.snap}

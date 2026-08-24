@@ -81,6 +81,10 @@ della macchina e li accende uno per uno, spenti di default, con la scelta che to
 risveglio. E i **comandi slash** si scrivono: la casella li propone appena scrivi `/`, con
 argomenti e alias.
 
+**Il daemon sopravvive al terminale**: `npm run stark:start` lo stacca, `stark:status` e
+`stark:stop` lo governano, l'indirizzo è fisso e il token sta in `~/.stark/token`. Una scheda
+aperta si ricollega da sola dopo un riavvio.
+
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
 quota — 37 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
@@ -97,11 +101,10 @@ Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
 Cosa manca nella UI, oltre alle impostazioni: il prompt è **solo testo**, senza allegati né
-immagini (§16.3); il **daemon sta in primo piano** e il token cambia a ogni avvio, quindi
-chiudere il terminale uccide le sessioni e riaprirle costa quota; nessun **instradamento**,
-quindi un ricaricamento perde la chat scelta; la **compattazione del contesto** arriva come
-evento e non si vede da nessuna parte; e delle notifiche mancano le due parti che vivono nelle
-impostazioni — **scegliere il suono** di ciascun evento e **silenziare un progetto** intero.
+immagini (§16.3); nessun **instradamento**, quindi un ricaricamento perde la chat scelta; la
+**compattazione del contesto** arriva come evento e non si vede da nessuna parte; e delle
+notifiche mancano le due parti che vivono nelle impostazioni — **scegliere il suono** di
+ciascun evento e **silenziare un progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -146,6 +149,9 @@ Decisioni già prese:
 - i **comandi slash** si completano dalla casella, con argomenti e alias. Quelli legati al
   terminale restano in elenco con l'etichetta: il CLI li ha, e a dire che lì non funzionano è
   l'agent — non STARK a indovinarlo.
+- il **token sta su disco** (`~/.stark/token`, `0600`) e la porta è fissa. Costo accettato: è
+  un segreto a riposo, ma sta accanto ai journal, che contengono già tutto ciò che l'agent ha
+  letto. In cambio l'indirizzo si può tenere aperto, che è il senso di un daemon che dura.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il

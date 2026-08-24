@@ -13,8 +13,13 @@ export type Guard = {
   reject(req: IncomingMessage): string | null
 }
 
-export function createGuard(port: () => number): Guard {
-  const token = randomBytes(32).toString('hex')
+/**
+ * `token` arriva da fuori perché ora **sopravvive al processo** (vedi `identity.ts`):
+ * generarlo qui dentro vorrebbe dire che il perimetro decide una cosa che riguarda
+ * l'avvio. Senza, se ne fa uno usa e getta: è quello che serve a un daemon di prova.
+ */
+export function createGuard(port: () => number, dato?: string): Guard {
+  const token = dato ?? randomBytes(32).toString('hex')
 
   return {
     token,

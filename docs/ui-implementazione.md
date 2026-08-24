@@ -14,8 +14,11 @@
 ```
 npm install
 npm run ui:build      # la UI è servita dal daemon, va compilata
-npm run stark         # stampa l'indirizzo con il token dentro
+npm run stark:start   # staccato: sopravvive al terminale. `npm run stark` = primo piano
 ```
+
+L'indirizzo è fisso (`127.0.0.1:4571`) e il token sta in `~/.stark/token`: una scheda aperta
+si ricollega da sola dopo `stark:stop` + `stark:start`, senza ricaricare.
 
 L'indirizzo contiene il token una volta sola: al primo caricamento la UI lo sposta in un
 cookie e lo toglie dalla barra degli indirizzi.
@@ -90,6 +93,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
 | `npm run check` | 37 verifiche sulla catena, costo zero di quota |
+| `npm run daemon` | 16 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
 
 ---
 

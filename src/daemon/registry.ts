@@ -180,6 +180,13 @@ export class Registry {
       }
     } catch (err) {
       this.live.delete(id)
+      // Il ciclo dei messaggi può essere già partito, e quando finisce scrive
+      // `session.state: closed`. Chiudendo il journal adesso, quella scrittura
+      // troverebbe un file chiuso e l'eccezione — che nessuno sta aspettando, perché
+      // il ciclo gira per conto suo — porterebbe giù **il daemon intero**: una cartella
+      // che non esiste basterebbe a spegnere tutte le altre conversazioni. Prima lo si
+      // fa finire, poi si chiude.
+      try { await adapter.close() } catch { /* stava già morendo */ }
       journal.close()
       this.bump()
       throw err
