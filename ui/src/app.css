@@ -262,8 +262,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .prow .pn{font-size:11px;color:var(--ink);font-weight:500}
 .prow .pd{font-size:9.5px;color:var(--muted)}
 .seg{margin-left:auto;display:flex;border:1px solid var(--line-2);border-radius:7px;overflow:hidden;flex:none;font-size:10px}
-.seg span{padding:2.5px 9px;color:var(--muted)}
-.seg span.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+/* span nell'anteprima, button nell'app: si premono, quindi la' sono bottoni */
+.seg span,.seg button{padding:2.5px 9px;color:var(--muted)}
+.seg span.on,.seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .hard{border:1px solid var(--stop);border-radius:8px;padding:9px 11px;background:var(--stop-bg)}
 .hard .ht{font-size:11px;font-weight:700;color:var(--stop);display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .hard .hs{font-size:10px;color:var(--ink-2);margin-bottom:7px}

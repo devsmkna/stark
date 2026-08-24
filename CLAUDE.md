@@ -96,7 +96,7 @@ aperta si ricollega da sola dopo un riavvio.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 41 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 48 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -106,12 +106,17 @@ dare in pasto al daemon lo produce `npm run check`; e aprire una sessione con
 `POST /api/sessions` **non costa quota** (è solo l'handshake), che è come si guardano gli stati
 che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 
-Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
-(`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
+**Le impostazioni ci sono**, sei sezioni: permessi per categoria (salvati sulla macchina,
+applicati alle chat nuove), colore per progetto, notifiche, tema, spazio su disco, diagnostica.
+Quello che STARK non sa ancora fare sta in elenco **spento con la spiegazione**, mai nascosto.
 
-Cosa manca nella UI, oltre alle impostazioni: scegliere un **file per percorso** senza
-scriverlo a mano; e delle notifiche mancano le due parti che vivono nelle impostazioni —
-**scegliere il suono** di ciascun evento e **silenziare un progetto** intero.
+Passo corrente: **da decidere**. Restano i divieti veri (`deny`), il profilo di Claude per
+progetto — il daemon ne apre uno solo — e le due misure di quota mai fatte.
+
+Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
+`deny` sarebbe una promessa non mantenibile); il **profilo di Claude per progetto**, che
+richiede al daemon di tenerne aperti più d'uno; scegliere un **file per percorso** senza
+scriverlo a mano; la **scelta dei suoni**; e una prova automatica dell'instradamento.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -153,6 +158,12 @@ Decisioni già prese:
 - i **server MCP si scelgono per chat**, spenti di default. Non con `--strict-mcp-config`, che
   li spegnerebbe e basta: si spengono per nome, così restano accendibili. È la differenza fra
   un default e un limite.
+- le impostazioni vivono in **due posti diversi, di proposito**: sulla macchina ciò che cambia
+  cosa fa l'agent (i permessi) e ciò che descrive un progetto (colore, silenzio); nel browser
+  ciò che è del dispositivo (tema, suoni). Non è un dettaglio: «voglio i suoni su questo
+  portatile» non è un fatto del progetto.
+- il pannello dei permessi mostra **sei categorie, non nomi di tool**: la traduzione in `Bash` e
+  `mcp__*` sta nell'adapter, che è l'unico a conoscerli (§1).
 - i **comandi slash** si completano dalla casella, con argomenti e alias. Quelli legati al
   terminale restano in elenco con l'etichetta: il CLI li ha, e a dire che lì non funzionano è
   l'agent — non STARK a indovinarlo.

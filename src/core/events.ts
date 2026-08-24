@@ -279,6 +279,39 @@ export type CanonicalEvent = {
 export type PermissionRuleDecision = 'allow' | 'ask' | 'deny'
 export type PermissionRules = Record<string, PermissionRuleDecision>
 
+/**
+ * Le categorie del pannello dei permessi (§16.5, e ADR-008).
+ *
+ * **Categorie, non nomi di tool**: «comandi shell» invece di `Bash`, «strumenti
+ * esterni» invece di `mcp__*`. I nomi dei tool sono vocabolario di Claude Code, ed è
+ * esattamente ciò che il modello canonico esiste per non far uscire dall'adapter — a
+ * tradurre una categoria nei tool di un agent è l'adapter, che è l'unico a conoscerli.
+ *
+ * Sono sei perché sono sei le cose che un utente riconosce guardando cosa sta per
+ * succedere. Un elenco di venti tool sarebbe più preciso e inservibile.
+ */
+export type PermissionCategory =
+  | 'shell'     // eseguire comandi
+  | 'edit'      // scrivere, cambiare, cancellare file
+  | 'read'      // aprire e cercare dentro la cartella
+  | 'net'       // rete: pagine, ricerche
+  | 'agents'    // sotto-agent che lavorano per conto loro
+  | 'external'  // strumenti esterni collegati (MCP)
+
+export const PERMISSION_CATEGORIES: PermissionCategory[] =
+  ['shell', 'edit', 'read', 'net', 'agents', 'external']
+
+/** Cosa fa STARK per ciascuna categoria. `deny` è un altro meccanismo: vedi §16.5. */
+export type CategoryRules = Record<PermissionCategory, 'allow' | 'ask'>
+
+export const CATEGORY_DEFAULTS: CategoryRules = {
+  // Tutto su «fai pure»: è il comportamento che rende il lavoro scorrevole ed è quello
+  // che si vuole quasi sempre (ADR-008). Ogni interruttore spostato **aggiunge** un
+  // riquadro di conferma dove lo si desidera, invece di toglierne uno.
+  shell: 'allow', edit: 'allow', read: 'allow', net: 'allow',
+  agents: 'allow', external: 'allow',
+}
+
 export type Command =
   | { c: 'session.open'; agent: string; cwd: string; model?: string; mode?: PermissionMode }
   | { c: 'session.prompt'; text: string; attachments?: Attachment[] }

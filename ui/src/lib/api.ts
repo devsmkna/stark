@@ -48,6 +48,30 @@ export type ImportableRow = {
   recent: boolean
 }
 
+/** Le impostazioni della macchina. Il tema e i suoni no: quelli sono del browser. */
+export type Settings = {
+  permissions: Record<string, 'allow' | 'ask'>
+  projects: Record<string, { colour?: number; muted?: boolean }>
+}
+
+export type Storage = {
+  home: string
+  sessions: { id: string; title: string; cwd?: string; bytes: number }[]
+  bytes: number
+}
+
+export type SystemInfo = {
+  url: string
+  port: number
+  home: string
+  listening: string
+  agent: {
+    node: string; sdk?: string; cli?: string; executable?: string; bundled: boolean
+    configDir: string
+    profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
+  }
+}
+
 export type LinkStatus = 'connecting' | 'live' | 'lost'
 
 /** Cosa risponde un comando. §18: solo «accettato», mai il proprio effetto. */
@@ -76,6 +100,9 @@ export class Api {
 
   get hasToken(): boolean { return this.token.length > 0 }
 
+  /** Il token in chiaro, per la pagina System: serve a copiarlo per un altro browser. */
+  get tokenValue(): string { return this.token }
+
   private get auth(): Record<string, string> {
     return { authorization: `Bearer ${this.token}` }
   }
@@ -92,6 +119,19 @@ export class Api {
   sessions(): Promise<{ sessions: SessionRow[] }> {
     return this.json('/api/sessions')
   }
+
+  settings(): Promise<{ settings: Settings }> { return this.json('/api/settings') }
+
+  saveSettings(s: Settings): Promise<{ settings: Settings }> {
+    return this.json('/api/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(s),
+    })
+  }
+
+  storage(): Promise<Storage> { return this.json('/api/storage') }
+  system(): Promise<SystemInfo> { return this.json('/api/system') }
 
   snapshot(id: string): Promise<{ snapshot: SessionSnapshot }> {
     return this.json(`/api/sessions/${id}`)

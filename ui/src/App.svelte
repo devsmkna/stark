@@ -4,6 +4,7 @@
   import Conversation from './components/Conversation.svelte'
   import Effects from './components/Effects.svelte'
   import NewChat from './components/NewChat.svelte'
+  import Settings from './components/Settings.svelte'
   import Icon from './components/Icon.svelte'
   import { Store } from './lib/store.svelte.ts'
 
@@ -105,7 +106,9 @@
       oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
   {/if}
 
-  {#if store.dialog?.kind === 'new'}
+  {#if store.dialog?.kind === 'settings'}
+    <Settings {store} />
+  {:else if store.dialog?.kind === 'new'}
     <NewChat {store} />
   {:else if store.dialog?.kind === 'delete'}
     {@const row = store.dialog.row}

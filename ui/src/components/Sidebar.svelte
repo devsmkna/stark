@@ -25,7 +25,7 @@
     return () => clearInterval(t)
   })
 
-  const palette = $derived(colours(store.rows))
+  const palette = $derived(colours(store.rows, store.settings?.projects ?? {}))
 
   const tree = $derived(
     ORDER.map(g => {
@@ -134,7 +134,8 @@
     {/if}
   </div>
 
-  <button class="sidefoot" title="Settings — not wired yet" disabled>
+  <button class="sidefoot" title="Settings"
+    onclick={() => { store.refused = null; store.dialog = { kind: 'settings' } }}>
     <Icon name="i-gear" /> Settings
   </button>
 </div>
@@ -162,7 +163,7 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
-  .sidefoot[disabled] { opacity: .55; cursor: default; }
+  .sidefoot { cursor: pointer; }
   .rn {
     width: 100%; font: inherit; font-size: 11.5px; font-weight: 600;
     border: 1px solid var(--accent); border-radius: 6px; padding: 1px 5px;

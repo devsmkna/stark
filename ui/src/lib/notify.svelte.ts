@@ -28,6 +28,10 @@ export type Permission = 'default' | 'granted' | 'denied' | 'unsupported'
  * dovrà stare dal lato del daemon: vale su qualunque browser lo apra.
  */
 const KEY = 'stark.calls'
+/** Le tre chiamate accese o spente, una per una. */
+const KEY_EVENTI = 'stark.calls.events'
+/** Se tacere sulla chat che stai guardando. Acceso: l'hai già davanti. */
+const KEY_QUI = 'stark.calls.quiet'
 
 /** Due note che salgono per «ti aspetto», due che scendono per «ho finito»: per chi
  *  ascolta dall'altra stanza sono situazioni opposte, e un suono solo le pareggerebbe. */
@@ -53,6 +57,14 @@ export type CallSpec = {
 export class Notifier {
   /** Se STARK ti chiama. Acceso di partenza: il suono non chiede niente a nessuno. */
   on = $state(true)
+  /**
+   * Quali delle tre chiamate. Separate perché sono tre situazioni diverse: c'è chi
+   * vuole sapere quando una chat lo aspetta e non gliene importa niente di quando ha
+   * finito, e viceversa.
+   */
+  eventi = $state<Record<Call, boolean>>({ needsYou: true, done: true, stopped: true })
+  /** Tacere sulla chat aperta e in primo piano: lì l'hai già visto succedere. */
+  zittoQui = $state(true)
   /** Cosa dice il browser sulle notifiche di sistema. Il suono non ne dipende. */
   permission = $state<Permission>('default')
 
@@ -61,6 +73,14 @@ export class Notifier {
   constructor() {
     try {
       this.on = localStorage.getItem(KEY) !== 'off'
+      const e = localStorage.getItem(KEY_EVENTI)
+      if (e) {
+        const letto = JSON.parse(e) as Partial<Record<Call, boolean>>
+        for (const k of ['needsYou', 'done', 'stopped'] as Call[]) {
+          if (typeof letto[k] === 'boolean') this.eventi[k] = letto[k]
+        }
+      }
+      this.zittoQui = localStorage.getItem(KEY_QUI) !== 'off'
     } catch { /* modalità privata, o storage negato: si resta accesi */ }
     this.permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
   }
@@ -106,8 +126,19 @@ export class Notifier {
     return 'Sound only. Click to let the browser show system notifications too'
   }
 
+  /** Accende o spegne una delle tre. */
+  setEvento(kind: Call, acceso: boolean): void {
+    this.eventi = { ...this.eventi, [kind]: acceso }
+    try { localStorage.setItem(KEY_EVENTI, JSON.stringify(this.eventi)) } catch { /* vedi sopra */ }
+  }
+
+  setZittoQui(v: boolean): void {
+    this.zittoQui = v
+    try { localStorage.setItem(KEY_QUI, v ? 'on' : 'off') } catch { /* vedi sopra */ }
+  }
+
   call(kind: Call, spec: CallSpec): void {
-    if (!this.on) return
+    if (!this.on || !this.eventi[kind]) return
     this.#play(kind)
     if (this.permission !== 'granted') return
     try {

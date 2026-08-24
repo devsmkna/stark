@@ -6,11 +6,13 @@
 // specifica marca come trappole, così che se un domani smettono di essere gestiti il
 // test lo dica invece di scoprirlo la UI.
 
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
+import { askToolsFor } from '../adapters/claude-code/permissions.ts'
+import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
@@ -323,6 +325,38 @@ const uDue = unified(DUE)
 check('diff: forma unificata, numeri di riga coerenti',
   uDue.filter(r => r.kind === 'removed').every(r => r.oldNo === 2)
   && uDue.filter(r => r.kind === 'added').some(r => r.newNo === 2))
+
+// ─── le impostazioni (§16.5) ────────────────────────────────────────────────
+
+// Il pannello dei permessi vive di due cose: che una categoria diventi i tool giusti,
+// e che ciò che arriva da una richiesta HTTP venga guardato prima di finire su disco.
+check('§16.5: «comandi shell» diventa i tool della shell, non una stringa qualunque',
+  askToolsFor(['shell']).includes('Bash') && !askToolsFor(['shell']).includes('Write'),
+  askToolsFor(['shell']).join(','))
+check('§16.5: gli strumenti esterni si prendono per forma, non per nome',
+  askToolsFor(['external']).join(',') === 'mcp__*')
+check('§16.5: nessuna categoria da chiedere → nessun hook, quindi nessun attrito',
+  askToolsFor([]).length === 0)
+
+const casa = mkdtempSync(resolve(tmpdir(), 'stark-settings-'))
+check('§16.5: senza file si parte da «fai pure» su tutto (ADR-008)',
+  Object.values(readSettings(casa).permissions).every(v => v === 'allow'))
+writeFileSync(resolve(casa, 'settings.json'), '{ questo non è json')
+check('§16.5: un file rotto non impedisce di partire, torna ai default',
+  readSettings(casa).permissions.shell === 'allow')
+const salvate = writeSettings(casa, {
+  permissions: { shell: 'ask', edit: 'allow', read: 'allow', net: 'allow', agents: 'allow', external: 'allow' },
+  // Roba che arriva da una richiesta e che non deve entrare: una categoria inventata,
+  // un valore che non è né allow né ask, un colore fuori scala.
+  projects: { '/x': { colour: 99 }, '/y': { muted: true } },
+} as never)
+check('§16.5: si salva ciò che si riconosce, e si butta il resto',
+  salvate.permissions.shell === 'ask'
+  && salvate.projects['/x']?.colour === undefined
+  && salvate.projects['/y']?.muted === true,
+  JSON.stringify(salvate))
+check('§16.5: le categorie da chiedere si rileggono da disco',
+  askCategories(readSettings(casa)).join(',') === 'shell')
 
 let failed = 0
 for (const [name, ok, detail] of checks) {

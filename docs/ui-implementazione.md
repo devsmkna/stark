@@ -92,7 +92,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 41 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 48 verifiche sulla catena, costo zero di quota |
 | `npm run daemon` | 16 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
 
 ---
@@ -161,6 +161,10 @@ scuro.
 | Rotta | |
 |---|---|
 | `GET /api/sessions` | elenco: `id, title, state, cwd, model, turns, lastSeq, lastTs, since, doing, live` |
+| `GET`/`PUT` `/api/settings` | la tabella dei permessi e i progetti, in `~/.stark/settings.json` |
+| `GET /api/storage` | quanto pesa ogni conversazione, allegati compresi |
+| `GET /api/system` | indirizzo, token, eseguibile, versioni, profili trovati |
+| `GET /api/sessions/:id/blob/:ref` | un allegato, per riferimento |
 | `GET /api/stream` | **flusso dell'elenco**: manda le righe quando cambiano, al più ogni 250 ms |
 | `POST /api/sessions` | apre o **risveglia**: `{cwd, model?, mode?, resume?, askTools?}` |
 | `GET /api/sessions/:id` | lo snapshot |
@@ -193,9 +197,9 @@ turno, e ripeterlo la lascerebbe in *Working* per sempre.
 >
 > | Serve a | Cosa manca |
 > |---|---|
-> | Impostazioni → Permessi | `permissions.setRules` è **dichiarato nel §11 ma non gestito** dal registro |
+> | ~~Impostazioni → Permessi~~ | **fatto**, ma per altra strada: la tabella è **globale** e sta in `GET/PUT /api/settings`, non in un comando di sessione. `permissions.setRules` resta dichiarato e non gestito: servirà per l'eccezione **di una chat**, che è un'altra cosa |
 > | Import di conversazioni | **nessuna rotta**: `listSessions()` dell'SDK non è esposto su HTTP |
-> | Impostazioni → Projects / System | **niente**: profili, colori e diagnostica non esistono lato daemon |
+> | ~~Impostazioni → Projects / System~~ | **fatto**: colori e silenzio in `settings.json`, diagnostica e profili in `GET /api/system`, pesi in `GET /api/storage`. Manca il **profilo per progetto**: il registro apre una sola `CLAUDE_CONFIG_DIR` per tutto il daemon |
 > | ~~Scegliere i server MCP per chat~~ | ~~niente~~ — **fatto**: `session.mcp` nello snapshot, `session.setMcp` fra i comandi |
 > | Sfogliare le cartelle in «New chat» | **nessuna rotta**: il percorso si scrive a mano |
 > | ~~Barra laterale dal vivo~~ | ~~nessun flusso globale~~ — **fatto**: `GET /api/stream` |
@@ -411,7 +415,37 @@ che sembra un guasto di STARK invece di un file che manca. Ora la miniatura lasc
 una riga che lo dice. Capita se si cancella la cartella a mano, o se un journal arriva da
 un'altra macchina senza i suoi allegati.
 
-### 5.11 Impostazioni
+### 5.11 Le impostazioni
+
+Sei sezioni, e la regola che le tiene insieme: **ogni voce dice la verità su cosa fa**. Dove
+STARK non sa ancora fare una cosa, la voce resta in elenco spenta e con scritto perché
+(Principio 5) — nasconderla farebbe credere che non esista.
+
+Cosa è vero oggi: le **sei categorie** dei permessi, salvate in `~/.stark/settings.json` e
+applicate alle chat nuove (provato dal vivo: messo «Shell → ask me», la sessione successiva ha
+chiesto il permesso prima di `echo ciao`); il **colore** per progetto; le **tre notifiche** con
+il silenzio per chat aperta e per progetto; il **tema**; **Storage** e **System** per intero.
+
+Cosa no, e lo dice: i pattern fini della shell e il riquadro *Never* (non ci sono regole di
+divieto), il **profilo per progetto** (una sola `CLAUDE_CONFIG_DIR` per daemon), la scelta dei
+suoni.
+
+**Dove vive una cosa è una decisione, non un dettaglio.** Sul daemon ciò che cambia cosa fa
+l'agent (i permessi) o che descrive un progetto (colore, silenzio): deve valere da qualunque
+browser. Nel browser ciò che è del dispositivo: tema e suoni. «Voglio sentire i suoni su questo
+portatile» non è un fatto del progetto.
+
+**Trappola, e presa tre volte prima di scriverla:** il reset dei bottoni dentro un componente
+(`background: none`) è **più specifico** delle regole di `app.css`, e su `.chip`, `.tog`, `.sw`
+e `.seg button` — che lì hanno un colore — lo spegne. Il risultato è un interruttore invisibile
+o un pallino trasparente, cioè un comando che non si vede. Sfondo e bordo si tolgono solo a chi
+in `app.css` non ne ha.
+
+**Trappola:** chiedere la versione all'eseguibile costa **otto secondi** (è un pacchetto grosso
+che deve srotolarsi). La pagina System restava lì a «sto leggendo». Ora la risposta si tiene per
+tutta la vita del daemon e si **scalda all'avvio**, mentre nessuno la aspetta.
+
+### 5.12 Cosa resta
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

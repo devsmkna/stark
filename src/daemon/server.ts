@@ -10,6 +10,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
+import type { Settings } from './settings.ts'
+import { diagnostics, warmDiagnostics } from '../adapters/claude-code/profiles.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 
@@ -54,7 +56,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     configDir: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
   })
 
-  const server = createServer((req, res) => { void route(req, res, guard, registry, guardToken) })
+  // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
+  // adesso, mentre nessuno la sta aspettando.
+  warmDiagnostics()
+
+  const server = createServer((req, res) => {
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'])
+  })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
   await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
@@ -77,6 +85,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
 async function route(
   req: IncomingMessage, res: ServerResponse,
   guard: ReturnType<typeof createGuard>, registry: Registry, token: string,
+  // La porta e la cartella di configurazione servono a una rotta sola — quella della
+  // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
+  port: () => number, configDir?: string,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -113,6 +124,33 @@ async function route(
       if (!body?.sessionId) return send(res, 400, { error: 'sessionId obbligatorio' })
       const esito = await registry.importSession(body.sessionId)
       return send(res, esito.ok ? 201 : 409, esito)
+    }
+
+    // ─── le impostazioni, che non sono di una sessione ma della macchina ─────
+    if (method === 'GET' && path === '/api/settings') {
+      return send(res, 200, { settings: registry.settings() })
+    }
+    if (method === 'PUT' && path === '/api/settings') {
+      const body = await readJson<Settings>(req)
+      if (!body) return send(res, 400, { error: 'impostazioni malformate' })
+      // Si risponde con ciò che è stato **davvero** scritto, non con ciò che è
+      // arrivato: il registro butta via quello che non riconosce, e la UI deve
+      // mostrare lo stato vero invece di quello che sperava di aver impostato.
+      return send(res, 200, { settings: registry.saveSettings(body) })
+    }
+    if (method === 'GET' && path === '/api/storage') {
+      return send(res, 200, registry.storage())
+    }
+    if (method === 'GET' && path === '/api/system') {
+      // La diagnostica: chiede la versione all'eseguibile, quindi non è istantanea.
+      // È la pagina che si guarda quando qualcosa sembra rotto senza motivo.
+      return send(res, 200, {
+        url: `http://127.0.0.1:${port()}`,
+        port: port(),
+        home: STARK_HOME,
+        listening: 'localhost only',
+        agent: await diagnostics(configDir),
+      })
     }
 
     if (method === 'POST' && path === '/api/sessions') {

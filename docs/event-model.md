@@ -685,10 +685,14 @@ cui `Capabilities` dovrà lavorare davvero.
 4. **L'hook `PermissionDenied`.** Esiste e servirebbe a intercettare i blocchi del classificatore
    in modo pulito invece di riconoscerli dal testo dell'errore. Mai provato: finché non lo si
    verifica, `action.blocked` si ricava dal `tool_result`.
-5. **Quali voci mostra il pannello dei permessi.** Le tredici chiavi di OpenCode sono un buon
-   punto di partenza, ma sono le sue, non le nostre: vanno mappate sui tool di Claude Code e
-   ridotte a categorie che un utente riconosca ("comandi shell", "modifica file", "rete") invece
-   di nomi di tool.
+5. ~~**Quali voci mostra il pannello dei permessi.**~~ **Risolto: sei categorie.** `shell`,
+   `edit`, `read`, `net`, `agents`, `external` — nel vocabolario canonico
+   (`PermissionCategory`), con la traduzione in nomi di tool confinata nell'adapter
+   (`adapters/claude-code/permissions.ts`), che è l'unico a conoscerli. Sono sei perché sono
+   sei le cose che un utente riconosce guardando cosa sta per succedere; un elenco di venti
+   tool sarebbe più preciso e inservibile. Restano fuori i **divieti**: «vietalo» non è una
+   terza posizione dello stesso interruttore ma un altro meccanismo, e STARK non lo implementa
+   ancora — nel pannello sta in elenco, spento, con scritto perché.
 6. **Costo in quota del classificatore.** Ogni azione ispezionata è una chiamata a un secondo
    modello. Non è stato misurato, e su abbonamento a quota fissa è la risorsa che conta.
 7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa.

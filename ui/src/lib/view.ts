@@ -61,9 +61,19 @@ export function project(cwd: string | undefined): string {
  * colore che cambia da solo non identifica più niente.
  * Oltre il settimo si ripetono — è una domanda ancora aperta, vedi ui-schermate.md.
  */
-export function colours(rows: SessionRow[]): Map<string, number> {
+export function colours(
+  rows: SessionRow[],
+  scelti: Record<string, { colour?: number }> = {},
+): Map<string, number> {
   const names = [...new Set(rows.map(r => project(r.cwd)))].sort()
-  return new Map(names.map((n, i) => [n, i % 7]))
+  // Il colore scelto a mano vince: dal momento in cui lo scegli, l'ordine alfabetico
+  // smette di decidere per te. Vale per cartella, che è l'identità vera di un progetto.
+  const perCartella = new Map<string, number>()
+  for (const r of rows) {
+    const c = r.cwd ? scelti[r.cwd]?.colour : undefined
+    if (c !== undefined) perCartella.set(project(r.cwd), c)
+  }
+  return new Map(names.map((n, i) => [n, perCartella.get(n) ?? i % 7]))
 }
 
 export function hhmm(ts: number): string {

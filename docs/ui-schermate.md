@@ -539,6 +539,31 @@ quando ha un lavoro lungo che non si vuole sentire mentre due corti sì. Resta v
 regola della sezione 1: i primi due suoni devono essere diversi, perché «ho finito» e «ti sto
 aspettando» sono situazioni opposte per chi ascolta.
 
+### Cosa di questa schermata è vero oggi
+
+Costruita il 24 agosto 2026. **Vero e funzionante:** le sei categorie dei permessi, salvate
+sulla macchina e applicate alle chat nuove; il colore per progetto; le tre notifiche con il
+silenzio per la chat aperta e per progetto; il tema; Storage e System per intero.
+
+**Non ancora, e la voce lo dice invece di sparire:** i pattern fini della shell e il riquadro
+*Never* — STARK non ha regole di divieto, e un confine duro che non blocca sarebbe la peggiore
+delle bugie; il **profilo per progetto**, perché il daemon apre una sola `CLAUDE_CONFIG_DIR`
+per volta; la scelta dei suoni, che sono tre e sono quelli.
+
+Una cosa che vale la pena ricordare quando si toccherà: **la tabella vale per le chat nuove**.
+I controlli di una conversazione si installano quando l'agent parte, e cambiarli a metà
+vorrebbe dire rinegoziare l'handshake di qualcosa che sta lavorando. La schermata lo scrive.
+
+### Dove vive un'impostazione
+
+Non è un dettaglio tecnico, è una decisione di prodotto:
+
+- **sulla macchina** (`~/.stark/settings.json`) ciò che cambia cosa fa l'agent — i permessi — e
+  ciò che descrive un progetto: il suo colore, se è silenziato. Deve valere da qualunque
+  browser apra STARK.
+- **nel browser** ciò che è del dispositivo: il tema e i suoni. «Voglio sentire i suoni su
+  questo portatile» non è un fatto del progetto, e portarselo sul fisso sarebbe sbagliato.
+
 ### Cosa non c'è, e perché
 
 Nessuna sezione «Accesso»: per l'MVP si ascolta solo su `localhost`, quindi non c'è niente da

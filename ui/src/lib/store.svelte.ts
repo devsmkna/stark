@@ -12,9 +12,13 @@
 
 import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
-import { Api, bootToken, type ImportableRow, type LinkStatus, type SessionRow } from './api.ts'
+import {
+  Api, bootToken,
+  type ImportableRow, type LinkStatus, type SessionRow, type Settings,
+} from './api.ts'
 import { Notifier, type Call } from './notify.svelte.ts'
 import { fromPath, go } from './route.ts'
+import { Themer } from './theme.svelte.ts'
 import { activityText, project } from './view.ts'
 
 /** Gli stati in cui una chat *stava lavorando*: solo da lì ha senso dire «ha finito». */
@@ -46,7 +50,11 @@ export type View = 'chat' | 'effects'
 /** Il riquadro sopra l'app, quando ce n'è uno. L'app resta visibile dietro: creare
  *  una chat non è cambiare posto, è aggiungere una riga a un elenco che stai già
  *  guardando. */
-export type Dialog = { kind: 'new' } | { kind: 'delete'; row: SessionRow } | null
+export type Dialog =
+  | { kind: 'new' }
+  | { kind: 'delete'; row: SessionRow }
+  | { kind: 'settings' }
+  | null
 
 /**
  * Le due porte per aggiungere un lavoro all'elenco: cominciarne uno nuovo, o portare
@@ -64,6 +72,15 @@ export class Store {
   readonly api = new Api(bootToken())
   /** Come vieni chiamato quando guardi altrove. Vedi `notify.svelte.ts`. */
   readonly calls = new Notifier()
+  /** Il tema, che è del dispositivo e non della macchina. Vedi `theme.svelte.ts`. */
+  readonly theme = new Themer()
+
+  /**
+   * Le impostazioni della macchina. `null` finché non sono arrivate: prima di allora
+   * non si sa niente, e inventare un default lato UI vorrebbe dire mostrare per un
+   * istante una tabella dei permessi che non è quella vera.
+   */
+  settings = $state<Settings | null>(null)
 
   rows = $state<SessionRow[]>([])
   selected = $state<string | null>(null)
@@ -135,6 +152,9 @@ export class Store {
     // Il tasto «indietro» del browser deve tornare alla chat di prima, non uscire
     // dall'app: è l'unico gesto di navigazione che qui non abbiamo inventato noi.
     addEventListener('popstate', this.#popstate)
+    // Servono subito: da qui nascono i colori dei progetti e il silenzio per progetto,
+    // che si vedono nella barra laterale prima ancora che si apra una chat.
+    void this.loadSettings()
     this.#stopList = this.api.sessionsStream(
       rows => {
         this.#ring(rows)
@@ -173,7 +193,10 @@ export class Store {
       if (!kind) continue
       // Se stai guardando proprio quella chat, il blocco in basso e il pallino l'hanno
       // già detto: chiamarti sarebbe gridare a qualcuno che è nella stanza.
-      if (this.selected === r.id && document.visibilityState === 'visible') continue
+      if (this.calls.zittoQui && this.selected === r.id && document.visibilityState === 'visible') continue
+      // Un progetto silenziato tace tutto: serve quando ne ha uno lungo che non vuoi
+      // sentire, e due corti che invece sì.
+      if (this.project(r.cwd).muted) continue
       this.calls.call(kind, {
         title: `${HEAD[kind]} · ${project(r.cwd)}`,
         // Il titolo dice *quale* lavoro, l'operazione dice *cosa* voleva fare: senza la
@@ -211,6 +234,44 @@ export class Store {
   }
 
   /** Apre una chat. `indirizzo: false` quando è l'indirizzo ad aver aperto lei. */
+  async loadSettings(): Promise<void> {
+    try {
+      const { settings } = await this.api.settings()
+      this.settings = settings
+    } catch { /* il daemon dirà di suo che non risponde */ }
+  }
+
+  /**
+   * Salva e **riprende ciò che è stato scritto davvero**: il daemon butta via quello
+   * che non riconosce, e mostrare quello che speravi di aver impostato invece di quello
+   * che è impostato è il modo in cui un pannello di opzioni comincia a mentire.
+   */
+  async saveSettings(next: Settings): Promise<void> {
+    const prima = this.settings
+    this.settings = next          // subito, perché un interruttore deve muoversi quando lo tocchi
+    try {
+      const { settings } = await this.api.saveSettings(next)
+      this.settings = settings
+    } catch (e) {
+      this.settings = prima
+      this.refused = (e as Error).message
+    }
+  }
+
+  /** Il colore e il silenzio di un progetto, per cartella. */
+  project(cwd: string | undefined): { colour?: number; muted?: boolean } {
+    return (cwd ? this.settings?.projects[cwd] : undefined) ?? {}
+  }
+
+  async setProject(cwd: string, patch: { colour?: number; muted?: boolean }): Promise<void> {
+    const s = this.settings
+    if (!s) return
+    await this.saveSettings({
+      ...s,
+      projects: { ...s.projects, [cwd]: { ...s.projects[cwd], ...patch } },
+    })
+  }
+
   async select(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
     if (opts.indirizzo !== false) go(id, 'chat')
     if (this.selected === id) return

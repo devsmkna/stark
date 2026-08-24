@@ -7,15 +7,17 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
 import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
+import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
+import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
 import type { AgentQuestion, Attachment, CanonicalEvent, Command, PermissionMode, PromptPart } from '../core/events.ts'
 
 export type OpenSpec = {
@@ -74,6 +76,19 @@ type Live = {
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
   pending: Map<string, Pending>
+}
+
+/** Quanto pesa una conversazione: il journal, il file grezzo e i suoi allegati. */
+function peso(id: string): number {
+  let n = 0
+  for (const f of [`${id}.jsonl`, `${id}.raw.jsonl`]) {
+    try { n += statSync(resolve(SESSIONS, f)).size } catch { /* può non esserci */ }
+  }
+  const dir = resolve(ALLEGATI, id)
+  try {
+    for (const f of readdirSync(dir)) n += statSync(resolve(dir, f)).size
+  } catch { /* nessun allegato */ }
+  return n
 }
 
 /** §16.3: nell'MVP il prompt è testo semplice, quindi basta concatenare le parti. */
@@ -142,6 +157,40 @@ export class Registry {
     }
   }
 
+  // ─── impostazioni ─────────────────────────────────────────────────────────
+
+  /** Le impostazioni di questa macchina. Si rileggono a ogni giro: sono un file, non
+   *  uno stato, e chi le cambia può essere un altro browser. */
+  settings(): Settings { return readSettings(STARK_HOME) }
+
+  saveSettings(s: Settings): Settings { return writeSettings(STARK_HOME, s) }
+
+  /**
+   * Quanto occupa ogni conversazione, e dove. È la domanda che ci si fa quando il
+   * disco si riempie, e la risposta onesta comprende gli allegati: sono parte della
+   * conversazione, e cancellandola se ne vanno con lei.
+   */
+  storage(): {
+    home: string
+    sessions: { id: string; title: string; cwd?: string; bytes: number }[]
+    bytes: number
+  } {
+    const out: { id: string; title: string; cwd?: string; bytes: number }[] = []
+    if (existsSync(SESSIONS)) {
+      for (const f of readdirSync(SESSIONS)) {
+        if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
+        const id = f.replace(/\.jsonl$/, '')
+        const s = this.live.get(id)?.snapshot ?? reduce(Journal.read(resolve(SESSIONS, f)), id)
+        out.push({
+          id, title: titleOf(s), bytes: peso(id),
+          ...(s.cwd ? { cwd: s.cwd } : {}),
+        })
+      }
+    }
+    out.sort((a, b) => b.bytes - a.bytes)
+    return { home: SESSIONS, sessions: out, bytes: out.reduce((n, x) => n + x.bytes, 0) }
+  }
+
   async open(spec: OpenSpec): Promise<string> {
     // Riprendere una conversazione riusa il suo id, così il journal continua invece di
     // biforcarsi. Un fork invece è una sessione nuova, e deve avere un journal nuovo.
@@ -161,6 +210,7 @@ export class Registry {
     // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
     // l'utente non ha modo di collegare la cosa allo Sleep. Lo dice il journal.
     const mcp = spec.mcp ?? snapshot.mcpServers.filter(s => s.enabled).map(s => s.name)
+    const ask = spec.askTools ?? askToolsFor(askCategories(this.settings()))
 
     const adapter = new ClaudeCodeAdapter({
       cwd: spec.cwd,
@@ -168,7 +218,10 @@ export class Registry {
       mode: spec.mode ?? this.defaults.mode,
       ...(this.defaults.configDir ? { configDir: this.defaults.configDir } : {}),
       ...(spec.resume ? { resume: spec.resume } : { sessionId: id }),
-      ...(spec.askTools?.length ? { askTools: spec.askTools } : {}),
+      // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
+      // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo
+      // fanno); tutti gli altri prendono la tabella, che è il pannello dei permessi.
+      ...(ask.length ? { askTools: ask } : {}),
       ...(mcp.length ? { mcp } : {}),
       onRaw: m => raw.write(JSON.stringify(m)),
       onPayload: p => {
