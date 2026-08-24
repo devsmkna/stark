@@ -70,10 +70,9 @@ Le due conseguenze che hanno deciso la scelta:
 
 - **La barra a sinistra** raggruppa per stato e, dentro ogni stato, **per progetto — sempre**,
   anche quando il progetto è uno solo: la struttura non deve cambiare forma sotto gli occhi.
-  In cima nessun numero, solo un **pallino** che dice che c'è qualcosa da vedere.
 - **Tutti i comandi stanno in basso**, attorno alla casella di scrittura. Sopra di essa un blocco
-  con l'operazione in corso e, a destra, il **pulsante per fermare** — solo l'icona, un ottagono
-  pieno dentro un cerchio, in rosso.
+  con l'operazione in corso e, a destra, il **pulsante per fermare** — solo l'icona: un cerchio
+  con dentro un quadrato (`circle-stop`), in rosso.
 - **Quello stesso blocco è ciò che si espande** quando l'agent chiede un permesso o fa una domanda.
   Le richieste **non compaiono più in mezzo alla conversazione**: guardi sempre nello stesso posto.
   Nel flusso resta solo *cosa hai risposto*, dopo. Il pulsante per fermare **resta visibile anche
@@ -92,6 +91,36 @@ Le due conseguenze che hanno deciso la scelta:
 
 Lo stile: laterale chiara, pill di stato, un colore per progetto, densità alta ma leggibile.
 
+### Le rifiniture del 24 agosto, seconda tornata
+
+- **La lingua dell'interfaccia è l'inglese.** Questo documento e le pagine su Notion restano in
+  italiano: sono documentazione di progetto, non prodotto.
+- **Tre stati soli, e si chiamano `Waiting`, `Working`, `Sleeping`.** Non esiste più un gruppo
+  «finite»: **finito non vuol dire chiuso**. L'agent ha risposto e ora aspetta un prompt nuovo,
+  quindi sta in *Waiting* come chi aspetta un permesso. Un lavoro è concluso quando lo decide
+  l'utente, non quando l'agent smette di parlare.
+- **I nomi dei progetti in maiuscolo**, come intestazioni di gruppo. Sono maiuscoli per
+  presentazione, non nel dato: il nome resta la cartella così com'è.
+- **Un progetto ha un colore solo**, in qualunque stato compaia. Lo stesso progetto in *Waiting*
+  e in *Sleeping* porta lo stesso colore: il colore identifica il progetto, non la sezione.
+- **Sotto il titolo: prima l'orario, poi lo stato** — `asking` quando aspetta un permesso o la
+  risposta a una domanda, `done` quando ha finito il compito, `stopped` quando l'ha fermata
+  l'utente. Nelle altre sezioni, `working` e `sleeping`.
+- **Un pallino a destra sulle chat che aspettano.** Non è il «non letto» di una app di
+  messaggistica: **non sparisce quando si apre la chat**, sparisce quando la chat **riprende a
+  lavorare** — cioè quando le si manda un prompt nuovo, o quando riparte da sola dopo che si è
+  risposto a una domanda bloccante. Dice *tocca a te*, non *non l'hai vista*: leggere non è
+  rispondere, e una chat aperta e lasciata lì sta ancora aspettando.
+  Sì, sotto questa regola il pallino dice la stessa cosa della sezione *Waiting*. È voluto:
+  la sezione è un'intestazione che scorre via, il pallino viaggia con la riga.
+- **Il pulsante degli effetti non si chiama.** Niente etichetta «Effetti»: resta il conteggio
+  `4 files · 12 commands` con un'icona a barre a destra. Il conteggio dice già cosa si apre.
+- **A sinistra del testo scritto dall'utente c'è l'orario** (`HH:MM`), nell'intestazione del turno.
+- **La risposta a parole non si richiude mai**, per quanto sia lunga. Vedi le regole in fondo.
+- **Le icone vengono da una libreria vera**: [Lucide](https://lucide.dev) (licenza ISC), non
+  disegnate a mano. Nell'anteprima sono incorporate come sprite SVG perché il sandbox degli
+  artifact blocca le CDN; nell'app si installa il pacchetto e si usa normalmente.
+
 ---
 
 # Le schermate
@@ -108,7 +137,7 @@ dormienti, raggruppate per progetto.
   scrivendo
 - **da quanto tempo è in quello stato** — «ferma da 4 minuti», «lavora da 2». È
   l'informazione che più spesso fa entrare: distingue un lavoro che procede da uno piantato
-- in che stato è: pronta, sta lavorando, **ti aspetta**, dorme, errore
+- in che stato è: **ti aspetta** (`Waiting`), sta lavorando (`Working`), dorme (`Sleeping`)
 
 Ogni conversazione ha un **colore** che la rende riconoscibile senza leggere, un **titolo**
 che si genera da solo ma che si può cambiare, e la **cartella** a cui si riferisce.
@@ -125,8 +154,10 @@ minuti si pensa per urgenza («chi mi vuole?»).
 
 ### Come si viene avvisati
 
-Con una **notifica di sistema** e un **suono**. Non con un pallino nella lista: il pallino
-funziona solo se si sta già guardando STARK, e il punto è poter guardare altrove.
+Con una **notifica di sistema** e un **suono**. Il pallino nella lista **non è** il modo in cui
+si viene avvisati: funziona solo se si sta già guardando STARK, e il punto è poter guardare
+altrove. Sono due cose con due mestieri — la notifica ti chiama, il pallino ti dice dove
+guardare quando sei già dentro.
 
 Il suono deve distinguere **«ho finito»** da **«ti sto aspettando»**: per chi ascolta sono
 due situazioni opposte.
@@ -135,9 +166,9 @@ due situazioni opposte.
 
 ## 2. Una conversazione aperta
 
-Le conversazioni su cui si sta lavorando restano aperte in **linguette**, come le schede di
-un browser: si passa dall'una all'altra senza perdere il punto in cui si era. Con tre o
-quattro sono semplici linguette; quando diventano molte si raggruppano per progetto.
+Si passa da una conversazione all'altra **dall'elenco a sinistra**, senza perdere il punto in
+cui si era. Niente linguette: l'elenco fa già da scambiatore, ed è sempre visibile — due
+navigazioni per la stessa cosa sarebbero una di troppo.
 
 ### La struttura: il turno è un contenitore
 
@@ -167,7 +198,7 @@ Sono **quattordici**, e nel terminale hanno tutte lo stesso aspetto. Qui devono 
 | | Cos'è | Come si comporta |
 |---|---|---|
 | **la richiesta dell'utente** | ciò che ha chiesto | apre il turno e ne è l'intestazione |
-| **la risposta a parole** | il testo dell'assistente | formattato per davvero: titoli, elenchi, tabelle. Se è molto lungo **si richiude**, mostrando l'inizio |
+| **la risposta a parole** | il testo dell'assistente | formattato per davvero: titoli, elenchi, tabelle. **Sempre per intero**, non si richiude mai |
 | **il ragionamento** | il pensiero prima di rispondere | **chiuso**, con l'indicazione di quanto ha pensato. Si apre per capire una scelta |
 | **un'operazione** | un comando, una modifica a un file, una ricerca | una riga sola: *cosa* ha fatto e *su cosa*, più l'esito. Il risultato resta **chiuso** |
 | **il risultato di un comando** | ciò che il comando ha stampato | separato fra output normale, errori, ed esito |
@@ -271,28 +302,120 @@ insieme**, per rivedere alla fine.
 
 ## 6. Avviare un nuovo lavoro
 
-Serve scegliere: **la cartella** su cui lavorare, quale **assistente** (per ora ce n'è uno),
-quale **modello**, e quanto **controllo** si vuole sui permessi.
+Serve scegliere due cose sole: **l'agent** — cioè quale installazione, fra quelle trovate
+sulla macchina — e **la cartella**. Solo la seconda è obbligatoria; la cartella decide anche
+progetto, colore e branch.
 
-Il modello e il livello di controllo si possono cambiare anche **a lavoro già avviato**,
-senza ricominciare.
+Se la cartella appartiene a un progetto che STARK non ha mai visto, si sceglie anche il
+**profilo di Claude** — vedi la sezione 7. Per un progetto già noto è deciso e si mostra
+soltanto.
 
-Si può anche **riprendere una conversazione già esistente**, comprese quelle iniziate dal
-terminale fuori da STARK.
+**Le opzioni non si scelgono qui.** Modello, modalità dei permessi e server MCP servono
+*mentre* si lavora e si cambiano **a caldo**: vivono nella barra di stato sotto la casella di
+scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
+sarebbe farsi rispondere a domande non ancora poste.
+
+Non è una schermata a sé ma un **riquadro sopra l'app**, che resta visibile dietro: creare una
+chat non è cambiare posto, è aggiungere una riga a un elenco che stai già guardando.
+
+**Riprendere una conversazione nata nel terminale** è la seconda porta, con un riquadro suo:
+mostra ciò che c'è già sulla macchina — primo prompt, cartella, branch, data, dimensione — e si
+sceglie riconoscendola. Chi era in corso *in quel momento* porta l'avviso della presa in
+carico: non si perde niente, ma i due processi smettono di vedersi (P16).
+
+### Rinominare, addormentare, eliminare
+
+Non esiste una schermata «modifica chat»: con cartella e agent bloccati per costruzione
+sarebbe stata un contenitore con dentro un campo solo. Sono **azioni**, e stanno dove sta
+l'oggetto — col tasto destro sulla riga nell'elenco. **Sleep ha in più un pulsante suo** in
+alto nella chat aperta, perché è l'unica delle tre che si fa spesso e a chat aperta.
 
 ---
 
-## 7. Le impostazioni dei permessi
+## 7. Le impostazioni
 
-Una lista di categorie riconoscibili — eseguire comandi, modificare file, accedere alla
-rete — ognuna con un interruttore fra **«fai pure»** e **«chiedimelo»**.
+Riquadro quasi a tutto schermo sopra l'app, con sei sezioni. Ognuna risponde a una domanda
+diversa, e sono queste:
+
+| | |
+|---|---|
+| **Permissions** | la tabella qui sotto |
+| **Projects** | ciò che appartiene al progetto e non all'app: il colore e il **profilo di Claude** |
+| **Notifications** | come si viene chiamati quando si guarda altrove |
+| **Appearance** | il tema |
+| **Storage** | dove stanno i journal, quanto pesano, come si cancellano |
+| **System** | indirizzo e token di STARK, la diagnostica dell'agent, i profili trovati |
+
+### Il profilo di Claude è del progetto, non dell'app
+
+Un **profilo** è una configurazione di Claude Code — in concreto una `CLAUDE_CONFIG_DIR` — e
+si porta dietro il login, i server MCP, la memoria e le conversazioni che si possono
+riprendere. Sulla stessa macchina ne convivono più d'uno: per esempio uno di lavoro e uno
+personale.
+
+**La scelta è per progetto.** Non è una comodità: la **quota si conta per profilo**, quindi
+due progetti su profili diversi non si mangiano la settimana a vicenda. Una sola impostazione
+globale renderebbe impossibile separarli.
+
+Dove compare:
+
+- in **Projects**, una riga per progetto con colore e profilo
+- nella creazione di una chat, **solo se STARK non conosce ancora quella cartella** — per un
+  progetto già visto il profilo è deciso, e si mostra senza chiederlo
+- in **System**, in sola lettura: quali profili esistono sulla macchina, con quante
+  conversazioni e quanti MCP ciascuno
+- nel pannellino della quota, che dice **su quale profilo** sta contando
+
+Puntare un progetto al profilo sbagliato è il modo più confondente in cui questa cosa può
+rompersi: l'agent non trova nessuna conversazione da riprendere e forse nemmeno il login, con
+l'aria di essere rotto senza motivo apparente.
+
+> **Nota sui nomi.** «Ambiente» è già preso: indica *dove gira* l'agent — la macchina, cioè
+> WSL, un container, un host SSH. Il profilo è *quale identità e configurazione* usa. Sono due
+> assi diversi e chiamarli con la stessa parola li farebbe collidere proprio dove serve
+> distinguerli.
+
+### I permessi
+
+Una lista di categorie riconoscibili — eseguire comandi, modificare file, leggere file,
+accedere alla rete, sotto-agent, strumenti esterni — ognuna con un interruttore fra
+**«fai pure»** e **«chiedimelo»**. Categorie, non nomi di tool: `Bash` e `mcp__*` sono
+vocabolario di Claude Code, ed è esattamente ciò che il modello canonico esiste per non far
+uscire dall'adapter.
 
 La posizione di partenza è *fai pure* per tutto: è il comportamento che rende il lavoro
 scorrevole, ed è quello che si vuole quasi sempre. Ogni interruttore spostato **aggiunge**
 un riquadro di conferma dove lo si desidera.
 
+**«Vietalo» non è una terza posizione dello stesso interruttore**, ed è un riquadro a parte.
+Sono due meccanismi diversi: «chiedimelo» aggiunge un passaggio che si può concedere lì per
+lì, «vietalo» blocca **prima** che il classificatore veda l'azione e non lo scavalca nessuno
+— nemmeno una regola della singola chat. È anche il motivo per cui i confini duri possono
+restare pochi e veri.
+
+La tabella è **globale**, e una singola chat può discostarsene: in quel caso le impostazioni
+lo dicono («2 chat non seguono queste regole») e ci si arriva da lì. L'eccezione si imposta
+dalla barra sotto la casella di scrittura di quella chat, dove già vivono modalità, modello
+e MCP.
+
 Se una voce non è disponibile, **si mostra spenta con la spiegazione del perché**. Mai
 nascosta, mai lasciata accesa e non funzionante.
+
+### Le notifiche
+
+Un interruttore per ciascun evento — *ti aspetta*, *ha finito*, *si è fermata da sola* — con
+un suono scegliibile per ognuno, e la possibilità di **silenziare un intero progetto**, per
+quando ha un lavoro lungo che non si vuole sentire mentre due corti sì. Resta valida la
+regola della sezione 1: i primi due suoni devono essere diversi, perché «ho finito» e «ti sto
+aspettando» sono situazioni opposte per chi ascolta.
+
+### Cosa non c'è, e perché
+
+Nessuna sezione «Accesso»: per l'MVP si ascolta solo su `localhost`, quindi non c'è niente da
+configurare — c'è da *sapere*, e indirizzo e token stanno in *System*. Fuori anche il TTL
+automatico dello Sleep (ADR-005 lo rimanda), la rotazione del journal (§16.7 non decisa),
+l'anonimizzazione e la configurazione di un secondo agent (ADR-004). Ognuna aprirebbe una
+decisione non ancora presa.
 
 ---
 
@@ -304,15 +427,19 @@ Dal telefono non si lavora: si **sorveglia e si sblocca**. Serve vedere lo stato
 lavori, leggere per intero l'ultima risposta, rispondere a permessi e domande, e poter
 scrivere una richiesta nuova.
 
-**Lo schermo stretto non rimpicciolisce: cambia.** Le linguette e il confronto affiancato
+**Lo schermo stretto non rimpicciolisce: cambia.** L'elenco a fianco e il confronto affiancato
 non funzionano stretti — lì servono soluzioni diverse, non le stesse più piccole.
 
 ---
 
 # Le regole che valgono ovunque
 
-**Quasi tutto è chiuso di default.** Ragionamenti, risultati dei comandi, turni già visti,
-testi lunghi. Si apre ciò che serve. È l'unico modo di reggere quattrocento blocchi.
+**Quasi tutto è chiuso di default.** Ragionamenti, risultati dei comandi, turni già visti. Si
+apre ciò che serve. È l'unico modo di reggere quattrocento blocchi.
+
+**Con un'eccezione: la risposta a parole si mostra sempre intera.** È l'unica cosa scritta
+*per l'utente*; tutto il resto è materiale di lavorazione. Troncarla costringe a un clic per
+leggere ciò che gli è stato risposto, e un turno già richiuso la nasconde comunque.
 
 **Ogni cosa che accade è un oggetto**, con un tipo riconoscibile e uno stato aperto o
 chiuso. Non righe di testo indistinguibili.

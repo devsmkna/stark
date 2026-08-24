@@ -16,6 +16,8 @@
   --done:#186A3B; --done-bg:#E6F4EC;
   --add:#186A3B; --add-bg:#E9F6EE;
   --del:#B42318; --del-bg:#FDECEA;
+  /* un colore per progetto, non per sezione */
+  --p-stark:#3B5BF5; --p-pay:#D97706; --p-site:#0F9D76;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
@@ -30,6 +32,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --p-stark:#7A92FF; --p-pay:#FBBF24; --p-site:#34D399;
 }}
 :root[data-theme="dark"]{
   --ground:#0E1118; --surface:#161A23; --surface-2:#1C212C; --surface-3:#232936;
@@ -42,6 +45,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --p-stark:#7A92FF; --p-pay:#FBBF24; --p-site:#34D399;
 }
 
 *{box-sizing:border-box}
@@ -57,6 +61,8 @@ code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding
 hr{border:0;border-top:1px solid var(--line);margin:52px 0}
 .head{display:flex;align-items:flex-start;gap:14px;margin-bottom:8px}
 .logo{width:34px;height:34px;border-radius:9px;background:#171A22;color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px;flex:none;margin-top:2px}
+:root[data-theme="dark"] .logo{background:#E8EAF0;color:#0E1118}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo{background:#E8EAF0;color:#0E1118}}
 .sec{margin-top:44px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
 @media(max-width:760px){.two{grid-template-columns:1fr}}
@@ -70,32 +76,40 @@ hr{border:0;border-top:1px solid var(--line);margin:52px 0}
 .note div{padding:11px 14px;border-radius:8px;background:var(--surface-2);color:var(--ink-2)}
 .note b{color:var(--ink);font-weight:600}
 
-/* ══ mock ══ */
+/* mock */
 .mock{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:var(--surface);display:flex;font-size:11.5px;line-height:1.45;margin-top:16px;box-shadow:0 1px 2px rgba(16,20,32,.05),0 8px 24px rgba(16,20,32,.05)}
 .mock *{min-width:0}
 .scroller{overflow:auto}
-svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+/* icone: Lucide 1.33 (ISC), disegnate su griglia 24 */
+svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
 /* barra sinistra */
-.side{width:206px;flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line)}
+.side{width:212px;flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line)}
 .sidetop{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
 .sidetop .nm{font-weight:700;font-size:12.5px;letter-spacing:-.01em}
-.bell{width:7px;height:7px;border-radius:50%;background:var(--wait);box-shadow:0 0 0 3px var(--wait-bg)}
-.plus{margin-left:auto;color:var(--muted);font-size:14px;line-height:1}
+.sidetop .plus{margin-left:auto;color:var(--muted);display:flex}
 .gstate{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:11px 10px 4px}
-.gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:10.5px;font-weight:500}
-.sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:flex-start;margin:0 5px}
+.gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px}
 .sit.on{background:var(--accent-soft)}
 .sit .ttl{font-weight:600;color:var(--ink);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sit .ago{color:var(--muted);font-size:10px}
+.sit .meta{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sit .sst{font-weight:600}
+.sst.asking{color:var(--wait)}
+.sst.done{color:var(--done)}
+.sst.stopped{color:var(--stop)}
+.sst.working{color:var(--work)}
+.sst.sleeping{color:var(--muted)}
+.unread{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
+.sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}
 
 /* colonna destra */
 .col{flex:1;display:flex;flex-direction:column}
 .bar{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);flex:none}
 .bar .t{font-weight:600;font-size:12.5px}
-.effbtn{margin-left:auto;display:flex;align-items:center;gap:6px;border:1px solid var(--line-2);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--surface)}
+.effbtn{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--surface);font-family:inherit;font-size:11.5px}
 .effbtn b{font-weight:600;color:var(--ink)}
 
 .conv{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
@@ -103,6 +117,7 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2)}
 .turn.open>.th{background:var(--surface)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
+.th .tm{color:var(--muted);font-size:10px;flex:none;font-variant-numeric:tabular-nums}
 .th .q{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{margin-left:auto;color:var(--muted);font-size:10px;flex:none}
 .tb{padding:2px 11px 11px;display:flex;flex-direction:column;gap:6px}
@@ -125,8 +140,8 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .doing{display:flex;align-items:center;gap:8px;padding:8px 12px}
 .doing .txt{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .doing .el{color:var(--muted);font-size:10px;flex:none}
-.stopb{width:22px;height:22px;flex:none;color:var(--stop);display:grid;place-items:center}
-.stopb svg{width:20px;height:20px}
+.stopb{width:22px;height:22px;flex:none;color:var(--stop);display:grid;place-items:center;background:none;border:0;padding:0}
+.stopb svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .spin{width:9px;height:9px;border-radius:50%;border:2px solid var(--work);border-right-color:transparent;flex:none;animation:sp .9s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
@@ -138,6 +153,8 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .opts{display:flex;gap:6px;flex-wrap:wrap}
 .opt{border:1px solid var(--line-2);border-radius:7px;padding:3.5px 9px;font-size:10.5px;font-weight:500;background:var(--surface)}
 .opt.pri{background:var(--accent);color:#fff;border-color:transparent}
+:root[data-theme="dark"] .opt.pri{color:#0E1118}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .opt.pri{color:#0E1118}}
 .input{margin:0 12px 8px;border:1px solid var(--line-2);border-radius:9px;padding:8px 11px;color:var(--muted);font-size:11px}
 .status{display:flex;align-items:center;gap:9px;padding:5px 12px 7px;font-size:10px;color:var(--muted);position:relative}
 .status .l,.status .r{display:flex;align-items:center;gap:9px}
@@ -161,8 +178,8 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .fileblk .fh{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--surface-2)}
 .fileblk .fh .nm{font-family:var(--mono);font-size:10.5px;color:var(--ink);font-weight:500}
 .fileblk .fh .st{margin-left:auto;display:flex;gap:6px;font-family:var(--mono);font-size:10px}
-.diff{font-family:var(--mono);font-size:10.5px;border-top:1px solid var(--line)}
-.dgrid{display:grid;grid-template-columns:26px 1fr 26px 1fr}
+.diff{font-family:var(--mono);font-size:10.5px;border-top:1px solid var(--line);overflow-x:auto}
+.dgrid{display:grid;grid-template-columns:26px 1fr 26px 1fr;min-width:420px}
 .dgrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}
 .dn{color:var(--muted);text-align:right;background:var(--surface-2);font-variant-numeric:tabular-nums}
 .dold{background:var(--del-bg)}
@@ -186,25 +203,167 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .choose ol{margin:8px 0 0;padding-left:20px;color:var(--ink-2)}
 .choose li{margin-bottom:8px}
 .choose b{color:var(--ink)}
+
+/* schermate di impostazione: create / edit / settings */
+.panel{padding:14px 16px;display:flex;flex-direction:column;gap:16px}
+.fgroup{display:flex;flex-direction:column;gap:6px}
+.flabel{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.hint{font-size:10px;color:var(--muted)}
+.hint b{color:var(--ink-2);font-weight:600}
+.field{display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:8px;padding:7px 10px;background:var(--surface);font-family:var(--mono);font-size:10.5px;color:var(--ink)}
+.field .ph{color:var(--muted);font-family:var(--sans)}
+.field .act{margin-left:auto;color:var(--accent);font-family:var(--sans);font-weight:600;font-size:10px}
+.field.off{background:var(--surface-2);color:var(--muted);border-style:dashed}
+.recents{display:flex;gap:5px;flex-wrap:wrap}
+.rec{display:flex;align-items:center;gap:5px;border:1px solid var(--line-2);border-radius:20px;padding:2px 9px 2px 7px;font-size:10px;color:var(--ink-2);background:var(--surface)}
+.inst{display:flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;background:var(--surface)}
+.inst.on{border-color:var(--accent);background:var(--accent-soft)}
+.inst .rd{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line-2);flex:none}
+.inst.on .rd{border-color:var(--accent);border-width:3.5px}
+.inst .nm{font-weight:600;font-size:11.5px;color:var(--ink)}
+.inst .ver{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.inst .where{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ink-2);flex:none}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{display:flex;align-items:center;gap:5px;border:1px solid var(--line-2);border-radius:7px;padding:3.5px 8px;font-size:10.5px;color:var(--ink);background:var(--surface)}
+.chip .lab{color:var(--muted)}
+.chip.ro{border-style:dashed;color:var(--muted)}
+.menu{position:relative;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);box-shadow:0 8px 28px rgba(16,20,32,.16);padding:4px;display:flex;flex-direction:column;gap:1px;width:250px}
+.mi{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;font-size:10.5px;color:var(--ink)}
+.mi.on{background:var(--accent-soft)}
+.mi .tag{margin-left:auto;font-size:9.5px;color:var(--muted);flex:none}
+.mi.dis{color:var(--muted)}
+.mi.dis .tag{color:var(--stop)}
+.mi .sub{display:block;color:var(--muted);font-size:9.5px}
+.warn{display:flex;gap:7px;align-items:flex-start;background:var(--wait-bg);color:var(--wait);border-radius:7px;padding:6px 9px;font-size:10px}
+.warn b{font-weight:600}
+.btnrow{display:flex;gap:7px;align-items:center;margin-top:auto;padding-top:6px}
+.btn{border:1px solid var(--line-2);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;color:var(--ink);background:var(--surface);font-family:inherit}
+.btn.pri{background:var(--accent);color:#fff;border-color:transparent}
+:root[data-theme="dark"] .btn.pri{color:#0E1118}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.pri{color:#0E1118}}
+.btn.dgr{color:var(--stop);border-color:var(--line-2)}
+.snav{width:132px;flex:none;border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:1px;background:var(--surface)}
+.sn{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;font-size:11px;color:var(--ink-2)}
+.sn.on{background:var(--surface-3);color:var(--ink);font-weight:600}
+.prow{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .pn{font-size:11px;color:var(--ink);font-weight:500}
+.prow .pd{font-size:9.5px;color:var(--muted)}
+.seg{margin-left:auto;display:flex;border:1px solid var(--line-2);border-radius:7px;overflow:hidden;flex:none;font-size:10px}
+.seg span{padding:2.5px 9px;color:var(--muted)}
+.seg span.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.hard{border:1px solid var(--stop);border-radius:8px;padding:9px 11px;background:var(--stop-bg)}
+.hard .ht{font-size:11px;font-weight:700;color:var(--stop);display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.hard .hs{font-size:10px;color:var(--ink-2);margin-bottom:7px}
+.pat{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:10.5px;align-items:center}
+.pat code{font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:5px;justify-self:start}
+.pat .vv{font-size:10px;font-weight:600}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:4px 12px;font-size:10.5px;align-items:baseline}
+.kv .k2{color:var(--muted);font-size:10px}
+.kv .v2{font-family:var(--mono);color:var(--ink);font-size:10px;overflow-wrap:anywhere}
+.okk{color:var(--done);font-weight:600}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:26px;text-align:center}
+.empty h4{margin:0;font-size:14px;color:var(--ink)}
+.empty p{margin:0;font-size:11px;color:var(--muted);max-width:40ch}
+
+/* dialoghi sopra l'app */
+.mock.rel{position:relative}
+.scrim{position:absolute;inset:0;background:rgba(16,20,32,.44)}
+.dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 24px 60px rgba(16,20,32,.32);display:flex;flex-direction:column;overflow:hidden;max-height:calc(100% - 26px)}
+.dlg.wide{inset:13px;transform:none;max-height:none;width:auto;height:auto;flex-direction:row}
+.dlgh{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--line);flex:none}
+.dlgh .dt{font-weight:600;font-size:12.5px}
+.dlgh .ds{font-size:10px;color:var(--muted)}
+.dlgh .x{margin-left:auto;color:var(--muted);display:flex}
+.dlgb{padding:13px;overflow:auto;display:flex;flex-direction:column;gap:15px;flex:1}
+.dlgf{padding:9px 13px;border-top:1px solid var(--line);display:flex;gap:7px;justify-content:flex-end;flex:none;background:var(--surface-2)}
+.dlgcol{flex:1;display:flex;flex-direction:column;min-width:0}
+/* menu contestuale */
+.ctx-menu{position:absolute;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;box-shadow:0 14px 40px rgba(16,20,32,.26);padding:4px;display:flex;flex-direction:column;gap:1px;width:158px;z-index:6}
+.ctx-menu .mi{font-size:11px}
+.ctx-menu .mi.dgr{color:var(--stop)}
+.ctx-menu hr{margin:3px 2px;border-top-color:var(--line)}
+/* chip toccabili nella barra di stato */
+.tune{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line-2);border-radius:6px;padding:1px 5px 1px 6px;color:var(--ink);background:var(--surface)}
+.tune svg.ic{width:11px;height:11px}
+.iconb{width:24px;height:24px;flex:none;color:var(--ink-2);display:grid;place-items:center;background:none;border:1px solid transparent;border-radius:7px;padding:0}
+/* elenco delle conversazioni da importare */
+.imp{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;background:var(--surface)}
+.imp.on{border-color:var(--accent);background:var(--accent-soft)}
+.imp .rd{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--line-2);flex:none;margin-top:2px}
+.imp.on .rd{border-color:var(--accent);border-width:3.5px}
+.imp .bd{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.imp .t1{display:flex;align-items:baseline;gap:8px}
+.imp .t1 .nm{font-weight:600;font-size:11.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imp .t1 .pj{margin-left:auto;font-size:10px;color:var(--ink-2);flex:none;display:flex;align-items:center;gap:5px}
+.imp .fp{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imp .mt{font-size:9.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.imp.live{border-color:var(--wait)}
+.zero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px;text-align:center}
+.zero .lg{width:38px;height:38px;border-radius:10px;background:var(--ink);color:var(--ground);display:grid;place-items:center;font-weight:700;font-size:16px}
+.zero h4{margin:0;font-size:16px;color:var(--ink)}
+.zero p{margin:0;font-size:11.5px;color:var(--muted);max-width:46ch}
+
+/* pannello isolato: stesso contenitore del dialogo, senza l'app dietro */
+.pane{border:1px solid var(--line-2);border-radius:12px;background:var(--surface);overflow:hidden;margin-top:10px;display:flex;flex-direction:column;font-size:11.5px;line-height:1.45;box-shadow:0 1px 2px rgba(16,20,32,.05)}
+.pane *{min-width:0}
+.pane .dlgb{overflow:visible}
+.tog{width:26px;height:15px;border-radius:9px;background:var(--surface-3);position:relative;flex:none;border:1px solid var(--line-2)}
+.tog.on{background:var(--accent);border-color:transparent}
+.tog i{position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:50%;background:var(--surface);display:block}
+.tog.on i{left:14px}
+.nrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)}
+.nrow:last-child{border-bottom:0}
+.nrow .nn{font-size:11px;color:var(--ink);font-weight:500}
+.nrow .nd{font-size:9.5px;color:var(--muted)}
+.nrow .rt{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+.sw{width:15px;height:15px;border-radius:5px;flex:none;border:1px solid rgba(0,0,0,.08)}
+.swrow{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid var(--line);font-size:11px}
+.swrow:last-child{border-bottom:0}
+.swrow .pn2{color:var(--ink);font-weight:500;text-transform:uppercase;letter-spacing:.05em;font-size:10px}
+.swrow .rt{margin-left:auto;display:flex;gap:4px}
+.notice{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line-2);background:var(--surface-2);border-radius:8px;padding:7px 10px;font-size:10.5px;color:var(--ink-2)}
+.notice b{color:var(--ink)}
+.notice .go{margin-left:auto;color:var(--accent);font-weight:600;flex:none}
+
+.pjrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)}
+.pjrow:last-child{border-bottom:0}
+.pjrow .pjn{flex:1;min-width:0}
+.pjrow .pjp{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
 </style>
 
 <svg style="display:none" aria-hidden="true">
-  <symbol id="i-term" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.6 6.4 6.9 8.3 4.6 10.2M8.6 10.6h3.2"/></symbol>
-  <symbol id="i-brick" viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="1.2"/><path d="M1.5 8h13M5.6 3.5v4.5M10.4 8v4.5"/></symbol>
-  <symbol id="i-brain" viewBox="0 0 16 16"><path d="M8 3.4c-.9-1.2-3.1-1-3.6.6-1.3.2-1.7 1.6-1 2.4-.8.9-.3 2.3.9 2.6.1 1.4 1.6 2 2.7 1.2.3.9 1.7.9 2 0 1.1.8 2.6.2 2.7-1.2 1.2-.3 1.7-1.7.9-2.6.7-.8.3-2.2-1-2.4-.5-1.6-2.7-1.8-3.6-.6Z"/><path d="M8 3.4v8.4"/></symbol>
-  <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3M6 9h4M6 11h3"/></symbol>
-  <symbol id="i-globe" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c1.7 2 1.7 9.6 0 11.6M8 2.2c-1.7 2-1.7 9.6 0 11.6"/></symbol>
-  <symbol id="i-plug" viewBox="0 0 16 16"><path d="M6 2v3M10 2v3"/><rect x="3.8" y="5" width="8.4" height="3.6" rx="1.2"/><path d="M8 8.6v2.4a2.4 2.4 0 0 1-2.4 2.4H4.6"/></symbol>
-  <symbol id="i-block" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M4 12 12 4"/></symbol>
-  <symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.6"/><path d="M8 12h.01"/><circle cx="8" cy="8" r="6"/></symbol>
-  <symbol id="i-mail" viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="1.5"/><path d="m2 4.6 6 4.2 6-4.2"/></symbol>
-  <symbol id="i-cut" viewBox="0 0 16 16"><path d="M2 8h3.5M10.5 8H14M6.6 5.6 9.4 10.4M9.4 5.6 6.6 10.4"/></symbol>
-  <symbol id="i-bolt" viewBox="0 0 16 16"><path d="M9 1.6 3.8 9.2h3.4L7 14.4l5.2-7.6H8.8z"/></symbol>
-  <symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.8"/><circle cx="4.5" cy="12.5" r="1.8"/><circle cx="11.5" cy="6" r="1.8"/><path d="M4.5 5.3v5.4M11.5 7.8c0 2-1.6 2.9-3.5 3.2"/></symbol>
-  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 4.2h4l1.4 1.6h7V12a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2z"/></symbol>
-  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5"/></symbol>
-  <symbol id="i-back" viewBox="0 0 16 16"><path d="M9.6 3.2 4.8 8l4.8 4.8"/></symbol>
-  <symbol id="i-stop" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.6"/><path d="M7.6 5.2h4.8L15.8 8.6v4.8L12.4 16.8H7.6L4.2 13.4V8.6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M12 19h8" /> <path d="m4 17 6-6-6-6" /></symbol>
+  <symbol id="i-brick" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M12 9v6" /> <path d="M16 15v6" /> <path d="M16 3v6" /> <path d="M3 15h18" /> <path d="M3 9h18" /> <path d="M8 15v6" /> <path d="M8 3v6" /></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 18V5" /> <path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" /> <path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" /> <path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" /> <path d="M18 18a4 4 0 0 0 2-7.464" /> <path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" /> <path d="M6 18a4 4 0 0 1-2-7.464" /> <path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" /></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" /></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" /></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5" /> <path d="M15 8V2" /> <path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z" /> <path d="M9 8V2" /></symbol>
+  <symbol id="i-block" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M4.929 4.929 19.07 19.071" /></symbol>
+  <symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7" /> <rect x="2" y="4" width="20" height="16" rx="2" /></symbol>
+  <symbol id="i-cut" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3" /> <path d="M8.12 8.12 12 12" /> <path d="M20 4 8.12 15.88" /> <circle cx="6" cy="18" r="3" /> <path d="M14.8 14.8 20 20" /></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z" /></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3" /> <circle cx="18" cy="6" r="3" /> <circle cx="6" cy="18" r="3" /></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <rect x="9" y="9" width="6" height="6" rx="1" /></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M3 5h18" /> <path d="M3 12h18" /> <path d="M3 19h18" /></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /> <path d="m15 5 4 4" /></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" /> <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /> <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /> <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /> <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" /></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" /></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0" /> <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></symbol>
+  <symbol id="i-disk" viewBox="0 0 24 24"><path d="M10 16h.01" /> <path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /> <path d="M21.946 12.013H2.054" /> <path d="M6 16h.01" /></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M10 5H3" /> <path d="M12 19H3" /> <path d="M14 3v4" /> <path d="M16 17v4" /> <path d="M21 12h-9" /> <path d="M21 19h-5" /> <path d="M21 5h-7" /> <path d="M8 10v4" /> <path d="M8 12H3" /></symbol>
 </svg>
 
 <div class="wrap">
@@ -212,7 +371,7 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
   <div class="head">
     <div class="logo">S</div>
     <div>
-      <h1>L'interfaccia di STARK</h1>
+      <h1>L&rsquo;interfaccia di STARK</h1>
       <p class="lede">Elenco compatto sempre a fianco, conversazione larga. Comandi e stato tutti in
       basso, attorno alla casella di scrittura. Aggiornata il 24 agosto 2026.</p>
     </div>
@@ -220,91 +379,100 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
   <div class="two">
     <div class="vbox">
-      <h3><span class="dotk" style="background:var(--done)"></span> Le tre regole dell'impianto</h3>
+      <h3><span class="dotk" style="background:var(--done)"></span> Le tre regole dell&rsquo;impianto</h3>
       <ul>
-        <li>L'elenco <b>è</b> la navigazione, e sta sempre lì: chi ti aspetta non va cercato</li>
-        <li>Tutto ciò che fai o che ti viene chiesto succede <b>in basso</b>, attorno alla casella
+        <li>L&rsquo;elenco <b>&egrave;</b> la navigazione, e sta sempre l&igrave;: chi ti aspetta non va cercato</li>
+        <li>Tutto ci&ograve; che fai o che ti viene chiesto succede <b>in basso</b>, attorno alla casella
         di scrittura. Un posto solo dove guardare</li>
         <li>La conversazione resta larga: i confronti ci stanno dentro</li>
       </ul>
     </div>
     <div class="vbox">
-      <h3><span class="dotk" style="background:var(--muted)"></span> Cosa è stato scartato</h3>
+      <h3><span class="dotk" style="background:var(--muted)"></span> Cosa &egrave; stato scartato</h3>
       <ul>
-        <li><b>Le linguette di sessione</b> — l'elenco fa già da scambiatore</li>
-        <li><b>Le linguette Conversazione / Effetti</b> — la conversazione è sempre il centro, non
+        <li><b>Le linguette di sessione</b> &mdash; l&rsquo;elenco fa gi&agrave; da scambiatore</li>
+        <li><b>Le linguette Conversazione / Effetti</b> &mdash; la conversazione &egrave; sempre il centro, non
         serve dichiararlo. Gli effetti si aprono da un pulsante</li>
-        <li><b>Le richieste in mezzo al flusso</b> — salgono dal blocco in basso, dove stai già guardando</li>
+        <li><b>Le richieste in mezzo al flusso</b> &mdash; salgono dal blocco in basso, dove stai gi&agrave; guardando</li>
       </ul>
     </div>
   </div>
 
   <hr>
 
-  <!-- ══ conversazione ══ -->
+  <!-- conversazione -->
   <section>
     <h2>La conversazione</h2>
-    <p>A sinistra: stato, e dentro ogni stato il progetto. Sempre, anche quando il progetto è uno
-    solo — così la struttura non cambia forma sotto gli occhi. In alto niente numero, solo il
-    <b>pallino</b> che dice che c'è qualcosa da vedere.</p>
-    <p style="color:var(--accent)">↓ Passa il mouse sulla percentuale di contesto, in basso a destra.</p>
+    <p>A sinistra tre stati soli &mdash; <b>Waiting</b>, <b>Working</b>, <b>Sleeping</b> &mdash; e dentro ogni
+    stato il progetto, sempre, anche quando il progetto &egrave; uno solo: cos&igrave; la struttura non cambia
+    forma sotto gli occhi. Un progetto ha <b>un colore solo</b>, in qualunque stato compaia: guarda
+    <code>API-PAGAMENTI</code>, che sta in Waiting e in Sleeping con lo stesso ambra.</p>
+    <p>Le chat che ti aspettano portano un <b>pallino a destra</b>. Non &egrave; il &laquo;non letto&raquo; di
+    Telegram: <b>non se ne va quando apri la chat</b>, se ne va quando la chat <b>riprende a
+    lavorare</b> &mdash; cio&egrave; quando le mandi un prompt nuovo, o quando riparte da sola dopo che hai
+    risposto a una domanda bloccante. Dice <i>tocca a te</i>, non <i>non l&rsquo;hai vista</i>: leggere non
+    &egrave; rispondere, e una chat aperta e lasciata l&igrave; ti sta ancora aspettando.</p>
+    <p>Sotto il titolo: prima l&rsquo;orario, poi lo stato &mdash; <i>asking</i> quando aspetta un permesso o una
+    risposta, <i>done</i> quando ha finito il compito, <i>stopped</i> quando l&rsquo;hai fermata tu.
+    <b>Finito non vuol dire chiuso</b>: l&rsquo;agent ha risposto e ora aspetta te, quindi resta in Waiting.</p>
+    <p style="color:var(--accent)">&darr; Passa il mouse sulla percentuale di contesto, in basso a destra.</p>
 
-    <div class="mock" style="height:530px">
+    <div class="mock" style="height:560px">
       <div class="side">
-        <div class="sidetop"><div class="nm">STARK</div><span class="bell"></span><span class="plus">+</span></div>
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1;padding-bottom:6px">
-          <div class="gstate">Ti aspettano</div>
-          <div class="gproj"><i class="dotk" style="background:#3B5BF5"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Confronto affiancato</div><div class="ago">ferma 4m</div></div></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Importazione trascritti</div><div class="ago">ferma 22m</div></div></div>
-          <div class="gproj"><i class="dotk" style="background:#F59E0B"></i> api-pagamenti</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Ritenta i pagamenti</div><div class="ago">ferma 1m</div></div></div>
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Daemon and security</div><div class="meta">11:20 <span class="sst done">done</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Webhook signature</div><div class="meta">09:47 <span class="sst stopped">stopped</span></div></div><span class="unread"></span></div>
 
-          <div class="gstate">Al lavoro</div>
-          <div class="gproj"><i class="dotk" style="background:#12B981"></i> sito-cliente</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Form di contatto</div><div class="ago">lavora 2m</div></div></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Ottimizza immagini</div><div class="ago">lavora 6m</div></div></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-site)"></i> sito-cliente</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Contact form</div><div class="meta">14:10 <span class="sst working">working</span></div></div></div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Optimize images</div><div class="meta">14:06 <span class="sst working">working</span></div></div></div>
 
-          <div class="gstate">Dormono</div>
-          <div class="gproj"><i class="dotk" style="background:#8B5CF6"></i> api-pagamenti</div>
-          <div class="sit zz"><div style="flex:1"><div class="ttl">Migrazione database</div><div class="ago">ieri</div></div></div>
-
-          <div class="gstate">Finite</div>
-          <div class="gproj"><i class="dotk" style="background:#3B5BF5"></i> stark</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Daemon e sicurezza</div><div class="ago">1h fa</div></div></div>
+          <div class="gstate">Sleeping</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit zz"><div style="flex:1"><div class="ttl">Database migration</div><div class="meta">ieri 18:40 <span class="sst sleeping">sleeping</span></div></div></div>
         </div>
-        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Impostazioni</div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
       </div>
 
       <div class="col">
         <div class="bar">
-          <i class="dotk" style="background:#3B5BF5"></i>
-          <div class="t">Confronto affiancato</div>
-          <button class="effbtn"><svg class="ic"><use href="#i-doc"/></svg> Effetti <b>4 file · 12 comandi</b></button>
+          <i class="dotk" style="background:var(--p-stark)"></i>
+          <div class="t">Side-by-side diff</div>
+          <button class="iconb" title="Put to sleep" style="margin-left:auto"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button class="effbtn" style="margin-left:0"><b>4 files &middot; 12 commands</b> <svg class="ic"><use href="#i-bars"/></svg></button>
         </div>
 
         <div class="scroller conv">
-          <div class="turn"><div class="th"><span class="cx">▸</span><span class="q">sì procedi col confronto affiancato</span><span class="n">41 blocchi</span></div></div>
-          <div class="turn"><div class="th"><span class="cx">▸</span><span class="q">controlla notion e allinea tutto</span><span class="n">27 blocchi</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">13:58</span><span class="q">check notion and align everything</span><span class="n">27 blocks</span></div></div>
           <div class="turn open">
-            <div class="th"><span class="cx">▾</span><span class="q">ora provalo su una modifica vera</span><span class="n">18 blocchi · 1m 12s</span></div>
+            <div class="th"><span class="cx">&#9662;</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks &middot; 1m 12s</span></div>
             <div class="tb">
-              <div class="row think"><svg class="ic"><use href="#i-brain"/></svg><span class="k">Ragionamento</span><span class="v">1.2k token · 8s</span><span class="end">▸</span></div>
-              <div class="prose">Serve un file abbastanza lungo perché due modifiche distanti producano
-              <b>due blocchi separati</b>. Scrivo venti righe e ne cambio la 2 e la 18.</div>
-              <div class="row"><svg class="ic"><use href="#i-brick"/></svg><span class="k">Write</span><span class="v">testo.txt</span><span class="end">✓</span></div>
-              <div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">node src/cli/diff-live-check.ts</span><span class="end">✓</span></div>
+              <div class="row think"><svg class="ic"><use href="#i-brain"/></svg><span class="k">Reasoning</span><span class="v">1.2k tokens &middot; 8s</span><span class="end">&#9656;</span></div>
+              <div class="prose">The file has to be long enough that two distant edits produce
+              <b>two separate hunks</b>. I&rsquo;ll write twenty lines and change line 2 and line 18.</div>
+              <div class="row"><svg class="ic"><use href="#i-brick"/></svg><span class="k">Write</span><span class="v">sample.txt</span><span class="end">&#10003;</span></div>
+              <div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">node src/cli/diff-live-check.ts</span><span class="end">&#10003;</span></div>
               <div class="fileblk" style="margin:2px 0">
-                <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">testo.txt</span>
-                  <span class="st"><span class="pl">+1</span><span class="mn">−1</span><span style="color:var(--muted)">▾</span></span></div>
+                <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">sample.txt</span>
+                  <span class="st"><span class="pl">+1</span><span class="mn">&minus;1</span><span style="color:var(--muted)">&#9662;</span></span></div>
                 <div class="diff"><div class="dgrid">
-                  <div class="gap">⋯ righe 1–14 non mostrate</div>
-                  <div class="dn">17</div><div>riga numero 17</div><div class="dn">17</div><div>riga numero 17</div>
-                  <div class="dn">18</div><div class="dold">riga numero 18</div><div class="dn">18</div><div class="dnew">riga numero 18<span class="markn"> cambiata</span></div>
-                  <div class="dn">19</div><div>riga numero 19</div><div class="dn">19</div><div>riga numero 19</div>
+                  <div class="gap">&ctdot; lines 1&ndash;14 not shown</div>
+                  <div class="dn">17</div><div>line number 17</div><div class="dn">17</div><div>line number 17</div>
+                  <div class="dn">18</div><div class="dold">line number 18</div><div class="dn">18</div><div class="dnew">line number 18<span class="markn"> changed</span></div>
+                  <div class="dn">19</div><div>line number 19</div><div class="dn">19</div><div>line number 19</div>
                 </div></div>
               </div>
-              <div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="k">Bloccato</span><span class="v">git reset --hard</span><span class="end" style="color:var(--wait)">Consenti</span></div>
+              <div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="k">Blocked</span><span class="v">git reset --hard</span><span class="end" style="color:var(--wait)">Allow</span></div>
             </div>
           </div>
         </div>
@@ -312,32 +480,35 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="dock">
           <div class="doing">
             <span class="spin"></span>
-            <div class="txt">Bash · npm run check</div>
+            <div class="txt">Bash &middot; npm run check</div>
             <div class="el">3s</div>
-            <button class="stopb" title="Ferma"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><use href="#i-stop"/></svg></button>
+            <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button>
           </div>
-          <div class="input">Scrivi ad agent… &nbsp;·&nbsp; / per i comandi</div>
+          <div class="input">Message the agent&hellip; &nbsp;&middot;&nbsp; / for commands</div>
           <div class="status">
             <div class="l">
-              <svg class="ic" style="color:var(--accent)"><use href="#i-bolt"/></svg><span>auto</span>
-              <span class="sep">·</span>
+              <span class="tune"><svg class="ic" style="color:var(--accent)"><use href="#i-bolt"/></svg>auto<svg class="ic"><use href="#i-down"/></svg></span>
+              <span class="tune"><span style="color:var(--muted)">MCP</span>none<svg class="ic"><use href="#i-down"/></svg></span>
+              <span class="sep">&middot;</span>
               <svg class="ic"><use href="#i-folder"/></svg><span>~/stark</span>
-              <span class="sep">·</span>
+              <span class="sep">&middot;</span>
               <svg class="ic"><use href="#i-branch"/></svg><span>main</span>
             </div>
             <div class="r">
-              <span>sonnet-5</span><span class="sep">·</span>
-              <span class="ctx" tabindex="0">contesto 34%
+              <span class="tune">sonnet-5<svg class="ic"><use href="#i-down"/></svg></span><span class="sep">&middot;</span>
+              <span class="ctx" tabindex="0">context 34%
                 <span class="tip">
-                  <div class="tr"><span>Contesto</span><b>34%</b></div>
+                  <div class="tr"><span>Context</span><b>34%</b></div>
                   <div class="meter"><i style="width:34%"></i></div>
-                  <div class="tr"><small>68k di 200k token</small></div>
+                  <div class="tr"><small>68k of 200k tokens</small></div>
                   <hr>
-                  <div class="tr"><span>Sessione</span><b>21%</b></div>
-                  <div class="tr"><small>si riazzera alle 21:00</small></div>
+                  <div class="tr"><span>Session</span><b>21%</b></div>
+                  <div class="tr"><small>resets at 21:00</small></div>
                   <hr>
-                  <div class="tr"><span>Settimana</span><b>58%</b></div>
-                  <div class="tr"><small>si riazzera lunedì</small></div>
+                  <div class="tr"><span>Week</span><b>58%</b></div>
+                  <div class="tr"><small>resets Monday</small></div>
+                  <hr>
+                  <div class="tr"><small>counted on profile <b style="font-weight:600">digitizers</b></small></div>
                 </span>
               </span>
             </div>
@@ -347,21 +518,21 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
     </div>
   </section>
 
-  <!-- ══ il blocco in basso ══ -->
+  <!-- il blocco in basso -->
   <section class="sec">
     <h2>Il blocco in basso, nei suoi tre stati</h2>
-    <p>È sempre lo stesso pezzo di schermo, sopra la casella di scrittura. Quando l'agent lavora dice
-    cosa sta facendo; quando ha bisogno di te <b>si espande lì</b>, invece di comparire in mezzo alla
-    conversazione. Non devi cercare dove è successo: guardi sempre nello stesso posto.</p>
+    <p>&Egrave; sempre lo stesso pezzo di schermo, sopra la casella di scrittura. Quando l&rsquo;agent lavora dice
+    cosa sta facendo; quando ha bisogno di te <b>si espande l&igrave;</b>, invece di comparire in mezzo alla
+    conversazione. Non devi cercare dove &egrave; successo: guardi sempre nello stesso posto.</p>
 
     <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-top:18px">
       <div>
         <div class="eyebrow">Mentre lavora</div>
         <div class="mock" style="display:block;margin-top:6px">
           <div class="dock" style="border-top:0">
-            <div class="doing"><span class="spin"></span><div class="txt">Edit · src/core/diff.ts</div><div class="el">3s</div>
-              <button class="stopb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><use href="#i-stop"/></svg></button></div>
-            <div class="input">Scrivi ad agent…</div>
+            <div class="doing"><span class="spin"></span><div class="txt">Edit &middot; src/core/diff.ts</div><div class="el">3s</div>
+              <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button></div>
+            <div class="input">Message the agent&hellip;</div>
           </div>
         </div>
       </div>
@@ -370,12 +541,12 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="mock" style="display:block;margin-top:6px">
           <div class="dock" style="border-top:0">
             <div class="askbox">
-              <div class="h"><svg class="ic" style="color:var(--accent)"><use href="#i-term"/></svg> Vuole eseguire un comando
-                <button class="stopb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><use href="#i-stop"/></svg></button></div>
+              <div class="h"><svg class="ic" style="color:var(--accent)"><use href="#i-term"/></svg> Wants to run a command
+                <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button></div>
               <div class="s"><code>rm -rf dist</code> in <code>~/stark</code></div>
-              <div class="opts"><span class="opt pri">Consenti</span><span class="opt">Consenti sempre</span><span class="opt">Nega</span></div>
+              <div class="opts"><span class="opt pri">Allow</span><span class="opt">Always allow</span><span class="opt">Deny</span></div>
             </div>
-            <div class="input">Scrivi ad agent…</div>
+            <div class="input">Message the agent&hellip;</div>
           </div>
         </div>
       </div>
@@ -384,171 +555,772 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="mock" style="display:block;margin-top:6px">
           <div class="dock" style="border-top:0">
             <div class="askbox q">
-              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> Tabulazioni o spazi?
-                <button class="stopb"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><use href="#i-stop"/></svg></button></div>
-              <div class="s">Per il file che sto per generare</div>
-              <div class="opts"><span class="opt pri">Tabulazioni</span><span class="opt">Spazi</span><span class="opt">Scrivo io…</span></div>
+              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> Tabs or spaces?
+                <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button></div>
+              <div class="s">For the file I&rsquo;m about to generate</div>
+              <div class="opts"><span class="opt pri">Tabs</span><span class="opt">Spaces</span><span class="opt">Let me type it&hellip;</span></div>
             </div>
-            <div class="input">Scrivi ad agent…</div>
+            <div class="input">Message the agent&hellip;</div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ══ effetti ══ -->
+  <!-- effetti -->
   <section class="sec">
     <h2>Gli effetti</h2>
     <p>Il pulsante in alto sostituisce la conversazione: gli effetti prendono tutta la larghezza,
-    e una freccia riporta indietro. L'interruttore a destra passa fra le due letture.</p>
+    e una freccia riporta indietro. L&rsquo;interruttore a destra passa fra le due letture. Nessuna
+    etichetta &laquo;Effetti&raquo;: il conteggio dice gi&agrave; cosa stai guardando.</p>
 
-    <div class="eyebrow" style="margin-top:22px">Per file — ogni file un blocco che si apre</div>
+    <div class="eyebrow" style="margin-top:22px">By file &mdash; ogni file un blocco che si apre</div>
     <div class="mock" style="height:400px">
-      <div class="side" style="width:206px">
-        <div class="sidetop"><div class="nm">STARK</div><span class="bell"></span><span class="plus">+</span></div>
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
-          <div class="gstate">Ti aspettano</div>
-          <div class="gproj"><i class="dotk" style="background:#3B5BF5"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Confronto affiancato</div><div class="ago">ferma 4m</div></div></div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Importazione trascritti</div><div class="ago">ferma 22m</div></div></div>
-          <div class="gstate">Al lavoro</div>
-          <div class="gproj"><i class="dotk" style="background:#12B981"></i> sito-cliente</div>
-          <div class="sit"><div style="flex:1"><div class="ttl">Form di contatto</div><div class="ago">lavora 2m</div></div></div>
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
         </div>
       </div>
       <div class="col">
         <div class="bar">
           <svg class="ic"><use href="#i-back"/></svg>
-          <div class="t">Effetti</div>
-          <span style="color:var(--muted)">4 file · 12 comandi</span>
-          <div class="switch"><span class="on">Per file</span><span>In ordine di tempo</span></div>
+          <div class="t">4 files &middot; 12 commands</div>
+          <div class="switch"><span class="on">By file</span><span>By time</span></div>
         </div>
         <div class="scroller" style="padding:12px">
           <div class="fileblk">
             <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">src/core/diff.ts</span>
-              <span class="st"><span style="color:var(--muted)">creato</span><span class="pl">+118</span><span class="mn">−0</span><span style="color:var(--muted)">▸</span></span></div>
+              <span class="st"><span style="color:var(--muted)">created</span><span class="pl">+118</span><span class="mn">&minus;0</span><span style="color:var(--muted)">&#9656;</span></span></div>
           </div>
           <div class="fileblk">
             <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">src/cli/offline-check.ts</span>
-              <span class="st"><span class="pl">+47</span><span class="mn">−2</span><span style="color:var(--muted)">▾</span></span></div>
+              <span class="st"><span class="pl">+47</span><span class="mn">&minus;2</span><span style="color:var(--muted)">&#9662;</span></span></div>
             <div class="diff"><div class="dgrid">
-              <div class="gap">⋯ righe 1–14 non mostrate</div>
-              <div class="dn">15</div><div>import { reduce } from …</div><div class="dn">15</div><div>import { reduce } from …</div>
+              <div class="gap">&ctdot; lines 1&ndash;14 not shown</div>
+              <div class="dn">15</div><div>import { reduce } from &hellip;</div><div class="dn">15</div><div>import { reduce } from &hellip;</div>
               <div class="dn"></div><div style="background:var(--surface-2)"></div><div class="dn">16</div><div class="dnew">import { sideBySide } from '../core/diff.ts'</div>
               <div class="dn">16</div><div class="dold">const checks = <span class="mark">[]</span></div><div class="dn">17</div><div class="dnew">const checks<span class="markn">: Check[]</span> = []</div>
             </div></div>
           </div>
           <div class="fileblk">
-            <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">testo.txt</span>
-              <span class="st"><span style="color:var(--muted)">2 modifiche</span><span class="pl">+2</span><span class="mn">−2</span><span style="color:var(--muted)">▸</span></span></div>
+            <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">sample.txt</span>
+              <span class="st"><span style="color:var(--muted)">2 changes</span><span class="pl">+2</span><span class="mn">&minus;2</span><span style="color:var(--muted)">&#9656;</span></span></div>
           </div>
           <div class="fileblk">
             <div class="fh"><svg class="ic"><use href="#i-brick"/></svg><span class="nm">package.json</span>
-              <span class="st"><span class="pl">+1</span><span class="mn">−0</span><span style="color:var(--muted)">▸</span></span></div>
+              <span class="st"><span class="pl">+1</span><span class="mn">&minus;0</span><span style="color:var(--muted)">&#9656;</span></span></div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="eyebrow" style="margin-top:30px">In ordine di tempo — ogni modifica dove è successa</div>
+    <div class="eyebrow" style="margin-top:30px">By time &mdash; ogni modifica dove &egrave; successa</div>
     <div class="mock" style="height:360px">
-      <div class="side" style="width:206px">
-        <div class="sidetop"><div class="nm">STARK</div><span class="bell"></span><span class="plus">+</span></div>
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
         <div class="scroller" style="flex:1">
-          <div class="gstate">Ti aspettano</div>
-          <div class="gproj"><i class="dotk" style="background:#3B5BF5"></i> stark</div>
-          <div class="sit on"><div style="flex:1"><div class="ttl">Confronto affiancato</div><div class="ago">ferma 4m</div></div></div>
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
         </div>
       </div>
       <div class="col">
         <div class="bar">
           <svg class="ic"><use href="#i-back"/></svg>
-          <div class="t">Effetti</div>
-          <span style="color:var(--muted)">4 file · 12 comandi</span>
-          <div class="switch"><span>Per file</span><span class="on">In ordine di tempo</span></div>
+          <div class="t">4 files &middot; 12 commands</div>
+          <div class="switch"><span>By file</span><span class="on">By time</span></div>
         </div>
         <div class="scroller" style="padding:12px">
-          <div class="tl"><div class="when">14:02</div><div class="body"><div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="v">npm run check</span><span class="end">✓ 1,4s</span></div></div></div>
-          <div class="tl"><div class="when">14:03</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">src/core/diff.ts</span><span class="end"><span class="pl">+118</span> creato</span></div></div></div>
-          <div class="tl"><div class="when">14:05</div><div class="body"><div class="row bad"><svg class="ic"><use href="#i-term"/></svg><span class="v">npx tsc --noEmit</span><span class="end" style="color:var(--stop)">✗ 2 errori</span></div></div></div>
-          <div class="tl"><div class="when">14:06</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">src/core/diff.ts</span><span class="end"><span class="pl">+3</span> <span class="mn">−1</span></span></div></div></div>
-          <div class="tl"><div class="when">14:11</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">testo.txt</span><span class="end"><span class="pl">+1</span> <span class="mn">−1</span></span></div></div></div>
-          <div class="tl"><div class="when">14:11</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">testo.txt</span><span class="end"><span class="pl">+1</span> <span class="mn">−1</span></span></div></div></div>
-          <div class="tl"><div class="when">14:12</div><div class="body"><div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="v">git reset --hard</span><span class="end" style="color:var(--wait)">bloccato</span></div></div></div>
+          <div class="tl"><div class="when">14:02</div><div class="body"><div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="v">npm run check</span><span class="end">&#10003; 1.4s</span></div></div></div>
+          <div class="tl"><div class="when">14:03</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">src/core/diff.ts</span><span class="end"><span class="pl">+118</span> created</span></div></div></div>
+          <div class="tl"><div class="when">14:05</div><div class="body"><div class="row bad"><svg class="ic"><use href="#i-term"/></svg><span class="v">npx tsc --noEmit</span><span class="end" style="color:var(--stop)">&#10007; 2 errors</span></div></div></div>
+          <div class="tl"><div class="when">14:06</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">src/core/diff.ts</span><span class="end"><span class="pl">+3</span> <span class="mn">&minus;1</span></span></div></div></div>
+          <div class="tl"><div class="when">14:11</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">sample.txt</span><span class="end"><span class="pl">+1</span> <span class="mn">&minus;1</span></span></div></div></div>
+          <div class="tl"><div class="when">14:11</div><div class="body"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="v">sample.txt</span><span class="end"><span class="pl">+1</span> <span class="mn">&minus;1</span></span></div></div></div>
+          <div class="tl"><div class="when">14:12</div><div class="body"><div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="v">git reset --hard</span><span class="end" style="color:var(--wait)">blocked</span></div></div></div>
         </div>
       </div>
     </div>
 
     <div class="note">
-      <div><b>Perché due letture</b> — «per file» risponde a <i>cosa è cambiato</i>, «in ordine di tempo» a
+      <div><b>Perch&eacute; due letture</b> &mdash; &laquo;by file&raquo; risponde a <i>cosa &egrave; cambiato</i>, &laquo;by time&raquo; a
       <i>cosa ha fatto</i>. Un file toccato due volte compare una volta nella prima, due nella seconda.</div>
-      <div><b>Il comando fallito</b> nel flusso scorre via e l'agent si corregge da solo. Qui resta,
+      <div><b>Il comando fallito</b> nel flusso scorre via e l&rsquo;agent si corregge da solo. Qui resta,
       e si conta.</div>
     </div>
   </section>
 
   <hr>
 
-  <!-- ══ vocabolario ══ -->
+  <!-- primo avvio -->
+  <section>
+    <p class="eyebrow">Le altre schermate</p>
+    <h2>Il primo avvio</h2>
+    <p>Non l'avevi chiesta, ma è letteralmente la prima cosa che chiunque vede di STARK. Qui
+    l'elenco a fianco non c'è: sarebbe una colonna vuota che spiega niente. La schermata dice
+    <b>cosa ha trovato sulla macchina</b> — l'unica informazione che serve per capire se STARK
+    è pronto — e apre le due strade per cominciare.</p>
+
+    <div class="mock" style="height:290px">
+      <div class="col">
+        <div class="zero">
+          <div class="lg">S</div>
+          <h4>No chats yet</h4>
+          <p>Found <b>Claude Code 2.1.241</b> and <b>OpenCode 1.17.20</b> in WSL · Ubuntu-22.04.</p>
+          <div class="btnrow" style="margin-top:2px">
+            <button class="btn pri"><svg class="ic" style="vertical-align:-2px"><use href="#i-plus"/></svg> New chat</button>
+            <button class="btn"><svg class="ic" style="vertical-align:-2px"><use href="#i-doc"/></svg> Import chat</button>
+          </div>
+          <p style="margin-top:2px">Import picks up a conversation you started in the terminal —
+          <b>12 found</b>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <div><b>Perché due pulsanti e non uno.</b> «New» e «Import» partono da due posti opposti:
+      uno da una cartella vuota di storia, l'altro da una conversazione che esiste già e che porta
+      con sé cartella, branch e contesto. Metterli dietro lo stesso pulsante costringerebbe a
+      scegliere <i>dopo</i> aver aperto, quando la domanda è già stata posta qui.</div>
+      <div><b>Il conteggio non è un dettaglio.</b> «12 found» dice che STARK ha già guardato e ha
+      trovato: senza quel numero, «Import chat» è una scommessa. Con zero trovate, il pulsante si
+      mostra spento con scritto dove ha cercato.</div>
+    </div>
+  </section>
+
+  <!-- nuova chat -->
+  <section class="sec">
+    <h2>Avviare un lavoro</h2>
+    <p>Due scelte, e una sola è obbligatoria. <b>Niente opzioni qui</b>: modello, modalità, MCP e
+    permessi servono <i>mentre</i> si lavora, non prima di aver scritto una riga — e si cambiano a
+    caldo. Chiederli in anticipo sarebbe farsi rispondere a domande che non si sono ancora poste.</p>
+
+    <div class="mock rel" style="height:400px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+        </div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
+      </div>
+      <div class="col">
+        <div class="bar"><i class="dotk" style="background:var(--p-stark)"></i><div class="t">Side-by-side diff</div>
+          <button class="iconb" style="margin-left:auto"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button class="effbtn" style="margin-left:0"><b>4 files · 12 commands</b> <svg class="ic"><use href="#i-bars"/></svg></button></div>
+        <div class="scroller conv">
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:58</span><span class="q">check notion and align everything</span><span class="n">27 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks · 1m 12s</span></div></div>
+        </div>
+        <div class="dock"><div class="input">Message the agent…</div></div>
+      </div>
+      <div class="scrim"></div>
+      <div class="dlg" style="width:400px">
+        <div class="dlgh"><div class="dt">New chat</div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+        <div class="dlgb">
+          <div class="fgroup">
+            <div class="flabel">Agent</div>
+            <div class="inst on"><span class="rd"></span><span class="nm">Claude Code</span><span class="ver">2.1.241</span>
+              <span class="where"><svg class="ic"><use href="#i-monitor"/></svg> WSL · Ubuntu-22.04</span></div>
+            <div class="inst"><span class="rd"></span><span class="nm">OpenCode</span><span class="ver">1.17.20</span>
+              <span class="where"><svg class="ic"><use href="#i-monitor"/></svg> WSL · Ubuntu-22.04</span></div>
+            <div class="hint">Nothing found on Windows — searched <b>PATH</b> and the usual install folders.</div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel">Folder</div>
+            <div class="field"><svg class="ic" style="color:var(--muted)"><use href="#i-folder"/></svg>~/DevsMachna/stark<span class="act">Browse</span></div>
+            <div class="recents">
+              <span class="rec"><i class="dotk" style="background:var(--p-stark)"></i> stark</span>
+              <span class="rec"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</span>
+              <span class="rec"><i class="dotk" style="background:var(--p-site)"></i> sito-cliente</span>
+            </div>
+            <div class="hint">The folder decides the project, its colour, and which branch you're on.</div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel">Profile</div>
+            <div class="chips">
+              <span class="chip">digitizers<svg class="ic"><use href="#i-down"/></svg></span>
+              <span class="hint" style="margin:0">/root/.claude-digitizers · 14 conversations</span>
+            </div>
+            <div class="hint">Which Claude configuration this project uses — its login, MCP servers, memory
+            and past conversations. <b>Remembered per project</b>: already set for <i>stark</i>, asked only
+            for a folder STARK has never seen. Shown only while more than one profile exists.</div>
+          </div>
+        </div>
+        <div class="dlgf"><button class="btn">Cancel</button><button class="btn pri">Start</button></div>
+      </div>
+    </div>
+
+    <p><b>Non è una schermata a sé.</b> È un riquadro sopra l'app, che resta visibile dietro: creare
+    una chat non è cambiare posto, è aggiungere una riga a un elenco che stai già guardando. E
+    quando lo chiudi sei esattamente dove eri.</p>
+
+    <div class="eyebrow" style="margin-top:26px">Dove sono finite le opzioni</div>
+    <div class="mock" style="display:block;margin-top:6px">
+      <div class="dock" style="border-top:0">
+        <div class="input">Message the agent…</div>
+        <div class="status">
+          <div class="l">
+            <span class="tune"><svg class="ic" style="color:var(--accent)"><use href="#i-bolt"/></svg>auto<svg class="ic"><use href="#i-down"/></svg></span>
+            <span class="tune"><span style="color:var(--muted)">MCP</span>none<svg class="ic"><use href="#i-down"/></svg></span>
+            <span class="sep">·</span>
+            <svg class="ic"><use href="#i-folder"/></svg><span>~/stark</span>
+            <span class="sep">·</span>
+            <svg class="ic"><use href="#i-branch"/></svg><span>main</span>
+          </div>
+          <div class="r"><span class="tune">sonnet-5<svg class="ic"><use href="#i-down"/></svg></span><span class="sep">·</span><span class="ctx">context 0%</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:14px">
+      <div class="menu">
+        <div class="mi on"><svg class="ic" style="color:var(--accent)"><use href="#i-bolt"/></svg><span>auto<span class="sub">A classifier checks every action. No cards.</span></span><svg class="ic" style="margin-left:auto;color:var(--accent)"><use href="#i-check"/></svg></div>
+        <div class="mi"><svg class="ic"><use href="#i-shield"/></svg><span>default<span class="sub">Asks before everything</span></span></div>
+        <div class="mi"><svg class="ic"><use href="#i-pencil"/></svg><span>acceptEdits<span class="sub">File edits go through, the rest asks</span></span></div>
+        <div class="mi"><svg class="ic"><use href="#i-doc"/></svg><span>plan<span class="sub">Plans first, touches nothing</span></span></div>
+        <div class="mi"><svg class="ic"><use href="#i-check"/></svg><span>dontAsk<span class="sub">Never asks. The classifier still checks.</span></span></div>
+        <div class="mi dis"><svg class="ic"><use href="#i-block"/></svg><span>bypassPermissions<span class="sub">Refused by the CLI itself when running as root</span></span><span class="tag">unavailable</span></div>
+      </div>
+      <div class="menu">
+        <div class="mi on"><span>sonnet-5<span class="sub">Supports auto mode</span></span><svg class="ic" style="margin-left:auto;color:var(--accent)"><use href="#i-check"/></svg></div>
+        <div class="mi"><span>opus-5<span class="sub">Supports auto mode</span></span></div>
+        <div class="mi"><span>fable-5<span class="sub">Supports auto mode</span></span></div>
+        <div class="mi"><svg class="ic" style="color:var(--wait)"><use href="#i-warn"/></svg><span>haiku-4.5<span class="sub">No auto mode — this chat would fall back to Manual and ask for everything</span></span></div>
+      </div>
+      <div class="menu" style="width:210px">
+        <div class="mi on"><span>none<span class="sub">Fastest, cheapest, nothing leaves the folder</span></span><svg class="ic" style="margin-left:auto;color:var(--accent)"><use href="#i-check"/></svg></div>
+        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>notion-mio<span class="sub">32 tools</span></span></div>
+        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>atlassian<span class="sub">19 tools</span></span></div>
+      </div>
+    </div>
+    <p style="margin-top:12px"><b>Sei modalità, non cinque.</b> <code>bypassPermissions</code> resta in
+    elenco, spento, con scritto <i>chi</i> lo rifiuta: non è una nostra prudenza, è il CLI che non lo
+    accetta da root. Nasconderlo farebbe sembrare STARK meno capace del terminale, che è esattamente
+    ciò che il Principio 5 vieta. Haiku invece è scegliibile davvero — solo, va detto cosa succede:
+    la sessione riparte in Manual e torna a chiedere tutto.</p>
+
+    <p style="margin-top:12px">Nella barra sotto la casella, dove <b>già stavano scritte</b>. Ora
+    quelle con il bordo si premono: modalità, MCP e modello. Cartella e branch no — quelli
+    raccontano dove sei, e cambiarli da lì sarebbe un'altra cosa. È il posto giusto perché è
+    l'unico che hai sotto gli occhi mentre scrivi il primo messaggio, che è esattamente il momento
+    in cui ti accorgi di volerli diversi.</p>
+    <div class="note">
+      <div><b>Modello e modalità cambiano a caldo</b> — verificato nello spike. Nessun «riavvia per
+      applicare»: il turno dopo è già col modello nuovo. Ecco perché sceglierli prima non serve.</div>
+      <div><b>MCP è la manopola che pesa.</b> Una chat nuova non prende nessun server. Ereditare
+      quelli della macchina costa circa <b>5× di contesto per turno</b> — su quota fissa è la voce
+      più cara della barra, ed è per questo che sta lì e non sepolta nelle impostazioni.</div>
+    </div>
+  </section>
+
+  <!-- rinomina / sleep / elimina -->
+  <section class="sec">
+    <h2>Rinominare, addormentare, eliminare</h2>
+    <p>Non c'è una schermata «modifica chat». Con cartella e agent bloccati per costruzione, quella
+    schermata sarebbe stata un contenitore con dentro un campo solo. Le tre cose che restano sono
+    <b>azioni</b>, e le azioni stanno dove sta l'oggetto: sulla riga nell'elenco, col tasto destro.</p>
+
+    <div class="mock rel" style="height:330px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit" style="background:var(--surface-3)"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+        </div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
+      </div>
+      <div class="col">
+        <div class="bar"><i class="dotk" style="background:var(--p-stark)"></i><div class="t">Side-by-side diff</div>
+          <button class="iconb" style="margin-left:auto"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button class="effbtn" style="margin-left:0"><b>4 files · 12 commands</b> <svg class="ic"><use href="#i-bars"/></svg></button></div>
+        <div class="scroller conv">
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:58</span><span class="q">check notion and align everything</span><span class="n">27 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks · 1m 12s</span></div></div>
+        </div>
+        <div class="dock"><div class="input">Message the agent…</div></div>
+      </div>
+      <div class="ctx-menu" style="left:118px;top:64px">
+        <div class="mi"><svg class="ic"><use href="#i-pencil"/></svg> Rename</div>
+        <div class="mi"><svg class="ic"><use href="#i-moon"/></svg> Put to sleep</div>
+        <hr>
+        <div class="mi dgr"><svg class="ic"><use href="#i-trash"/></svg> Delete</div>
+      </div>
+    </div>
+
+    <p>E <b>Sleep ha anche un pulsante suo</b>, in alto a destra nella chat aperta — la luna accanto
+    al conteggio degli effetti. È l'unica delle tre che si fa spesso e a chat aperta: cercarla nel
+    tasto destro di una riga che stai già guardando sarebbe un giro inutile.</p>
+
+    <div class="note">
+      <div><b>Rinominare non apre niente.</b> Il titolo diventa scrivibile dov'è — nella riga o nella
+      barra in alto. Da quel momento STARK smette di riscriverlo da solo a ogni turno.</div>
+      <div><b>Sleep libera memoria, non quota.</b> Risvegliare rilegge tutta la conversazione, e
+      quello costa. Va detto nel momento in cui si preme, non scoperto dopo dal contatore.</div>
+    </div>
+  </section>
+
+  <!-- import -->
+  <section class="sec">
+    <h2>Importare una conversazione dal terminale</h2>
+    <p>L'SDK sa già elencare le sessioni di Claude Code sulla macchina, con titolo, primo prompt,
+    branch, cartella, data e dimensione. Quindi la schermata non chiede di cercare un file: mostra
+    <b>quello che c'è</b>, e si sceglie riconoscendolo.</p>
+
+    <div class="mock rel" style="height:430px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+        </div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
+      </div>
+      <div class="col">
+        <div class="bar"><i class="dotk" style="background:var(--p-stark)"></i><div class="t">Side-by-side diff</div>
+          <button class="iconb" style="margin-left:auto"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button class="effbtn" style="margin-left:0"><b>4 files · 12 commands</b> <svg class="ic"><use href="#i-bars"/></svg></button></div>
+        <div class="scroller conv">
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:58</span><span class="q">check notion and align everything</span><span class="n">27 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks · 1m 12s</span></div></div>
+        </div>
+        <div class="dock"><div class="input">Message the agent…</div></div>
+      </div>
+      <div class="scrim"></div>
+      <div class="dlg" style="width:520px">
+        <div class="dlgh"><div><div class="dt">Import a conversation</div><div class="ds">Started in the terminal, on this machine</div></div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+        <div class="dlgb" style="gap:7px">
+          <div class="chips" style="margin-bottom:2px">
+            <span class="chip"><span class="lab">Agent</span>Claude Code<svg class="ic"><use href="#i-down"/></svg></span>
+            <span class="chip"><span class="lab">Folder</span>any<svg class="ic"><use href="#i-down"/></svg></span>
+            <span class="chip" style="color:var(--muted)"><svg class="ic"><use href="#i-search"/></svg>Search</span>
+          </div>
+          <div class="imp on"><span class="rd"></span><div class="bd">
+            <div class="t1"><span class="nm">Allineamento della memoria di progetto</span>
+              <span class="pj"><i class="dotk" style="background:var(--p-stark)"></i> stark · main</span></div>
+            <div class="fp">“ho lavorato a questo progetto durante il weekend sul mio pc fisso…”</div>
+            <div class="mt">today 09:41 · 1.2 MB · 431 messages</div></div></div>
+          <div class="imp"><span class="rd"></span><div class="bd">
+            <div class="t1"><span class="nm">Daemon: HTTP e SSE su localhost</span>
+              <span class="pj"><i class="dotk" style="background:var(--p-stark)"></i> stark · main</span></div>
+            <div class="fp">“ora facciamo il daemon vero, con il perimetro di sicurezza”</div>
+            <div class="mt">yesterday 22:10 · 840 kB · 287 messages</div></div></div>
+          <div class="imp live"><span class="rd"></span><div class="bd">
+            <div class="t1"><span class="nm">Refactor dei pagamenti</span>
+              <span class="pj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti · fix/retry</span></div>
+            <div class="fp">“riprova i pagamenti falliti con backoff esponenziale”</div>
+            <div class="mt" style="color:var(--wait);font-weight:600">running in a terminal right now</div>
+            <div class="warn" style="margin-top:4px"><svg class="ic"><use href="#i-warn"/></svg><span>STARK can open it and
+            <b>nothing gets lost</b> — the transcript on disk keeps both sides. But the two processes stop
+            seeing each other: whatever you do here, the terminal won't know. Don't drive it from both ends.</span></div>
+          </div></div>
+          <div class="imp"><span class="rd"></span><div class="bd">
+            <div class="t1"><span class="nm">Ottimizzazione delle immagini</span>
+              <span class="pj"><i class="dotk" style="background:var(--p-site)"></i> sito-cliente · main</span></div>
+            <div class="fp">“comprimi tutte le immagini sopra i 200 kB”</div>
+            <div class="mt">3 days ago · 96 kB · 41 messages</div></div></div>
+        </div>
+        <div class="dlgf"><button class="btn">Cancel</button><button class="btn pri">Import</button></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <div><b>Si riconosce dal primo prompt, non dal titolo.</b> Il titolo lo scrive il modello e si
+      somigliano tutti; la prima frase che hai scritto tu è quella che ti fa dire «ah, è quella».
+      Per questo sta in evidenza e non nei dettagli.</div>
+      <div><b>L'avviso sulla presa in carico</b> è misurato, non prudenziale (P16): il disco resta
+      coerente, i due processi vivi divergono. Dirlo qui è l'unico momento in cui serve — dopo
+      sarebbe tardi.</div>
+    </div>
+  </section>
+
+  <!-- impostazioni -->
+  <section class="sec">
+    <h2>Le impostazioni</h2>
+    <p>Riquadro quasi a tutto schermo, sopra l'app. Sei sezioni, ognuna con un mestiere distinto:
+    <b>Permissions</b> è la tabella di ADR-008; <b>Projects</b> tiene ciò che appartiene a un
+    progetto e non all'app — il colore e il <b>profilo di Claude</b>; <b>Notifications</b> è come
+    vieni chiamato quando guardi altrove; <b>Appearance</b> il tema; <b>Storage</b> i journal;
+    <b>System</b> è la pagina che si guarda quando qualcosa sembra rotto senza motivo.</p>
+
+    <div class="eyebrow" style="margin-top:22px">La forma: sopra l'app, che resta visibile dietro</div>
+    <div class="mock rel" style="height:520px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Waiting</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Transcript import</div><div class="meta">12:04 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">14:09 <span class="sst asking">asking</span></div></div><span class="unread"></span></div>
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Side-by-side diff</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+        </div>
+        <div class="sidefoot"><svg class="ic"><use href="#i-gear"/></svg> Settings</div>
+      </div>
+      <div class="col">
+        <div class="bar"><i class="dotk" style="background:var(--p-stark)"></i><div class="t">Side-by-side diff</div>
+          <button class="iconb" style="margin-left:auto"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <button class="effbtn" style="margin-left:0"><b>4 files · 12 commands</b> <svg class="ic"><use href="#i-bars"/></svg></button></div>
+        <div class="scroller conv">
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">13:58</span><span class="q">check notion and align everything</span><span class="n">27 blocks</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">▸</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks · 1m 12s</span></div></div>
+        </div>
+        <div class="dock"><div class="input">Message the agent…</div></div>
+      </div>
+      <div class="scrim"></div>
+      <div class="dlg wide">
+        <div class="snav">
+          <div class="sn on"><svg class="ic"><use href="#i-shield"/></svg> Permissions</div>
+          <div class="sn"><svg class="ic"><use href="#i-folder"/></svg> Projects</div>
+          <div class="sn"><svg class="ic"><use href="#i-bell"/></svg> Notifications</div>
+          <div class="sn"><svg class="ic"><use href="#i-palette"/></svg> Appearance</div>
+          <div class="sn"><svg class="ic"><use href="#i-disk"/></svg> Storage</div>
+          <div class="sn"><svg class="ic"><use href="#i-monitor"/></svg> System</div>
+        </div>
+        <div class="dlgcol">
+          <div class="dlgh"><div class="dt">Permissions</div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+          <div class="dlgb">
+            <div class="notice"><svg class="ic"><use href="#i-sliders"/></svg><span><b>2 chats don't follow these
+              rules.</b> A chat can differ — you set it from the bar under its message box.</span><span class="go">Review</span></div>
+            <div class="fgroup">
+              <div class="flabel">Stop and ask me before…</div>
+              <div>
+                <div class="prow"><div><div class="pn">Shell commands</div><div class="pd">running anything in the terminal</div></div>
+                  <span class="seg"><span>let it</span><span class="on">ask me</span></span></div>
+                <div class="prow"><div><div class="pn">Editing files</div><div class="pd">writing, changing, deleting</div></div>
+                  <span class="seg"><span class="on">let it</span><span>ask me</span></span></div>
+                <div class="prow"><div><div class="pn">Reading files</div><div class="pd">opening and searching the folder</div></div>
+                  <span class="seg"><span class="on">let it</span><span>ask me</span></span></div>
+                <div class="prow"><div><div class="pn">Network</div><div class="pd">fetching pages, searching the web</div></div>
+                  <span class="seg"><span class="on">let it</span><span>ask me</span></span></div>
+                <div class="prow"><div><div class="pn">Sub-agents</div><div class="pd">spawning helpers that work on their own</div></div>
+                  <span class="seg"><span class="on">let it</span><span>ask me</span></span></div>
+                <div class="prow"><div><div class="pn">External tools</div><div class="pd">Notion, Jira, anything connected</div></div>
+                  <span class="seg"><span class="on">let it</span><span>ask me</span></span></div>
+              </div>
+              <div class="hint">Everything starts on <b>let it</b>. The classifier still inspects every single
+              action — this only adds a human check on top, where you want one.</div>
+            </div>
+            <div class="fgroup">
+              <div class="flabel">Shell — finer than the whole category</div>
+              <div class="pat">
+                <code>rm *</code><span class="vv" style="color:var(--wait)">ask me</span>
+                <code>git push --force *</code><span class="vv" style="color:var(--stop)">never</span>
+                <code>*</code><span class="vv" style="color:var(--done)">let it</span>
+              </div>
+              <div class="hint">STARK sees every shell command and answers on its own for the ones you allowed:
+              it costs microseconds, not a round trip to the model.</div>
+            </div>
+            <div class="hard">
+              <div class="ht"><svg class="ic"><use href="#i-block"/></svg> Never, no exceptions</div>
+              <div class="hs">These are not a stricter «ask me». They block <b>before</b> the classifier ever
+              sees the action, and nothing — not you, not the agent, not a per-chat override — gets past them.</div>
+              <div class="chips">
+                <span class="chip"><code style="background:none;padding:0">.env*</code></span>
+                <span class="chip"><code style="background:none;padding:0">~/.ssh/**</code></span>
+                <span class="chip" style="color:var(--muted)"><svg class="ic"><use href="#i-plus"/></svg> Add</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <div><b>Categorie, non nomi di tool.</b> «Shell commands» invece di <code>Bash</code>,
+      «External tools» invece di <code>mcp__*</code>. I nomi dei tool sono vocabolario di Claude Code,
+      ed è proprio quello che il modello canonico esiste per non far uscire dall'adapter.</div>
+      <div><b>«Never» sta in un riquadro a parte</b> perché è un altro meccanismo: «ask me» aggiunge un
+      passaggio che si concede lì per lì, «never» blocca a monte. È anche l'unica riga che una chat
+      <i>non</i> può scavalcare — ed è la ragione per cui i confini duri possono restare pochi e veri.</div>
+    </div>
+
+    <p style="margin-top:26px">Gli altri cinque pannelli sono lo stesso riquadro con dentro altro.
+    Qui sotto mostro solo il contenuto, senza l'app dietro: la forma è già stata vista una volta e
+    ripeterla dieci volte ruberebbe spazio a ciò che cambia.</p>
+
+    <div class="eyebrow" style="margin-top:24px">Projects — il profilo di Claude si sceglie qui, per progetto</div>
+    <div class="pane">
+      <div class="dlgh"><div class="dt">Projects</div></div>
+      <div class="dlgb">
+        <div class="fgroup">
+          <div class="flabel">Every project remembers its profile and its colour</div>
+          <div>
+            <div class="pjrow"><span class="sw" style="background:#3B5BF5"></span>
+              <div class="pjn"><div class="pn2">stark</div><div class="pjp">~/DevsMachna/stark</div></div>
+              <span class="chip">digitizers<svg class="ic"><use href="#i-down"/></svg></span></div>
+            <div class="pjrow"><span class="sw" style="background:#D97706"></span>
+              <div class="pjn"><div class="pn2">api-pagamenti</div><div class="pjp">~/dev/api-pagamenti</div></div>
+              <span class="chip">digitizers<svg class="ic"><use href="#i-down"/></svg></span></div>
+            <div class="pjrow"><span class="sw" style="background:#0F9D76"></span>
+              <div class="pjn"><div class="pn2">sito-cliente</div><div class="pjp">~/dev/sito-cliente</div></div>
+              <span class="chip">personal<svg class="ic"><use href="#i-down"/></svg></span></div>
+          </div>
+          <div class="hint">The <b>profile</b> is which Claude configuration the project uses — its login,
+          its MCP servers, its memory, and the conversations it can resume.</div>
+          <div class="notice"><svg class="ic"><use href="#i-bolt"/></svg><span><b>Quota is counted per
+            profile.</b> Two projects on different profiles don't eat each other's week — which is the
+            real reason this is a per-project choice and not one setting for the whole app.</span></div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Colour</div>
+          <div class="chips">
+            <span class="sw" style="background:#3B5BF5"></span><span class="sw" style="background:#D97706"></span>
+            <span class="sw" style="background:#0F9D76"></span><span class="sw" style="background:#8B5CF6"></span>
+            <span class="sw" style="background:#DB2777"></span><span class="sw" style="background:#0891B2"></span>
+            <span class="sw" style="background:#65A30D"></span>
+          </div>
+          <div class="hint">Assigned in order, seven of them, then they repeat. <b>Cosa succede all'ottavo
+          progetto non è deciso</b>: due progetti che condividono il colore rompono il patto per cui il
+          colore identifica il progetto senza leggere.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="margin-top:26px">Notifications — come vieni chiamato quando guardi altrove</div>
+    <div class="pane">
+      <div class="dlgh"><div class="dt">Notifications</div></div>
+      <div class="dlgb">
+        <div class="fgroup">
+          <div class="flabel">Call me when…</div>
+          <div>
+            <div class="nrow"><div><div class="nn">A chat is waiting for me</div><div class="nd">a permission, or a question to answer</div></div>
+              <span class="rt"><span class="chip">Ping<svg class="ic"><use href="#i-down"/></svg></span><span class="tog on"><i></i></span></span></div>
+            <div class="nrow"><div><div class="nn">A chat has finished</div><div class="nd">the task is done, it now waits for a new prompt</div></div>
+              <span class="rt"><span class="chip">Chime<svg class="ic"><use href="#i-down"/></svg></span><span class="tog on"><i></i></span></span></div>
+            <div class="nrow"><div><div class="nn">A chat stopped on its own</div><div class="nd">an error, or the quota ran out</div></div>
+              <span class="rt"><span class="chip">Ping<svg class="ic"><use href="#i-down"/></svg></span><span class="tog on"><i></i></span></span></div>
+          </div>
+          <div class="hint"><b>Two different sounds on purpose.</b> «I'm done» and «I'm waiting for you»
+          are opposite situations for whoever is listening — one can wait, the other is holding still
+          until you answer.</div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Stay quiet for…</div>
+          <div>
+            <div class="nrow"><div><div class="nn">The chat I'm looking at</div><div class="nd">you can already see it happen</div></div>
+              <span class="rt"><span class="tog on"><i></i></span></span></div>
+          </div>
+          <div class="chips" style="margin-top:4px">
+            <span class="chip"><i class="dotk" style="background:var(--p-stark)"></i>stark</span>
+            <span class="chip" style="color:var(--muted)"><i class="dotk" style="background:var(--p-pay)"></i>api-pagamenti · muted</span>
+            <span class="chip"><i class="dotk" style="background:var(--p-site)"></i>sito-cliente</span>
+          </div>
+          <div class="hint">Silence a whole project when it has one long job you don't want to hear
+          about, and two short ones you do.</div>
+        </div>
+        <div class="notice"><svg class="ic"><use href="#i-bell"/></svg><span><b>The dot in the list is not
+          a notification.</b> It only works if you are already looking at STARK, and the whole point of
+          these is being able to look somewhere else.</span></div>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="margin-top:26px">Appearance</div>
+    <div class="pane">
+      <div class="dlgh"><div class="dt">Appearance</div></div>
+      <div class="dlgb">
+        <div class="fgroup">
+          <div class="flabel">Theme</div>
+          <div class="chips"><span class="chip">Light</span><span class="chip">Dark</span>
+            <span class="chip" style="border-color:var(--accent);color:var(--accent)"><svg class="ic"><use href="#i-check"/></svg>System</span></div>
+          <div class="hint">Project colours moved to <b>Projects</b>: a colour belongs to the project,
+          next to the profile it uses, not to a page about how STARK looks.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="margin-top:26px">Storage — dove sta la conversazione, e perché non nel progetto</div>
+    <div class="pane">
+      <div class="dlgh"><div class="dt">Storage</div></div>
+      <div class="dlgb">
+        <div class="fgroup">
+          <div class="flabel">Journals</div>
+          <div class="field"><svg class="ic" style="color:var(--muted)"><use href="#i-folder"/></svg>~/.stark/sessioni<span class="act">Open folder</span></div>
+          <div class="hint">14 chats · 38.2 MB</div>
+          <div class="warn"><svg class="ic"><use href="#i-warn"/></svg><span>An imported journal holds the
+            <b>entire conversation</b>, including everything the agent read along the way. That is why it
+            lives here and not inside your project folder — by construction, not because of a line in
+            <code>.gitignore</code> that somebody can delete by mistake.</span></div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Per chat</div>
+          <div>
+            <div class="nrow"><div><div class="nn">Transcript import</div><div class="nd">stark · imported from the terminal</div></div>
+              <span class="rt"><span class="mt" style="font-size:10px;color:var(--muted)">12.8 MB</span><button class="btn dgr" style="padding:2px 8px;font-size:10px">Delete</button></span></div>
+            <div class="nrow"><div><div class="nn">Side-by-side diff</div><div class="nd">stark</div></div>
+              <span class="rt"><span class="mt" style="font-size:10px;color:var(--muted)">4.1 MB</span><button class="btn dgr" style="padding:2px 8px;font-size:10px">Delete</button></span></div>
+          </div>
+          <div class="hint">Deleting a journal removes <b>STARK's</b> view of the chat. The agent keeps its
+          own transcript where it always did — the two are different memories with different jobs.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="margin-top:26px">System — la pagina che si guarda quando sembra rotto senza motivo</div>
+    <div class="pane">
+      <div class="dlgh"><div class="dt">System</div></div>
+      <div class="dlgb">
+        <div class="fgroup">
+          <div class="flabel">STARK</div>
+          <div class="kv">
+            <span class="k2">Address</span><span class="v2">http://127.0.0.1:51734 <span style="color:var(--accent);font-family:var(--sans);font-weight:600">Copy</span></span>
+            <span class="k2">Token</span><span class="v2">•••••••••••••••• <span style="color:var(--accent);font-family:var(--sans);font-weight:600">Copy</span> <span style="color:var(--accent);font-family:var(--sans);font-weight:600">Regenerate</span></span>
+            <span class="k2">Listening on</span><span class="v2">localhost only</span>
+          </div>
+          <div class="hint">The token changes at every start: it is <b>not a secret to keep</b>, it is what
+          stops another page open in your browser from driving an agent that runs as root. Copy it to open
+          STARK in a second browser.</div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Claude Code · WSL · Ubuntu-22.04</div>
+          <div class="kv">
+            <span class="k2">Executable</span><span class="v2">node_modules/@anthropic-ai/claude-agent-sdk/vendor/claude <span style="color:var(--muted)">— bundled, not yours</span></span>
+            <span class="k2">CLI</span><span class="v2">2.1.241 <span class="okk">paired</span> <span style="color:var(--muted)">with SDK 0.3.241</span></span>
+            <span class="k2">Node</span><span class="v2">22.23.2</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Profiles found on this machine</div>
+          <div class="kv">
+            <span class="k2">digitizers</span><span class="v2">/root/.claude-digitizers <span style="color:var(--muted)">— 14 conversations · 2 MCP servers</span></span>
+            <span class="k2">personal</span><span class="v2">~/.claude <span style="color:var(--muted)">— 3 conversations · no MCP servers</span></span>
+          </div>
+          <div class="hint">Read-only here. <b>Which one a project uses is set in Projects</b> — this page
+          only says what exists.</div>
+          <div class="warn"><svg class="ic"><use href="#i-warn"/></svg><span>This is the
+            <code>CLAUDE_CONFIG_DIR</code> STARK passes to every agent it launches. Point a project at the
+            wrong profile and that agent finds <b>no conversations to resume, and possibly no login</b> —
+            looking broken for no reason at all. It is the single most confusing way this can fail.</span></div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">Auto mode</div>
+          <div class="kv">
+            <span class="k2">sonnet-5</span><span class="v2"><span class="okk">supported</span></span>
+            <span class="k2">haiku-4.5</span><span class="v2" style="color:var(--wait)">not supported — falls back to Manual</span>
+          </div>
+        </div>
+        <div class="fgroup">
+          <div class="flabel">MCP servers on this machine</div>
+          <div class="kv">
+            <span class="k2">notion-mio</span><span class="v2">32 tools</span>
+            <span class="k2">atlassian</span><span class="v2">19 tools</span>
+          </div>
+          <div class="hint">A new chat gets <b>none of them</b> unless you pick it in the status bar.
+          Inheriting the whole machine costs roughly <b>5× the context per turn</b>.
+          <code>strict-mcp-config</code> is always on and is not a switch.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <div><b>Niente sezione «Access».</b> Per l'MVP si ascolta solo su <code>localhost</code>, quindi non
+      c'è nulla da configurare: c'è da <i>sapere</i>, e sta in System. Chiamarla «Access» prometterebbe
+      un controllo che non esiste.</div>
+      <div><b>Fuori, e con la ragione:</b> TTL automatico dello Sleep (ADR-005 lo rimanda), rotazione del
+      journal (§16.7 non decisa), anonimizzazione (rimandata), configurazione di un secondo agent
+      (ADR-004: uno solo). Ognuna aprirebbe una decisione non presa.</div>
+    </div>
+  </section>
+
+
+  <hr>
+
+  <!-- vocabolario -->
   <section>
     <p class="eyebrow">Dentro la conversazione</p>
     <h2>I blocchi, uno per uno</h2>
-    <p>Ogni tipo ha il suo segno, così si riconosce senza leggere. Quasi tutti chiusi di partenza.</p>
+    <p>Ogni tipo ha il suo segno, cos&igrave; si riconosce senza leggere. Quasi tutti chiusi di partenza &mdash;
+    con un&rsquo;eccezione: <b>la risposta a parole non si richiude mai</b>.</p>
 
     <div class="vocab">
       <div class="vrow">
-        <div><div class="vname">La tua richiesta</div><div class="vnote">apre il turno, il turno si richiude</div></div>
+        <div><div class="vname">La tua richiesta</div><div class="vnote">apre il turno, il turno si richiude. A sinistra l&rsquo;orario</div></div>
         <div class="vdemo" style="display:flex;flex-direction:column;gap:6px">
-          <div class="turn open"><div class="th"><span class="cx">▾</span><span class="q">ora provalo su una modifica vera</span><span class="n">18 blocchi · 1m 12s</span></div></div>
-          <div class="turn"><div class="th"><span class="cx">▸</span><span class="q">sì procedi col confronto affiancato</span><span class="n">41 blocchi</span></div></div>
+          <div class="turn open"><div class="th"><span class="cx">&#9662;</span><span class="tm">14:07</span><span class="q">now try it on a real change</span><span class="n">18 blocks &middot; 1m 12s</span></div></div>
+          <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">13:41</span><span class="q">yes, go ahead with the side-by-side diff</span><span class="n">41 blocks</span></div></div>
         </div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-brain"/></svg> Ragionamento</div><div class="vnote">chiuso, con quanto ha pensato</div></div>
-        <div class="vdemo"><div class="row think"><svg class="ic"><use href="#i-brain"/></svg><span class="k">Ragionamento</span><span class="v">1.2k token · 8s</span><span class="end">▸</span></div></div>
+        <div class="vdemo"><div class="row think"><svg class="ic"><use href="#i-brain"/></svg><span class="k">Reasoning</span><span class="v">1.2k tokens &middot; 8s</span><span class="end">&#9656;</span></div></div>
       </div>
       <div class="vrow">
-        <div><div class="vname">Risposta a parole</div><div class="vnote">se è lunga si richiude</div></div>
-        <div class="vdemo"><div class="prose">Il marcatore <code>\ No newline</code> non è una riga del file:
-        annota quella prima. Trattarlo come contenuto sballerebbe <b>tutta la numerazione a valle</b>.
-        <span style="color:var(--accent)">▾ mostra il resto (18 righe)</span></div></div>
+        <div><div class="vname">Risposta a parole</div><div class="vnote"><b style="color:var(--ink)">sempre per intero</b>, non si richiude mai</div></div>
+        <div class="vdemo"><div class="prose">The <code>\ No newline</code> marker is not a line of the file:
+        it annotates the one before it. Treating it as content would throw off <b>every line number
+        below</b>. The side-by-side view puts it in the gutter of the line it belongs to, so the
+        numbering on both sides keeps matching the file on disk.</div></div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-term"/></svg> Comando</div><div class="vnote">output chiuso</div></div>
         <div class="vdemo" style="display:flex;flex-direction:column;gap:5px">
-          <div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">npm run check</span><span class="end">✓</span></div>
-          <div class="row bad"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">npx tsc --noEmit</span><span class="end" style="color:var(--stop)">✗ 2 errori</span></div>
+          <div class="row"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">npm run check</span><span class="end">&#10003;</span></div>
+          <div class="row bad"><svg class="ic"><use href="#i-term"/></svg><span class="k">Bash</span><span class="v">npx tsc --noEmit</span><span class="end" style="color:var(--stop)">&#10007; 2 errors</span></div>
         </div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-brick"/></svg> Scrittura</div><div class="vnote">cliccabile, apre il confronto</div></div>
-        <div class="vdemo"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="k">src/core/diff.ts</span><span class="v"><span class="pl">+118</span> <span class="mn">−0</span></span><span class="end">▸</span></div></div>
+        <div class="vdemo"><div class="row file"><svg class="ic"><use href="#i-brick"/></svg><span class="k">src/core/diff.ts</span><span class="v"><span class="pl">+118</span> <span class="mn">&minus;0</span></span><span class="end">&#9656;</span></div></div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-doc"/></svg> Lettura</div>
         <div class="vname" style="margin-top:6px"><svg class="ic"><use href="#i-globe"/></svg> Rete</div>
         <div class="vname" style="margin-top:6px"><svg class="ic"><use href="#i-plug"/></svg> Strumento esterno</div></div>
         <div class="vdemo" style="display:flex;flex-direction:column;gap:5px">
-          <div class="row"><svg class="ic"><use href="#i-doc"/></svg><span class="k">Read</span><span class="v">docs/event-model.md</span><span class="end">✓</span></div>
-          <div class="row"><svg class="ic"><use href="#i-globe"/></svg><span class="k">Web</span><span class="v">code.claude.com/docs</span><span class="end">✓</span></div>
-          <div class="row"><svg class="ic"><use href="#i-plug"/></svg><span class="k">Notion</span><span class="v">aggiorna pagina · Roadmap</span><span class="end">✓</span></div>
+          <div class="row"><svg class="ic"><use href="#i-doc"/></svg><span class="k">Read</span><span class="v">docs/event-model.md</span><span class="end">&#10003;</span></div>
+          <div class="row"><svg class="ic"><use href="#i-globe"/></svg><span class="k">Web</span><span class="v">code.claude.com/docs</span><span class="end">&#10003;</span></div>
+          <div class="row"><svg class="ic"><use href="#i-plug"/></svg><span class="k">Notion</span><span class="v">update page &middot; Roadmap</span><span class="end">&#10003;</span></div>
         </div>
       </div>
       <div class="vrow">
-        <div><div class="vname"><svg class="ic"><use href="#i-block"/></svg> Azione bloccata</div><div class="vnote">non è un errore: puoi consentirla</div></div>
-        <div class="vdemo"><div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="k">Bloccato</span><span class="v">git reset --hard · fermato per sicurezza</span><span class="end" style="color:var(--wait)">Consenti</span></div></div>
+        <div><div class="vname"><svg class="ic"><use href="#i-block"/></svg> Azione bloccata</div><div class="vnote">non &egrave; un errore: puoi consentirla</div></div>
+        <div class="vdemo"><div class="row block"><svg class="ic"><use href="#i-block"/></svg><span class="k">Blocked</span><span class="v">git reset --hard &middot; stopped for safety</span><span class="end" style="color:var(--wait)">Allow</span></div></div>
       </div>
       <div class="vrow">
-        <div><div class="vname"><svg class="ic"><use href="#i-ask"/></svg> Cosa hai risposto</div><div class="vnote">resta nel flusso, dove è successo</div></div>
-        <div class="vdemo"><div class="row" style="background:var(--accent-soft)"><svg class="ic"><use href="#i-ask"/></svg><span class="k">Hai risposto</span><span class="v" style="color:var(--ink)">Tabulazioni</span><span class="end">2 giorni fa</span></div></div>
+        <div><div class="vname"><svg class="ic"><use href="#i-ask"/></svg> Cosa hai risposto</div><div class="vnote">resta nel flusso, dove &egrave; successo</div></div>
+        <div class="vdemo"><div class="row" style="background:var(--accent-soft)"><svg class="ic"><use href="#i-ask"/></svg><span class="k">You answered</span><span class="v" style="color:var(--ink)">Tabs</span><span class="end">2 days ago</span></div></div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-mail"/></svg> Da portare fuori</div><div class="vnote">campi separati, copiabili</div></div>
         <div class="vdemo">
           <div class="fileblk">
-            <div class="fh"><svg class="ic"><use href="#i-mail"/></svg><span class="nm" style="font-family:var(--sans);font-weight:600">Mail di risposta</span><span class="st" style="color:var(--accent)">Copia tutto</span></div>
-            <div style="padding:6px 10px;border-bottom:1px solid var(--line);font-size:10.5px"><span style="color:var(--muted)">Oggetto</span> · Re: preventivo revisionato <span style="float:right;color:var(--accent)">Copia</span></div>
-            <div style="padding:6px 10px;font-size:10.5px"><span style="color:var(--muted)">Corpo</span> · Buongiorno Marco, allego la versione… <span style="float:right;color:var(--accent)">Copia</span></div>
+            <div class="fh"><svg class="ic"><use href="#i-mail"/></svg><span class="nm" style="font-family:var(--sans);font-weight:600">Reply email</span><span class="st" style="color:var(--accent)">Copy all</span></div>
+            <div style="padding:6px 10px;border-bottom:1px solid var(--line);font-size:10.5px"><span style="color:var(--muted)">Subject</span> &middot; Re: revised quote <span style="float:right;color:var(--accent)">Copy</span></div>
+            <div style="padding:6px 10px;font-size:10.5px"><span style="color:var(--muted)">Body</span> &middot; Hi Marco, attached is the version&hellip; <span style="float:right;color:var(--accent)">Copy</span></div>
           </div>
         </div>
       </div>
@@ -556,7 +1328,7 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div><div class="vname"><svg class="ic"><use href="#i-cut"/></svg> La memoria si accorcia</div><div class="vnote">oltre qui ricorda solo un riassunto</div></div>
         <div class="vdemo"><div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:10.5px">
           <span style="flex:1;height:1px;background:var(--line-2)"></span>
-          <svg class="ic"><use href="#i-cut"/></svg> da qui in giù ricorda solo un riassunto
+          <svg class="ic"><use href="#i-cut"/></svg> from here down it only remembers a summary
           <span style="flex:1;height:1px;background:var(--line-2)"></span></div></div>
       </div>
     </div>
@@ -565,14 +1337,18 @@ svg.ic{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-wid
   <div class="choose">
     <h3>Cosa resta da decidere</h3>
     <ol>
-      <li><b>L'icona della modalità.</b> Nel disegno c'è un fulmine per <i>auto</i>: servono i segni per
-      <i>default</i> e <i>plan</i>, e vanno distinguibili a un'occhiata.</li>
-      <li><b>Avviare un lavoro</b> — il <b>+</b> in cima all'elenco — e <b>le impostazioni dei permessi</b>,
-      l'ingranaggio in fondo: hanno un posto ma non sono ancora disegnate dentro.</li>
+      <li><b>L&rsquo;icona della modalit&agrave;.</b> Nel disegno c&rsquo;&egrave; un fulmine per <i>auto</i>: servono i segni per
+      <i>default</i> e <i>plan</i>, e vanno distinguibili a un&rsquo;occhiata.</li>
+      <li><b>Avviare un lavoro</b> &mdash; il <b>+</b> in cima all&rsquo;elenco &mdash; e <b>le impostazioni dei permessi</b>,
+      l&rsquo;ingranaggio in fondo: hanno un posto ma non sono ancora disegnate dentro.</li>
       <li><b>La versione stretta.</b> Elenco e conversazione non ci stanno affiancati su telefono: va
       deciso quale dei due comanda.</li>
       <li><b>Il colore</b> oltre i sei o sette progetti.</li>
     </ol>
   </div>
+
+  <p style="margin-top:26px;font-size:12px;color:var(--muted)">Icone: <b>Lucide</b> 1.33 (licenza ISC),
+  incorporate come sprite SVG. Il sandbox degli artifact blocca gli host esterni, quindi nessuna CDN:
+  nell&rsquo;app vera si installa il pacchetto e si usa la libreria normalmente.</p>
 
 </div>
