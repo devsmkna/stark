@@ -74,6 +74,9 @@ export type SessionSnapshot = {
   cost: Cost
   quota?: QuotaView
   lastSeq: number
+  /** Quando è successo l'ultimo evento. La barra laterale mostra l'ora, e per il §4
+   *  ogni cosa che la UI mostra deve nascere dal journal e non da altrove. */
+  lastTs: number
   resumeRef?: string
   error?: string
 }
@@ -83,7 +86,7 @@ function emptySnapshot(sessionId: string): SessionSnapshot {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
     blocked: [], notices: [],
-    usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0,
+    usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
   }
 }
 
@@ -96,6 +99,7 @@ export function reduce(events: CanonicalEvent[], sessionId = ''): SessionSnapsho
 /** Applica un evento in place. La UI dal vivo userà questa, il replay userà `reduce`. */
 export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot {
   s.lastSeq = e.seq
+  s.lastTs = e.ts
   if (!s.sessionId) s.sessionId = e.sessionId
   const p = e.payload
   const turn = (): TurnView | undefined => s.turns[s.turns.length - 1]

@@ -8,8 +8,10 @@ const daemon = await startDaemon({
   ...(process.env['STARK_MODEL'] ? { model: process.env['STARK_MODEL'] } : {}),
 })
 
-console.log(`STARK in ascolto su ${daemon.url}`)
-console.log(`journal in ${STARK_HOME}/sessioni`)
+console.log(`\n  Apri STARK:  ${daemon.url}/?token=${daemon.token}\n`)
+console.log(`Il token sta nell'indirizzo una volta sola: al primo caricamento STARK lo`)
+console.log(`sposta in un cookie e lo toglie dalla barra degli indirizzi.`)
+console.log(`\njournal in ${STARK_HOME}/sessioni`)
 console.log(`\ntoken: ${daemon.token}`)
 console.log(`\nEsempio:\n  curl -s ${daemon.url}/api/sessions -H "Authorization: Bearer ${daemon.token}"`)
 console.log(`\nIl token cambia a ogni avvio: non è un segreto da conservare, è ciò che`)

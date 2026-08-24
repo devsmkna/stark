@@ -7,6 +7,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard } from './security.ts'
+import { serveUi } from './static.ts'
 import { Registry, type OpenSpec } from './registry.ts'
 import type { Command } from '../core/events.ts'
 
@@ -26,6 +27,7 @@ export type Daemon = {
 export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   let port = opts.port ?? 0
   const guard = createGuard(() => port)
+  const guardToken = guard.token
   const registry = new Registry({
     ...(opts.model ? { model: opts.model } : {}),
     // Le sessioni dell'utente possono vivere fuori da ~/.claude. Se non si propaga
@@ -34,7 +36,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     configDir: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
   })
 
-  const server = createServer((req, res) => { void route(req, res, guard, registry) })
+  const server = createServer((req, res) => { void route(req, res, guard, registry, guardToken) })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
   await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
@@ -56,7 +58,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
 
 async function route(
   req: IncomingMessage, res: ServerResponse,
-  guard: ReturnType<typeof createGuard>, registry: Registry,
+  guard: ReturnType<typeof createGuard>, registry: Registry, token: string,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -107,6 +109,10 @@ async function route(
         return send(res, esito.ok ? 200 : 409, esito)
       }
     }
+
+    // Tutto ciò che non è /api è la UI. Sta in fondo di proposito: l'API ha la
+    // precedenza, così un file compilato non potrà mai oscurare una rotta vera.
+    if (!path.startsWith('/api/') && serveUi(req, res, token)) return
 
     send(res, 404, { error: 'non trovato' })
   } catch (e) {

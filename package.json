@@ -17,11 +17,21 @@
     "import": "node src/cli/import-check.ts",
     "stark": "node src/cli/stark.ts",
     "daemon": "node src/cli/daemon-check.ts",
-    "diff": "node src/cli/diff-live-check.ts"
+    "diff": "node src/cli/diff-live-check.ts",
+    "ui:dev": "vite",
+    "ui:build": "vite build",
+    "ui:check": "svelte-check --tsconfig ./ui/tsconfig.json",
+    "icons": "node tools/gen-icons.mjs"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/node": "^24.0.0",
-    "typescript": "^5.7.2"
+    "lucide-static": "^1.34.0",
+    "playwright-core": "^1.62.1",
+    "svelte": "^5.56.10",
+    "svelte-check": "^4.7.6",
+    "typescript": "^5.7.2",
+    "vite": "^8.2.2"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.241"

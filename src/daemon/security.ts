@@ -45,6 +45,16 @@ export function createGuard(port: () => number): Guard {
   }
 }
 
+function cookieToken(req: IncomingMessage): string | null {
+  const raw = req.headers.cookie
+  if (!raw) return null
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=')
+    if (k === 'stark') return rest.join('=')
+  }
+  return null
+}
+
 function isLocal(addr: string): boolean {
   const a = addr.replace(/^::ffff:/, '')
   return a === '127.0.0.1' || a === '::1' || a.startsWith('127.')
@@ -65,9 +75,15 @@ function hasToken(req: IncomingMessage, token: string): boolean {
   const auth = req.headers.authorization
   const given = typeof auth === 'string' && auth.startsWith('Bearer ')
     ? auth.slice(7)
-    // Ultima spiaggia per i client che non possono mettere header. Sconsigliato: le
-    // query string finiscono nei log e nella cronologia.
-    : new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? ''
+    // Il cookie serve alle sottorisorse della pagina: il browser scarica script e
+    // fogli di stile senza poter aggiungere intestazioni, e senza questo la prima
+    // pagina passerebbe per poi restare bianca. È messo `SameSite=Strict`, quindi
+    // non parte nemmeno per richieste che nascono da un altro sito.
+    : cookieToken(req)
+    // Ultima spiaggia per i client che non possono fare nessuna delle due cose, e
+    // per il primo caricamento della pagina, che non ha ancora il cookie.
+    // Sconsigliato in generale: le query string finiscono nei log e nella cronologia.
+    ?? new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? ''
   if (given.length !== token.length) return false
   // Confronto a tempo costante: un `===` perde la partita un carattere alla volta.
   return timingSafeEqual(Buffer.from(given), Buffer.from(token))

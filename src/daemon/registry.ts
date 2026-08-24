@@ -24,11 +24,15 @@ export type OpenSpec = {
 
 export type SessionRow = {
   id: string
+  /** Il primo prompt dell'utente, che è come si riconosce una conversazione. Il titolo
+   *  scritto dal modello si somiglia sempre; la prima frase scritta da te no. */
+  title: string
   state: string
   cwd?: string
   model?: string
   turns: number
   lastSeq: number
+  lastTs: number
   live: boolean
 }
 
@@ -43,6 +47,14 @@ type Live = {
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
   pending: Map<string, Pending>
+}
+
+/** §16.3: nell'MVP il prompt è testo semplice, quindi basta concatenare le parti. */
+function titleOf(s: SessionSnapshot): string {
+  const parts = s.turns[0]?.prompt ?? []
+  const text = parts.map(x => x.text).join(' ').trim().replace(/\s+/g, ' ')
+  if (!text) return `sessione ${s.sessionId.slice(0, 8)}`
+  return text.length > 64 ? `${text.slice(0, 63)}…` : text
 }
 
 export const STARK_HOME = process.env['STARK_HOME'] ?? resolve(homedir(), '.stark')
@@ -124,15 +136,17 @@ export class Registry {
         const id = f.replace(/\.jsonl$/, '')
         const s = reduce(Journal.read(resolve(SESSIONS, f)), id)
         rows.set(id, {
-          id, state: s.state, turns: s.turns.length, lastSeq: s.lastSeq, live: false,
+          id, title: titleOf(s), state: s.state, turns: s.turns.length,
+          lastSeq: s.lastSeq, lastTs: s.lastTs, live: false,
           ...(s.cwd ? { cwd: s.cwd } : {}), ...(s.model ? { model: s.model } : {}),
         })
       }
     }
     for (const [id, l] of this.live) {
       rows.set(id, {
-        id, state: l.snapshot.state, turns: l.snapshot.turns.length,
-        lastSeq: l.snapshot.lastSeq, live: true,
+        id, title: titleOf(l.snapshot), state: l.snapshot.state,
+        turns: l.snapshot.turns.length,
+        lastSeq: l.snapshot.lastSeq, lastTs: l.snapshot.lastTs, live: true,
         ...(l.snapshot.cwd ? { cwd: l.snapshot.cwd } : {}),
         ...(l.snapshot.model ? { model: l.snapshot.model } : {}),
       })
