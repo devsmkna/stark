@@ -7,6 +7,7 @@
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { statSync } from 'node:fs'
+import { promptText } from '../core/events.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
 import { Journal } from '../core/journal.ts'
 import { reduce } from '../core/reduce.ts'
@@ -46,9 +47,9 @@ console.log(`token in uscita nella conversazione: ${tokens.toLocaleString('it-IT
 console.log(`\nrighe scartate: ${Object.entries(stats.saltate).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`)
 console.log('\nprimi turni:')
 for (const t of s.turns.slice(0, 3)) {
-  const p = t.prompt[0]?.text.replace(/\s+/g, ' ').slice(0, 70) ?? ''
+  const p = promptText(t.prompt).replace(/\s+/g, ' ').slice(0, 70)
   console.log(`  "${p}…" -> ${t.parts.length} parti`)
 }
 console.log('\nultimo turno:')
 const ultimo = s.turns[s.turns.length - 1]
-console.log(`  "${ultimo?.prompt[0]?.text.replace(/\s+/g, ' ').slice(0, 70) ?? ''}…" -> ${ultimo?.parts.length} parti`)
+console.log(`  "${promptText(ultimo?.prompt ?? []).replace(/\s+/g, ' ').slice(0, 70)}…" -> ${ultimo?.parts.length} parti`)

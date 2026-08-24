@@ -11,6 +11,7 @@
   import Dock from './Dock.svelte'
   import type { LinkStatus } from '../lib/api.ts'
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
+  import { promptText } from '$core/events.ts'
   import { colours, hhmm, project, since, toolIcon } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -31,7 +32,11 @@
     opened = next
   }
 
-  const promptOf = (t: TurnView): string => t.prompt.map(p => p.text).join(' ')
+  const promptOf = (t: TurnView): string => promptText(t.prompt)
+  /** Le immagini che hai mandato con quel turno: stanno prima del testo, come le ha
+   *  viste il modello. I byte non sono nel journal, quindi si chiedono al daemon. */
+  const immaginiOf = (t: TurnView): Extract<TurnView['prompt'][number], { type: 'image' }>[] =>
+    t.prompt.filter(p => p.type === 'image')
   // Sulla lista intera, non su questa sola riga: la tavolozza si assegna in ordine
   // alfabetico fra TUTTI i progetti, quindi calcolarla su un elenco di uno darebbe
   // sempre il primo colore — e lo stesso progetto avrebbe due colori diversi nelle
@@ -118,6 +123,20 @@
 
         {#if open}
           <div class="tb">
+            {#if immaginiOf(turn).length > 0}
+              <!-- Quello che gli hai fatto vedere, sopra a tutto: è la prima cosa che
+                   il modello ha avuto davanti, e riaprendo due giorni dopo è la prima
+                   che serve per capire di cosa si stava parlando. -->
+              <div class="pimgs">
+                {#each immaginiOf(turn) as img (img.ref)}
+                  <a href={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
+                    target="_blank" rel="noreferrer" title={img.name ?? 'image'}>
+                    <img src={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
+                      alt={img.name ?? 'attachment'} />
+                  </a>
+                {/each}
+              </div>
+            {/if}
             {#each turn.parts as part (part.kind === 'tool' ? part.callId : part.partId)}
               {#if part.kind === 'text'}
                 <!-- Sempre per intero: è l'unica cosa scritta per l'utente. -->
@@ -188,6 +207,15 @@
 </div>
 
 <style>
+  /* Le immagini mandate col prompt: piccole, perché sono un promemoria di cosa hai
+     mandato, non la cosa da guardare. Un clic le apre a grandezza vera. */
+  .pimgs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  .pimgs img {
+    max-height: 96px; max-width: 220px; border-radius: 7px;
+    border: 1px solid var(--line-2); display: block;
+  }
+  .pimgs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   .th, .iconb, .effbtn { background: none; font: inherit; color: inherit; }
   .th { width: 100%; border: 0; text-align: left; }
   .th:focus-visible, .iconb:focus-visible, .effbtn:focus-visible {

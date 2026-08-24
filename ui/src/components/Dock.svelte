@@ -9,7 +9,7 @@
   import Ask from './Ask.svelte'
   import Status from './Status.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
-  import type { SlashCommand } from '$core/events.ts'
+  import type { Attachment, SlashCommand } from '$core/events.ts'
   import { activity } from '$core/activity.ts'
   import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -39,14 +39,71 @@
 
   async function send(): Promise<void> {
     const draft = text
-    if (!draft.trim()) return
+    const addosso = allegati
+    if (!draft.trim() && addosso.length === 0) return
     // Si svuota subito: se il comando fosse rifiutato, il testo torna. Aspettare la
     // risposta per svuotare farebbe sembrare lenta una casella che non lo è.
     text = ''
+    allegati = []
     grow()
-    const ok = await store.prompt(draft)
-    if (!ok) { text = draft; grow() }
+    const ok = await store.prompt(draft, addosso)
+    if (!ok) { text = draft; allegati = addosso; grow() }
   }
+
+  // ─── allegati ─────────────────────────────────────────────────────────────
+
+  /** Quello che parte insieme al testo. Vuoto quasi sempre; non vuoto quando serve. */
+  let allegati = $state<Attachment[]>([])
+
+  /** I quattro tipi che il modello accetta. Gli altri non si accodano in silenzio. */
+  const TIPI = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+  /** Oltre questo, l'immagine non parte. Il numero è nostro, e il messaggio lo dice. */
+  const MASSIMO = 10 * 1024 * 1024
+
+  async function aggiungi(file: File | null): Promise<void> {
+    if (!file) return
+    if (!TIPI.includes(file.type)) {
+      store.refused = `${file.name || 'that file'} is a ${file.type || 'file'} — only PNG, JPEG, GIF and WebP can be sent`
+      return
+    }
+    if (file.size > MASSIMO) {
+      store.refused = `${file.name || 'that image'} is ${Math.round(file.size / 1e6)} MB — the limit is 10 MB`
+      return
+    }
+    // `readAsDataURL` e non `btoa` su un ArrayBuffer: quest'ultimo, su un'immagine
+    // vera, si fa passare un array di milioni di elementi come argomenti e sfonda lo
+    // stack. Qui la conversione la fa il browser.
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(String(r.result))
+      r.onerror = () => rej(r.error)
+      r.readAsDataURL(file)
+    })
+    allegati = [...allegati, {
+      type: 'image',
+      mediaType: file.type as Attachment['mediaType'],
+      data: dataUrl.slice(dataUrl.indexOf(',') + 1),
+      ...(file.name ? { name: file.name } : {}),
+    }]
+  }
+
+  function incolla(e: ClipboardEvent): void {
+    const items = [...(e.clipboardData?.items ?? [])].filter(i => i.kind === 'file')
+    if (items.length === 0) return
+    // Solo se ci sono davvero dei file: uno screenshot incollato arriva così, ma il
+    // testo normale no, e intercettarlo romperebbe il copia-incolla di tutti i giorni.
+    e.preventDefault()
+    for (const i of items) void aggiungi(i.getAsFile())
+  }
+
+  function lascia(e: DragEvent): void {
+    e.preventDefault()
+    sopra = false
+    for (const f of e.dataTransfer?.files ?? []) void aggiungi(f)
+  }
+
+  /** Qualcosa sta passando sopra il blocco: si dice che qui si può lasciare. */
+  let sopra = $state(false)
 
   function key(e: KeyboardEvent): void {
     // Col menu dei comandi aperto i tasti vogliono dire un'altra cosa: Invio completa
@@ -124,7 +181,13 @@
   }
 </script>
 
-<div class="dock">
+<!-- Trascinare funziona su tutto il blocco, non solo sulla casella: chi arriva con
+     un'immagine in mano punta «in basso», non un rettangolo di 24 pixel. -->
+<div class="dock" class:sopra
+  ondragover={e => { if (store.live) { e.preventDefault(); sopra = true } }}
+  ondragleave={() => { sopra = false }}
+  ondrop={lascia}
+  role="presentation">
   {#if store.refused}
     <div class="refused">
       <Icon name="i-warn" />
@@ -179,9 +242,23 @@
     </div>
   {/if}
 
+  {#if allegati.length > 0}
+    <div class="allegati">
+      {#each allegati as a, i (a.data.slice(0, 32) + i)}
+        <div class="all">
+          <img src={`data:${a.mediaType};base64,${a.data}`} alt={a.name ?? 'attachment'} />
+          <span class="n">{a.name ?? 'pasted image'}</span>
+          <button class="x" aria-label="Remove"
+            onclick={() => { allegati = allegati.filter((_, j) => j !== i) }}>✕</button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   {#if store.live}
     <textarea
       class="input"
+      onpaste={incolla}
       bind:this={box}
       bind:value={text}
       oninput={() => { chiuso = false; grow() }}
@@ -233,6 +310,24 @@
   .slash .mi.on { background: var(--accent-soft); }
   .slash .mi:hover:not(.on) { background: var(--surface-2); }
   .slash .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* Gli allegati in attesa di partire, sopra la casella. */
+  .allegati { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  .all {
+    display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 3px;
+    border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2);
+    font-size: 10px; max-width: 240px;
+  }
+  .all img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; flex: none; }
+  .all .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+  .all .x {
+    border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px;
+    padding: 0 2px; line-height: 1;
+  }
+  .all .x:hover { color: var(--ink); }
+  /* Mentre qualcosa passa sopra: un bordo, non un velo — il velo coprirebbe la
+     conversazione, che è quello che si sta guardando per decidere cosa allegare. */
+  .dock.sopra { outline: 2px dashed var(--accent); outline-offset: -4px; }
   textarea.input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 
   .stopb:focus-visible { outline: 2px solid var(--stop); outline-offset: 1px; }

@@ -156,6 +156,40 @@ fondere terrebbe in vita un server sparito dalla macchina, in un elenco da cui n
 toglierlo. Sta nel journal anche perché è da lì che il **risveglio** sa cosa riaccendere —
 senza, una chat che dorme si sveglia senza i suoi strumenti e sembra rotta.
 
+**`PromptPart` — §16.3, chiuso collegando gli allegati.**
+
+```ts
+type PromptPart =
+  | { type: 'text',  text: string }
+  | { type: 'image', ref: string, mediaType: string, bytes: number, name?: string }
+```
+
+`ref` è lo **sha256 dei byte**, che stanno in un file sotto `~/.stark/allegati/<sessione>/`.
+Nel journal ci va il riferimento e non il contenuto, e non è un dettaglio di efficienza: il
+journal si **rilegge tutto a ogni risveglio**, e un megabyte a colpo lo renderebbe caro
+esattamente dove ADR-005 lo vuole leggero. L'invariante del §4 regge lo stesso — la rilettura
+ritrova il riferimento, e il file è lì.
+
+Il comando porta invece i byte, perché è il viaggio dal browser al daemon:
+
+```ts
+type Attachment = {
+  type: 'image'
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  data: string   // base64
+  name?: string
+}
+```
+
+Verificato prima di scriverlo: il CLI **accetta** un blocco `image` dentro un messaggio utente
+in stream-json, e il modello lo vede (ha descritto il logo di STARK). Le immagini vanno **prima**
+del testo, come raccomanda la documentazione dell'API: il modello legge la domanda avendo già
+davanti ciò a cui si riferisce.
+
+I quattro tipi sono quelli che il modello accetta. Un **file di testo non è un allegato**: si
+incolla, o si nomina per percorso — l'agent sa leggerlo da solo, ed è il motivo per cui non
+serve spedirglielo.
+
 **`session.commands` — aggiunto collegando i comandi slash.**
 
 ```ts
@@ -626,8 +660,11 @@ cui `Capabilities` dovrà lavorare davvero.
 2. ~~**Identità stabile delle parti.**~~ **Risolto dal codice.** Il `partId` è
    `${messageId}#${index}`: l'indice si ricicla a ogni messaggio, l'id del messaggio no.
    Verificato che i partId restano distinti attraverso più messaggi dello stesso turno.
-3. **Rappresentazione del prompt utente.** Testo semplice nell'MVP; allegati e riferimenti a file
-   sono da definire.
+3. ~~**Rappresentazione del prompt utente.**~~ **Risolto per le immagini** (vedi `PromptPart`
+   nel §6): si incollano e si trascinano, viaggiano come blocchi `image` verso l'agent e come
+   riferimento nel journal. Resta fuori il **riferimento a un file per percorso**, che però non
+   ha bisogno di un tipo nuovo: l'agent legge un percorso scritto nel testo. Va deciso se serve
+   un modo per *scegliere* quel file invece di scriverlo, e quello sì che tocca la UI.
 4. **L'hook `PermissionDenied`.** Esiste e servirebbe a intercettare i blocchi del classificatore
    in modo pulito invece di riconoscerli dal testo dell'errore. Mai provato: finché non lo si
    verifica, `action.blocked` si ricava dal `tool_result`.

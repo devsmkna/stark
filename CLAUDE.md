@@ -81,13 +81,16 @@ della macchina e li accende uno per uno, spenti di default, con la scelta che to
 risveglio. E i **comandi slash** si scrivono: la casella li propone appena scrivi `/`, con
 argomenti e alias.
 
+**Il prompt non è più solo testo**: si incollano e si trascinano immagini (PNG, JPEG, GIF,
+WebP). Nel journal va il **riferimento**, non i byte: quello si rilegge tutto a ogni risveglio.
+
 **Il daemon sopravvive al terminale**: `npm run stark:start` lo stacca, `stark:status` e
 `stark:stop` lo governano, l'indirizzo è fisso e il token sta in `~/.stark/token`. Una scheda
 aperta si ricollega da sola dopo un riavvio.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 37 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 40 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -100,11 +103,11 @@ che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
-Cosa manca nella UI, oltre alle impostazioni: il prompt è **solo testo**, senza allegati né
-immagini (§16.3); nessun **instradamento**, quindi un ricaricamento perde la chat scelta; la
-**compattazione del contesto** arriva come evento e non si vede da nessuna parte; e delle
-notifiche mancano le due parti che vivono nelle impostazioni — **scegliere il suono** di
-ciascun evento e **silenziare un progetto** intero.
+Cosa manca nella UI, oltre alle impostazioni: nessun **instradamento**, quindi un ricaricamento
+perde la chat scelta; la **compattazione del contesto** arriva come evento e non si vede da
+nessuna parte; scegliere un **file per percorso** senza scriverlo a mano; e delle notifiche
+mancano le due parti che vivono nelle impostazioni — **scegliere il suono** di ciascun evento e
+**silenziare un progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una

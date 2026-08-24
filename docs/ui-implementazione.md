@@ -92,7 +92,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 37 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 40 verifiche sulla catena, costo zero di quota |
 | `npm run daemon` | 16 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
 
 ---
@@ -366,7 +366,35 @@ scrivere lo riapre.
 `.mi.on` in `app.css` e se lo mangiava — la riga scelta con le frecce restava invisibile,
 cioè il menu non si poteva usare da tastiera, che è il modo in cui lo si usa.
 
-### 5.9 Impostazioni
+### 5.9 Gli allegati
+
+Verificato per primo, perché tutto il resto ne dipendeva: il CLI **accetta** un blocco `image`
+dentro un messaggio utente in stream-json, e il modello lo vede.
+
+Il giro: la UI legge il file con `readAsDataURL` (non `btoa` su un `ArrayBuffer` — su
+un'immagine vera quello passa milioni di argomenti a una funzione e sfonda lo stack), manda il
+base64 nel comando, il **daemon scrive i byte** in `~/.stark/allegati/<sessione>/<sha256>.<ext>`
+e mette nel journal il solo riferimento. La conversazione li rilegge da
+`GET /api/sessions/:id/blob/:ref`, che passa dal cookie come ogni altra sottorisorsa.
+
+**Perché il riferimento e non i byte:** il journal si rilegge tutto a ogni risveglio. Misurato
+su una schermata da 683 KB: journal di 41 KB con il riferimento, contro quasi un megabyte se ci
+fossero finiti i byte. C'è un controllo in `npm run check` che tiene quella riga sotto i 400
+caratteri, così se un giorno qualcuno ce li rimette il test lo dice prima del disco.
+
+**Trappole:**
+
+- il corpo delle richieste era limitato a **4 MB** per tutte le rotte: in base64 un'immagine
+  cresce di un terzo, quindi una schermata da 3 MB non passava. Ora il limite è un parametro,
+  e solo i comandi ne hanno uno grande (32 MB).
+- `ref` arriva da un indirizzo: il registro **ricontrolla** che sia solo esadecimale, perché un
+  `..` in mezzo trasformerebbe quella rotta in un modo di leggere qualunque file della macchina.
+- cancellare una conversazione cancella anche i suoi allegati. Senza, restavano su disco senza
+  che nessuno sapesse più di chi erano.
+- il nome del file è l'impronta del contenuto, quindi la risposta si può marcare `immutable`:
+  la cache del browser non può servire una cosa per un'altra.
+
+### 5.10 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

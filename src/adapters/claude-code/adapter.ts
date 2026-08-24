@@ -12,7 +12,19 @@ import {
   type McpServerStatus, type Options, type PermissionResult, type PermissionUpdate,
   type Query, type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { AgentQuestion, McpServer, Payload, PermissionMode } from '../../core/events.ts'
+import type {
+  AgentQuestion, McpServer, Payload, PermissionMode, PromptPart,
+} from '../../core/events.ts'
+
+/** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
+export type PromptImage = {
+  ref: string
+  mediaType: string
+  bytes: number
+  name?: string
+  /** base64. Non finisce nel journal: vedi `PromptPart`. */
+  data: string
+}
 import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
   resolveModel, slashCommands, type LaunchOptions,
@@ -61,7 +73,7 @@ export class ClaudeCodeAdapter {
   private q: Query | null = null
   private created = false
   private loop: Promise<void> | null = null
-  private pendingTurn: { turnId: string; text: string } | null = null
+  private pendingTurn: { turnId: string; parts: PromptPart[] } | null = null
   private turnEnd: (() => void) | null = null
 
   constructor(opts: AdapterOptions) { this.opts = opts }
@@ -219,17 +231,39 @@ export class ClaudeCodeAdapter {
     this.emit({ k: 'session.mcp', servers })
   }
 
-  prompt(text: string): string {
+  /**
+   * Le immagini vanno **prima** del testo, ed è la disposizione che la documentazione
+   * dell'API raccomanda: il modello legge la domanda avendo già davanti ciò a cui si
+   * riferisce. Nel journal finiscono con lo stesso ordine, ma **senza i byte**: quelli
+   * stanno in un file, e qui viaggia il riferimento (vedi `PromptPart`).
+   */
+  prompt(text: string, immagini: PromptImage[] = []): string {
     const turnId = randomUUID()
     this.tr.beginTurn(turnId)
-    if (this.created) this.emit({ k: 'turn.started', turnId, prompt: [{ type: 'text', text }] })
-    else this.pendingTurn = { turnId, text }
+    const parts: PromptPart[] = [
+      ...immagini.map(i => ({
+        type: 'image' as const, ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
+        ...(i.name ? { name: i.name } : {}),
+      })),
+      { type: 'text' as const, text },
+    ]
+    if (this.created) this.emit({ k: 'turn.started', turnId, prompt: parts })
+    else this.pendingTurn = { turnId, parts }
     const msg: SDKUserMessage = {
       type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text }] },
+      message: {
+        role: 'user',
+        content: [
+          ...immagini.map(i => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: i.mediaType, data: i.data },
+          })),
+          { type: 'text' as const, text },
+        ],
+      },
       parent_tool_use_id: null,
       session_id: '',
-    }
+    } as SDKUserMessage
     this.input.push(msg)
     return turnId
   }
@@ -299,7 +333,7 @@ export class ClaudeCodeAdapter {
     if (this.pendingTurn) {
       const t = this.pendingTurn
       this.pendingTurn = null
-      this.emit({ k: 'turn.started', turnId: t.turnId, prompt: [{ type: 'text', text: t.text }] })
+      this.emit({ k: 'turn.started', turnId: t.turnId, prompt: t.parts })
     }
   }
 

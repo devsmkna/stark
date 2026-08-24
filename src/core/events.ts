@@ -116,9 +116,34 @@ export type AgentQuestion = {
 }
 
 /** §16.3 resta aperto: nell'MVP il prompt è testo semplice. */
-export type PromptPart = { type: 'text'; text: string }
+/**
+ * Un pezzo di ciò che hai mandato. §16.3 era aperto proprio qui: nell'MVP il prompt era
+ * solo testo, e uno schermo da far vedere all'agent non aveva strada per arrivarci.
+ *
+ * L'immagine nel journal viaggia **per riferimento**, non per contenuto: `ref` è lo
+ * sha256 dei byte, che stanno in un file accanto ai journal. Metterci dentro il base64
+ * gonfierebbe di un megabyte a colpo un file che si rilegge tutto a ogni risveglio, e
+ * il §4 continua a valere lo stesso — la rilettura ritrova il riferimento e il file c'è.
+ */
+export type PromptPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; ref: string; mediaType: string; bytes: number; name?: string }
 
-export type Attachment = { type: 'file'; path: string }
+/**
+ * Cosa la UI allega a un prompt. Qui i byte ci sono davvero, perché è il viaggio
+ * dal browser al daemon: è il daemon a scriverli su disco e a sostituirli con un `ref`.
+ *
+ * I quattro tipi sono quelli che il modello accetta. Un file di testo non sta qui:
+ * si incolla, o si nomina per percorso — l'agent sa leggerlo da solo, ed è il motivo
+ * per cui non serve spedirglielo.
+ */
+export type Attachment = {
+  type: 'image'
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  /** base64, senza il prefisso `data:`. */
+  data: string
+  name?: string
+}
 
 /** §9: esattamente la forma di `structuredPatch`. Nessun diff da calcolare. */
 export type Hunk = {
@@ -266,3 +291,11 @@ export type Command =
   | { c: 'question.reject'; requestId: string }
 
 export const EMPTY_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+
+/**
+ * Il testo di un prompt, senza le immagini. Sta qui perché serve identico in tre posti
+ * — il titolo della conversazione, l'intestazione del turno, l'import — e perché da
+ * quando un prompt può contenere altro, `parts.map(p => p.text)` non è più vero.
+ */
+export const promptText = (parts: PromptPart[]): string =>
+  parts.filter(p => p.type === 'text').map(p => p.text).join(' ')

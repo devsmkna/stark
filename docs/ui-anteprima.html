@@ -123,6 +123,17 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .slash .line,.slash .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .slash .hint2{color:var(--muted);font-size:10.5px;font-family:var(--mono)}
 .caret{display:inline-block;width:1px;height:12px;background:var(--ink);vertical-align:-2px;margin-left:1px}
+/* gli allegati in attesa di partire, sopra la casella */
+.allegati{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.all{display:flex;align-items:center;gap:6px;padding:3px 6px 3px 3px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface-2);font-size:10px;max-width:240px}
+.all .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.all .x{color:var(--muted);font-size:11px;padding:0 2px;line-height:1}
+/* la miniatura, disegnata: nell'app e' l'immagine vera */
+.tn{width:26px;height:26px;border-radius:5px;flex:none;background:linear-gradient(160deg,var(--surface-3),var(--line-2));border:1px solid var(--line-2);position:relative;display:inline-block}
+.tn::after{content:"";position:absolute;left:3px;right:3px;top:5px;height:2px;border-radius:2px;background:var(--muted);opacity:.5;box-shadow:0 5px 0 var(--muted)}
+.tn.big{width:120px;height:74px;border-radius:7px}
+.tn.big::after{left:10px;right:10px;top:18px;height:4px;box-shadow:0 14px 0 var(--muted),0 28px 0 var(--muted)}
+.pimgs{display:flex;flex-wrap:wrap;gap:6px}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
 .sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}
@@ -692,6 +703,50 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       che l&igrave; non funziona &egrave; l&rsquo;agent, non noi.</div>
     </div>
   </section>
+
+  <!-- allegati -->
+  <section class="sec">
+    <h2>Fargli vedere una cosa</h2>
+    <p>Il prompt era <b>solo testo</b>. Uno schermo da mostrare all&rsquo;agent &mdash; il grafico che non
+    torna, l&rsquo;errore che compare solo a video &mdash; non aveva strada per arrivarci, e quella era
+    l&rsquo;ultima cosa che dal terminale si poteva fare e da STARK no.</p>
+    <p>Si <b>incolla</b> (uno screenshot arriva cos&igrave;) o si <b>trascina</b> sul blocco in basso, non su
+    un rettangolo di ventiquattro pixel: chi arriva con un&rsquo;immagine in mano punta <i>in basso</i>.
+    Restano l&igrave;, in attesa, finch&eacute; non premi Invio.</p>
+
+    <div class="mock" style="display:block;margin-top:6px">
+      <div class="dock" style="border-top:0">
+        <div class="allegati">
+          <div class="all"><span class="tn"></span><span class="n">Schermata 2026-08-24.png</span><span class="x">&#10005;</span></div>
+          <div class="all"><span class="tn"></span><span class="n">grafico-quota.png</span><span class="x">&#10005;</span></div>
+        </div>
+        <div class="input">Il secondo grafico non torna: perch&eacute;?</div>
+      </div>
+    </div>
+
+    <div class="eyebrow" style="margin-top:22px">E nella conversazione, sopra la risposta</div>
+    <div class="mock" style="display:block;margin-top:6px;padding:14px 16px">
+      <div style="display:flex;gap:8px;align-items:baseline;font-size:11px">
+        <span style="color:var(--muted);font-variant-numeric:tabular-nums">14:31</span>
+        <b>Il secondo grafico non torna: perch&eacute;?</b>
+      </div>
+      <div class="pimgs" style="margin-top:8px"><span class="tn big"></span><span class="tn big"></span></div>
+      <div style="font-size:11.5px;color:var(--ink-2)">Il secondo grafico somma due volte le sessioni
+      del venerd&igrave;&hellip;</div>
+    </div>
+
+    <div class="note">
+      <div><b>Nel journal ci va il riferimento, non i byte.</b> L&rsquo;immagine sta in un file accanto
+      ai journal, e il journal porta la sua impronta. Un megabyte a colpo dentro un file che si
+      <b>rilegge tutto a ogni risveglio</b> sarebbe stato il modo pi&ugrave; veloce di rendere caro lo
+      Sleep. Riaprendo la chat due giorni dopo l&rsquo;immagine c&rsquo;&egrave; ancora: &egrave; l&igrave;.</div>
+      <div><b>PNG, JPEG, GIF, WebP.</b> Sono i quattro che il modello accetta. Un file di un altro
+      tipo lo dice invece di sparire nel nulla; un file di testo non si allega e non serve &mdash;
+      l&rsquo;agent sa leggerlo da s&eacute;, basta nominarglielo.</div>
+    </div>
+  </section>
+
+  <hr>
 
   <!-- effetti -->
   <section class="sec">
@@ -1506,6 +1561,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       <li><b>La riga dice cosa sta facendo e da quanto sta cos&igrave;</b> &mdash; il tempo su tutte le righe,
       l&rsquo;operazione in corso solo su quelle vive. Era la prima cosa che il &sect;1 chiedeva per decidere
       se entrare in una chat, e la riga non la diceva.</li>
+      <li><b>Il prompt non &egrave; pi&ugrave; solo testo</b> &mdash; si incollano e si trascinano immagini, e il
+      journal porta il riferimento invece del megabyte. Era l&rsquo;ultima cosa che il terminale
+      faceva e STARK no.</li>
       <li><b>Come vieni chiamato quando guardi altrove</b> &mdash; notifica di sistema e suono, tre
       eventi con tre suoni, la campanella in cima all&rsquo;elenco come interruttore. Vedi la sezione
       <i>Quando guardi altrove</i>.</li>

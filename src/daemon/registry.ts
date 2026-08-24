@@ -5,9 +5,9 @@
 // si riaggancia dopo una caduta vedrebbe una storia diversa da quella su disco, e
 // l'invariante del §4 smetterebbe di valere senza che nessuno se ne accorga.
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
 import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
@@ -15,7 +15,8 @@ import { importTranscript } from '../adapters/claude-code/import.ts'
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
-import type { AgentQuestion, CanonicalEvent, Command, PermissionMode } from '../core/events.ts'
+import { promptText } from '../core/events.ts'
+import type { AgentQuestion, Attachment, CanonicalEvent, Command, PermissionMode, PromptPart } from '../core/events.ts'
 
 export type OpenSpec = {
   cwd: string
@@ -79,8 +80,7 @@ type Live = {
 function titleOf(s: SessionSnapshot): string {
   // Un titolo scelto a mano vince sempre: da quel momento STARK smette di riscriverlo.
   if (s.title) return s.title
-  const parts = s.turns[0]?.prompt ?? []
-  const text = parts.map(x => x.text).join(' ').trim().replace(/\s+/g, ' ')
+  const text = promptText(s.turns[0]?.prompt ?? []).trim().replace(/\s+/g, ' ')
   // In inglese perché è testo di interfaccia, non di documentazione: finisce nella
   // barra laterale accanto a «done» e «working».
   if (!text) return `new chat ${s.sessionId.slice(0, 8)}`
@@ -102,6 +102,25 @@ function settled(state: string): string {
 
 export const STARK_HOME = process.env['STARK_HOME'] ?? resolve(homedir(), '.stark')
 const SESSIONS = resolve(STARK_HOME, 'sessioni')
+const ALLEGATI = resolve(STARK_HOME, 'allegati')
+
+/** I quattro tipi che il modello accetta, e le estensioni con cui li scriviamo. */
+const TIPI: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+}
+/** Il contrario, per rispondere con l'intestazione giusta quando li si rilegge. */
+const DA_ESTENSIONE: Record<string, string> = Object.fromEntries(
+  Object.entries(TIPI).map(([mime, ext]) => [ext, mime]),
+)
+
+/** Un'immagine già scritta su disco: `data` serve ancora, per mandarla all'agent. */
+export type ImmagineSalvata = {
+  ref: string
+  mediaType: string
+  bytes: number
+  name?: string
+  data: string
+}
 
 export class Registry {
   private readonly live = new Map<string, Live>()
@@ -295,6 +314,53 @@ export class Registry {
     return { ok: true, id: sessionId }
   }
 
+  // ─── allegati ─────────────────────────────────────────────────────────────
+
+  /**
+   * Scrive gli allegati su disco e li restituisce col loro riferimento.
+   *
+   * Il nome del file è lo **sha256 dei byte**: la stessa immagine mandata due volte
+   * occupa un posto solo, e il nome non può contenere niente che arrivi da fuori —
+   * niente percorsi, niente estensioni scelte da chi carica. La cartella è per
+   * sessione, così cancellare una conversazione porta via anche i suoi allegati
+   * invece di lasciarli in giro senza che nessuno sappia più di chi erano.
+   */
+  saveAttachments(id: string, list: Attachment[] = []): ImmagineSalvata[] {
+    const out: ImmagineSalvata[] = []
+    for (const a of list) {
+      const ext = TIPI[a.mediaType]
+      if (!ext) continue   // un tipo che il modello non accetta non si salva e non si manda
+      const bytes = Buffer.from(a.data, 'base64')
+      const ref = createHash('sha256').update(bytes).digest('hex')
+      const dir = resolve(ALLEGATI, id)
+      mkdirSync(dir, { recursive: true })
+      const path = resolve(dir, `${ref}.${ext}`)
+      if (!existsSync(path)) writeFileSync(path, bytes)
+      out.push({
+        ref, mediaType: a.mediaType, bytes: bytes.length, data: a.data,
+        ...(a.name ? { name: a.name } : {}),
+      })
+    }
+    return out
+  }
+
+  /**
+   * Un allegato da rileggere. `ref` arriva da un indirizzo, quindi si ricontrolla
+   * qui che sia solo esadecimale: un `..` in mezzo trasformerebbe questa funzione in
+   * un modo di leggere qualunque file della macchina.
+   */
+  attachment(id: string, ref: string): { path: string; mediaType: string } | null {
+    if (!/^[0-9a-f]{64}$/.test(ref)) return null
+    const dir = resolve(ALLEGATI, id)
+    if (!existsSync(dir)) return null
+    const file = readdirSync(dir).find(f => f.startsWith(`${ref}.`))
+    if (!file) return null
+    const ext = file.slice(ref.length + 1)
+    const mediaType = DA_ESTENSIONE[ext]
+    if (!mediaType) return null
+    return { path: resolve(dir, file), mediaType }
+  }
+
   /** Rilettura dal journal: è la stessa cosa che fa un risveglio. */
   events(id: string, from = 0): CanonicalEvent[] {
     const path = resolve(SESSIONS, `${id}.jsonl`)
@@ -361,6 +427,8 @@ export class Registry {
     if (!existsSync(path)) return { ok: false, error: 'sconosciuta' }
     rmSync(path, { force: true })
     rmSync(resolve(SESSIONS, `${id}.raw.jsonl`), { force: true })
+    // Gli allegati sono parte della conversazione: restare senza di lei non ha senso.
+    rmSync(resolve(ALLEGATI, id), { recursive: true, force: true })
     this.bump()
     return { ok: true }
   }
@@ -374,7 +442,9 @@ export class Registry {
     if (!l) return { ok: false, error: 'sessione non attiva' }
     switch (cmd.c) {
       case 'session.prompt':
-        l.adapter.prompt(cmd.text)
+        // I byte finiscono su disco **prima** di partire: il journal scriverà il
+        // riferimento, e senza il file quel riferimento non varrebbe niente.
+        l.adapter.prompt(cmd.text, this.saveAttachments(id, cmd.attachments))
         return { ok: true }
       case 'session.interrupt':
         await l.adapter.interrupt()

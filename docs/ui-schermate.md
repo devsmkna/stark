@@ -361,6 +361,20 @@ soltanto.
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
 
+### Fargli vedere una cosa
+
+Deciso implementando il 24 agosto 2026. Il prompt non è più solo testo: si **incolla** uno
+screenshot o si **trascina** un'immagine sul blocco in basso — su tutto il blocco, non su un
+rettangolo di ventiquattro pixel: chi arriva con un'immagine in mano punta *in basso*. Gli
+allegati restano in attesa sopra la casella finché non si manda.
+
+- **PNG, JPEG, GIF, WebP**, che sono i quattro che il modello accetta. Un file di un altro tipo
+  lo dice, invece di sparire nel nulla.
+- **un file di testo non si allega**: si incolla, o si nomina per percorso. L'agent sa leggerlo
+  da solo, ed è il motivo per cui non serve spedirglielo.
+- **nella conversazione l'immagine resta**, sopra la risposta, com'era davanti al modello.
+  Riaprendo il lavoro due giorni dopo si capisce di cosa si stava parlando.
+
 ### I comandi slash
 
 Deciso implementando il 24 agosto 2026. La sessione ne offre **quarantotto**, e da STARK non

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
-import { EMPTY_USAGE, MODEL_VERSION, type CanonicalEvent } from '../core/events.ts'
+import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
@@ -118,6 +118,16 @@ applyTo(live, journal.append({
     { name: 'code-review', description: 'rivede il diff', argumentHint: '[low|high]' },
   ],
 }))
+// §16.3: un prompt con dentro un'immagine. Nel journal ci va il **riferimento**, non i
+// byte: un megabyte a colpo dentro un file che si rilegge tutto a ogni risveglio.
+applyTo(live, journal.append({
+  k: 'turn.started',
+  turnId: 'turn-2',
+  prompt: [
+    { type: 'image', ref: 'a'.repeat(64), mediaType: 'image/png', bytes: 683131, name: 'schermata.png' },
+    { type: 'text', text: 'cosa vedi?' },
+  ],
+}))
 applyTo(live, journal.append({ k: 'session.state', state: 'idle' }))
 journal.close()
 
@@ -187,6 +197,19 @@ check('§6: la fotografia dei server MCP sostituisce la precedente, non ci si fo
   replayed.mcpServers.map(s => `${s.name}:${s.status}`).join(','))
 // È da qui che il risveglio sa cosa riaccendere: senza, una chat che dorme si sveglia
 // senza i suoi strumenti e sembra rotta senza motivo apparente.
+const conImmagine = replayed.turns[1]?.prompt ?? []
+check('§16.3: l\'immagine resta nel prompt dopo la rilettura, col suo riferimento',
+  conImmagine[0]?.type === 'image' && conImmagine[0].bytes === 683131,
+  JSON.stringify(conImmagine[0]))
+check('§16.3: il testo del prompt ignora le immagini invece di rompersi',
+  promptText(conImmagine) === 'cosa vedi?', promptText(conImmagine))
+// La riga del journal deve restare una riga: se un giorno ci finissero dentro i byte,
+// questo numero esploderebbe e il test lo direbbe prima che se ne accorga un disco pieno.
+const rigaImmagine = Journal.read(journal.path)
+  .find(e => e.payload.k === 'turn.started' && e.payload.turnId === 'turn-2')
+check('§16.3: i byte non entrano nel journal',
+  JSON.stringify(rigaImmagine).length < 400, `${JSON.stringify(rigaImmagine).length} caratteri`)
+
 check('§6: la lista dei comandi si sostituisce, e porta argomenti e alias',
   replayed.slashCommands.length === 2
   && replayed.slashCommands[1]?.argumentHint === '[low|high]'

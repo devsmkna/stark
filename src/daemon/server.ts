@@ -5,6 +5,7 @@
 // Node e nel browser, quindi non introduce dipendenze, e per giunta è la stessa forma
 // che usa OpenCode — il che risparmierà lavoro al secondo adapter invece di crearne.
 
+import { createReadStream } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
@@ -121,6 +122,22 @@ async function route(
       return send(res, 201, { id, snapshot: registry.snapshot(id) })
     }
 
+    // Gli allegati: `<ref>` è uno sha256, e il controllo vero lo rifà il registro —
+    // qui la forma serve solo a non far entrare niente che somigli a un percorso.
+    const b = /^\/api\/sessions\/([0-9a-f-]{8,})\/blob\/([0-9a-f]{64})$/.exec(path)
+    if (b && method === 'GET') {
+      const found = registry.attachment(b[1]!, b[2]!)
+      if (!found) return send(res, 404, { error: 'allegato sconosciuto' })
+      // Immutabile per costruzione: il nome **è** l'impronta del contenuto, quindi la
+      // cache del browser non può servire una cosa per un'altra.
+      res.writeHead(200, {
+        'content-type': found.mediaType,
+        'cache-control': 'private, max-age=31536000, immutable',
+      })
+      createReadStream(found.path).pipe(res)
+      return
+    }
+
     const m = /^\/api\/sessions\/([0-9a-f-]{8,})(\/[a-z]+)?$/.exec(path)
     if (m) {
       const id = m[1]!
@@ -143,7 +160,10 @@ async function route(
         return send(res, esito.ok ? 200 : 404, esito)
       }
       if (method === 'POST' && sub === '/command') {
-        const cmd = await readJson<Command>(req)
+        // 32 MB: un prompt può portarsi dietro qualche schermata, e in base64 ognuna
+        // pesa un terzo in più dei suoi byte. Il tetto resta perché un corpo senza
+        // limite è il modo più semplice di finire la memoria di un daemon.
+        const cmd = await readJson<Command>(req, 32 * 1024 * 1024)
         if (!cmd?.c) return send(res, 400, { error: 'comando malformato' })
         const esito = await registry.command(id, cmd)
         return send(res, esito.ok ? 200 : 409, esito)
@@ -238,13 +258,18 @@ function send(res: ServerResponse, code: number, body: unknown): void {
   res.end(s)
 }
 
-async function readJson<T>(req: IncomingMessage): Promise<T | null> {
+/**
+ * `max` è un parametro e non una costante perché i corpi non sono tutti uguali: un
+ * comando è due righe, ma un prompt con dentro uno schermo incollato viaggia in base64,
+ * che cresce di un terzo. Con il limite unico a 4 MB, un'immagine da 3 MB non passava.
+ */
+async function readJson<T>(req: IncomingMessage, max = 4 * 1024 * 1024): Promise<T | null> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     size += (c as Buffer).length
     // Un corpo senza limite è un modo di finire la memoria del daemon.
-    if (size > 4 * 1024 * 1024) throw new Error('corpo troppo grande')
+    if (size > max) throw new Error('corpo troppo grande')
     chunks.push(c as Buffer)
   }
   if (chunks.length === 0) return null

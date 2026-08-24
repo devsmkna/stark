@@ -11,7 +11,7 @@
 // torna dal flusso. Concentrarli qui rende quella regola visibile invece che sperata.
 
 import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
-import type { Command, PermissionMode } from '$core/events.ts'
+import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import { Api, bootToken, type ImportableRow, type LinkStatus, type SessionRow } from './api.ts'
 import { Notifier, type Call } from './notify.svelte.ts'
 import { activityText, project } from './view.ts'
@@ -198,10 +198,17 @@ export class Store {
     return esito.ok
   }
 
-  prompt(text: string): Promise<boolean> {
+  /**
+   * Un prompt può portarsi dietro delle immagini. Il testo vuoto va bene **se** c'è un
+   * allegato: «guarda questo» spesso non ha bisogno di parole.
+   */
+  prompt(text: string, attachments: Attachment[] = []): Promise<boolean> {
     const clean = text.trim()
-    if (!clean) return Promise.resolve(false)
-    return this.send({ c: 'session.prompt', text: clean })
+    if (!clean && attachments.length === 0) return Promise.resolve(false)
+    return this.send({
+      c: 'session.prompt', text: clean,
+      ...(attachments.length ? { attachments } : {}),
+    })
   }
 
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
