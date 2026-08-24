@@ -89,7 +89,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 36 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 37 verifiche sulla catena, costo zero di quota |
 
 ---
 
@@ -337,7 +337,32 @@ Come si prova senza spendere quota: aprire una sessione (`POST /api/sessions`) e
 snapshot basta per l'elenco e per il toggle. Serve **un turno vero** solo per l'ultima domanda,
 quella che conta: i tool nel contesto — `session.tools` nel journal, `mcp__` contati.
 
-### 5.8 Impostazioni
+### 5.8 I comandi slash
+
+Funzionavano già: `/qualcosa` è un prompt come un altro e il turno si chiude regolarmente
+(verificato con `/usage`, che risponde col conteggio vero, e con `/help`, che risponde «isn't
+available in this environment» — l'agent a dirlo, non noi). Mancava solo il modo di
+**scoprirli e scriverli**: 48 comandi nello snapshot, zero raggiungibili.
+
+La lista arriva da `supportedCommands()` e non dall'handshake, che ne dà una versione povera
+senza `argumentHint` né alias. Nuovo evento `session.commands`, che **sostituisce**: la lista
+cambia in corsa (`system/commands_changed`) e `terminal_slash_commands` arriva solo col primo
+turno, quindi `terminalOnly` si marca dopo, non si indovina prima.
+
+**Trappola trovata guardando:** le descrizioni delle skill sono **paragrafi interi**. Senza
+tagliarle a una riga (`white-space:nowrap` + ellissi su nome e descrizione) una sola voce
+occupa mezzo schermo. È la stessa domanda di sempre — *con quattrocento blocchi dentro,
+regge?* — applicata a un menu.
+
+**Trappola nuova:** completare un comando che non prende argomenti lo lascia a filtrare se
+stesso, e il secondo Invio **ricompleta invece di mandare**. Completare chiude il menu;
+scrivere lo riapre.
+
+**Trappola nel CSS:** `.slash .mi { background: none }` nel componente è più specifico di
+`.mi.on` in `app.css` e se lo mangiava — la riga scelta con le frecce restava invisibile,
+cioè il menu non si poteva usare da tastiera, che è il modo in cui lo si usa.
+
+### 5.9 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

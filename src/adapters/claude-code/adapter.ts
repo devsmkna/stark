@@ -17,6 +17,7 @@ import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
   resolveModel, slashCommands, type LaunchOptions,
 } from './sdk-options.ts'
+import type { SlashCommand } from '../../core/events.ts'
 import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
 
@@ -110,7 +111,47 @@ export class ClaudeCodeAdapter {
     this.volere = new Set(this.opts.mcp ?? [])
     this.input.before(() => this.reconcileMcp())
     await this.reconcileMcp()
+    await this.refreshCommands()
   }
+
+  // ─── comandi slash ────────────────────────────────────────────────────────
+
+  /** L'ultima lista scritta nel journal, per non riscriverla identica. */
+  private comandi: SlashCommand[] = []
+  /** Quali sono legati al terminale. Non arriva dall'handshake ma dal primo turno. */
+  private soloTerminale = new Set<string>()
+
+  /**
+   * La lista dei comandi, presa dal metodo dell'SDK e non dall'handshake.
+   *
+   * L'handshake ne porta una versione povera — nome e descrizione — mentre
+   * `supportedCommands()` dà anche `argumentHint` e gli alias, e senza il primo metà
+   * dei comandi sono indovinelli: `/code-review` non dice da solo che accetta
+   * `[low|medium|high]`. Vale la regola del progetto: se esiste il metodo ufficiale,
+   * si usa quello.
+   */
+  private async refreshCommands(): Promise<void> {
+    const q = this.q
+    if (!q) return
+    try {
+      const raw = await q.supportedCommands()
+      this.comandi = slashCommands(raw)
+    } catch { return }
+    this.emitCommands()
+  }
+
+  private emitCommands(): void {
+    const commands = this.comandi.map(c => ({
+      ...c,
+      ...(this.soloTerminale.has(c.name) ? { terminalOnly: true } : {}),
+    }))
+    const firma = JSON.stringify(commands)
+    if (firma === this.ultimiComandi) return
+    this.ultimiComandi = firma
+    this.emit({ k: 'session.commands', commands })
+  }
+
+  private ultimiComandi = ''
 
   // ─── server MCP ───────────────────────────────────────────────────────────
 
@@ -266,6 +307,7 @@ export class ClaudeCodeAdapter {
     try {
       for await (const m of q) {
         this.opts.onRaw?.(m)
+        this.watchCommands(m as Record<string, unknown>)
         for (const p of this.tr.handle(m as Record<string, unknown>)) {
           this.emit(p)
           if (p.k === 'turn.ended') { this.turnEnd?.(); this.turnEnd = null }
@@ -277,6 +319,32 @@ export class ClaudeCodeAdapter {
       this.turnEnd = null
     }
     this.emit({ k: 'session.state', state: 'closed' })
+  }
+
+  /**
+   * Due cose sui comandi si sanno solo guardando passare i messaggi.
+   *
+   * Quali sono legati al terminale lo dice `system:init`, che arriva col primo turno e
+   * non con l'handshake: prima di allora non c'è modo di saperlo, e marcarli a
+   * indovinare sarebbe peggio che marcarli tardi. E la lista **cambia in corsa** —
+   * l'agent scopre skill nuove lavorando in una sottocartella — con una notifica che
+   * dice di rimpiazzarla.
+   */
+  private watchCommands(m: Record<string, unknown>): void {
+    if (m['type'] === 'system' && m['subtype'] === 'init') {
+      const solo = m['terminal_slash_commands']
+      if (Array.isArray(solo)) {
+        this.soloTerminale = new Set(solo.map(String))
+        this.emitCommands()
+      }
+      return
+    }
+    // `system/commands_changed` porta la lista intera e va **sostituita**, non fusa.
+    // Si rilegge invece di fidarsi del payload perché è la stessa lista che
+    // `supportedCommands()` restituisce, e passare da lì tiene un solo formato.
+    if (m['type'] === 'system' && m['subtype'] === 'commands_changed') {
+      void this.refreshCommands()
+    }
   }
 
   /**

@@ -120,6 +120,7 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 | { k: 'session.mode',     mode: PermissionMode }
 | { k: 'session.tools',    tools: string[] }
 | { k: 'session.mcp',      servers: McpServer[] }
+| { k: 'session.commands', commands: SlashCommand[] }
 | { k: 'session.renamed',  title: string }
 | { k: 'session.slept' }
 | { k: 'session.woke',     resumedFromSeq: number }
@@ -154,6 +155,37 @@ L'evento porta la **fotografia intera**, e chi lo applica sostituisce invece di 
 fondere terrebbe in vita un server sparito dalla macchina, in un elenco da cui non si può
 toglierlo. Sta nel journal anche perché è da lì che il **risveglio** sa cosa riaccendere —
 senza, una chat che dorme si sveglia senza i suoi strumenti e sembra rotta.
+
+**`session.commands` — aggiunto collegando i comandi slash.**
+
+```ts
+type SlashCommand = {
+  name: string
+  description?: string
+  argumentHint?: string   // "<file>", "[low|medium|high]"
+  aliases?: string[]      // /reset e /new portano a /clear
+  terminalOnly?: boolean  // la sua UX è legata al terminale
+}
+```
+
+L'handshake ne porta una versione povera — nome e descrizione — mentre `supportedCommands()`
+dell'SDK dà anche `argumentHint` e gli alias. Senza il primo, metà dei comandi sono
+indovinelli: `/code-review` non dice da solo che accetta `[low|medium|high]`.
+
+Due cose si sanno solo guardando passare i messaggi, e per questo la lista è un evento a sé
+invece di stare tutta in `session.created`:
+
+- **quali sono legati al terminale** lo dice `terminal_slash_commands` in `system:init`, che
+  arriva col primo turno e non con l'handshake. Prima di allora non si sa, e marcarli a
+  indovinare sarebbe peggio che marcarli tardi. Non si nascondono: il CLI ce li ha, quindi
+  si mostrano con l'etichetta (Principio 5), e a spiegare che lì non funzionano è l'agent.
+- **la lista cambia in corsa**: l'agent scopre skill nuove lavorando in una sottocartella, e
+  `system/commands_changed` porta quella nuova, da **sostituire** com'è.
+
+Mandare `/qualcosa` è un prompt come un altro: verificato che il turno si chiude regolarmente
+(`result/success`), sia per un comando che esiste — `/usage` risponde col conteggio vero — sia
+per uno che in headless non c'è: `/help` risponde «isn't available in this environment», che è
+l'agent a dirlo e non STARK a indovinarlo.
 
 **Come ci arriva l'adapter, e perché non basta guardare una volta.** L'SDK dà `mcpServerStatus()`
 e `toggleMcpServer()`: STARK non legge nessun file di configurazione, e non saprebbe farlo —

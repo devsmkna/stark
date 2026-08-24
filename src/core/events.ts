@@ -38,7 +38,22 @@ export type Usage = {
  */
 export type Cost = { nominalUsd: number }
 
-export type SlashCommand = { name: string; description?: string }
+/**
+ * Un comando slash offerto dalla sessione.
+ *
+ * `argumentHint` è ciò che va scritto dopo il nome (`<file>`, `[low|high]`), e senza
+ * di quello metà dei comandi sono indovinelli. `terminalOnly` marca quelli la cui UX
+ * è legata al terminale: **non si nascondono** — si mostrano con scritto perché,
+ * come ogni altra cosa che il CLI consente e qui non ha senso (Principio 5).
+ */
+export type SlashCommand = {
+  name: string
+  description?: string
+  argumentHint?: string
+  /** Altri nomi che portano allo stesso comando: `/cost` e `/stats` → `/usage`. */
+  aliases?: string[]
+  terminalOnly?: boolean
+}
 
 /**
  * Un modello fra cui la sessione puo scegliere. `id` e cio che si rimanda indietro
@@ -152,6 +167,9 @@ export type Payload =
   // risveglio deve poter riaccendere quello che avevi acceso: senza, una chat che
   // dorme si sveglia senza i suoi strumenti e sembra rotta.
   | { k: 'session.mcp'; servers: McpServer[] }
+  // I comandi slash arrivano con l'handshake, ma la lista **cambia in corsa**: l'agent
+  // scopre skill nuove lavorando in una sottocartella. È un rimpiazzo, non un'aggiunta.
+  | { k: 'session.commands'; commands: SlashCommand[] }
   // Il manico con cui questa sessione si riapre. Sta nel journal perche senza, il
   // journal non basta a risvegliare: saprebbe dire cosa e successo ma non come tornarci.
   | { k: 'session.resumeRef'; ref: string }

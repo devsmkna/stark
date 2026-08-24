@@ -109,6 +109,15 @@ applyTo(live, journal.append({
   k: 'session.mcp',
   servers: [{ name: 'notion', status: 'connected', enabled: true }],
 }))
+// §6: i comandi slash arrivano poveri dall'handshake e ricchi da `supportedCommands()`,
+// e la lista cambia in corsa. Anche questa è una fotografia che sostituisce.
+applyTo(live, journal.append({
+  k: 'session.commands',
+  commands: [
+    { name: 'clear', description: 'svuota il contesto', aliases: ['reset', 'new'] },
+    { name: 'code-review', description: 'rivede il diff', argumentHint: '[low|high]' },
+  ],
+}))
 applyTo(live, journal.append({ k: 'session.state', state: 'idle' }))
 journal.close()
 
@@ -178,6 +187,12 @@ check('§6: la fotografia dei server MCP sostituisce la precedente, non ci si fo
   replayed.mcpServers.map(s => `${s.name}:${s.status}`).join(','))
 // È da qui che il risveglio sa cosa riaccendere: senza, una chat che dorme si sveglia
 // senza i suoi strumenti e sembra rotta senza motivo apparente.
+check('§6: la lista dei comandi si sostituisce, e porta argomenti e alias',
+  replayed.slashCommands.length === 2
+  && replayed.slashCommands[1]?.argumentHint === '[low|high]'
+  && replayed.slashCommands[0]?.aliases?.join(',') === 'reset,new',
+  JSON.stringify(replayed.slashCommands))
+
 check('§6: dal journal si ricava cosa riaccendere al risveglio',
   replayed.mcpServers.filter(s => s.enabled).map(s => s.name).join(',') === 'notion')
 

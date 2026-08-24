@@ -100,7 +100,7 @@ in un cookie e lo toglie dalla barra degli indirizzi.
 | `npm run stark` | **avvia il daemon** e stampa l'indirizzo con il token |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
-| `npm run check` | catena completa su eventi finti: 36 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 37 verifiche, **zero quota spesa** |
 | `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |

@@ -166,7 +166,18 @@ export function modeChoices(): ModeChoice[] {
 
 export function slashCommands(raw: unknown): SlashCommand[] {
   if (!Array.isArray(raw)) return []
-  return raw.map(c => typeof c === 'string'
-    ? { name: c }
-    : { name: String(c?.['name'] ?? '?'), ...(c?.['description'] ? { description: String(c['description']) } : {}) })
+  return raw.map(c => {
+    if (typeof c === 'string') return { name: c }
+    const hint = c?.['argumentHint']
+    const alias = c?.['aliases']
+    return {
+      name: String(c?.['name'] ?? '?'),
+      ...(c?.['description'] ? { description: String(c['description']) } : {}),
+      // Stringa vuota vuol dire «nessun argomento», e portarsela dietro come campo
+      // presente costringerebbe la UI a distinguere '' da assente per non stampare
+      // uno spazio dopo il nome.
+      ...(typeof hint === 'string' && hint ? { argumentHint: hint } : {}),
+      ...(Array.isArray(alias) && alias.length ? { aliases: alias.map(String) } : {}),
+    }
+  })
 }

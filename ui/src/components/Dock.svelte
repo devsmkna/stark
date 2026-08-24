@@ -9,6 +9,7 @@
   import Ask from './Ask.svelte'
   import Status from './Status.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
+  import type { SlashCommand } from '$core/events.ts'
   import { activity } from '$core/activity.ts'
   import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -48,12 +49,70 @@
   }
 
   function key(e: KeyboardEvent): void {
+    // Col menu dei comandi aperto i tasti vogliono dire un'altra cosa: Invio completa
+    // invece di mandare. Mandare "/comp" a metà è l'errore che il menu esiste per
+    // evitare, quindi qui viene prima di tutto il resto.
+    if (comandi.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); scelto = (scelto + 1) % comandi.length; return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); scelto = (scelto - 1 + comandi.length) % comandi.length; return }
+      if (e.key === 'Escape') { e.preventDefault(); chiuso = true; return }
+      if ((e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey && !e.isComposing) {
+        e.preventDefault()
+        completa(comandi[scelto]!)
+        return
+      }
+    }
     // Invio manda, Maiusc+Invio va a capo. È la convenzione di ogni casella di
     // messaggio, e qui vale a maggior ragione: si scrivono richieste di una riga.
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault()
       void send()
     }
+  }
+
+  // ─── i comandi slash ──────────────────────────────────────────────────────
+
+  /** Chiuso a mano con Esc: si riapre scrivendo, non appena si torna sulla casella. */
+  let chiuso = $state(false)
+  let scelto = $state(0)
+
+  /**
+   * Il menu vive finché si sta scrivendo **il nome**: dal `/` iniziale al primo spazio.
+   * Dopo lo spazio si stanno scrivendo gli argomenti, e un elenco che resta aperto lì
+   * coprirebbe quello che si scrive per proporre cose che non servono più.
+   */
+  const parola = $derived(
+    !chiuso && store.live && /^\/[^\s]*$/.test(text) ? text.slice(1).toLowerCase() : null,
+  )
+
+  const comandi = $derived.by(() => {
+    if (parola === null) return []
+    const tutti = snap.slashCommands
+    // Prima quelli che *cominciano* per quello che hai scritto, poi quelli che lo
+    // contengono: cercando "review" si vuole `/code-review`, ma digitando "c" si
+    // vuole `/clear` prima di `/code-review`.
+    const nome = (c: SlashCommand): string[] => [c.name, ...(c.aliases ?? [])]
+    const inizia = tutti.filter(c => nome(c).some(n => n.toLowerCase().startsWith(parola)))
+    const dentro = tutti.filter(c => !inizia.includes(c)
+      && nome(c).some(n => n.toLowerCase().includes(parola)))
+    return [...inizia, ...dentro].slice(0, 40)
+  })
+
+  // La riga scelta torna in cima a ogni cambio di filtro: lasciarla dov'era la
+  // farebbe puntare a un comando diverso da quello che si stava guardando.
+  $effect(() => { void parola; scelto = 0 })
+  $effect(() => { if (text === '') chiuso = false })
+
+  function completa(c: SlashCommand): void {
+    // Chiudere dopo aver scelto non è cosmesi: senza, `/doctor` — che non prende
+    // argomenti — resta a filtrare se stesso, e il secondo Invio ricompleta invece di
+    // mandare. Si riapre appena si scrive un altro carattere.
+    chiuso = true
+    // Lo spazio finale solo se il comando prende qualcosa: senza, Invio manda subito,
+    // che è quello che si vuole dopo aver scelto `/clear`.
+    text = `/${c.name}${c.argumentHint ? ' ' : ''}`
+    box?.focus()
+    grow()
   }
 
   /** La casella cresce col testo fino a un tetto, poi scorre. */
@@ -93,12 +152,39 @@
     </div>
   {/if}
 
+  {#if comandi.length > 0}
+    <!-- Sopra la casella e non sotto: sotto finirebbe fuori dalla finestra, e
+         soprattutto il posto dove si guarda mentre si scrive è appena sopra ciò che
+         si scrive. -->
+    <div class="slash" role="listbox" tabindex="-1" aria-label="Slash commands">
+      {#each comandi as c, i (c.name)}
+        <button class="mi" class:on={i === scelto} role="option" aria-selected={i === scelto}
+          onmousedown={e => { e.preventDefault(); completa(c) }}>
+          <!-- Due righe, e **una riga ciascuna**: la descrizione di una skill è un
+               paragrafo intero, e lasciata libera fa una riga alta mezzo schermo.
+               Qui serve riconoscere il comando, non leggerne il manuale. -->
+          <span class="txt">
+            <span class="line">
+              <b>/{c.name}</b>
+              {#if c.argumentHint}<span class="hint2">{c.argumentHint}</span>{/if}
+              {#if c.aliases?.length}<span class="hint2">— {c.aliases.map(a => `/${a}`).join(', ')}</span>{/if}
+            </span>
+            {#if c.description}<span class="sub" title={c.description}>{c.description}</span>{/if}
+          </span>
+          <!-- Non si nasconde: il CLI ce l'ha. Si dice che lì non funziona, e se lo
+               mandi lo stesso è l'agent a spiegarlo — noi non lo blocchiamo. -->
+          {#if c.terminalOnly}<span class="tag">terminal only</span>{/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if store.live}
     <textarea
       class="input"
       bind:this={box}
       bind:value={text}
-      oninput={grow}
+      oninput={() => { chiuso = false; grow() }}
       onkeydown={key}
       rows="1"
       placeholder="Message the agent…"
@@ -135,6 +221,18 @@
     background: var(--surface); color: var(--ink); max-height: 160px;
   }
   textarea.input::placeholder { color: var(--muted); }
+
+  /* Le righe sono <button> perché si premono; il vestito viene da app.css. */
+  .slash .mi {
+    width: 100%; background: none; border: 0; font: inherit; color: inherit;
+    text-align: left; cursor: pointer;
+  }
+  /* Il `background: none` qui sopra è più specifico di `.mi.on` in app.css e se lo
+     mangiava: la riga scelta con le frecce restava invisibile, cioè il menu non si
+     poteva usare da tastiera — che è il modo in cui lo si usa. */
+  .slash .mi.on { background: var(--accent-soft); }
+  .slash .mi:hover:not(.on) { background: var(--surface-2); }
+  .slash .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   textarea.input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 
   .stopb:focus-visible { outline: 2px solid var(--stop); outline-offset: 1px; }

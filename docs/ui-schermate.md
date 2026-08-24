@@ -361,6 +361,23 @@ soltanto.
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
 
+### I comandi slash
+
+Deciso implementando il 24 agosto 2026. La sessione ne offre **quarantotto**, e da STARK non
+se ne poteva scrivere nemmeno uno. Ora la casella li propone appena si scrive `/`, filtrando
+mentre si digita: ↑↓ per scegliere, Tab o Invio per completare, Esc per chiudere.
+
+- **il suggerimento degli argomenti conta quanto il nome**: `/code-review` da solo è un
+  indovinello, e che accetti `[low|medium|high]` lo sa la sessione. Stessa cosa per gli
+  **alias** — `/reset` e `/new` portano a `/clear`, e chi cerca la parola che ha in mente
+  la trova.
+- **una riga per riga**: la descrizione di una skill è un paragrafo intero, e lasciata libera
+  fa una riga alta mezzo schermo. Qui serve riconoscere il comando, non leggerne il manuale.
+- **completare chiude il menu**, e riscrivere lo riapre. Senza, un comando che non prende
+  argomenti resta a filtrare se stesso e il secondo Invio ricompleta invece di mandare.
+- **quelli legati al terminale restano in elenco** con l'etichetta. Il CLI li ha; e se li si
+  manda lo stesso, a dire che lì non funzionano è l'agent, non noi.
+
 ### Gli strumenti esterni, chat per chat
 
 Deciso implementando il 24 agosto 2026. Il chip **MCP** nella barra apre l'elenco dei server che

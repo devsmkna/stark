@@ -78,11 +78,12 @@ Provato dal vivo, notifica compresa.
 
 **Gli strumenti esterni si scelgono per chat**: il chip MCP nella barra di stato elenca i server
 della macchina e li accende uno per uno, spenti di default, con la scelta che torna col
-risveglio.
+risveglio. E i **comandi slash** si scrivono: la casella li propone appena scrivi `/`, con
+argomenti e alias.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 36 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 37 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -95,11 +96,12 @@ che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
-Cosa manca nella UI, oltre alle impostazioni: nessun **instradamento**, quindi un ricaricamento
-perde la chat scelta; niente **comandi slash**, che pure arrivano già nello snapshot; il prompt
-è **solo testo**, senza allegati né immagini (§16.3); e delle notifiche mancano le due parti che
-vivono nelle impostazioni — **scegliere il suono** di ciascun evento e **silenziare un
-progetto** intero.
+Cosa manca nella UI, oltre alle impostazioni: il prompt è **solo testo**, senza allegati né
+immagini (§16.3); il **daemon sta in primo piano** e il token cambia a ogni avvio, quindi
+chiudere il terminale uccide le sessioni e riaprirle costa quota; nessun **instradamento**,
+quindi un ricaricamento perde la chat scelta; la **compattazione del contesto** arriva come
+evento e non si vede da nessuna parte; e delle notifiche mancano le due parti che vivono nelle
+impostazioni — **scegliere il suono** di ciascun evento e **silenziare un progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -141,6 +143,9 @@ Decisioni già prese:
 - i **server MCP si scelgono per chat**, spenti di default. Non con `--strict-mcp-config`, che
   li spegnerebbe e basta: si spengono per nome, così restano accendibili. È la differenza fra
   un default e un limite.
+- i **comandi slash** si completano dalla casella, con argomenti e alias. Quelli legati al
+  terminale restano in elenco con l'etichetta: il CLI li ha, e a dire che lì non funzionano è
+  l'agent — non STARK a indovinarlo.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il

@@ -175,6 +175,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
     // Si sostituisce, non si fonde: l'evento porta la fotografia intera di com'erano
     // in quel momento. Fondere terrebbe in vita un server sparito dalla macchina.
     case 'session.mcp': s.mcpServers = p.servers; break
+    case 'session.commands': s.slashCommands = p.commands; break
     case 'session.resumeRef': s.resumeRef = p.ref; break
     case 'session.mode': s.mode = p.mode; break
     case 'session.slept': s.state = 'sleeping'; break

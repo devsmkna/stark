@@ -115,6 +115,14 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .sst.working{color:var(--work)}
 .sst.sleeping{color:var(--muted)}
 .unread{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+/* i comandi slash, sopra la casella: stesso vestito dei menu della barra di stato */
+.slash{border:1px solid var(--line-2);border-radius:10px;background:var(--surface);margin:0 0 8px;padding:4px;max-height:210px;overflow:auto;box-shadow:0 8px 24px rgba(16,20,32,.10)}
+.slash .mi{align-items:flex-start}
+.slash .txt{min-width:0;flex:1;display:block;overflow:hidden}
+/* una riga ciascuna: la descrizione di una skill e' un paragrafo intero */
+.slash .line,.slash .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slash .hint2{color:var(--muted);font-size:10.5px;font-family:var(--mono)}
+.caret{display:inline-block;width:1px;height:12px;background:var(--ink);vertical-align:-2px;margin-left:1px}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
 .sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}
@@ -610,7 +618,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
   <!-- il blocco in basso -->
   <section class="sec">
-    <h2>Il blocco in basso, nei suoi tre stati</h2>
+    <h2>Il blocco in basso, nei suoi quattro stati</h2>
     <p>&Egrave; sempre lo stesso pezzo di schermo, sopra la casella di scrittura. Quando l&rsquo;agent lavora dice
     cosa sta facendo; quando ha bisogno di te <b>si espande l&igrave;</b>, invece di comparire in mezzo alla
     conversazione. Non devi cercare dove &egrave; successo: guardi sempre nello stesso posto.</p>
@@ -654,6 +662,34 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
           </div>
         </div>
       </div>
+      <div>
+        <div class="eyebrow">Quando scrivi <code>/</code></div>
+        <div class="mock" style="display:block;margin-top:6px;overflow:visible">
+          <div class="dock" style="border-top:0">
+            <div class="slash">
+              <div class="mi on"><span><b>/compact</b> <span class="hint2">[instructions]</span><span class="sub">Compact the conversation and keep working</span></span></div>
+              <div class="mi"><span><b>/clear</b> <span class="hint2">&mdash; /reset, /new</span><span class="sub">Start fresh: clears the context, keeps the chat</span></span></div>
+              <div class="mi"><span><b>/code-review</b> <span class="hint2">[low|medium|high] [--fix]</span><span class="sub">Review the current diff</span></span></div>
+              <div class="mi"><span><b>/color</b><span class="sub">Change the theme</span></span><span class="tag">terminal only</span></div>
+            </div>
+            <div class="input"><span style="color:var(--ink)">/c</span><span class="caret"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p style="margin-top:16px">La <b>quarta</b> &egrave; nuova. I comandi slash esistono da sempre nel CLI, e da
+    STARK non si potevano n&eacute; vedere n&eacute; scrivere: la sessione ne offre <b>quarantotto</b>, e non ne
+    usciva nessuno. Ora la casella li propone appena scrivi <code>/</code>, filtrandoli mentre digiti;
+    &uarr;&darr; per scegliere, Tab o Invio per completare, Esc per chiudere.</p>
+    <div class="note">
+      <div><b>Il suggerimento degli argomenti conta quanto il nome.</b> <code>/code-review</code> da solo
+      &egrave; un indovinello: che accetti <code>[low|medium|high]</code> lo sa la sessione, e adesso lo dice.
+      Stessa cosa per gli <b>alias</b>: <code>/reset</code> e <code>/new</code> portano a <code>/clear</code>,
+      e chi cerca la parola che ha in mente la trova.</div>
+      <div><b>Quelli legati al terminale restano in elenco</b>, con l&rsquo;etichetta. Il CLI li ha, quindi
+      nasconderli sarebbe il Principio 5 rotto un&rsquo;altra volta; e se lo mandi lo stesso, a spiegare
+      che l&igrave; non funziona &egrave; l&rsquo;agent, non noi.</div>
     </div>
   </section>
 
