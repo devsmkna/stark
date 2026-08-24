@@ -93,7 +93,7 @@
       style="margin-left:auto" disabled={!store.live}
       onclick={() => void store.sleep()}><Icon name="i-moon" /></button>
 
-    <button class="effbtn" style="margin-left:0" onclick={() => { store.view = 'effects' }}>
+    <button class="effbtn" style="margin-left:0" onclick={() => store.show('effects')}>
       <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
         {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}</b>
       <Icon name="i-bars" />

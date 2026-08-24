@@ -66,7 +66,7 @@
 <div class="col">
   <div class="bar">
     <button class="iconb" title="Back to the conversation"
-      onclick={() => { store.view = 'chat' }}><Icon name="i-back" /></button>
+      onclick={() => store.show('chat')}><Icon name="i-back" /></button>
     <div class="t">
       {nf} {nf === 1 ? 'file' : 'files'} · {nc} {nc === 1 ? 'command' : 'commands'}
     </div>

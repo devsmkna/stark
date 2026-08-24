@@ -108,6 +108,7 @@ ui/src/App.svelte           guscio: barra laterale + area principale, stati di e
 ui/src/lib/api.ts           client del daemon: token, fetch, SSE a mano, riconnessione
 ui/src/lib/store.svelte.ts  lo stato dell'app: righe, selezione, snapshot, collegamento
 ui/src/lib/notify.svelte.ts come vieni chiamato: le tre chiamate, i suoni, la campanella
+ui/src/lib/route.ts         l'indirizzo: /chat/<id> e /chat/<id>/effects
 ui/src/lib/view.ts          traduzioni: gruppo, etichetta, progetto, colore, orario
 ui/src/components/Sidebar.svelte       elenco per stato e progetto, tasto destro, rinomina in riga
 ui/src/components/Conversation.svelte  turni richiudibili, parti, risposte date, file in linea
@@ -407,8 +408,13 @@ caratteri, così se un giorno qualcuno ce li rimette il test lo dice prima del d
   `tool.input.ended.summary`, scritto da `adapters/claude-code/summary.ts`. La UI ha ancora un
   ripiego per i journal scritti prima, ma mostra `inputRaw` troncato senza interpretarlo.
 - ~~Il titolo non si può rinominare~~ — **chiuso**: `session.rename` → `session.renamed`.
-- **Non c'è instradamento**: la chat scelta vive in memoria, quindi un ricaricamento la perde.
-  Il daemon serve già la pagina su qualunque rotta, quindi `/chat/<id>` è pronto quando servirà.
+- ~~Non c'è instradamento~~ — **chiuso**: `ui/src/lib/route.ts`, `/chat/<id>` e
+  `/chat/<id>/effects`. Il daemon già ricadeva su `index.html` per qualunque rotta, quindi non
+  è servito toccare niente lato server. Due cose emerse provandolo: gli effetti vanno in
+  `pushState` e non in `replaceState`, altrimenti «indietro» esce dall'app invece di tornare
+  alla conversazione; e il messaggio di rifiuto vive nel blocco in basso, che senza una chat
+  aperta non c'è — un indirizzo che puntava a una conversazione cancellata rimbalzava in
+  silenzio. Manca una prova automatica: oggi è verificata a mano col browser.
 - ~~Nessuna notifica di sistema e nessun suono~~ — **chiuso**: `ui/src/lib/notify.svelte.ts`,
   tre chiamate con tre suoni e la campanella in cima all'elenco. Restano da fare, e stanno
   nelle impostazioni: **scegliere il suono** di ciascun evento e **silenziare un progetto**

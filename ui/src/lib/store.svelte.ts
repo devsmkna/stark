@@ -14,6 +14,7 @@ import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import { Api, bootToken, type ImportableRow, type LinkStatus, type SessionRow } from './api.ts'
 import { Notifier, type Call } from './notify.svelte.ts'
+import { fromPath, go } from './route.ts'
 import { activityText, project } from './view.ts'
 
 /** Gli stati in cui una chat *stava lavorando*: solo da lì ha senso dire «ha finito». */
@@ -74,6 +75,16 @@ export class Store {
   loaded = $state(false)
 
   view = $state<View>('chat')
+
+  /**
+   * Gli effetti sono un **posto**, non un interruttore: stanno nell'indirizzo, e ci si
+   * torna indietro col tasto del browser esattamente come con la freccia dentro l'app.
+   * Due schermate, due voci nella storia — è la cosa che chi preme «indietro» si aspetta.
+   */
+  show(view: View): void {
+    this.view = view
+    go(this.selected, view)
+  }
   dialog = $state<Dialog>(null)
   menu = $state<ContextMenu>(null)
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
@@ -97,6 +108,10 @@ export class Store {
   #stopList: (() => void) | null = null
   /** Lo stato di ogni riga com'era l'ultima volta: è da qui che si vede il passaggio. */
   #was = new Map<string, string>()
+  /** Il primo elenco è arrivato: da lì in poi l'indirizzo si può onorare. */
+  #partita = false
+  /** L'indietro del browser: si apre ciò che dice l'indirizzo, senza riscriverlo. */
+  #popstate = (): void => { void this.#apriDaIndirizzo() }
   /** Il primo elenco non chiama nessuno: sono le chat che c'erano già, non novità. */
   #greeted = false
 
@@ -117,8 +132,19 @@ export class Store {
   get live(): boolean { return this.row?.live ?? false }
 
   async start(): Promise<void> {
+    // Il tasto «indietro» del browser deve tornare alla chat di prima, non uscire
+    // dall'app: è l'unico gesto di navigazione che qui non abbiamo inventato noi.
+    addEventListener('popstate', this.#popstate)
     this.#stopList = this.api.sessionsStream(
-      rows => { this.#ring(rows); this.rows = rows; this.loaded = true; this.fatal = null },
+      rows => {
+        this.#ring(rows)
+        this.rows = rows
+        this.loaded = true
+        this.fatal = null
+        // Il primo elenco è anche il momento in cui si può aprire ciò che dice
+        // l'indirizzo: prima non si saprebbe nemmeno se quella chat esiste.
+        if (!this.#partita) { this.#partita = true; void this.#apriDaIndirizzo() }
+      },
       s => {
         this.listLink = s
         // Un elenco che non arriva è l'unico guasto che vale la pena gridare: senza
@@ -159,7 +185,34 @@ export class Store {
     }
   }
 
-  async select(id: string): Promise<void> {
+  /**
+   * Apre ciò che dice l'indirizzo. Non lo riscrive: è già quello giusto, e riscriverlo
+   * dentro un `popstate` aggiungerebbe una voce alla storia mentre la si sta
+   * ripercorrendo — cioè il tasto «indietro» smetterebbe di andare indietro.
+   */
+  async #apriDaIndirizzo(): Promise<void> {
+    const r = fromPath()
+    if (!r) {
+      this.#stopStream?.()
+      this.#stopStream = null
+      this.selected = null
+      this.snap = null
+      return
+    }
+    if (!this.rows.some(x => x.id === r.id)) {
+      // Un indirizzo che punta a una chat cancellata, o di un'altra macchina. Si dice,
+      // e si resta all'elenco: meglio di una schermata che gira a vuoto.
+      this.refused = 'that chat is not here anymore'
+      go(null, 'chat', true)
+      return
+    }
+    if (this.selected !== r.id) await this.select(r.id, { indirizzo: false })
+    this.view = r.view
+  }
+
+  /** Apre una chat. `indirizzo: false` quando è l'indirizzo ad aver aperto lei. */
+  async select(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
+    if (opts.indirizzo !== false) go(id, 'chat')
     if (this.selected === id) return
     this.#stopStream?.()
     this.selected = id
@@ -300,10 +353,14 @@ export class Store {
       this.#stopStream = null
       this.selected = null
       this.snap = null
+      // L'indirizzo puntava a una chat che non c'è più: lasciarcelo vorrebbe dire che
+      // il prossimo ricaricamento apre un vicolo cieco.
+      go(null, 'chat')
     }
   }
 
   dispose(): void {
+    removeEventListener('popstate', this.#popstate)
     this.#stopStream?.()
     this.#stopList?.()
   }

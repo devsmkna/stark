@@ -216,6 +216,17 @@ Si passa da una conversazione all'altra **dall'elenco a sinistra**, senza perder
 cui si era. Niente linguette: l'elenco fa già da scambiatore, ed è sempre visibile — due
 navigazioni per la stessa cosa sarebbero una di troppo.
 
+### L'indirizzo dice dove sei
+
+Deciso implementando il 24 agosto 2026. La chat aperta sta nell'indirizzo — `/chat/<id>`, e
+`/chat/<id>/effects` quando guardi gli effetti — quindi un **ricaricamento non perde il posto**,
+e riaprire il browser sulla scheda di ieri riapre quella conversazione. In un'app che si tiene
+aperta per giorni è la differenza fra riprendere e ricominciare.
+
+Gli **effetti sono un posto**, non un interruttore: il tasto «indietro» del browser riporta alla
+conversazione, esattamente come la freccia dentro l'app. Un indirizzo che punta a una
+conversazione che non c'è più lo dice e riporta all'elenco, invece di girare a vuoto.
+
 ### La struttura: il turno è un contenitore
 
 Ogni cosa che l'utente chiede apre un **turno**, e tutto ciò che l'assistente fa in risposta

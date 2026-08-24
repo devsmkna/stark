@@ -68,7 +68,17 @@
         </div>
       </div>
     {:else}
-      <div class="mid">Pick a chat on the left.</div>
+      <!-- Il messaggio di rifiuto vive nel blocco in basso, che senza una chat aperta
+           non c'è: un indirizzo che punta a una conversazione cancellata rimbalzava qui
+           in silenzio, e sembrava che il tasto non avesse fatto niente. -->
+      <div class="mid">
+        {#if store.refused}
+          <div>
+            <p><b>{store.refused}</b></p>
+            <p>Pick a chat on the left.</p>
+          </div>
+        {:else}Pick a chat on the left.{/if}
+      </div>
     {/if}
   {/if}
 
