@@ -134,6 +134,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .tn.big{width:120px;height:74px;border-radius:7px}
 .tn.big::after{left:10px;right:10px;top:18px;height:4px;box-shadow:0 14px 0 var(--muted),0 28px 0 var(--muted)}
 .pimgs{display:flex;flex-wrap:wrap;gap:6px}
+/* la compattazione: un taglio nel flusso */
+.compact{display:flex;align-items:center;gap:8px;margin:10px 0}
+.compact .l{flex:1;height:1px;background:var(--line-2)}
+.compact .t{font-size:9.5px;color:var(--muted);white-space:nowrap}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
 .sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}
@@ -704,6 +708,36 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     </div>
   </section>
 
+  <!-- compattazione -->
+  <section class="sec">
+    <h2>Quando il contesto si riassume</h2>
+    <p>Prima o poi una conversazione lunga <b>compatta</b>: il modello non ha pi&ugrave; i messaggi per
+    intero, ma un riassunto. Succede da solo quando il contesto si riempie, o quando lo chiedi con
+    <code>/compact</code>. Fino a ieri STARK non lo diceva: l&rsquo;evento arrivava e finiva in un
+    <code>break</code>.</p>
+    <p>&Egrave; la spiegazione di met&agrave; delle volte in cui l&rsquo;agent <i>sembra</i> aver dimenticato qualcosa.
+    Non dirlo lascia quel &laquo;sembra&raquo; addosso all&rsquo;utente, che al posto di una spiegazione si fa
+    un&rsquo;idea sbagliata dello strumento.</p>
+
+    <div class="mock" style="display:block;margin-top:6px;padding:14px 16px">
+      <div style="font-size:11.5px;color:var(--ink-2)">&hellip;fatto, il file &egrave; scritto.</div>
+      <div class="compact"><span class="l"></span><span class="t">Context compacted, because you asked
+      &middot; 34.8k &rarr; 743 tokens</span><span class="l"></span></div>
+      <div style="font-size:11.5px;color:var(--ink-2)">Riprendo da dove eravamo&hellip;</div>
+    </div>
+
+    <div class="note">
+      <div><b>Una riga che taglia, non un blocco.</b> Sopra quella riga il contesto &egrave; un
+      riassunto: il taglio &egrave; la cosa da vedere, e occupare mezzo schermo per dirlo sarebbe
+      sproporzionato a un fatto che non ha bisogno di essere letto due volte.</div>
+      <div><b>Dice anche perch&eacute;.</b> <i>Because you asked</i> o <i>it had filled up</i> sono due
+      situazioni diverse: la prima l&rsquo;hai voluta, la seconda ti dice che quella conversazione sta
+      diventando cara. Numeri veri, misurati su una sessione vera: 34.802 &rarr; 743 token in 8,7 s.</div>
+    </div>
+  </section>
+
+  <hr>
+
   <!-- allegati -->
   <section class="sec">
     <h2>Fargli vedere una cosa</h2>
@@ -736,6 +770,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     </div>
 
     <div class="note">
+      <div><b>Se il file non c&rsquo;&egrave; pi&ugrave;</b> &mdash; cancellato a mano, o un journal arrivato da
+      un&rsquo;altra macchina senza la sua cartella &mdash; al posto della miniatura c&rsquo;&egrave; scritto
+      <i>&laquo;non &egrave; su questa macchina&raquo;</i>. L&rsquo;icona di immagine rotta sembrerebbe un guasto di
+      STARK invece di un file che manca.</div>
       <div><b>Nel journal ci va il riferimento, non i byte.</b> L&rsquo;immagine sta in un file accanto
       ai journal, e il journal porta la sua impronta. Un megabyte a colpo dentro un file che si
       <b>rilegge tutto a ogni risveglio</b> sarebbe stato il modo pi&ugrave; veloce di rendere caro lo
@@ -1561,6 +1599,8 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       <li><b>La riga dice cosa sta facendo e da quanto sta cos&igrave;</b> &mdash; il tempo su tutte le righe,
       l&rsquo;operazione in corso solo su quelle vive. Era la prima cosa che il &sect;1 chiedeva per decidere
       se entrare in una chat, e la riga non la diceva.</li>
+      <li><b>La compattazione si vede</b> &mdash; una riga nel flusso, con quanto c&rsquo;era, quanto &egrave;
+      rimasto e perch&eacute; &egrave; successo.</li>
       <li><b>Il prompt non &egrave; pi&ugrave; solo testo</b> &mdash; si incollano e si trascinano immagini, e il
       journal porta il riferimento invece del megabyte. Era l&rsquo;ultima cosa che il terminale
       faceva e STARK no.</li>

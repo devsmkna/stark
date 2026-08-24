@@ -11,6 +11,7 @@
   import Dock from './Dock.svelte'
   import type { LinkStatus } from '../lib/api.ts'
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
+  import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
   import { colours, hhmm, project, since, toolIcon } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -33,6 +34,11 @@
   }
 
   const promptOf = (t: TurnView): string => promptText(t.prompt)
+  /** Gli allegati il cui file non si trova più. Non è stato dell'app, è stato del disco. */
+  let persi = $state(new SvelteSet<string>())
+
+  /** 34802 → «34.8k». I token si leggono per ordine di grandezza, non a una a una. */
+  const kilo = (n: number): string => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
   /** Le immagini che hai mandato con quel turno: stanno prima del testo, come le ha
    *  viste il modello. I byte non sono nel journal, quindi si chiedono al daemon. */
   const immaginiOf = (t: TurnView): Extract<TurnView['prompt'][number], { type: 'image' }>[] =>
@@ -129,11 +135,23 @@
                    che serve per capire di cosa si stava parlando. -->
               <div class="pimgs">
                 {#each immaginiOf(turn) as img (img.ref)}
-                  <a href={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
-                    target="_blank" rel="noreferrer" title={img.name ?? 'image'}>
-                    <img src={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
-                      alt={img.name ?? 'attachment'} />
-                  </a>
+                  {#if persi.has(img.ref)}
+                    <!-- Il file non c'è più: cancellato a mano, o un journal arrivato
+                         da un'altra macchina senza la sua cartella di allegati. Dirlo
+                         è meglio dell'icona di immagine rotta, che sembra un guasto
+                         di STARK invece di un file che manca. -->
+                    <span class="persa" title={img.name ?? 'image'}>
+                      <Icon name="i-warn" />
+                      {img.name ?? 'image'} — not on this machine
+                    </span>
+                  {:else}
+                    <a href={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
+                      target="_blank" rel="noreferrer" title={img.name ?? 'image'}>
+                      <img src={`/api/sessions/${snap.sessionId}/blob/${img.ref}`}
+                        alt={img.name ?? 'attachment'}
+                        onerror={() => { persi = new SvelteSet([...persi, img.ref]) }} />
+                    </a>
+                  {/if}
                 {/each}
               </div>
             {/if}
@@ -141,6 +159,24 @@
               {#if part.kind === 'text'}
                 <!-- Sempre per intero: è l'unica cosa scritta per l'utente. -->
                 <div class="prose">{part.text}</div>
+
+              {:else if part.kind === 'compact'}
+                <!-- Una riga che taglia il flusso, perché è esattamente quello che è
+                     successo: sopra, il modello non ha più i messaggi per intero ma un
+                     riassunto. È la spiegazione di metà delle volte in cui sembra aver
+                     dimenticato qualcosa, e nasconderla lascerebbe quel «sembra». -->
+                <div class="compact">
+                  <span class="l"></span>
+                  <span class="t">
+                    Context compacted{#if part.trigger === 'manual'}, because you asked{:else if part.trigger === 'auto'}, it had filled up{/if}
+                    {#if part.after !== undefined}
+                      · {kilo(part.before)} → {kilo(part.after)} tokens
+                    {:else}
+                      · {kilo(part.before)} tokens before
+                    {/if}
+                  </span>
+                  <span class="l"></span>
+                </div>
 
               {:else if part.kind === 'reasoning'}
                 <div class="row think">
@@ -207,6 +243,11 @@
 </div>
 
 <style>
+  /* La riga della compattazione: un taglio, non un blocco. */
+  .compact { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  .compact .l { flex: 1; height: 1px; background: var(--line-2); }
+  .compact .t { font-size: 9.5px; color: var(--muted); white-space: nowrap; }
+
   /* Le immagini mandate col prompt: piccole, perché sono un promemoria di cosa hai
      mandato, non la cosa da guardare. Un clic le apre a grandezza vera. */
   .pimgs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
@@ -215,6 +256,11 @@
     border: 1px solid var(--line-2); display: block;
   }
   .pimgs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .persa {
+    display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px;
+    border: 1px dashed var(--line-2); border-radius: 7px;
+    font-size: 10px; color: var(--muted);
+  }
 
   .th, .iconb, .effbtn { background: none; font: inherit; color: inherit; }
   .th { width: 100%; border: 0; text-align: left; }

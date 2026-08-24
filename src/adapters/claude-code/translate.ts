@@ -69,12 +69,21 @@ export class Translator {
         // Viene agganciato al prossimo reasoning.delta.
         this.pendingThinkingTokens = num(e['estimated_tokens'])
         return []
-      case 'compact_boundary':
+      case 'compact_boundary': {
+        const meta = (e['compact_metadata'] ?? {}) as Record<string, unknown>
+        const after = num(meta['post_tokens'])
+        const trigger = meta['trigger']
+        const ms = num(meta['duration_ms'])
         return [{
           k: 'context.compacted',
-          before: num(e['compact_metadata']?.['pre_tokens']) ?? 0,
-          after: 0,
+          before: num(meta['pre_tokens']) ?? 0,
+          // `after` era fisso a zero, che voleva dire «non lo so» e si leggeva
+          // «azzerato». Quando il protocollo non lo manda, non lo mandiamo nemmeno noi.
+          ...(after !== undefined ? { after } : {}),
+          ...(trigger === 'manual' || trigger === 'auto' ? { trigger } : {}),
+          ...(ms !== undefined ? { ms } : {}),
         }]
+      }
       default:
         return []
     }

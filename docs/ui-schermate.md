@@ -372,6 +372,17 @@ soltanto.
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
 
+### Quando il contesto si riassume
+
+Deciso implementando il 24 agosto 2026. Una conversazione lunga prima o poi **compatta**: il
+modello non ha più i messaggi per intero ma un riassunto, e succede da solo quando il contesto
+si riempie o quando lo si chiede con `/compact`.
+
+Nel flusso compare **una riga che taglia**, con quanto c'era, quanto è rimasto e *perché* è
+successo. È la spiegazione di metà delle volte in cui l'agent sembra aver dimenticato qualcosa:
+non dirlo lascia quel «sembra» addosso all'utente, che al posto di una spiegazione si fa
+un'idea sbagliata dello strumento.
+
 ### Fargli vedere una cosa
 
 Deciso implementando il 24 agosto 2026. Il prompt non è più solo testo: si **incolla** uno

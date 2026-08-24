@@ -156,6 +156,23 @@ fondere terrebbe in vita un server sparito dalla macchina, in un elenco da cui n
 toglierlo. Sta nel journal anche perché è da lì che il **risveglio** sa cosa riaccendere —
 senza, una chat che dorme si sveglia senza i suoi strumenti e sembra rotta.
 
+**`context.compacted` — corretto guardandone una vera.**
+
+```ts
+| { k: 'context.compacted', before: number, after?: number,
+                            trigger?: 'manual' | 'auto', ms?: number }
+```
+
+`after` era **fisso a zero**, che voleva dire «non lo so» e si leggeva «azzerato». Il protocollo
+lo dichiara opzionale, quindi quando non arriva non si inventa. `trigger` distingue due
+situazioni diverse per chi legge: *l'hai chiesto tu* e *si era riempito* — la seconda dice
+anche che quella conversazione sta diventando cara.
+
+Osservata dal vivo su una sessione reale (`/compact` dopo sei scambi): `trigger: 'manual'`,
+`pre_tokens: 34802`, `post_tokens: 743`, `duration_ms: 8754`. E **arriva dentro il turno**,
+dopo il suo `system:init` e prima del `result` — per questo nello snapshot è una **parte del
+turno** e non un fatto a sé: è lì che è successa, ed è lì che va vista.
+
 **`PromptPart` — §16.3, chiuso collegando gli allegati.**
 
 ```ts

@@ -92,7 +92,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 40 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 41 verifiche sulla catena, costo zero di quota |
 | `npm run daemon` | 16 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
 
 ---
@@ -395,7 +395,23 @@ caratteri, così se un giorno qualcuno ce li rimette il test lo dice prima del d
 - il nome del file è l'impronta del contenuto, quindi la risposta si può marcare `immutable`:
   la cache del browser non può servire una cosa per un'altra.
 
-### 5.10 Impostazioni
+### 5.10 La compattazione, e un allegato che non c'è più
+
+`context.compacted` arrivava e finiva in un `break` dentro `reduce.ts`. Ora è una **parte del
+turno** (`CompactPartView`), perché è lì che succede: osservato dal vivo, il `compact_boundary`
+arriva dopo il `system:init` del turno e prima del suo `result`.
+
+Due cose corrette guardandone una vera invece di dedurla: `after` era **fisso a zero** — che
+voleva dire «non lo so» e si leggeva «azzerato» — e mancava `trigger`, che distingue *l'hai
+chiesto tu* da *si era riempito*. Per vederne una serve una conversazione con abbastanza
+messaggi: su una appena nata `/compact` risponde «Not enough messages to compact».
+
+Nello stesso giro: un allegato il cui file non c'è più mostrava l'**icona di immagine rotta**,
+che sembra un guasto di STARK invece di un file che manca. Ora la miniatura lascia il posto a
+una riga che lo dice. Capita se si cancella la cartella a mano, o se un journal arriva da
+un'altra macchina senza i suoi allegati.
+
+### 5.11 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

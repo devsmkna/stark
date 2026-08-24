@@ -41,7 +41,21 @@ export type AnswerPartView = {
   refused: boolean
   at: number
 }
-export type PartView = TextPartView | ReasoningPartView | ToolPartView | AnswerPartView
+/**
+ * Dove il contesto e stato riassunto. Sta **dentro il turno** perche li succede: si e
+ * visto dal vivo, il `compact_boundary` arriva dopo l'inizio del turno e prima che
+ * finisca. Ed e una cosa da vedere, non da nascondere: sopra quella riga il modello
+ * non ha piu i messaggi per intero, ed e la spiegazione di meta delle volte in cui
+ * sembra aver dimenticato qualcosa.
+ */
+export type CompactPartView = {
+  kind: 'compact'; partId: string
+  before: number; after?: number
+  trigger?: 'manual' | 'auto'
+  at: number
+}
+export type PartView =
+  TextPartView | ReasoningPartView | ToolPartView | AnswerPartView | CompactPartView
 
 export type TurnView = {
   turnId: string
@@ -324,7 +338,17 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         status: p.status, kind: p.kind, resetsAt: p.resetsAt, usingOverage: p.usingOverage,
       }
       break
-    case 'context.compacted': break
+    case 'context.compacted': {
+      // Senza un turno aperto non c'e un posto nel flusso in cui metterla, e non e mai
+      // successo: la compattazione avviene mentre un turno gira. Se un giorno arrivasse
+      // prima del primo turno, si perderebbe qui — e lo direbbe questo commento.
+      turn()?.parts.push({
+        kind: 'compact', partId: `compact-${e.seq}`, before: p.before, at: e.ts,
+        ...(p.after !== undefined ? { after: p.after } : {}),
+        ...(p.trigger !== undefined ? { trigger: p.trigger } : {}),
+      })
+      break
+    }
     case 'notice':
       s.notices.push({ level: p.level, text: p.text }); break
     case 'action.blocked': {

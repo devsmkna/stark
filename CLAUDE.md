@@ -81,6 +81,9 @@ della macchina e li accende uno per uno, spenti di default, con la scelta che to
 risveglio. E i **comandi slash** si scrivono: la casella li propone appena scrivi `/`, con
 argomenti e alias.
 
+**La compattazione si vede**: una riga nel flusso con quanto c'era, quanto è rimasto e se
+l'hai chiesta tu o si era riempito. Prima l'evento finiva in un `break`.
+
 **L'indirizzo dice dove sei** (`/chat/<id>`, `/chat/<id>/effects`): un ricaricamento non perde
 la chat, e «indietro» torna alla conversazione dagli effetti.
 
@@ -93,7 +96,7 @@ aperta si ricollega da sola dopo un riavvio.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 40 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 41 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -106,10 +109,9 @@ che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
-Cosa manca nella UI, oltre alle impostazioni: la **compattazione del contesto** arriva come
-evento e non si vede da nessuna parte; scegliere un **file per percorso** senza scriverlo a
-mano; e delle notifiche mancano le due parti che vivono nelle impostazioni — **scegliere il
-suono** di ciascun evento e **silenziare un progetto** intero.
+Cosa manca nella UI, oltre alle impostazioni: scegliere un **file per percorso** senza
+scriverlo a mano; e delle notifiche mancano le due parti che vivono nelle impostazioni —
+**scegliere il suono** di ciascun evento e **silenziare un progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una

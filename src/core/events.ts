@@ -251,7 +251,14 @@ export type Payload =
   | { k: 'usage.updated'; usage: Usage; cost: Cost }
   | { k: 'quota.updated'; status: string; kind: string; resetsAt: number
       usingOverage: boolean }
-  | { k: 'context.compacted'; before: number; after: number }
+  /**
+   * Il contesto è stato riassunto: da qui in su il modello non ha più i messaggi per
+   * intero, ma un riassunto. Osservato dal vivo: `manual` con 34.802 → 743 token in
+   * 8,7 s. `after` è opzionale perché il protocollo lo dichiara tale — mostrare uno
+   * zero al posto di «non lo so» sarebbe la solita bugia comoda.
+   */
+  | { k: 'context.compacted'; before: number; after?: number
+      trigger?: 'manual' | 'auto'; ms?: number }
   | { k: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { k: 'action.blocked'; by: 'classifier' | 'denyRule'; callId?: string; reason: string }
 
