@@ -44,6 +44,11 @@ e va aggiornata a fine sessione prima di cambiare PC.
   `docs/ui-schermate.md` a parole, `docs/ui-anteprima.html` come anteprima da pubblicare.
 - **Domande aperte** — https://app.notion.com/p/3c3fef5cacd981f688d2c486c3119b04
 
+**Se stai per lavorare sulla UI** → leggi `docs/ui-implementazione.md`. Dice cos'è già
+scritto, cosa manca **nel daemon** prima di poter fare una certa schermata, in che ordine
+procedere e dove sono le trappole. È il documento che evita di scoprire a metà di un
+componente che la rotta che gli serve non esiste.
+
 Nota: ADR-003 definisce dove vive cosa. Le specifiche accoppiate al codice (modello di eventi
 canonico, contratti degli adapter) NON vanno su Notion ma in `docs/` in questo repo.
 
