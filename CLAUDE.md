@@ -31,6 +31,7 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-008 — Permessi basati su auto mode (default: zero card, toggle opzionali)
   - ADR-007 — Stack tecnologico e persistenza (Node + TS, journal JSONL)
   - ADR-009 — Agent SDK ufficiale invece del protocollo a mano (supera in parte ADR-001)
+  - ADR-010 — Con cosa si scrive la UI (Vite + Svelte 5; il daemon resta senza build)
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -57,14 +58,27 @@ eventi canonici → journal JSONL → Sleep → risveglio con `--resume` → sta
 journal, identico a quello dal vivo. Il **daemon esiste** (HTTP + SSE su `127.0.0.1`, registro
 multi-sessione, perimetro di sicurezza), e così l'import di conversazioni nate nella CLI.
 
-**Manca solo la UI.** L'impianto è deciso e c'è un'anteprima (`docs/ui-anteprima.html`), ma
-nessun client vero: è l'unico pezzo dell'MVP che non esiste.
+**La UI è cominciata.** Vite + Svelte 5 in `ui/`, servita dal daemon. Oggi **legge**: elenco
+dei lavori raggruppato per stato e progetto, conversazione dal vivo agganciata al flusso SSE,
+riconnessione automatica. Non scrive ancora — niente casella di scrittura, niente permessi,
+niente effetti. Tutte le schermate sono disegnate in `docs/ui-anteprima.html`.
 
-Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` girano diretti, senza build).
-`npm run check` prova tutta la catena a costo zero di quota — 26 verifiche; `npm run slice`
-apre una sessione vera.
+Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
+la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
+quota — 26 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+`npm run slice` apre una sessione vera.
 
-Passo corrente: **scrivere la UI**, agganciata al flusso SSE del daemon.
+Per **guardare** la UI invece di descriverla: `node tools/shot.mjs <url> <fuori.png> [selettore]`
+la fotografa senza spendere quota. Un journal da dare in pasto al daemon lo produce
+`npm run check`, che scrive eventi canonici finti.
+
+Passo corrente: **far scrivere la UI** — casella di scrittura e Stop, poi i due stati bloccanti
+del blocco in basso, poi effetti e confronto affiancato.
+
+Due buchi noti nella UI, oltre a ciò che non è ancora scritto: la barra laterale si aggiorna
+**interrogando `/api/sessions` ogni 3 secondi**, perché il daemon espone un flusso per sessione
+e non uno globale; e il riassunto di cosa fa un tool lo **indovina la UI** guardando dentro
+`input`, che è forma di Claude Code — dovrebbe arrivare già pronto dal modello canonico.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -85,6 +99,12 @@ Decisioni già prese:
   stripping dei tipi non controlla nulla. Il sorgente resta compilabile
   (`rewriteRelativeImportExtensions`), quindi la scelta è reversibile con un comando.
   Il prerequisito Node è passato da ≥20 a ≥22.18: ADR-007 su Notion è già stato corretto.
+- UI in **Vite + Svelte 5** (ADR-010). Il daemon resta senza build: le due metà divergono di
+  proposito, perché la misura di ADR-007 era stata presa su `tsc` che emette `dist/` e su Node
+  che riparte, condizioni che nel browser non esistono.
+- la UI non tiene un modello proprio: tiene lo `SessionSnapshot` e ci applica sopra gli eventi
+  con lo **stesso `applyTo`** del daemon. L'invariante del §4 non è una regola da rispettare, è
+  l'unica cosa che sa fare.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
