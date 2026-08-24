@@ -427,8 +427,15 @@ Dal telefono non si lavora: si **sorveglia e si sblocca**. Serve vedere lo stato
 lavori, leggere per intero l'ultima risposta, rispondere a permessi e domande, e poter
 scrivere una richiesta nuova.
 
-**Lo schermo stretto non rimpicciolisce: cambia.** L'elenco a fianco e il confronto affiancato
-non funzionano stretti — lì servono soluzioni diverse, non le stesse più piccole.
+**Lo schermo stretto non rimpicciolisce: cambia.** Deciso il 24 agosto 2026: si segue la
+logica di WhatsApp e Telegram. **L'elenco *è* la schermata principale**, a tutto schermo;
+toccando una chat si apre soltanto quella, a tutto schermo, con una freccia per tornare.
+Una alla volta, non due colonne rimpicciolite.
+
+Funziona perché è già l'impianto che c'è: l'elenco è la navigazione, e su schermo largo le
+due cose stanno affiancate solo perché lo spazio lo permette. Stretto, si alternano. Il
+confronto affiancato resta l'eccezione che non regge: lì serve la forma a colonna unica,
+con righe vecchie e nuove alternate (vedi la sezione 4).
 
 ---
 

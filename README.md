@@ -1,91 +1,171 @@
-# STARK
+<p align="center">
+  <img src="docs/logo/stark-logo.png" alt="STARK" width="620">
+</p>
 
-Interfaccia web locale per gestire le sessioni con gli agent AI installati sulla macchina.
-Le decisioni e la roadmap stanno su Notion; qui c'è il codice e la specifica che cambia col
-codice. Vedi `CLAUDE.md` per i link e `docs/event-model.md` per il modello di eventi.
+<p align="center">
+  <b>Una GUI per gli agent AI che scrivono codice.</b><br>
+  Gira sulla tua macchina, si apre nel browser, e sostituisce il terminale invece di imitarlo.
+</p>
+
+---
+
+## Che problema risolve
+
+Claude Code e simili si usano dal terminale, e funzionano bene. L'interfaccia però è un
+flusso di testo che scorre: tutto ha lo stesso aspetto, niente si può richiudere, e ciò che
+è passato è passato. **Tredici scambi di lavoro reale producono circa quattrocento blocchi**
+fra testo, ragionamenti e operazioni. Dentro quel muro non si capisce più cosa è stato fatto,
+quali file sono stati toccati, né quali domande sono state fatte e cosa si è risposto.
+
+E soprattutto: non si lavora con un agent alla volta. Se ne lanciano tre o quattro in
+parallelo su progetti diversi, e li si sorveglia — chi ha finito, chi è fermo ad aspettare
+una risposta, chi sta ancora lavorando. Dal terminale quella sorveglianza si fa a mano,
+girando fra le finestre.
+
+STARK è un **cruscotto dei lavori in corso**, non un'app di messaggistica: la conversazione
+è un sottoprodotto, quello che conta è lo stato del lavoro — e cambia proprio mentre sei
+girato dall'altra parte.
+
+> **Il principio fondante.** STARK non è un terminale nel browser: è una GUI che
+> **sostituisce** la TUI. Ogni volta che una scelta tecnica costringe a «simulare il
+> terminale», è la scelta sbagliata.
+
+Il corollario che ne governa il perimetro: **STARK non deve mai poter meno del CLI.** Se il
+CLI lo consente, STARK lo consente. Se il CLI lo rifiuta, la voce si mostra disabilitata
+**con la spiegazione**, mai nascosta.
+
+## Com'è fatto
+
+```
+ agent (Claude Code, via Agent SDK)
+      │  messaggi nella forma dell'agent
+      ▼
+ adapter ──► eventi canonici ──► journal JSONL ──► reduce ──► stato
+      │      l'unico punto che        append-only      funzione pura
+      │      nomina Claude Code                        eventi → schermo
+      ▼
+ daemon: HTTP + SSE su 127.0.0.1 ──► UI nel browser (Svelte)
+```
+
+Due cose reggono tutto il resto:
+
+- **Il vocabolario canonico.** Fuori dall'adapter nessun componente sa che esiste Claude
+  Code. È quel confine a rendere possibile un secondo agent senza rifare la UI.
+- **L'invariante del journal.** Lo stato dello schermo dev'essere ricostruibile *interamente*
+  rileggendo il journal dall'inizio. Se la UI tenesse anche un solo dato che non nasce da lì,
+  il risveglio di una sessione dormiente mostrerebbe mezzo schermo vuoto — e nessuno se ne
+  accorgerebbe fino a quel momento. `core/reduce.ts` è quell'invariante resa eseguibile, e la
+  UI nel browser usa **la stessa funzione** del daemon.
+
+Il modello di eventi sta in [`docs/event-model.md`](docs/event-model.md): è il contratto fra
+motore e interfaccia, e si legge prima di toccare l'uno o l'altra.
 
 ## Stato
 
-Fetta verticale funzionante sopra l'**Agent SDK ufficiale** (ADR-009): avvio di una sessione,
-traduzione nel vocabolario canonico, permessi e domande a scelta multipla, journal JSONL, Sleep,
-risveglio e ricostruzione dello stato dal journal. Nessuna UI.
+Motore completo e funzionante: sessione vera sopra l'**Agent SDK ufficiale**, traduzione nel
+vocabolario canonico, permessi in modalità `auto` con zero interruzioni, domande a scelta
+multipla, journal, Sleep, risveglio con `--resume`, import di conversazioni nate nella CLI, e
+il daemon con il suo perimetro di sicurezza.
+
+**La UI è in costruzione.** Oggi legge: elenco dei lavori, conversazione dal vivo agganciata
+al flusso SSE, riconnessione automatica. Non scrive ancora — niente casella di scrittura,
+niente permessi, niente effetti.
+
+Il disegno di tutte le schermate, con il perché di ogni scelta, sta in
+[`docs/ui-schermate.md`](docs/ui-schermate.md) e nell'anteprima
+[`docs/ui-anteprima.html`](docs/ui-anteprima.html).
 
 ## Requisiti
 
-Node **≥ 22.18**. Claude Code **non** va installato a parte: l'SDK porta il proprio. I sorgenti TypeScript girano direttamente (`node src/…​.ts`), senza build:
-è da 22.18 che l'esecuzione dei `.ts` è attiva senza flag. `tsc` resta necessario per il
-controllo dei tipi, che lo stripping **non** fa.
+Node **≥ 22.18**. Claude Code **non** va installato a parte: l'SDK porta il proprio
+eseguibile, appaiato alla propria versione dal lockfile. I sorgenti TypeScript girano
+direttamente (`node src/….ts`), senza build — è da 22.18 che l'esecuzione dei `.ts` è attiva
+senza flag. `tsc` resta necessario per il controllo dei tipi, che lo stripping **non** fa.
 
 ```
 npm install
+npm run ui:build     # la UI è servita dal daemon, va compilata una volta
+npm run stark        # stampa l'indirizzo da aprire
 ```
+
+L'indirizzo stampato contiene il token una volta sola. Al primo caricamento STARK lo sposta
+in un cookie e lo toglie dalla barra degli indirizzi.
 
 ## Comandi
 
 | | |
 |---|---|
-| `npm run typecheck` | controllo dei tipi. Nessun file emesso. |
+| `npm run stark` | **avvia il daemon** e stampa l'indirizzo con il token |
+| `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
+| `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
 | `npm run check` | catena completa su eventi finti: 26 verifiche, **zero quota spesa** |
+| `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
-| `npm run stark` | **avvia il daemon** e stampa indirizzo e token |
 | `npm run daemon` | prova il daemon da capo a fondo, perimetro di sicurezza compreso |
 | `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
-| `npm run build` | emette JS in `dist/`. Serve solo se un giorno si vuole distribuire compilato. |
+| `npm run icons` · `python3 tools/gen-logo.py` | rigenerano icone e marchio dalle sorgenti |
 
-`npm run check` è quello da eseguire spesso: la risorsa scarsa è la quota, non i dollari, e un
-test che costa un turno di modello è un test che nessuno esegue.
+`npm run check` è quello da eseguire spesso: la risorsa scarsa è la quota, non i dollari, e
+un test che costa un turno di modello è un test che nessuno esegue.
 
 ### Variabili per `npm run slice`
 
 | | |
 |---|---|
 | `STARK_MODEL` | default `claude-sonnet-5`. Con un modello che non regge auto mode la sessione riparte in Manual e la fetta lo segnala. |
-| `STARK_MODE` | default `auto` (ADR-008) |
-| `STARK_ASK` | nomi di tool separati da virgola per cui chiedere il permesso. Vuoto = zero card. `STARK_ASK=Bash` mostra il comportamento di ADR-008: `Write` ed `Edit` passano dal classificatore, solo `Bash` torna indietro. |
+| `STARK_MODE` | default `auto` |
+| `STARK_ASK` | tool per cui chiedere il permesso, separati da virgola. Vuoto = zero interruzioni. `STARK_ASK=Bash` mostra il comportamento voluto: `Write` ed `Edit` passano dal classificatore, solo `Bash` torna indietro. |
 | `STARK_PROMPT` | il prompt da mandare |
 
-La sandbox è `spike/sandbox/vslice/`, che è gitignorata: contiene journal di sessione e
-percorsi assoluti della macchina.
+## Sicurezza
 
-## Il daemon
-
-`npm run stark` mette in ascolto un server su `127.0.0.1` con una porta casuale e stampa un
-token. Il token cambia a ogni avvio: non è un segreto da conservare, è ciò che impedisce a
-un'altra pagina aperta nel browser di parlare con questo processo.
-
-| | |
-|---|---|
-| `GET /api/health` | il daemon risponde |
-| `GET /api/sessions` | elenco delle sessioni, vive e dormienti |
-| `POST /api/sessions` | apre o riprende una sessione: `{cwd, model?, mode?, resume?, askTools?}` |
-| `GET /api/sessions/:id` | lo stato ricostruito |
-| `GET /api/sessions/:id/events?from=N` | rilettura del journal da `N` in poi |
-| `GET /api/sessions/:id/stream?from=N` | flusso SSE: prima ciò che si è perso, poi il resto |
-| `POST /api/sessions/:id/command` | i comandi del §11 della specifica |
-
-### Perché è protetto così
+STARK esegue comandi arbitrari, e sulla macchina di sviluppo lo fa **come root**. La
+sicurezza qui è un requisito, non un accorgimento.
 
 Un server su localhost **non** è al sicuro per il fatto di essere su localhost: qualunque
-pagina web che hai aperta può mandargli richieste, e STARK esegue comandi come root. Le difese
-sono tre e coprono attacchi diversi:
+pagina web tu abbia aperta può mandargli richieste. Le difese sono quattro e coprono attacchi
+diversi:
 
-- **token** in `Authorization: Bearer`, confrontato a tempo costante — distingue STARK da
-  qualunque altro processo sulla macchina
-- **`Origin`** — ferma le richieste che arrivano da un altro sito
+- **indirizzo** — si ascolta esplicitamente su `127.0.0.1`, non su tutte le interfacce
 - **`Host`** — ferma il DNS rebinding, cioè un dominio dell'attaccante che punta a `127.0.0.1`.
   È l'unica cosa che il browser non lascia falsificare, ed è per questo che regge
+- **`Origin`** — ferma le richieste che arrivano da un altro sito
+- **token** in `Authorization: Bearer` o in un cookie `SameSite=Strict`, confrontato a tempo
+  costante — distingue STARK da qualunque altro processo sulla macchina
 
-Non ci sono intestazioni CORS, di proposito.
+Nessuna intestazione CORS, di proposito. Il token cambia a ogni avvio: non è un segreto da
+conservare.
 
-## Dove finiscono i journal delle conversazioni vere
+Distinzione che vale la pena tenere ferma: questi controlli **non** limitano ciò che puoi
+fare. Limitano *chi altro* può guidare l'agent. Il CLI non ne ha bisogno perché non ha
+superficie di rete; una web app quella protezione implicita la perde, e il token la
+restituisce.
+
+## Dove finiscono le conversazioni
 
 In `~/.stark/sessioni/`, **fuori dal repo**. Un journal importato contiene la conversazione
-intera: sta fuori da git per costruzione, non per una riga di `.gitignore` che qualcuno può
-cancellare per sbaglio.
+intera, compreso tutto ciò che l'agent ha letto: sta fuori da git per costruzione, non per
+una riga di `.gitignore` che qualcuno può cancellare per sbaglio.
 
-Riprendere una sessione richiede il trascritto di Claude Code, quindi le sessioni di STARK
-non usano `--no-session-persistence`. Il journal di STARK ricostruisce la UI; il contesto del
+Riprendere una sessione richiede il trascritto dell'agent, quindi STARK non usa
+`--no-session-persistence`. Il journal di STARK ricostruisce lo schermo; il contesto del
 modello vive nel trascritto dell'agent. Sono due memorie diverse e servono entrambe.
+
+## Dove stanno le decisioni
+
+Le motivazioni, gli ADR e la roadmap **non stanno in questo repo**: stanno su Notion, e i
+collegamenti sono in [`CLAUDE.md`](CLAUDE.md). Qui c'è il codice e le specifiche che cambiano
+insieme al codice — il modello di eventi e il disegno delle schermate.
+
+Ogni decisione strutturale è registrata come ADR **con la motivazione**, così che se un
+domani la si rimette in discussione si sappia su quali premesse era stata presa.
+
+## Crediti
+
+Marchio in `docs/logo/`. `stark-wordmark.svg` è vettorizzato dall'originale e usa
+`currentColor`: la stessa immagine sta bene sul chiaro e sullo scuro, senza varianti da
+tenere allineate. Icone: [Lucide](https://lucide.dev), licenza ISC. Caratteri: IBM Plex Sans
+e IBM Plex Mono, licenza OFL.
