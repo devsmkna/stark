@@ -52,16 +52,24 @@ la si rimette in discussione si sappia su quali premesse era stata presa.
 ## Stato attuale
 
 Spike concluso. Specifica del modello di eventi scritta (`docs/event-model.md`).
-**Fetta verticale implementata e funzionante**: sessione Claude Code reale → eventi canonici →
-journal JSONL → Sleep → stato ricostruito dal journal, identico a quello dal vivo.
-Non esiste ancora nessuna UI, né il daemon vero (una sessione sola, niente HTTP).
+**Il motore è implementato e funzionante**: sessione Claude Code reale sopra l'Agent SDK →
+eventi canonici → journal JSONL → Sleep → risveglio con `--resume` → stato ricostruito dal
+journal, identico a quello dal vivo. Il **daemon esiste** (HTTP + SSE su `127.0.0.1`, registro
+multi-sessione, perimetro di sicurezza), e così l'import di conversazioni nate nella CLI.
+
+**Manca solo la UI.** L'impianto è deciso e c'è un'anteprima (`docs/ui-anteprima.html`), ma
+nessun client vero: è l'unico pezzo dell'MVP che non esiste.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` girano diretti, senza build).
-`npm run check` prova tutta la catena a costo zero di quota; `npm run slice` apre una
-sessione vera.
+`npm run check` prova tutta la catena a costo zero di quota — 26 verifiche; `npm run slice`
+apre una sessione vera.
 
-Passo corrente: **decidere il prossimo pezzo** fra daemon multi-sessione, risveglio con
-`--resume`, e layout della UI.
+Passo corrente: **scrivere la UI**, agganciata al flusso SSE del daemon.
+
+Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
+classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
+conversazione lunga** (P16). Le sonde usano prompt minuscoli, quindi non dicono niente su un
+trascritto vero: finché non c'è quella misura, lo Sleep non va presentato come indolore.
 
 Decisioni già prese:
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
@@ -76,7 +84,7 @@ Decisioni già prese:
   tracce di stack che puntano al sorgente vero. `tsc --noEmit` resta obbligatorio, perché lo
   stripping dei tipi non controlla nulla. Il sorgente resta compilabile
   (`rewriteRelativeImportExtensions`), quindi la scelta è reversibile con un comando.
-  **Conseguenza: ADR-007 va corretto su Notion, il prerequisito Node passa da ≥20 a ≥22.18.**
+  Il prerequisito Node è passato da ≥20 a ≥22.18: ADR-007 su Notion è già stato corretto.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
@@ -170,11 +178,17 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
   Corollario per ADR-005: risvegliare una sessione dormiente rilegge tutto il contesto, quindi
   costa quota. Lo Sleep libera RAM, non quota.
 - **Due macchine**, e i trascritti NON si sincronizzano fra loro (vedi il Punto della situazione).
-  Node: 24.13.1 su `/mnt/m/devs-development/stark/stark`, ancora 18.x su `/root/DevsMachna/stark`.
-  ADR-007 rende ≥20 un prerequisito: va aggiornato lì prima di implementare.
-- Il repo vive su un mount DrvFs (`/mnt/…`): `git status` segnala come modificati file il cui
-  contenuto è identico a HEAD. È una limitazione dello stat cache di git su quel filesystem,
-  non una modifica reale — verificare sempre con `git diff` prima di crederci.
+  Node: **24.13.1** sul fisso (`/mnt/m/devs-development/stark/stark`), **22.23.2** sul portatile
+  (`/root/DevsMachna/stark`, aggiornato il 24 agosto 2026). Il prerequisito di ADR-007 è ≥ 22.18:
+  ora è soddisfatto su entrambe.
+- **`CLAUDE_CONFIG_DIR` non vale uguale sulle due macchine**: sul fisso punta a
+  `/root/.claude-digitizers`; sul portatile non è impostata e le sessioni stanno in `~/.claude`.
+  Va propagata al processo figlio (opzione `env` dell'SDK), altrimenti quello guarda nella
+  cartella sbagliata, non trova sessioni da riprendere e sembra rotto senza motivo apparente.
+- **Sul fisso** il repo vive su un mount DrvFs (`/mnt/…`): `git status` segnala come modificati
+  file il cui contenuto è identico a HEAD. È una limitazione dello stat cache di git su quel
+  filesystem, non una modifica reale — verificare sempre con `git diff` prima di crederci.
+  Sul portatile il repo sta su ext4 e il problema non si presenta.
 
 ## Sicurezza (requisito, non accorgimento)
 

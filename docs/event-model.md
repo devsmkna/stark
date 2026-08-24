@@ -538,9 +538,13 @@ cui `Capabilities` dovrà lavorare davvero.
 6. **Costo in quota del classificatore.** Ogni azione ispezionata è una chiamata a un secondo
    modello. Non è stato misurato, e su abbonamento a quota fissa è la risorsa che conta.
 7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa.
-8. **Il risveglio vero.** La fetta verticale dimostra metà dello Sleep: il processo muore e lo
-   stato si ricostruisce identico dal journal. Manca l'altra metà, cioè rilanciare con
-   `--resume` e riagganciare il journal esistente senza duplicare `seq`.
+8. ~~**Il risveglio vero.**~~ **Risolto, e misurato (P16).** Rilanciare con `--resume` riaggancia
+   il journal esistente e i `seq` **continuano** invece di ripartire da 1 — ripartire produrrebbe
+   due eventi con lo stesso numero nello stesso file, e "ho già visto fino a N" smetterebbe di
+   voler dire qualcosa. Sono due memorie separate: il journal ripristina la UI, il trascritto
+   dell'agent ripristina il contesto del modello. Per questo `--no-session-persistence` è
+   incompatibile con lo Sleep. Resta non misurato **quanto costa in quota** risvegliare una
+   conversazione lunga: le sonde usano prompt minuscoli.
 
 ---
 
@@ -554,7 +558,7 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 15 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/offline-check.ts` | `npm run check` — 26 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 

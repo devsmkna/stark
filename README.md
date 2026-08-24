@@ -25,7 +25,7 @@ npm install
 | | |
 |---|---|
 | `npm run typecheck` | controllo dei tipi. Nessun file emesso. |
-| `npm run check` | catena completa su eventi finti: 15 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 26 verifiche, **zero quota spesa** |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
