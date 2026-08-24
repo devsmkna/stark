@@ -41,6 +41,35 @@ export type Cost = { nominalUsd: number }
 export type SlashCommand = { name: string; description?: string }
 
 /**
+ * Un modello fra cui la sessione puo scegliere. `id` e cio che si rimanda indietro
+ * con `session.setModel`, `resolved` il modello vero a cui un alias punta.
+ *
+ * Sta nel vocabolario canonico e non in una lista dentro la UI per la ragione del §1:
+ * i nomi dei modelli sono vocabolario dell'agent, e la UI non deve conoscerli. Lo
+ * stesso vale per `autoMode`, che dipende dal modello e non dall'agent: senza, la UI
+ * dovrebbe sapere da se che Haiku non regge auto mode, cioe indovinare.
+ */
+export type ModelChoice = {
+  id: string
+  label?: string
+  resolved?: string
+  autoMode: boolean
+}
+
+/**
+ * Una modalita dei permessi, e se questa sessione puo davvero usarla.
+ *
+ * `available: false` non e un motivo per nascondere la voce: il Principio 5 vuole che
+ * si veda spenta CON la spiegazione. La spiegazione la scrive l'adapter, che e l'unico
+ * che sa chi rifiuta e perche.
+ */
+export type ModeChoice = {
+  mode: PermissionMode
+  available: boolean
+  reason?: string
+}
+
+/**
  * Una domanda dell'agent, nella forma documentata di `AskUserQuestion`.
  * Da 1 a 4 domande per richiesta, da 2 a 4 opzioni ciascuna, `header` max 12 caratteri.
  */
@@ -87,6 +116,8 @@ export type Payload =
   // §6 sessione
   | { k: 'session.created'; agent: string; cwd: string; model: string
       capabilities: Capabilities; tools: string[]; commands: SlashCommand[]
+      // Cosa si puo scegliere dalla barra di stato, senza che la UI debba saperlo.
+      models?: ModelChoice[]; modes?: ModeChoice[]
       // I comportamenti di protocollo che questa versione implementa. È documentato
       // usare questi nomi per la feature detection invece di confrontare versioni.
       protocolCapabilities?: string[] }
@@ -99,6 +130,8 @@ export type Payload =
   // Il manico con cui questa sessione si riapre. Sta nel journal perche senza, il
   // journal non basta a risvegliare: saprebbe dire cosa e successo ma non come tornarci.
   | { k: 'session.resumeRef'; ref: string }
+  /** Il titolo scelto dall'utente. Da qui in poi STARK non lo riscrive piu da solo. */
+  | { k: 'session.renamed'; title: string }
   | { k: 'session.slept' }
   | { k: 'session.woke'; resumedFromSeq: number }
   | { k: 'session.error'; message: string; fatal: boolean }
@@ -120,7 +153,10 @@ export type Payload =
 
   | { k: 'tool.started'; callId: string; name: string }
   | { k: 'tool.input.delta'; callId: string; delta: string }
-  | { k: 'tool.input.ended'; callId: string; input: unknown }
+  // `summary` e "su cosa" il tool ha lavorato, gia pronto: il comando, il percorso,
+  // l'indirizzo. Lo scrive l'adapter perche estrarlo da `input` vuol dire conoscere la
+  // forma di un agent, ed e esattamente cio che il §1 vieta fuori di li.
+  | { k: 'tool.input.ended'; callId: string; input: unknown; summary?: string }
   | { k: 'tool.ended'; callId: string; ok: boolean; output?: unknown; error?: string }
 
   // §8 richieste bloccanti — nel caso normale NON esistono affatto (ADR-008)
@@ -175,6 +211,7 @@ export type Command =
   | { c: 'session.setModel'; model: string }
   | { c: 'session.setMode'; mode: PermissionMode }
   | { c: 'permissions.setRules'; rules: PermissionRules }
+  | { c: 'session.rename'; title: string }
   | { c: 'session.sleep' }
   | { c: 'session.wake' }
   | { c: 'session.close' }

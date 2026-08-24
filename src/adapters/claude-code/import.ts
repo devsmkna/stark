@@ -13,6 +13,8 @@
 import { readFileSync } from 'node:fs'
 import type { Payload, Usage } from '../../core/events.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
+import { capabilitiesFor, modeChoices } from './sdk-options.ts'
+import { summarize } from './summary.ts'
 import type { NativeEvent } from './raw.ts'
 
 export type ImportedEvent = { payload: Payload; ts: number }
@@ -22,6 +24,8 @@ export type ImportStats = {
   saltate: Record<string, number>
   turni: number
   parti: number
+  cwd?: string
+  model?: string
 }
 
 /** Righe che sono contabilita dell'interfaccia, non conversazione. */
@@ -52,6 +56,12 @@ export function importTranscript(path: string): { events: ImportedEvent[]; stats
   const saltate: Record<string, number> = {}
   let righe = 0, turni = 0, parti = 0
   let turnAperto = false
+  // La cartella e il modello non stanno in una riga di intestazione: sono ripetuti su
+  // ogni voce del trascritto. Si prende il primo che passa, perche senza `cwd` la
+  // conversazione importata finisce nel gruppo "no folder" — cioe senza progetto,
+  // senza colore e senza la cartella da cui la si potrebbe risvegliare.
+  let cwd: string | undefined
+  let model: string | undefined
   let uso = vuoto()
   const nomiTool = new Map<string, { name: string; input: unknown }>()
 
@@ -73,6 +83,7 @@ export function importTranscript(path: string): { events: ImportedEvent[]; stats
 
     const ts = Date.parse(String(e['timestamp'] ?? '')) || 0
     const uuid = String(e['uuid'] ?? '')
+    if (!cwd && typeof e['cwd'] === 'string' && e['cwd']) cwd = e['cwd']
 
     if (tipo === 'system') {
       if (e['subtype'] === 'compact_boundary') {
@@ -137,6 +148,10 @@ export function importTranscript(path: string): { events: ImportedEvent[]; stats
       // quota. I token invece ci sono, e sono l'unica misura onesta di quanto e costato
       // riaprire questa conversazione.
       somma(uso, e['message']?.['usage'])
+      // `<synthetic>` non e un modello: e cio che il CLI scrive per i messaggi che
+      // fabbrica lui, per esempio "[Request interrupted by user]".
+      const m = e['message']?.['model']
+      if (!model && typeof m === 'string' && m && !m.startsWith('<')) model = m
       push({ k: 'step.started', stepId: uuid }, ts)
       blocchi.forEach((b, i) => {
         // §16.2 risolto meglio che dal vivo: il trascritto ha un uuid per messaggio,
@@ -156,8 +171,13 @@ export function importTranscript(path: string): { events: ImportedEvent[]; stats
           const callId = String(b['id'] ?? partId)
           const name = String(b['name'] ?? '?')
           nomiTool.set(callId, { name, input: b['input'] ?? {} })
+          const input = b['input'] ?? {}
+          const riassunto = summarize(name, input)
           push({ k: 'tool.started', callId, name }, ts)
-          push({ k: 'tool.input.ended', callId, input: b['input'] ?? {} }, ts)
+          push({
+            k: 'tool.input.ended', callId, input,
+            ...(riassunto !== undefined ? { summary: riassunto } : {}),
+          }, ts)
           parti++
         }
       })
@@ -170,7 +190,27 @@ export function importTranscript(path: string): { events: ImportedEvent[]; stats
 
   if (turnAperto) push(chiusura(turni, uso), events[events.length - 1]?.ts ?? 0)
 
-  return { events, stats: { righe, saltate, turni, parti } }
+  // La nascita della sessione va in testa, e si scrive **dopo** aver letto tutto:
+  // cartella e modello si scoprono strada facendo. Senza, lo snapshot ricostruito non
+  // saprebbe ne dove gira la conversazione ne con che modello — e la UI mostrerebbe
+  // una chat senza progetto, che e il modo piu veloce di perderla di vista.
+  const primo = events[0]?.ts ?? Date.now()
+  if (cwd || model) {
+    events.unshift({
+      payload: {
+        k: 'session.created', agent: 'claude-code', cwd: cwd ?? '',
+        model: model ?? '', capabilities: capabilitiesFor(model ?? ''),
+        tools: [], commands: [], models: [], modes: modeChoices(),
+      },
+      ts: primo,
+    })
+  }
+  // Nessun processo dietro: la conversazione e completa e aspetta un prompt nuovo.
+  // Senza questo lo stato resterebbe `starting`, cioe "sta partendo" su qualcosa che
+  // non partira da solo.
+  push({ k: 'session.state', state: 'idle' }, events[events.length - 1]?.ts ?? primo)
+
+  return { events, stats: { righe, saltate, turni, parti, ...(cwd ? { cwd } : {}), ...(model ? { model } : {}) } }
 }
 
 function vuoto(): Usage { return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }

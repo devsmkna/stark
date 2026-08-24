@@ -6,7 +6,9 @@
 // silenzioso di fallire.
 
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
-import type { Capabilities, PermissionMode, SlashCommand } from '../../core/events.ts'
+import type {
+  Capabilities, ModeChoice, ModelChoice, PermissionMode, SlashCommand,
+} from '../../core/events.ts'
 
 export type LaunchOptions = {
   cwd: string
@@ -93,6 +95,61 @@ export function resolveModel(models: unknown, requested: string): string {
     if (m?.['value'] === requested && typeof m['resolvedModel'] === 'string') return m['resolvedModel']
   }
   return requested
+}
+
+/**
+ * I modelli fra cui questa sessione può scegliere, come li dichiara l'handshake.
+ *
+ * `autoMode` viaggia con ciascuno perché è una proprietà del modello: senza, la barra
+ * di stato dovrebbe sapere da sé che Haiku non lo regge — cioè conoscere i modelli di
+ * un agent, che è ciò che il §1 vieta fuori di qui. La UI ne fa un avviso: la voce
+ * resta scegliibile, perché il CLI la accetta (Principio 5), ma dice cosa succede.
+ */
+export function modelChoices(raw: unknown, current: string): ModelChoice[] {
+  const out: ModelChoice[] = []
+  const seen = new Set<string>()
+  if (Array.isArray(raw)) {
+    for (const m of raw) {
+      const id = String(m?.['value'] ?? '')
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      const resolved = typeof m?.['resolvedModel'] === 'string' ? m['resolvedModel'] : undefined
+      const label = typeof m?.['displayName'] === 'string' ? m['displayName'] : undefined
+      out.push({
+        id, autoMode: modelSupportsAutoMode(resolved ?? id),
+        ...(label ? { label } : {}), ...(resolved ? { resolved } : {}),
+      })
+    }
+  }
+  // Il modello con cui la sessione sta girando dev'esserci sempre, anche se
+  // l'handshake non lo elenca: una tendina che non contiene il valore corrente
+  // sembrerebbe dire che è stato scelto qualcosa di impossibile.
+  if (!out.some(m => m.id === current || m.resolved === current)) {
+    out.unshift({ id: current, autoMode: modelSupportsAutoMode(current) })
+  }
+  return out
+}
+
+/**
+ * Tutte e sei le modalità, con scritto quali non si possono usare **e perché**.
+ *
+ * Non cinque: `bypassPermissions` resta in elenco, spenta. Non è una prudenza di STARK,
+ * è il CLI che la rifiuta a chi gira come root — e Principio 5 dice che una voce che il
+ * CLI non accetta si mostra disabilitata con la spiegazione, mai nascosta. Nasconderla
+ * farebbe sembrare STARK meno capace del terminale.
+ */
+export function modeChoices(): ModeChoice[] {
+  const root = typeof process.getuid === 'function' && process.getuid() === 0
+  const ALL: PermissionMode[] = [
+    'auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions',
+  ]
+  return ALL.map(mode => mode === 'bypassPermissions' && root
+    ? {
+        mode, available: false,
+        reason: 'Refused by the CLI itself when it runs with root privileges — '
+          + 'not a STARK restriction.',
+      }
+    : { mode, available: true })
 }
 
 export function slashCommands(raw: unknown): SlashCommand[] {

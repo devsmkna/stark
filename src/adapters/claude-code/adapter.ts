@@ -13,9 +13,10 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentQuestion, Payload, PermissionMode } from '../../core/events.ts'
 import {
-  buildOptions, capabilitiesFor, modelSupportsAutoMode, resolveModel, slashCommands,
-  type LaunchOptions,
+  buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
+  resolveModel, slashCommands, type LaunchOptions,
 } from './sdk-options.ts'
+import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
 
 /** Cosa STARK decide su una richiesta di permesso. */
@@ -156,6 +157,8 @@ export class ClaudeCodeAdapter {
       capabilities: capabilitiesFor(model),
       tools: [],
       commands: slashCommands(info['commands']),
+      models: modelChoices(info['models'], model),
+      modes: modeChoices(),
       ...(Array.isArray(caps) ? { protocolCapabilities: caps.map(String) } : {}),
     })
 
@@ -252,7 +255,7 @@ export class ClaudeCodeAdapter {
     this.emit({
       k: 'permission.asked', requestId,
       action: toolName,
-      resources: describeResources(toolName, input),
+      resources: resourcesOf(toolName, input),
       // §8: non è uno scope da indovinare, è la riga della tabella dei permessi che
       // il "Consenti sempre" sposterebbe da "chiedi" a "consenti".
       savable: [toolName],
@@ -328,9 +331,3 @@ function normalizeQuestions(raw: unknown): AgentQuestion[] {
   }))
 }
 
-function describeResources(tool: string, input: Record<string, unknown>): string[] {
-  if (tool === 'Bash' && typeof input['command'] === 'string') return [input['command']]
-  if (typeof input['file_path'] === 'string') return [input['file_path']]
-  if (typeof input['path'] === 'string') return [input['path']]
-  return []
-}

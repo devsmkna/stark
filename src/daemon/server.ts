@@ -78,6 +78,25 @@ async function route(
       return send(res, 200, { sessions: registry.list() })
     }
 
+    // Il flusso dell'**elenco**, non di una sessione. Esiste perché senza, per sapere
+    // che una chat diversa da quella aperta è cambiata, alla barra laterale non
+    // restava che richiedere `/api/sessions` a ripetizione.
+    if (method === 'GET' && path === '/api/stream') {
+      return listStream(req, res, registry)
+    }
+
+    // Le conversazioni nate nella CLI. Non è una rotta sulle sessioni di STARK: sono
+    // cose che STARK non ha ancora, e che l'SDK sa elencare al posto nostro.
+    if (method === 'GET' && path === '/api/importable') {
+      return send(res, 200, { sessions: await registry.importable() })
+    }
+    if (method === 'POST' && path === '/api/importable') {
+      const body = await readJson<{ sessionId?: string }>(req)
+      if (!body?.sessionId) return send(res, 400, { error: 'sessionId obbligatorio' })
+      const esito = await registry.importSession(body.sessionId)
+      return send(res, esito.ok ? 201 : 409, esito)
+    }
+
     if (method === 'POST' && path === '/api/sessions') {
       const body = await readJson<OpenSpec>(req)
       if (!body?.cwd) return send(res, 400, { error: 'cwd obbligatorio' })
@@ -101,6 +120,10 @@ async function route(
       if (method === 'GET' && sub === '/stream') {
         const from = Number(url.searchParams.get('from') ?? 0)
         return stream(req, res, registry, id, Number.isFinite(from) ? from : 0)
+      }
+      if (method === 'DELETE' && sub === '') {
+        const esito = await registry.remove(id)
+        return send(res, esito.ok ? 200 : 404, esito)
       }
       if (method === 'POST' && sub === '/command') {
         const cmd = await readJson<Command>(req)
@@ -146,6 +169,46 @@ function stream(
   const battito = setInterval(() => res.write(': .\n\n'), 15000)
 
   const chiudi = (): void => { clearInterval(battito); unsubscribe(); res.end() }
+  req.on('close', chiudi)
+  req.on('error', chiudi)
+}
+
+/**
+ * Le righe dell'elenco, ogni volta che cambiano.
+ *
+ * Manda la lista intera e non un delta: sono poche decine di righe corte, e un
+ * protocollo di differenze fra client e server sarebbe una seconda copia dello stato
+ * da tenere allineata — cioè un altro posto in cui la UI può divergere dal journal.
+ *
+ * Il ritardo non è una comodità: un solo turno produce decine di eventi al secondo,
+ * e ognuno cambia `lastSeq`. Senza, si ricalcolerebbe l'elenco — che rilegge da disco
+ * i journal delle sessioni non vive — a ogni delta di testo.
+ */
+function listStream(req: IncomingMessage, res: ServerResponse, registry: Registry): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  })
+
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const invia = (): void => {
+    timer = null
+    res.write(`event: sessions\ndata: ${JSON.stringify({ sessions: registry.list() })}\n\n`)
+  }
+  invia()
+
+  const unsubscribe = registry.watchAll(() => {
+    if (timer === null) timer = setTimeout(invia, 250)
+  })
+  const battito = setInterval(() => res.write(': .\n\n'), 15000)
+
+  const chiudi = (): void => {
+    clearInterval(battito)
+    if (timer) clearTimeout(timer)
+    unsubscribe()
+    res.end()
+  }
   req.on('close', chiudi)
   req.on('error', chiudi)
 }

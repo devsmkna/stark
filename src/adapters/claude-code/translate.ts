@@ -12,6 +12,7 @@
 import type { Cost, Payload, Usage } from '../../core/events.ts'
 import type { NativeEvent } from './raw.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
+import { summarize } from './summary.ts'
 
 type OpenBlock =
   | { kind: 'text'; partId: string; acc: string }
@@ -143,7 +144,11 @@ export class Translator {
         if (block.kind === 'reasoning') return [{ k: 'reasoning.ended', partId: block.partId }]
         const input = parseJson(block.acc)
         this.calls.set(block.callId, { name: block.name, input })
-        return [{ k: 'tool.input.ended', callId: block.callId, input }]
+        const summary = summarize(block.name, input)
+        return [{
+          k: 'tool.input.ended', callId: block.callId, input,
+          ...(summary !== undefined ? { summary } : {}),
+        }]
       }
       case 'message_stop':
         return [{ k: 'step.ended', stepId: this.messageId, finish: 'stop', usage: EMPTY }]

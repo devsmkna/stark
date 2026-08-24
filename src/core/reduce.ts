@@ -9,8 +9,8 @@
 import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
-  type AgentQuestion, type PermissionMode, type PromptPart, type SessionState,
-  type SlashCommand, type Usage,
+  type AgentQuestion, type ModeChoice, type ModelChoice, type PermissionMode,
+  type PromptPart, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
 export type TextPartView = { kind: 'text'; partId: string; text: string; open: boolean }
@@ -19,15 +19,39 @@ export type ReasoningPartView = {
 }
 export type ToolPartView = {
   kind: 'tool'; callId: string; name: string; inputRaw: string; input?: unknown
+  /** Su cosa ha lavorato, gia pronto dall'adapter. Vedi `tool.input.ended`. */
+  summary?: string
+  startedAt: number; endedAt?: number
   done: boolean; ok?: boolean; error?: string; blocked?: 'classifier' | 'denyRule'
 }
-export type PartView = TextPartView | ReasoningPartView | ToolPartView
+/**
+ * Cosa hai risposto, li dov'e successo.
+ *
+ * La richiesta non entra nel flusso — si espande il blocco in basso, sempre nello
+ * stesso posto. Ma la RISPOSTA si: riaprendo il lavoro due giorni dopo si deve
+ * capire cosa si era deciso, e perche l'agent ha fatto in quel modo.
+ */
+export type AnswerPartView = {
+  kind: 'answer'; partId: string; of: 'permission' | 'question'
+  /** Cosa era stato chiesto, come lo si era letto nel blocco in basso. */
+  asked: string
+  /** Cosa si e risposto. */
+  answer: string
+  /** Una risposta negata non e un fallimento, ma va distinta da una concessa. */
+  refused: boolean
+  at: number
+}
+export type PartView = TextPartView | ReasoningPartView | ToolPartView | AnswerPartView
 
 export type TurnView = {
   turnId: string
   prompt: PromptPart[]
   parts: PartView[]
   steps: number
+  /** L'orario a sinistra nell'intestazione del turno, e la durata quando e finito.
+   *  Come `lastTs`: la UI lo mostra, quindi per il §4 deve nascere dal journal. */
+  startedAt: number
+  endedAt?: number
   ended: boolean
   reason?: 'completed' | 'aborted' | 'error'
   usage?: Usage
@@ -36,10 +60,13 @@ export type TurnView = {
 
 export type FileEditView = {
   path: string; created: boolean; hunks: Hunk[]; callId?: string
+  /** «In ordine di tempo» e una delle due letture degli effetti: senza l'ora non esiste. */
+  ts: number
 }
 export type CommandRunView = {
   command: string; exitCode?: number; interrupted: boolean
   stdoutBytes: number; stderrBytes: number; callId?: string
+  ts: number
 }
 export type PendingPermissionView = {
   requestId: string; action: string; resources: string[]; savable: string[]; callId?: string
@@ -49,7 +76,9 @@ export type QuotaView = {
 }
 export type PendingQuestionView = { requestId: string; questions: AgentQuestion[] }
 export type NoticeView = { level: 'info' | 'warn' | 'error'; text: string }
-export type BlockedView = { by: 'classifier' | 'denyRule'; callId?: string; reason: string }
+export type BlockedView = {
+  by: 'classifier' | 'denyRule'; callId?: string; reason: string; ts: number
+}
 
 export type SessionSnapshot = {
   v: number
@@ -58,6 +87,12 @@ export type SessionSnapshot = {
   cwd?: string
   model?: string
   mode?: PermissionMode
+  /** Fra cosa si puo scegliere dalla barra di stato. Vuoto su un journal vecchio: la
+   *  UI mostra allora solo il valore corrente, invece di inventarsi un elenco. */
+  models: ModelChoice[]
+  modes: ModeChoice[]
+  /** Il titolo scelto a mano. Se manca, lo si ricava dal primo prompt. */
+  title?: string
   state: SessionState
   stateReason?: string
   capabilities?: Capabilities
@@ -84,6 +119,7 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
+    models: [], modes: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
     blocked: [], notices: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
@@ -108,7 +144,10 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
     case 'session.created':
       s.agent = p.agent; s.cwd = p.cwd; s.model = p.model
       s.capabilities = p.capabilities; s.tools = p.tools; s.slashCommands = p.commands
+      if (p.models) s.models = p.models
+      if (p.modes) s.modes = p.modes
       break
+    case 'session.renamed': s.title = p.title; break
     case 'session.state':
       s.state = p.state
       if (p.reason !== undefined) s.stateReason = p.reason
@@ -125,11 +164,17 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
 
     case 'turn.started':
-      s.turns.push({ turnId: p.turnId, prompt: p.prompt, parts: [], steps: 0, ended: false })
+      s.turns.push({
+        turnId: p.turnId, prompt: p.prompt, parts: [], steps: 0,
+        startedAt: e.ts, ended: false,
+      })
       break
     case 'turn.ended': {
       const t = s.turns.find(x => x.turnId === p.turnId)
-      if (t) { t.ended = true; t.reason = p.reason; t.usage = p.usage; t.cost = p.cost }
+      if (t) {
+        t.ended = true; t.reason = p.reason; t.usage = p.usage; t.cost = p.cost
+        t.endedAt = e.ts
+      }
       break
     }
     case 'step.started': { const t = turn(); if (t) t.steps++; break }
@@ -167,18 +212,24 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
     case 'tool.started':
       turn()?.parts.push({
         kind: 'tool', callId: p.callId, name: p.name, inputRaw: '', done: false,
+        startedAt: e.ts,
       })
       break
     case 'tool.input.delta': {
       const part = findTool(s, p.callId); if (part) part.inputRaw += p.delta; break
     }
     case 'tool.input.ended': {
-      const part = findTool(s, p.callId); if (part) part.input = p.input; break
+      const part = findTool(s, p.callId)
+      if (part) {
+        part.input = p.input
+        if (p.summary !== undefined) part.summary = p.summary
+      }
+      break
     }
     case 'tool.ended': {
       const part = findTool(s, p.callId)
       if (part) {
-        part.done = true; part.ok = p.ok
+        part.done = true; part.ok = p.ok; part.endedAt = e.ts
         if (p.error !== undefined) part.error = p.error
       }
       break
@@ -191,30 +242,53 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       })
       s.state = 'awaiting'
       break
-    case 'permission.replied':
+    case 'permission.replied': {
+      // Si legge la richiesta PRIMA di toglierla: la risposta da sola direbbe «once»
+      // senza dire a cosa, e nel flusso resterebbe un si senza domanda.
+      const asked = s.pendingPermissions.find(x => x.requestId === p.requestId)
       s.pendingPermissions = s.pendingPermissions.filter(x => x.requestId !== p.requestId)
+      turn()?.parts.push({
+        kind: 'answer', partId: p.requestId, of: 'permission',
+        asked: asked ? [asked.action, ...asked.resources].join(' · ') : 'permission',
+        answer: p.decision === 'reject' ? 'denied'
+          : p.decision === 'always' ? 'allowed, and remembered' : 'allowed',
+        refused: p.decision === 'reject', at: e.ts,
+      })
       if (s.pendingPermissions.length === 0 && s.state === 'awaiting') s.state = 'busy'
       break
+    }
     case 'question.asked':
       s.pendingQuestions.push({ requestId: p.requestId, questions: p.questions })
       s.state = 'awaiting'
       break
     case 'question.replied':
-    case 'question.rejected':
+    case 'question.rejected': {
+      const asked = s.pendingQuestions.find(x => x.requestId === p.requestId)
       s.pendingQuestions = s.pendingQuestions.filter(x => x.requestId !== p.requestId)
+      const replied = p.k === 'question.replied'
+      turn()?.parts.push({
+        kind: 'answer', partId: p.requestId, of: 'question',
+        asked: asked?.questions.map(q => q.question).join(' · ') ?? 'question',
+        answer: replied
+          ? Object.values(p.answers).map(v => Array.isArray(v) ? v.join(', ') : v).join(' · ')
+            || (p.response ?? '')
+          : 'dismissed without answering',
+        refused: !replied, at: e.ts,
+      })
       if (s.pendingQuestions.length === 0 && s.pendingPermissions.length === 0
         && s.state === 'awaiting') s.state = 'busy'
       break
+    }
 
     case 'file.edited':
       s.files.push({
-        path: p.path, created: p.created, hunks: p.hunks,
+        path: p.path, created: p.created, hunks: p.hunks, ts: e.ts,
         ...(p.callId !== undefined ? { callId: p.callId } : {}),
       })
       break
     case 'command.executed':
       s.shell.push({
-        command: p.command, interrupted: p.interrupted,
+        command: p.command, interrupted: p.interrupted, ts: e.ts,
         stdoutBytes: p.stdout.length, stderrBytes: p.stderr.length,
         ...(p.exitCode !== undefined ? { exitCode: p.exitCode } : {}),
         ...(p.callId !== undefined ? { callId: p.callId } : {}),
@@ -233,7 +307,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.notices.push({ level: p.level, text: p.text }); break
     case 'action.blocked': {
       s.blocked.push({
-        by: p.by, reason: p.reason,
+        by: p.by, reason: p.reason, ts: e.ts,
         ...(p.callId !== undefined ? { callId: p.callId } : {}),
       })
       const part = p.callId ? findTool(s, p.callId) : undefined
