@@ -30,14 +30,38 @@ Serve un journal, e non serve una sessione vera per averlo:
 
 ```bash
 npm run check                                  # scrive eventi canonici finti in /tmp/stark-offline-XXXX
-cp /tmp/stark-offline-*/s.jsonl ~/.stark/sessioni/$(uuidgen).jsonl
-STARK_PORT=4571 npm run stark &
+mkdir -p /tmp/finto/sessioni
+cp /tmp/stark-offline-*/s.jsonl /tmp/finto/sessioni/$(uuidgen).jsonl
+STARK_HOME=/tmp/finto STARK_PORT=4571 npm run stark &
 node tools/shot.mjs "http://127.0.0.1:4571/?token=<token>" /tmp/ui.png ".sit"
 DARK=1 node tools/shot.mjs "http://127.0.0.1:4571/?token=<token>" /tmp/ui-scuro.png ".sit"
 ```
 
-Il terzo argomento è un selettore da cliccare prima di fotografare. **Guardare le schermate
-invece di descriverle è una regola del progetto**, non un vezzo: vedi `CLAUDE.md`.
+`STARK_HOME` tiene i journal finti fuori da `~/.stark`, dove stanno quelli veri.
+Dal terzo argomento in poi sono **selettori da premere in fila**, prima di fotografare: le
+schermate che non stanno all'apertura sono a due passi, per esempio
+`"text=il titolo" ".effbtn" "text=By time"`. **Guardare le schermate invece di descriverle è
+una regola del progetto**, non un vezzo: vedi `CLAUDE.md`.
+
+> Non usare `waitUntil: 'networkidle'` in `shot.mjs`: la UI tiene aperti **due** flussi SSE —
+> quello dell'elenco e quello della chat — quindi la rete non sta mai ferma e l'attesa scade
+> sempre. È già `'load'` più una pausa; se un giorno torna un timeout, la causa è questa.
+
+### Guardare gli stati che hanno bisogno di un processo vero
+
+Casella di scrittura, Stop, permessi e domande esistono solo se dietro c'è un processo: la UI
+li spegne apposta quando `live` è falso, perché una casella che accetta un messaggio senza
+nessuno che lo raccolga lo perde in silenzio. Aprire una sessione **non costa quota** — è solo
+l'handshake, nessun turno di modello:
+
+```bash
+curl -s -X POST http://127.0.0.1:4571/api/sessions -H "Authorization: Bearer <token>" \
+  -H 'content-type: application/json' -d '{"cwd":"/tmp/prova"}'
+```
+
+Per vedere la card di un permesso serve `"askTools":["Bash"]` nello stesso corpo, e poi un
+prompt vero — quello **sì** costa, quindi che sia minuscolo. E si preme *Allow*, non *Always
+allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` della cartella.
 
 ### Controlli
 
@@ -45,7 +69,7 @@ invece di descriverle è una regola del progetto**, non un vezzo: vedi `CLAUDE.m
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 26 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 30 verifiche sulla catena, costo zero di quota |
 
 ---
 
@@ -59,16 +83,26 @@ ui/src/App.svelte           guscio: barra laterale + area principale, stati di e
 ui/src/lib/api.ts           client del daemon: token, fetch, SSE a mano, riconnessione
 ui/src/lib/store.svelte.ts  lo stato dell'app: righe, selezione, snapshot, collegamento
 ui/src/lib/view.ts          traduzioni: gruppo, etichetta, progetto, colore, orario
-ui/src/components/Sidebar.svelte       elenco per stato e progetto, pallino, orario+stato
-ui/src/components/Conversation.svelte  turni richiudibili, parti, dock in sola lettura
+ui/src/components/Sidebar.svelte       elenco per stato e progetto, tasto destro, rinomina in riga
+ui/src/components/Conversation.svelte  turni richiudibili, parti, risposte date, file in linea
+ui/src/components/Dock.svelte          il blocco in basso nei suoi tre stati
+ui/src/components/Ask.svelte           permesso e domanda, dentro il dock
+ui/src/components/Status.svelte        la barra che si preme: modalità, MCP, modello, quota
+ui/src/components/Effects.svelte       per file / in ordine di tempo, al posto della conversazione
+ui/src/components/FileBlock.svelte     un file che si apre sul confronto
+ui/src/components/Diff.svelte          affiancato, e a colonna unica su schermo stretto
+ui/src/components/NewChat.svelte       il riquadro sopra l'app
 ui/src/components/Icon.svelte          <use> nello sprite
 ui/src/components/Sprite.svelte        GENERATO da tools/gen-icons.mjs
 ui/src/components/Logo.svelte          GENERATO da tools/gen-logo.py
 ```
 
-Funziona: elenco raggruppato in Waiting / Working / Sleeping con un colore per progetto,
-apertura di una chat, conversazione dal vivo dal flusso SSE, riconnessione con attesa
-crescente, tema chiaro e scuro.
+Funziona, e verificato guardandolo: elenco raggruppato in Waiting / Working / Sleeping con un
+colore per progetto; conversazione dal vivo dal flusso SSE con riconnessione; **scrittura e
+Stop**; **permessi e domande** nel blocco in basso, con la risposta che resta nel flusso;
+**effetti** nelle due letture con il confronto affiancato; **barra di stato** che cambia
+modalità e modello a caldo; **nuova chat, risveglio, rinomina, sleep, elimina**; tema chiaro e
+scuro.
 
 ---
 
@@ -100,15 +134,25 @@ crescente, tema chiaro e scuro.
 | Rotta | |
 |---|---|
 | `GET /api/sessions` | elenco: `id, title, state, cwd, model, turns, lastSeq, lastTs, live` |
+| `GET /api/stream` | **flusso dell'elenco**: manda le righe quando cambiano, al più ogni 250 ms |
 | `POST /api/sessions` | apre o **risveglia**: `{cwd, model?, mode?, resume?, askTools?}` |
 | `GET /api/sessions/:id` | lo snapshot |
+| `DELETE /api/sessions/:id` | cancella il journal. Non c'è cestino |
 | `GET /api/sessions/:id/events?from=N` | rilettura del journal |
-| `GET /api/sessions/:id/stream?from=N` | flusso SSE |
+| `GET /api/sessions/:id/stream?from=N` | flusso SSE della conversazione |
 | `POST /api/sessions/:id/command` | i comandi del §11 |
 
 **Comandi che il registro gestisce davvero**: `session.prompt`, `session.interrupt`,
-`session.setModel`, `session.setMode`, `session.sleep`, `session.close`, `permission.reply`,
-`question.reply`, `question.reject`.
+`session.setModel`, `session.setMode`, `session.rename`, `session.sleep`, `session.close`,
+`permission.reply`, `question.reply`, `question.reject`.
+
+`session.rename` è l'unico che il registro gestisce **prima** del controllo «è attiva?»: si
+rinomina soprattutto ciò che dorme.
+
+`state` nelle righe dell'elenco **non** ripete alla lettera l'ultimo stato scritto: una sessione
+senza processo dietro che risulterebbe `busy`, `starting` o `awaiting` viene riportata `closed`.
+Il journal di una conversazione che il riavvio del daemon ha interrotto finisce a metà di un
+turno, e ripeterlo la lascerebbe in *Working* per sempre.
 
 <br>
 
@@ -121,7 +165,9 @@ crescente, tema chiaro e scuro.
 > | Impostazioni → Permessi | `permissions.setRules` è **dichiarato nel §11 ma non gestito** dal registro |
 > | Import di conversazioni | **nessuna rotta**: `listSessions()` dell'SDK non è esposto su HTTP |
 > | Impostazioni → Projects / System | **niente**: profili, colori e diagnostica non esistono lato daemon |
-> | Barra laterale dal vivo | **nessun flusso globale**: oggi la UI interroga `/api/sessions` ogni 3 s |
+> | Scegliere i server MCP per chat | **niente**: il daemon non li elenca, e ogni chat parte con nessuno |
+> | Sfogliare le cartelle in «New chat» | **nessuna rotta**: il percorso si scrive a mano |
+> | ~~Barra laterale dal vivo~~ | ~~nessun flusso globale~~ — **fatto**: `GET /api/stream` |
 >
 > `session.wake` è dichiarato e non gestito, ma **non serve**: il risveglio si fa con
 > `POST /api/sessions {cwd, resume:{ref: <sessionId>}}`, che riusa l'id e fa **continuare** il
@@ -130,61 +176,88 @@ crescente, tema chiaro e scuro.
 
 ---
 
-## 5. L'ordine del lavoro
+## 5. Le fette, e cosa si è imparato scrivendole
 
-Una fetta per volta, ognuna verificabile guardandola. In ogni riga: cosa serve dal modello,
-quale schermata dell'anteprima la descrive, e la trappola.
+Fatte 5.1 → 5.5, più l'import. Ogni riga dice **dove sta** adesso e la trappola, che nel
+frattempo è passata da previsione a fatto verificato.
 
-### 5.1 Scrivere e fermare
+### 5.1 Scrivere e fermare — `Dock.svelte`
 
-`{c:'session.prompt', text}` e `{c:'session.interrupt'}`. Il dock mostra l'operazione in corso
-quando `snap.state === 'busy'`, con il pulsante `circle-stop` rosso a destra.
+`{c:'session.prompt', text}` e `{c:'session.interrupt'}`. Invio manda, Maiusc+Invio va a capo.
 
-**Trappola:** dopo il POST non aggiornare niente a mano. Il turno nuovo arriva come
+**Trappola confermata:** dopo il POST non si aggiorna niente a mano. Il turno nuovo arriva come
 `turn.started` dal flusso, e `applyTo` lo mette dov'è giusto.
 
-### 5.2 I due stati bloccanti del dock
+**Trappola nuova:** tutto ciò che è «in corso» va condizionato a `store.live`, non solo allo
+stato dello snapshot. Il journal di una sessione interrotta dal riavvio del daemon finisce a
+metà di un turno: ripeterlo alla lettera mostra una rotellina che gira su niente e una casella
+di scrittura che accetta un messaggio senza nessuno che lo raccolga.
 
-`snap.pendingPermissions` e `snap.pendingQuestions`. Si risponde con
-`{c:'permission.reply', requestId, decision:'once'|'always'|'reject', scope?}` e
-`{c:'question.reply', requestId, answers, response?}`.
+### 5.2 I due stati bloccanti — `Ask.svelte`
 
-Le richieste **non compaiono nel flusso**: si espande il blocco in basso, sempre nello stesso
-posto. Nel flusso resta solo *cosa hai risposto*, dopo. **Il pulsante per fermare resta
-visibile anche quando il blocco è espanso**: una domanda arriva mentre l'agent lavora ancora.
+`snap.pendingPermissions` e `snap.pendingQuestions`. Le richieste **non compaiono nel flusso**:
+si espande il blocco in basso. Nel flusso resta *cosa hai risposto*, ed è una parte vera dello
+snapshot (`AnswerPartView`), non un pezzo di stato della UI.
 
-**Trappola:** `scope` nasce da `savable` della richiesta, che è ciò che il «Consenti sempre»
-può salvare. Non inventarlo.
+**Trappola confermata:** `scope` nasce da `savable`, non si inventa.
 
-### 5.3 Effetti e confronto affiancato
+**Trappola nuova, e non era prevista:** lo Stop non va legato a `busy`. Quando arriva una
+richiesta lo stato canonico diventa `awaiting`, quindi `busy` è falso — e il pulsante
+sparirebbe proprio nel momento in cui serve di più. Si condiziona a `store.live`.
 
-`snap.files` (`FileEditView`: `path`, `created`, `hunks`, `callId`) e `snap.shell`.
-`core/diff.ts` dà già tutto: `sideBySide(hunks)`, `unified(hunks)`, `stats(hunks)`,
-`intraLine(a,b)`. **Non calcolare diff nella UI.**
+**Cosa è cambiato nel daemon:** «Consenti sempre» ora salva davvero. Il registro traduce lo
+`scope` in `{type:'addRules', behavior:'allow', destination:'localSettings'}` per l'SDK. Prima
+il pulsante si comportava come «Consenti» mentre il journal scriveva `always`.
 
-Due letture: *by file* e *by time*. Gli effetti **prendono il posto** della conversazione, con
-una freccia per tornare.
+### 5.3 Effetti e confronto affiancato — `Effects.svelte`, `FileBlock.svelte`, `Diff.svelte`
 
-**Trappola:** su una `Write` di file nuovo `structuredPatch` è vuoto e l'hunk è sintetizzato
-dall'adapter — è il caso più comune, e senza sarebbe uno schermo bianco. Le 26 verifiche di
-`npm run check` lo coprono: se le rompi, l'hai rotto.
+`core/diff.ts` dà già tutto: `sideBySide`, `unified`, `stats`, `intraLine`. **Non calcolare
+diff nella UI.**
 
-### 5.4 Barra di stato toccabile
+**Trappola confermata:** su una `Write` di file nuovo `structuredPatch` è vuoto e l'hunk è
+sintetizzato dall'adapter. `npm run check` lo copre.
 
-Modalità, MCP e modello si premono e aprono le tendine disegnate nell'anteprima.
-`{c:'session.setModel'}` e `{c:'session.setMode'}` **cambiano a caldo**: nessun «riavvia per
-applicare». `bypassPermissions` si mostra spento **con la spiegazione** che è il CLI a
-rifiutarlo da root (Principio 5), e Haiku è scegliibile ma avvisa che la sessione ripartirebbe
-in Manual.
+**Trappola nuova:** `SideRow` e `UnifiedRow` hanno gli stessi nomi di riga (`context`,
+`removed`, `added`) con dentro campi diversi. In un'unione sola non c'è modo di sapere quale
+si ha in mano: si costruisce **una forma alla volta**, scegliendo su `narrow`.
 
-### 5.5 Nuova chat, risveglio, menu contestuale
+**Un bug che si vede solo su una conversazione vera:** `.conv` è una colonna flex, e senza
+`flex:none` sui turni un turno lungo schiaccia tutti gli altri fino a farli sparire a otto
+pixel. Con tre turni non si nota; con dodici sì. È la domanda con cui si valuta una grafica in
+questo progetto — *con quattrocento blocchi dentro, regge?* — e vale anche per il CSS.
 
-Riquadro sopra l'app: agent e cartella, niente opzioni. `POST /api/sessions`.
-Risveglio di una Sleeping: stesso POST con `resume`. **Il risveglio rilegge tutto il contesto,
-quindi costa quota**: va detto nel momento in cui si preme, non scoperto dopo dal contatore.
-Tasto destro sulla riga: rinomina, sleep, elimina.
+### 5.4 Barra di stato toccabile — `Status.svelte`
 
-### 5.6 Import e impostazioni
+`{c:'session.setModel'}` e `{c:'session.setMode'}` cambiano a caldo. `bypassPermissions` si
+mostra spento **con la spiegazione**, Haiku è scegliibile ma avvisa.
+
+**Cosa è cambiato nel modello:** gli elenchi non sono scritti nella UI. `session.created` porta
+`models: ModelChoice[]` e `modes: ModeChoice[]`, perché i nomi dei modelli sono vocabolario
+dell'agent e «chi rifiuta `bypassPermissions` e perché» lo sa solo l'adapter. Su un journal
+vecchio gli elenchi sono vuoti: le modalità si mostrano lo stesso (sono canoniche), il chip del
+modello no.
+
+**Niente percentuale di contesto inventata.** Lo snapshot non sa quanto della finestra resta:
+si mostrano i token passati di qui e, quando `quota.updated` è arrivato, quando la finestra si
+riapre. Su una chat importata `usage` è vuoto e si sommano i turni.
+
+### 5.5 Nuova chat, import, risveglio, menu contestuale
+
+`NewChat.svelte` è **un riquadro con due linguette**, non due schermate e non una tendina sul
+`+`: la ragione sta in testa al file e nell'anteprima. Il risveglio è `POST /api/sessions` con
+`resume`, **non** un comando — `POST /command` su una sessione senza processo risponde
+«sessione non attiva». Rinomina, sleep ed elimina stanno nel tasto destro sulla riga.
+
+**L'import passa dall'SDK** (`catalogue.ts` → `listSessions`), non da uno scandaglio nostro.
+L'unica cosa che l'SDK non dà è il percorso del trascritto: lo si cerca per nome dentro
+`<config>/projects/`, ed è l'unico pezzo di conoscenza interna, confinato in quel file.
+
+**Trappola nuova:** un trascritto importato non ha un `session.created`, quindi senza aiuto la
+conversazione finisce senza cartella, senza progetto, senza colore e senza il modo di
+risvegliarla. `importTranscript` ora legge `cwd` e `model` dalle voci del trascritto e li
+scrive in testa, e chiude con `session.state: 'idle'`.
+
+### 5.6 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 
@@ -192,16 +265,22 @@ Tasto destro sulla riga: rinomina, sleep, elimina.
 
 ## 6. Debiti noti, da chiudere quando si passa di lì
 
-- **La barra laterale interroga `/api/sessions` ogni 3 secondi** (`store.svelte.ts`). Il daemon
-  espone un flusso per sessione e non uno globale. Funziona, ma non è dal vivo.
-- **Il riassunto di cosa fa un tool lo indovina la UI** guardando dentro `input` alla ricerca di
-  `command`, `file_path`, `path`… È forma di Claude Code, cioè esattamente ciò che il §1 vieta
-  fuori dall'adapter. La bugia è confinata in `subject()` dentro `Conversation.svelte`, con un
-  commento che lo dice. **La cura vera è un riassunto già pronto nel modello canonico.**
-- **Il titolo non si può rinominare**: `title` nasce dal primo prompt in `registry.ts` e non
-  esiste un comando per cambiarlo.
+- ~~La barra laterale interroga `/api/sessions` ogni 3 secondi~~ — **chiuso**: `GET /api/stream`.
+- ~~Il riassunto di cosa fa un tool lo indovina la UI~~ — **chiuso**: arriva in
+  `tool.input.ended.summary`, scritto da `adapters/claude-code/summary.ts`. La UI ha ancora un
+  ripiego per i journal scritti prima, ma mostra `inputRaw` troncato senza interpretarlo.
+- ~~Il titolo non si può rinominare~~ — **chiuso**: `session.rename` → `session.renamed`.
 - **Non c'è instradamento**: la chat scelta vive in memoria, quindi un ricaricamento la perde.
   Il daemon serve già la pagina su qualunque rotta, quindi `/chat/<id>` è pronto quando servirà.
+- **Nessuna notifica di sistema e nessun suono.** Il pallino nell'elenco funziona solo se stai
+  già guardando STARK, e il punto era poter guardare altrove (`ui-schermate.md` §1).
+- **L'avviso «forse è aperta in un terminale»** nell'import è una stima sull'ora dell'ultima
+  scrittura (cinque minuti), non un fatto: il trascritto non dice se un processo è vivo.
+  Sbagliare per eccesso costa una frase in più da leggere; per difetto, non avvisare qualcuno
+  che sta per guidare la stessa conversazione da due posti.
+- **La riga dell'elenco non dice cosa sta facendo adesso** né da quanto tempo è ferma, che
+  `ui-schermate.md` §1 mette fra le cose che fanno decidere se entrare. Il dato c'è nello
+  snapshot; manca nella riga, che oggi porta solo `lastTs`.
 
 ---
 

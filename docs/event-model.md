@@ -113,17 +113,42 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 
 ```ts
 | { k: 'session.created',  agent: string, cwd: string, model: string,
-                           capabilities: Capabilities, tools: string[], commands: SlashCommand[] }
+                           capabilities: Capabilities, tools: string[], commands: SlashCommand[],
+                           models?: ModelChoice[], modes?: ModeChoice[] }
 | { k: 'session.state',    state: SessionState, reason?: string }
 | { k: 'session.model',    model: string }
 | { k: 'session.mode',     mode: PermissionMode }
 | { k: 'session.tools',    tools: string[] }
+| { k: 'session.renamed',  title: string }
 | { k: 'session.slept' }
 | { k: 'session.woke',     resumedFromSeq: number }
 | { k: 'session.error',    message: string, fatal: boolean }
 ```
 
 `session.created` porta con sé tutto ciò che serve a popolare la UI *prima* del primo prompt.
+
+**`models` e `modes` — aggiunti scrivendo la barra di stato.**
+
+```ts
+type ModelChoice = { id: string, label?: string, resolved?: string, autoMode: boolean }
+type ModeChoice  = { mode: PermissionMode, available: boolean, reason?: string }
+```
+
+Stanno qui e non in un elenco dentro la UI per la ragione del §1. `id` è ciò che si rimanda
+indietro con `session.setModel`; `resolved` è il modello vero a cui un alias punta, e serve a
+sapere quale voce spuntare quando `session.model` riporta il nome risolto. `autoMode` viaggia
+col modello e non con la sessione perché **dipende dal modello**: senza, la UI dovrebbe sapere
+da sé che Haiku non regge auto mode.
+
+`modes` esiste per il Principio 5. Le sei modalità sono canoniche e la UI le conosce già; ciò
+che non può sapere è **quale non si può usare qui e perché** — `bypassPermissions` è rifiutato
+dal CLI a chi gira come root, e quella frase la può scrivere solo l'adapter. La voce si mostra
+spenta **con la spiegazione**, mai nascosta.
+
+**`session.renamed`** è il titolo scelto a mano. Esiste perché per il §4 la UI non può mostrare
+niente che non nasca dal journal: un titolo tenuto altrove sparirebbe al primo risveglio. Si
+scrive anche su una sessione **senza processo dietro** — si rinomina soprattutto ciò che dorme —
+quindi non passa dal `POST /command` del §18, che risponderebbe «sessione non attiva».
 
 > ⚠️ **Corretto dal codice.** La bozza 1 lo faceva nascere da `system:init`. Sbagliato:
 > `system:init` **non arriva all'handshake, arriva col primo turno**. Aspettarlo prima di
@@ -163,7 +188,7 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 
 | { k: 'tool.started',      callId: string, name: string }
 | { k: 'tool.input.delta',  callId: string, delta: string }
-| { k: 'tool.input.ended',  callId: string, input: unknown }
+| { k: 'tool.input.ended',  callId: string, input: unknown, summary?: string }
 | { k: 'tool.ended',        callId: string, ok: boolean, output?: unknown, error?: string }
 ```
 
@@ -172,6 +197,14 @@ blocchi `thinking`, **e in più** un evento `system:thinking_tokens` con `estima
 `estimated_tokens_delta` (24 occorrenze nella cattura di oggi). Il secondo non aggiunge contenuto,
 serve solo a mostrare un indicatore di avanzamento mentre l'agent pensa. Sta come campo
 opzionale, non come evento a sé: è un dettaglio di presentazione dello stesso fatto.
+
+`summary` è **su cosa** il tool ha lavorato, già in chiaro: il comando, il percorso, l'indirizzo.
+Aggiunto per chiudere un debito, non per comodità. Prima lo ricavava la UI frugando dentro `input`
+alla ricerca di `command`, `file_path`, `path`: cioè conoscendo la forma di Claude Code fuori
+dall'adapter, che è esattamente ciò che il §1 vieta. La conoscenza non è sparita — non poteva —
+ma è tornata dalla parte giusta del confine (`adapters/claude-code/summary.ts`). È opzionale
+perché i journal scritti prima non ce l'hanno: là la UI mostra `inputRaw` troncato, che è ciò
+che ha, senza interpretarlo.
 
 `tool.input.delta` esiste perché entrambi gli agent trasmettono l'input del tool in streaming
 (Claude Code con `input_json_delta`, OpenCode con `session.next.tool.input.delta`). La UI può
@@ -325,6 +358,7 @@ type Command =
   | { c: 'session.setModel', model: string }
   | { c: 'session.setMode',  mode: PermissionMode }
   | { c: 'permissions.setRules', rules: PermissionRules }   // il pannello dei toggle
+  | { c: 'session.rename',  title: string }
   | { c: 'session.sleep' }
   | { c: 'session.wake' }
   | { c: 'session.close' }
@@ -558,9 +592,10 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 26 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/offline-check.ts` | `npm run check` — 30 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
+| `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |
 
 ## 18. Il daemon: come i comandi del §11 viaggiano
 
@@ -573,6 +608,33 @@ il proprio effetto, quell'effetto esisterebbe in un posto che il journal non con
 Il flusso è **SSE**, non WebSocket. Ciò che conta va in una direzione sola, e SSE è uno standard
 che sta già in Node e nel browser: nessuna dipendenza. Per giunta è la stessa forma che usa
 OpenCode, quindi il secondo adapter troverà la strada fatta.
+
+### Due flussi, non uno
+
+`GET /api/sessions/:id/stream` porta gli **eventi** di una conversazione. `GET /api/stream` porta
+le **righe dell'elenco**, e non manda eventi ma un colpetto con la lista intera ogni volta che
+cambia, al più una volta ogni 250 ms.
+
+Il secondo è nato per togliere una domanda ripetuta: la barra laterale interrogava
+`/api/sessions` ogni tre secondi, perché per sapere che una chat *diversa* da quella aperta era
+cambiata non c'era altro modo. Interrogare a ripetizione per sapere se è successo qualcosa è
+esattamente ciò che SSE esiste per non fare.
+
+Manda la lista intera e non un delta di proposito: sono poche decine di righe corte, e un
+protocollo di differenze sarebbe una seconda copia dello stato da tenere allineata — cioè un
+altro posto in cui la UI può divergere dal journal. Il ritardo di 250 ms non è una comodità: un
+solo turno produce decine di eventi al secondo, e ogni riga dell'elenco che non è viva si
+ricalcola rileggendo il suo journal da disco.
+
+### Le due rotte che non sono comandi
+
+`DELETE /api/sessions/:id` cancella il journal, cioè **tutta** la storia: non c'è cestino. Se la
+sessione sta girando la si chiude prima, altrimenti l'adapter continuerebbe a scrivere su un file
+che non esiste più.
+
+`session.rename` invece è un comando del §11, ma il registro lo gestisce **prima** del controllo
+«è attiva?»: si rinomina soprattutto ciò che dorme, e `POST /command` su una sessione dormiente
+risponde «sessione non attiva». Scrive `session.renamed` nel journal e basta.
 
 Chi si collega passa `?from=N` e riceve **prima ciò che si è perso, poi il resto**, in un
 travaso che non cede il controllo: se aspettasse qualcosa in mezzo, un evento nuovo potrebbe

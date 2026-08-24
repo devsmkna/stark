@@ -67,9 +67,11 @@ vocabolario canonico, permessi in modalità `auto` con zero interruzioni, domand
 multipla, journal, Sleep, risveglio con `--resume`, import di conversazioni nate nella CLI, e
 il daemon con il suo perimetro di sicurezza.
 
-**La UI è in costruzione.** Oggi legge: elenco dei lavori, conversazione dal vivo agganciata
-al flusso SSE, riconnessione automatica. Non scrive ancora — niente casella di scrittura,
-niente permessi, niente effetti.
+**La UI legge e scrive.** Elenco dei lavori agganciato a un flusso globale, conversazione dal
+vivo con turni richiudibili, casella di scrittura e Stop, permessi e domande nel blocco in
+basso, effetti nelle due letture con il confronto affiancato, modello e modalità che cambiano
+a caldo, nuova chat, import di conversazioni dal terminale, risveglio, rinomina, sleep,
+elimina. Restano fuori le **impostazioni** e le **notifiche di sistema**.
 
 Il disegno di tutte le schermate, con il perché di ogni scelta, sta in
 [`docs/ui-schermate.md`](docs/ui-schermate.md) e nell'anteprima
@@ -98,7 +100,7 @@ in un cookie e lo toglie dalla barra degli indirizzi.
 | `npm run stark` | **avvia il daemon** e stampa l'indirizzo con il token |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
-| `npm run check` | catena completa su eventi finti: 26 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 30 verifiche, **zero quota spesa** |
 | `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |

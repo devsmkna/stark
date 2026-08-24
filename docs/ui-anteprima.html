@@ -113,7 +113,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .effbtn b{font-weight:600;color:var(--ink)}
 
 .conv{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
-.turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+/* `flex:none` non è decorativo: `.conv` è una colonna flex, e senza, un turno lungo
+   fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
+   conversazione vera, che è esattamente il caso che deve reggere. */
+.turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface);flex:none}
 .turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2)}
 .turn.open>.th{background:var(--surface)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
@@ -181,6 +184,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .diff{font-family:var(--mono);font-size:10.5px;border-top:1px solid var(--line);overflow-x:auto}
 .dgrid{display:grid;grid-template-columns:26px 1fr 26px 1fr;min-width:420px}
 .dgrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}
+/* su schermo stretto l'affiancato non ci sta: si cambia forma, non si rimpicciolisce */
+.ugrid{display:grid;grid-template-columns:26px 1fr}
+.ugrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}
 .dn{color:var(--muted);text-align:right;background:var(--surface-2);font-variant-numeric:tabular-nums}
 .dold{background:var(--del-bg)}
 .dnew{background:var(--add-bg)}
@@ -350,6 +356,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <rect x="9" y="9" width="6" height="6" rx="1" /></symbol>
   <symbol id="i-bars" viewBox="0 0 24 24"><path d="M3 5h18" /> <path d="M3 12h18" /> <path d="M3 19h18" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
@@ -734,7 +741,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       </div>
       <div class="scrim"></div>
       <div class="dlg" style="width:400px">
-        <div class="dlgh"><div class="dt">New chat</div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+        <div class="dlgh"><div><div class="dt">New chat</div><div class="ds">A folder is all it needs</div></div>
+          <div class="switch" style="margin-left:auto"><span class="on">New</span><span>Import</span></div>
+          <span class="x"><svg class="ic"><use href="#i-x"/></svg></span></div>
         <div class="dlgb">
           <div class="fgroup">
             <div class="flabel">Agent</div>
@@ -772,6 +781,14 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <p><b>Non è una schermata a sé.</b> È un riquadro sopra l'app, che resta visibile dietro: creare
     una chat non è cambiare posto, è aggiungere una riga a un elenco che stai già guardando. E
     quando lo chiudi sei esattamente dove eri.</p>
+
+    <p><b>Due linguette, non una tendina sul <code>+</code>.</b> Le porte per aggiungere un lavoro
+    sono due — cominciarne uno nuovo, o portare dentro una conversazione nata nel terminale — e
+    fanno la stessa cosa, quindi nessuna delle due merita di stare un passo più indietro
+    dell'altra. Ma la ragione vera è un'altra: una tendina si apre solo se sai già che c'è
+    qualcosa da scegliere, e chi non sa che STARK può riprendere una conversazione del terminale
+    non andrà a cercarla lì. Con le linguette la seconda porta <b>si vede</b>, e l'elenco di ciò
+    che c'è da importare è esso stesso la scoperta.</p>
 
     <div class="eyebrow" style="margin-top:26px">Dove sono finite le opzioni</div>
     <div class="mock" style="display:block;margin-top:6px">
@@ -919,7 +936,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       </div>
       <div class="scrim"></div>
       <div class="dlg" style="width:520px">
-        <div class="dlgh"><div><div class="dt">Import a conversation</div><div class="ds">Started in the terminal, on this machine</div></div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+        <div class="dlgh"><div><div class="dt">Import a conversation</div><div class="ds">Started in the terminal, on this machine</div></div>
+          <div class="switch" style="margin-left:auto"><span>New</span><span class="on">Import</span></div>
+          <span class="x"><svg class="ic"><use href="#i-x"/></svg></span></div>
         <div class="dlgb" style="gap:7px">
           <div class="chips" style="margin-bottom:2px">
             <span class="chip"><span class="lab">Agent</span>Claude Code<svg class="ic"><use href="#i-down"/></svg></span>
@@ -1012,7 +1031,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
           <div class="sn"><svg class="ic"><use href="#i-monitor"/></svg> System</div>
         </div>
         <div class="dlgcol">
-          <div class="dlgh"><div class="dt">Permissions</div><span class="x"><svg class="ic"><use href="#i-block"/></svg></span></div>
+          <div class="dlgh"><div class="dt">Permissions</div><span class="x"><svg class="ic"><use href="#i-x"/></svg></span></div>
           <div class="dlgb">
             <div class="notice"><svg class="ic"><use href="#i-sliders"/></svg><span><b>2 chats don't follow these
               rules.</b> A chat can differ — you set it from the bar under its message box.</span><span class="go">Review</span></div>

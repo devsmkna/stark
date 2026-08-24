@@ -117,6 +117,9 @@ Lo stile: laterale chiara, pill di stato, un colore per progetto, densità alta 
   `4 files · 12 commands` con un'icona a barre a destra. Il conteggio dice già cosa si apre.
 - **A sinistra del testo scritto dall'utente c'è l'orario** (`HH:MM`), nell'intestazione del turno.
 - **La risposta a parole non si richiude mai**, per quanto sia lunga. Vedi le regole in fondo.
+- **La X che chiude i riquadri è una X.** Nell'anteprima era il cerchio sbarrato di `ban`, che
+  vuol dire *vietato* e non *chiudi*. Cambiato il 24 agosto 2026: si usa il segno che tutti
+  riconoscono.
 - **Le icone vengono da una libreria vera**: [Lucide](https://lucide.dev) (licenza ISC), non
   disegnate a mano. Nell'anteprima sono incorporate come sprite SVG perché il sandbox degli
   artifact blocca le CDN; nell'app si installa il pacchetto e si usa normalmente.
@@ -318,10 +321,21 @@ sarebbe farsi rispondere a domande non ancora poste.
 Non è una schermata a sé ma un **riquadro sopra l'app**, che resta visibile dietro: creare una
 chat non è cambiare posto, è aggiungere una riga a un elenco che stai già guardando.
 
-**Riprendere una conversazione nata nel terminale** è la seconda porta, con un riquadro suo:
-mostra ciò che c'è già sulla macchina — primo prompt, cartella, branch, data, dimensione — e si
+**Riprendere una conversazione nata nel terminale** è la seconda porta, e sta **nello stesso
+riquadro, dietro una linguetta** — non in una tendina sul `+`. *(Deciso il 24 agosto 2026,
+implementando.)* Le due strade fanno la stessa cosa, aggiungere una riga all'elenco, quindi
+nessuna merita di stare un passo indietro dell'altra; e soprattutto una tendina si apre solo se
+sai già che c'è qualcosa da scegliere. Chi non sa che STARK può riprendere una conversazione del
+terminale non andrà a cercarla lì. Con le linguette la seconda porta **si vede**, e l'elenco di
+ciò che c'è da importare è esso stesso la scoperta.
+
+Mostra ciò che c'è già sulla macchina — primo prompt, cartella, branch, data, dimensione — e si
 sceglie riconoscendola. Chi era in corso *in quel momento* porta l'avviso della presa in
-carico: non si perde niente, ma i due processi smettono di vedersi (P16).
+carico: non si perde niente, ma i due processi smettono di vedersi (P16). Nota su com'è fatto
+oggi: «in corso in quel momento» STARK lo **stima** dall'ora dell'ultima scrittura del
+trascritto, perché il file non dice se un processo è ancora aperto. Sbagliare per eccesso di
+avviso costa una frase in più da leggere; per difetto, non dire a qualcuno che sta per guidare
+la stessa conversazione da due posti.
 
 ### Rinominare, addormentare, eliminare
 

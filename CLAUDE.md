@@ -63,27 +63,34 @@ eventi canonici → journal JSONL → Sleep → risveglio con `--resume` → sta
 journal, identico a quello dal vivo. Il **daemon esiste** (HTTP + SSE su `127.0.0.1`, registro
 multi-sessione, perimetro di sicurezza), e così l'import di conversazioni nate nella CLI.
 
-**La UI è cominciata.** Vite + Svelte 5 in `ui/`, servita dal daemon. Oggi **legge**: elenco
-dei lavori raggruppato per stato e progetto, conversazione dal vivo agganciata al flusso SSE,
-riconnessione automatica. Non scrive ancora — niente casella di scrittura, niente permessi,
-niente effetti. Tutte le schermate sono disegnate in `docs/ui-anteprima.html`.
+**La UI scrive.** Vite + Svelte 5 in `ui/`, servita dal daemon. Funziona, ed è stato verificato
+guardandolo su sessioni vere: elenco raggruppato per stato e progetto agganciato a un flusso
+globale; conversazione dal vivo con turni richiudibili; **casella di scrittura e Stop**;
+**permessi e domande** nel blocco in basso, con la risposta che resta nel flusso; **effetti**
+nelle due letture con il confronto affiancato; **barra di stato** che cambia modello e modalità
+a caldo; **nuova chat, import da terminale, risveglio, rinomina, sleep, elimina**; tema chiaro
+e scuro. Tutte le schermate sono disegnate in `docs/ui-anteprima.html`.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 26 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 30 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
-Per **guardare** la UI invece di descriverla: `node tools/shot.mjs <url> <fuori.png> [selettore]`
-la fotografa senza spendere quota. Un journal da dare in pasto al daemon lo produce
-`npm run check`, che scrive eventi canonici finti.
+Per **guardare** la UI invece di descriverla:
+`node tools/shot.mjs <url> <fuori.png> [selettore ...]` la fotografa senza spendere quota, e i
+selettori si premono in fila per arrivare alle schermate che stanno a due passi. Un journal da
+dare in pasto al daemon lo produce `npm run check`; e aprire una sessione con
+`POST /api/sessions` **non costa quota** (è solo l'handshake), che è come si guardano gli stati
+che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 
-Passo corrente: **far scrivere la UI** — casella di scrittura e Stop, poi i due stati bloccanti
-del blocco in basso, poi effetti e confronto affiancato.
+Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
+(`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
-Due buchi noti nella UI, oltre a ciò che non è ancora scritto: la barra laterale si aggiorna
-**interrogando `/api/sessions` ogni 3 secondi**, perché il daemon espone un flusso per sessione
-e non uno globale; e il riassunto di cosa fa un tool lo **indovina la UI** guardando dentro
-`input`, che è forma di Claude Code — dovrebbe arrivare già pronto dal modello canonico.
+Cosa manca nella UI, oltre alle impostazioni: nessuna **notifica di sistema né suono** — il
+pallino funziona solo se stai già guardando STARK, e il punto era poter guardare altrove;
+nessun **instradamento**, quindi un ricaricamento perde la chat scelta; la riga dell'elenco non
+dice **cosa sta facendo adesso** né da quanto è ferma; e i **server MCP per chat** non si
+scelgono, perché il daemon non li elenca.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -109,7 +116,12 @@ Decisioni già prese:
   che riparte, condizioni che nel browser non esistono.
 - la UI non tiene un modello proprio: tiene lo `SessionSnapshot` e ci applica sopra gli eventi
   con lo **stesso `applyTo`** del daemon. L'invariante del §4 non è una regola da rispettare, è
-  l'unica cosa che sa fare.
+  l'unica cosa che sa fare. Corollario applicato più volte scrivendo la UI: quando un dato
+  manca, si aggiunge **allo snapshot**, non a uno stato parallelo — è così che sono nati
+  `startedAt`, il riassunto dei tool e la risposta data come parte del turno.
+- avviare un lavoro e importarne uno dal terminale stanno nello **stesso riquadro, dietro due
+  linguette**: una tendina sul `+` si apre solo se sai già che c'è qualcosa da scegliere, e la
+  seconda porta va vista per essere usata.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
