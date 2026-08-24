@@ -78,7 +78,8 @@ Le due conseguenze che hanno deciso la scelta:
   Nel flusso resta solo *cosa hai risposto*, dopo. Il pulsante per fermare **resta visibile anche
   quando il blocco è espanso**: una domanda arriva mentre l'agent lavora ancora, e se lo stop
   sparisse proprio lì si perderebbe il controllo nel momento in cui serve di più.
-- **Sotto la casella una barra di stato**: a sinistra modalità, cartella e branch; a destra modello
+- **Sotto la casella una barra di stato**: a sinistra modalità, **strumenti esterni**, cartella e
+  branch; a destra modello
   e percentuale di contesto. La percentuale, al passaggio del mouse, apre un pannellino con
   contesto, sessione corrente e settimana, e quando si azzerano le ultime due.
 - **Gli effetti prendono il posto della conversazione**, con una freccia per tornare, e un
@@ -359,6 +360,26 @@ soltanto.
 *mentre* si lavora e si cambiano **a caldo**: vivono nella barra di stato sotto la casella di
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
+
+### Gli strumenti esterni, chat per chat
+
+Deciso implementando il 24 agosto 2026. Il chip **MCP** nella barra apre l'elenco dei server che
+questa macchina ha, e ognuno si accende per **questa** conversazione. Il menu non si chiude a
+ogni tocco: accenderne due è il caso normale.
+
+- **Di partenza sono tutti spenti**, e non è prudenza: ereditarli tutti costa circa 5× di
+  contesto per turno — su quota fissa è la voce più cara della barra — e apre una via d'uscita
+  ai dati che nessuno ha chiesto. Ma spento di *default* non vuol dire irraggiungibile: prima
+  STARK li rendeva impossibili da accendere, ed era il Principio 5 rotto in casa.
+- **Spento vuol dire spento davvero.** STARK non si limita a non chiederli: li spegne per nome
+  prima di ogni turno. Serve, e si è visto: i connettori di claude.ai compaiono qualche secondo
+  *dopo* la nascita della chat, quindi spegnerli una volta sola all'avvio li lasciava accesi —
+  71 tool entrati in un turno che doveva averne zero.
+- **La scelta torna col risveglio.** Sta nel journal, quindi una chat che dorme si risveglia con
+  i suoi strumenti invece che senza, e senza modo di collegare la cosa allo Sleep.
+- **Un server che chiede un login resta in elenco**, con scritto il comando da dare nel
+  terminale (`claude mcp login <nome>`). È una cosa che si fa fuori da STARK: dirlo è meglio che
+  farlo sparire, e sparire lo farebbe sembrare rotto.
 
 Non è una schermata a sé ma un **riquadro sopra l'app**, che resta visibile dietro: creare una
 chat non è cambiare posto, è aggiungere una riga a un elenco che stai già guardando.

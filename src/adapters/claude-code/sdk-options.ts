@@ -40,10 +40,22 @@ export function buildOptions(o: LaunchOptions): Options {
     cwd: o.cwd,
     model: o.model,
     permissionMode: o.mode,
-    // Obbligatorio. Senza, la sessione eredita tutti i server MCP globali della
-    // macchina: canale di uscita dati non presidiato e circa 5x di contesto per turno,
-    // cioè quota bruciata prima. È la stessa ragione di sempre, con un altro nome.
-    strictMcpConfig: true,
+    // `false`, e la ragione è cambiata nel tempo: vale la pena scriverla intera.
+    //
+    // Era `true` perché senza, la sessione eredita tutti i server MCP della macchina:
+    // canale di uscita dati non presidiato e circa 5x di contesto per turno. Ma `true`
+    // rende quei server **irraggiungibili**, e non c'è modo di riaccenderne uno: STARK
+    // finiva per poter meno del CLI, che è la cosa che non deve mai succedere.
+    //
+    // La protezione ora è in un altro punto ed è più precisa: l'adapter, appena la
+    // sessione è in piedi e **prima di qualunque turno**, spegne con `toggleMcpServer`
+    // tutti i server che la chat non ha scelto. Il default resta quindi «nessuno», ma
+    // adesso è una scelta che si può cambiare invece di un muro.
+    //
+    // Verificato prima di scriverlo, non dedotto: spenti prima del primo turno, i loro
+    // tool non compaiono nella lista del turno (0 su 29), e lo spegnimento **non**
+    // tocca la configurazione su disco — vale per la sessione, non per la macchina.
+    strictMcpConfig: false,
     includePartialMessages: true,
     // Le domande dell'agent esistono solo se qualcuno sa rispondere: il tool compare
     // nell'elenco perché passiamo questa callback (ADR-009). Toglierla non la rende

@@ -89,7 +89,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 34 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 36 verifiche sulla catena, costo zero di quota |
 
 ---
 
@@ -165,8 +165,8 @@ scuro.
 | `POST /api/sessions/:id/command` | i comandi del §11 |
 
 **Comandi che il registro gestisce davvero**: `session.prompt`, `session.interrupt`,
-`session.setModel`, `session.setMode`, `session.rename`, `session.sleep`, `session.close`,
-`permission.reply`, `question.reply`, `question.reject`.
+`session.setModel`, `session.setMode`, `session.setMcp`, `session.rename`, `session.sleep`,
+`session.close`, `permission.reply`, `question.reply`, `question.reject`.
 
 `session.rename` è l'unico che il registro gestisce **prima** del controllo «è attiva?»: si
 rinomina soprattutto ciò che dorme.
@@ -191,7 +191,7 @@ turno, e ripeterlo la lascerebbe in *Working* per sempre.
 > | Impostazioni → Permessi | `permissions.setRules` è **dichiarato nel §11 ma non gestito** dal registro |
 > | Import di conversazioni | **nessuna rotta**: `listSessions()` dell'SDK non è esposto su HTTP |
 > | Impostazioni → Projects / System | **niente**: profili, colori e diagnostica non esistono lato daemon |
-> | Scegliere i server MCP per chat | **niente**: il daemon non li elenca, e ogni chat parte con nessuno |
+> | ~~Scegliere i server MCP per chat~~ | ~~niente~~ — **fatto**: `session.mcp` nello snapshot, `session.setMcp` fra i comandi |
 > | Sfogliare le cartelle in «New chat» | **nessuna rotta**: il percorso si scrive a mano |
 > | ~~Barra laterale dal vivo~~ | ~~nessun flusso globale~~ — **fatto**: `GET /api/stream` |
 >
@@ -308,7 +308,36 @@ un permesso negato non spegne la campanella ma la spiega.
 
 Come si provano davvero, headless shell compreso: §1, *Guardare le notifiche*.
 
-### 5.7 Impostazioni
+### 5.7 Gli strumenti esterni, chat per chat
+
+`strictMcpConfig` è passato a **false**, e il default «nessun server» ora si ottiene
+spegnendoli per nome con `toggleMcpServer`. Il motivo non è tecnico: con `true` i server
+erano *irraggiungibili*, e non c'era modo di accenderne uno — il Principio 5 rotto in casa.
+
+Tutto passa dall'SDK (`mcpServerStatus`, `toggleMcpServer`): **STARK non legge nessun file di
+configurazione**, e non saprebbe farlo. Metà dei server di questa macchina sono connettori di
+claude.ai, che in nessun file ci sono.
+
+**Trappola nuova, e cara:** i connettori di claude.ai **non ci sono ancora** quando la sessione
+nasce — compaiono qualche secondo dopo. Spegnendoli una volta sola all'avvio, il primo turno se
+li è ritrovati tutti accesi: **103 tool, 71 dei quali `mcp__`**, cioè esattamente il costo che
+spegnerli doveva evitare. La riconciliazione gira quindi **prima di ogni turno**, agganciata
+alla consegna del messaggio (`PromptQueue.before`) e non a `prompt()`, che è troppo presto: lì
+il messaggio è già partito. Con un solo server acceso: 60 tool, 28 `mcp__`, tutti suoi.
+
+**Trappola nella trappola:** anche dentro una singola riconciliazione può comparirne uno nuovo,
+quindi si rilegge finché non c'è più niente da toccare (al massimo tre giri). Fermarsi al primo
+scrive nel journal una fotografia già vecchia, che dice «spento» di un server acceso.
+
+**Il risveglio riaccende da solo** ciò che era acceso: il registro legge l'insieme dallo
+snapshot (`mcpServers.filter(s => s.enabled)`) e lo passa all'adapter. Senza, una chat che
+dorme si risveglia senza i suoi strumenti, e non c'è modo di collegare la cosa allo Sleep.
+
+Come si prova senza spendere quota: aprire una sessione (`POST /api/sessions`) e leggere lo
+snapshot basta per l'elenco e per il toggle. Serve **un turno vero** solo per l'ultima domanda,
+quella che conta: i tool nel contesto — `session.tools` nel journal, `mcp__` contati.
+
+### 5.8 Impostazioni
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

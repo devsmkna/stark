@@ -76,9 +76,13 @@ aspetta*, *ha finito*, *si è fermata da sola*, con la campanella in cima all'el
 interruttore; e la riga dell'elenco dice **cosa sta facendo adesso e da quanto sta così**.
 Provato dal vivo, notifica compresa.
 
+**Gli strumenti esterni si scelgono per chat**: il chip MCP nella barra di stato elenca i server
+della macchina e li accende uno per uno, spenti di default, con la scelta che torna col
+risveglio.
+
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 34 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 36 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -92,9 +96,10 @@ Passo corrente: **le impostazioni**, che richiedono lavoro sul daemon prima
 (`permissions.setRules` non è gestito; profili, colori e diagnostica non esistono).
 
 Cosa manca nella UI, oltre alle impostazioni: nessun **instradamento**, quindi un ricaricamento
-perde la chat scelta; i **server MCP per chat** non si scelgono, perché il daemon non li
-elenca; e delle notifiche mancano le due parti che vivono nelle impostazioni — **scegliere il
-suono** di ciascun evento e **silenziare un progetto** intero.
+perde la chat scelta; niente **comandi slash**, che pure arrivano già nello snapshot; il prompt
+è **solo testo**, senza allegati né immagini (§16.3); e delle notifiche mancano le due parti che
+vivono nelle impostazioni — **scegliere il suono** di ciascun evento e **silenziare un
+progetto** intero.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -133,6 +138,9 @@ Decisioni già prese:
 - le notifiche si spengono e si accendono da **una campanella sola**, non per chat: il permesso
   del browser si può chiedere solo dentro un gesto, e il **suono non ne ha bisogno** — perciò
   un permesso negato non toglie il comando, lo spiega.
+- i **server MCP si scelgono per chat**, spenti di default. Non con `--strict-mcp-config`, che
+  li spegnerebbe e basta: si spengono per nome, così restano accendibili. È la differenza fra
+  un default e un limite.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
@@ -219,8 +227,15 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
   bypass, e da root funziona (verificato in headless). È il default di STARK per ADR-008.
   Con un modello che non supporta auto mode — Haiku non lo supporta — la sessione riparte in
   Manual e torna a chiedere tutto.
-- `--tools ""` NON spegne i tool MCP: serve `--strict-mcp-config`. Senza, ogni sessione eredita
-  tutti i server MCP globali della macchina (rischio di fuga dati e ~5x di contesto per turno).
+- `--tools ""` NON spegne i tool MCP. `--strict-mcp-config` sì, ma li rende anche
+  **irraggiungibili**, e STARK non lo usa più: il default «nessun server» si ottiene spegnendoli
+  per nome con `toggleMcpServer` dell'SDK, così restano accendibili per chat. Resta vero il
+  motivo per cui sono spenti di default: ereditarli tutti significa ~5x di contesto per turno e
+  una via d'uscita ai dati che nessuno ha chiesto.
+  **Attenzione**: i connettori di claude.ai **non ci sono ancora** quando la sessione nasce,
+  compaiono qualche secondo dopo. Spegnerli una volta sola all'avvio non basta — misurato: 71
+  tool `mcp__` entrati in un turno che doveva averne zero. La riconciliazione gira prima di
+  ogni turno.
 - L'utente è su **abbonamento a quota fissa**: `total_cost_usd` è un valore nominale, NON una
   spesa reale. La risorsa scarsa è la quota (rate limit), non i dollari.
   Corollario per ADR-005: risvegliare una sessione dormiente rilegge tutto il contesto, quindi

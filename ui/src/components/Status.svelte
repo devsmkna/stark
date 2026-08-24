@@ -31,6 +31,29 @@
     snap.modes.length > 0 ? snap.modes : MODES.map(mode => ({ mode, available: true })),
   )
 
+  // Il chip dice quanti ne hai accesi, non quanti ne esistono: è la cosa che cambia
+  // cosa succede al prossimo turno.
+  const mcpLabel = $derived.by(() => {
+    const on = snap.mcpServers.filter(s => s.enabled).length
+    return on === 0 ? 'none' : String(on)
+  })
+
+  /**
+   * Cosa dice la riga di un server. Gli stati sono quelli del protocollo e si mostrano
+   * come sono: `needs-auth` non è un errore di STARK e non si nasconde — si dice cosa
+   * fare, che è una cosa che si fa dal terminale e non da qui.
+   */
+  function mcpBlurb(s: SessionSnapshot['mcpServers'][number]): string {
+    if (!s.enabled) return 'off for this chat'
+    switch (s.status) {
+      case 'connected': return 'connected'
+      case 'pending': return 'connects the first time it is used'
+      case 'needs-auth': return `needs a login: run \`claude mcp login ${s.name}\` in a terminal`
+      case 'failed': return s.error ? `failed: ${s.error}` : 'failed'
+      default: return s.status
+    }
+  }
+
   // `usage.updated` arriva a fine turno dal vivo, ma un trascritto importato non ce
   // l'ha: là i token stanno solo nei singoli turni. Sommarli è l'unica misura onesta
   // di quanto è costata la conversazione, e senza questo ripiego una chat importata
@@ -96,23 +119,39 @@
     </span>
 
     <span class="pop">
-      <!-- Nessun server MCP, e non per prudenza: una chat che ereditasse quelli della
-           macchina costerebbe circa 5× di contesto per turno, cioè quota. Sceglierli
-           per chat è la prossima manopola da collegare, non una che manca per svista. -->
-      <button class="tune" onclick={() => choose('mcp')} title="External tool servers">
-        <span style="color:var(--muted)">MCP</span>none<Icon name="i-down" />
+      <!-- Gli strumenti esterni si accendono per chat, e di partenza sono spenti: una
+           conversazione che ereditasse tutti i server della macchina costerebbe circa
+           5× di contesto per turno, cioè quota, e aprirebbe una via d'uscita ai dati
+           che nessuno ha chiesto. Spenti è il default, non il limite: qui si accendono. -->
+      <button class="tune" onclick={() => choose('mcp')} disabled={!store.live}
+        title={store.live ? 'External tool servers, for this chat'
+          : 'Wake this chat to change its tool servers'}>
+        <span style="color:var(--muted)">MCP</span>{mcpLabel}<Icon name="i-down" />
       </button>
       {#if open === 'mcp'}
-        <div class="menu" style="width:230px">
-          <div class="mi on">
-            <span>none<span class="sub">Fastest, cheapest, nothing leaves the folder</span></span>
-            <Icon name="i-check" style="margin-left:auto;color:var(--accent)" />
-          </div>
-          <div class="mi dis">
-            <Icon name="i-plug" />
-            <span>pick servers<span class="sub">Not wired yet — the daemon does not list them.
-              Every chat starts with none.</span></span>
-          </div>
+        <div class="menu" style="width:290px">
+          {#each snap.mcpServers as s (s.name)}
+            <!-- Il menu **non** si chiude accendendo: accenderne due è il caso normale, e
+                 richiuderlo a ogni tocco costringerebbe a riaprirlo per la seconda. Si
+                 chiude col clic fuori, come gli altri. -->
+            <button class="mi" class:on={s.enabled}
+              onclick={() => void store.setMcp(s.name, !s.enabled)}>
+              <Icon name="i-plug" />
+              <span>{s.name}<span class="sub">{mcpBlurb(s)}</span></span>
+              {#if s.enabled}
+                <Icon name="i-check" style="margin-left:auto;color:var(--accent)" />
+              {/if}
+            </button>
+          {/each}
+          {#if snap.mcpServers.length === 0}
+            <div class="mi dis">
+              <Icon name="i-plug" />
+              <!-- Non è un guasto: questa cartella non ne ha, o la chat è nata prima
+                   che STARK sapesse chiederglielo. Dirlo è meglio di un elenco vuoto. -->
+              <span>no servers here<span class="sub">Nothing configured for this folder.
+                `claude mcp add` in a terminal, then wake this chat.</span></span>
+            </div>
+          {/if}
         </div>
       {/if}
     </span>

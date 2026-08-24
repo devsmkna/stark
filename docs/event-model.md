@@ -119,6 +119,7 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 | { k: 'session.model',    model: string }
 | { k: 'session.mode',     mode: PermissionMode }
 | { k: 'session.tools',    tools: string[] }
+| { k: 'session.mcp',      servers: McpServer[] }
 | { k: 'session.renamed',  title: string }
 | { k: 'session.slept' }
 | { k: 'session.woke',     resumedFromSeq: number }
@@ -133,6 +134,38 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 type ModelChoice = { id: string, label?: string, resolved?: string, autoMode: boolean }
 type ModeChoice  = { mode: PermissionMode, available: boolean, reason?: string }
 ```
+
+**`session.mcp` — aggiunto collegando gli strumenti esterni.**
+
+```ts
+type McpServer = {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  enabled: boolean      // la scelta di STARK per questa chat
+  error?: string
+}
+```
+
+Due campi e non uno: `enabled` è cosa ha scelto l'utente, `status` è cosa risponde l'agent.
+Un server acceso può essere `needs-auth` o `failed`, e schiacciarli in un campo solo
+nasconderebbe proprio il caso in cui ci si chiede perché non funziona.
+
+L'evento porta la **fotografia intera**, e chi lo applica sostituisce invece di fondere:
+fondere terrebbe in vita un server sparito dalla macchina, in un elenco da cui non si può
+toglierlo. Sta nel journal anche perché è da lì che il **risveglio** sa cosa riaccendere —
+senza, una chat che dorme si sveglia senza i suoi strumenti e sembra rotta.
+
+**Come ci arriva l'adapter, e perché non basta guardare una volta.** L'SDK dà `mcpServerStatus()`
+e `toggleMcpServer()`: STARK non legge nessun file di configurazione, e non saprebbe farlo —
+metà dei server di una macchina sono connettori di claude.ai, che non stanno in nessun file.
+Il default di STARK è **tutti spenti**, ottenuto spegnendo per nome invece che con
+`--strict-mcp-config`, che li renderebbe irraggiungibili (Principio 5: mai poter meno del CLI).
+
+La riconciliazione gira **prima di ogni turno**, non solo all'avvio: i connettori di claude.ai
+compaiono qualche secondo *dopo* che la sessione è nata, quindi spegnerli una volta sola li
+lascia accesi. Misurato: **103 tool nel primo turno, 71 dei quali `mcp__`**, cioè esattamente
+il costo di contesto che spegnerli doveva evitare. Con la riconciliazione per turno, e un
+server solo acceso: 60 tool, 28 `mcp__`, tutti suoi.
 
 Stanno qui e non in un elenco dentro la UI per la ragione del §1. `id` è ciò che si rimanda
 indietro con `session.setModel`; `resolved` è il modello vero a cui un alias punta, e serve a
@@ -357,6 +390,7 @@ type Command =
   | { c: 'session.interrupt' }
   | { c: 'session.setModel', model: string }
   | { c: 'session.setMode',  mode: PermissionMode }
+  | { c: 'session.setMcp',   server: string, enabled: boolean }
   | { c: 'permissions.setRules', rules: PermissionRules }   // il pannello dei toggle
   | { c: 'session.rename',  title: string }
   | { c: 'session.sleep' }

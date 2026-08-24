@@ -9,9 +9,10 @@
 import { randomUUID } from 'node:crypto'
 import {
   query,
-  type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage,
+  type McpServerStatus, type Options, type PermissionResult, type PermissionUpdate,
+  type Query, type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { AgentQuestion, Payload, PermissionMode } from '../../core/events.ts'
+import type { AgentQuestion, McpServer, Payload, PermissionMode } from '../../core/events.ts'
 import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
   resolveModel, slashCommands, type LaunchOptions,
@@ -30,6 +31,13 @@ export type QuestionAnswer =
   | null   // l'utente ha chiuso la card senza rispondere
 
 export type AdapterOptions = LaunchOptions & {
+  /**
+   * I server MCP che questa conversazione vuole accesi, per nome. Tutti gli altri
+   * vengono spenti prima del primo turno. Omesso vuol dire **nessuno**, che è il
+   * default di STARK: gli strumenti esterni si accendono quando servono, non si
+   * subiscono perché stanno sulla macchina.
+   */
+  mcp?: string[]
   onPayload: (p: Payload) => void
   /** Il messaggio nativo, per il file di debug separato dal journal (§13). */
   onRaw?: (m: unknown) => void
@@ -97,6 +105,77 @@ export class ClaudeCodeAdapter {
     // di poter mandare un prompt è un deadlock (misurato prima di ADR-009).
     const info = (await q.initializationResult()) as Record<string, unknown>
     this.announce(info)
+    // Subito, e prima che qualunque prompt possa partire: è questo passaggio a
+    // sostituire `strictMcpConfig`, e a farlo dopo sarebbe come non farlo.
+    this.volere = new Set(this.opts.mcp ?? [])
+    this.input.before(() => this.reconcileMcp())
+    await this.reconcileMcp()
+  }
+
+  // ─── server MCP ───────────────────────────────────────────────────────────
+
+  /** Chi la chat vuole acceso. Di partenza nessuno: gli strumenti si scelgono. */
+  private volere = new Set<string>()
+  /** L'ultima fotografia scritta nel journal, per non riscriverla identica ogni turno. */
+  private ultimaMcp = ''
+
+  /** Cambia un server a caldo. Non tocca la macchina: vale per questa conversazione. */
+  async setMcp(server: string, enabled: boolean): Promise<void> {
+    if (enabled) this.volere.add(server); else this.volere.delete(server)
+    await this.reconcileMcp()
+  }
+
+  /**
+   * Porta i server allo stato che la chat ha scelto, e scrive nel journal com'erano.
+   *
+   * Gira **prima di ogni turno**, non solo all'avvio, e non è una precauzione: i
+   * connettori di claude.ai non ci sono ancora quando la sessione nasce, compaiono
+   * qualche secondo dopo. Spegnendoli una volta sola all'avvio, il primo turno se li è
+   * ritrovati tutti accesi — misurato: **103 tool, di cui 71 `mcp__`**, cioè il costo
+   * di contesto che spegnerli doveva evitare. Il giro costa un messaggio di controllo
+   * per turno, che è il prezzo di dire la verità su cosa è acceso.
+   *
+   * Si spegne **per nome** invece di passare una lista di configurazioni, perché le
+   * configurazioni non le abbiamo: l'SDK dà i nomi e lo stato, non da dove vengono. Ed
+   * è giusto così — STARK non deve saper leggere i file di Claude Code per offrire
+   * quello che Claude Code ha già.
+   */
+  private async reconcileMcp(): Promise<void> {
+    const q = this.q
+    if (!q) return
+    // Si rilegge finché non c'è più niente da toccare, al massimo tre volte: **durante**
+    // una passata possono comparire server che all'inizio non c'erano, ed è appunto
+    // quello che fanno i connettori di claude.ai. Chi si ferma alla prima scrive nel
+    // journal una fotografia già vecchia, che dice «spento» di un server ancora acceso.
+    let visti: McpServerStatus[] = []
+    for (let giro = 0; giro < 3; giro++) {
+      try {
+        visti = await q.mcpServerStatus()
+      } catch {
+        // Una versione che non risponde non è un guasto della conversazione: la chat
+        // funziona lo stesso, e il chip resta vuoto invece di mentire.
+        return
+      }
+      let toccato = false
+      for (const s of visti) {
+        const acceso = this.volere.has(s.name)
+        if (acceso === (s.status !== 'disabled')) continue
+        try { await q.toggleMcpServer(s.name, acceso); toccato = true } catch { /* lo dirà lo stato */ }
+      }
+      if (!toccato) break
+    }
+    const servers: McpServer[] = visti.map(s => ({
+      name: s.name,
+      status: s.status,
+      enabled: this.volere.has(s.name),
+      ...(s.error !== undefined ? { error: s.error } : {}),
+    }))
+    // Uguale a prima non si riscrive: un evento per turno che dice la stessa cosa
+    // gonfierebbe il journal senza aggiungere niente da rileggere.
+    const firma = JSON.stringify(servers)
+    if (firma === this.ultimaMcp) return
+    this.ultimaMcp = firma
+    this.emit({ k: 'session.mcp', servers })
   }
 
   prompt(text: string): string {
@@ -292,6 +371,15 @@ class PromptQueue {
   private buffer: SDKUserMessage[] = []
   private waiting: ((m: SDKUserMessage | null) => void) | null = null
   private closed = false
+  /**
+   * Cosa va fatto **prima** di consegnare un messaggio all'agent. Esiste per una cosa
+   * sola: rimettere in riga i server MCP quando ne è comparso uno dopo l'avvio. Sta
+   * qui e non in `prompt()` perché lì il messaggio sarebbe già partito — l'unico punto
+   * che precede davvero il turno è la consegna.
+   */
+  private gate: (() => Promise<void>) | null = null
+
+  before(f: () => Promise<void>): void { this.gate = f }
 
   push(m: SDKUserMessage): void {
     if (this.waiting) { const w = this.waiting; this.waiting = null; w(m) }
@@ -306,12 +394,19 @@ class PromptQueue {
   async *stream(): AsyncGenerator<SDKUserMessage> {
     for (;;) {
       const next = this.buffer.shift()
-      if (next) { yield next; continue }
+      if (next) { await this.run(); yield next; continue }
       if (this.closed) return
       const m = await new Promise<SDKUserMessage | null>(res => { this.waiting = res })
       if (m === null) return
+      await this.run()
       yield m
     }
+  }
+
+  /** Il passaggio prima della consegna non può far saltare il turno: se fallisce, si
+   *  consegna lo stesso. Un messaggio perso sarebbe molto peggio di un server acceso. */
+  private async run(): Promise<void> {
+    try { await this.gate?.() } catch { /* la chat va avanti */ }
   }
 }
 

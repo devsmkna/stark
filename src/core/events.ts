@@ -70,6 +70,26 @@ export type ModeChoice = {
 }
 
 /**
+ * Un server MCP visto da una sessione, e cosa STARK ne ha deciso.
+ *
+ * Due campi e non uno perche dicono due cose diverse: `enabled` e la scelta di STARK
+ * per questa chat, `status` e cosa risponde l'agent. Un server acceso puo essere
+ * `needs-auth` o `failed`, e schiacciare le due cose in una sola nasconderebbe
+ * esattamente il caso in cui l'utente si chiede perche non funziona.
+ *
+ * `status` e vocabolario dell'adapter solo all'apparenza: sono i cinque stati che il
+ * protocollo dichiara, e la UI li mostra senza interpretarli.
+ */
+export type McpServer = {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  /** L'ha acceso STARK per questa conversazione. Di partenza sono tutti spenti. */
+  enabled: boolean
+  /** Perche non va, quando `status` e `failed`. */
+  error?: string
+}
+
+/**
  * Una domanda dell'agent, nella forma documentata di `AskUserQuestion`.
  * Da 1 a 4 domande per richiesta, da 2 a 4 opzioni ciascuna, `header` max 12 caratteri.
  */
@@ -127,6 +147,11 @@ export type Payload =
   // La lista dei tool non è nota alla nascita della sessione: arriva col primo turno.
   // Vedi la correzione al §14 in fondo a docs/event-model.md.
   | { k: 'session.tools'; tools: string[] }
+  // Quali server MCP questa conversazione ha davanti, e quali sono accesi. Nel journal
+  // perche il §4 vuole che la UI non mostri niente che non nasca da li, e perche il
+  // risveglio deve poter riaccendere quello che avevi acceso: senza, una chat che
+  // dorme si sveglia senza i suoi strumenti e sembra rotta.
+  | { k: 'session.mcp'; servers: McpServer[] }
   // Il manico con cui questa sessione si riapre. Sta nel journal perche senza, il
   // journal non basta a risvegliare: saprebbe dire cosa e successo ma non come tornarci.
   | { k: 'session.resumeRef'; ref: string }
@@ -210,6 +235,7 @@ export type Command =
   | { c: 'session.interrupt' }
   | { c: 'session.setModel'; model: string }
   | { c: 'session.setMode'; mode: PermissionMode }
+  | { c: 'session.setMcp'; server: string; enabled: boolean }
   | { c: 'permissions.setRules'; rules: PermissionRules }
   | { c: 'session.rename'; title: string }
   | { c: 'session.sleep' }

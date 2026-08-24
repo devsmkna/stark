@@ -95,6 +95,20 @@ applyTo(live, journal.append({
 applyTo(live, journal.append({
   k: 'permission.replied', requestId: 'req-1', decision: 'always', scope: 'Bash',
 }))
+// §6: i server MCP, due volte. La seconda fotografia deve **sostituire** la prima:
+// fondere terrebbe in vita un server sparito dalla macchina, e la chat lo mostrerebbe
+// per sempre in un elenco da cui non si può togliere.
+applyTo(live, journal.append({
+  k: 'session.mcp',
+  servers: [
+    { name: 'notion', status: 'pending', enabled: true },
+    { name: 'linear', status: 'disabled', enabled: false },
+  ],
+}))
+applyTo(live, journal.append({
+  k: 'session.mcp',
+  servers: [{ name: 'notion', status: 'connected', enabled: true }],
+}))
 applyTo(live, journal.append({ k: 'session.state', state: 'idle' }))
 journal.close()
 
@@ -158,6 +172,14 @@ check('§6: nessun avviso di declassamento quando la modalità combacia',
   replayed.notices.length === 0, replayed.notices.map(n => n.text).join('; '))
 check('turno chiuso come completato',
   replayed.turns[0]?.reason === 'completed')
+
+check('§6: la fotografia dei server MCP sostituisce la precedente, non ci si fonde',
+  replayed.mcpServers.length === 1 && replayed.mcpServers[0]?.status === 'connected',
+  replayed.mcpServers.map(s => `${s.name}:${s.status}`).join(','))
+// È da qui che il risveglio sa cosa riaccendere: senza, una chat che dorme si sveglia
+// senza i suoi strumenti e sembra rotta senza motivo apparente.
+check('§6: dal journal si ricava cosa riaccendere al risveglio',
+  replayed.mcpServers.filter(s => s.enabled).map(s => s.name).join(',') === 'notion')
 
 // ─── la riga viva dell'elenco (ui-schermate.md §1) ──────────────────────────
 

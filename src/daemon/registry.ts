@@ -23,6 +23,8 @@ export type OpenSpec = {
   mode?: PermissionMode
   resume?: { ref: string; fork?: boolean }
   askTools?: string[]
+  /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
+  mcp?: string[]
 }
 
 export type SessionRow = {
@@ -136,6 +138,11 @@ export class Registry {
 
     const entry: Live = { id, adapter: null as never, journal, snapshot, watchers, pending }
 
+    // Risvegliare deve restituire la chat com'era, strumenti compresi: una sessione
+    // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
+    // l'utente non ha modo di collegare la cosa allo Sleep. Lo dice il journal.
+    const mcp = spec.mcp ?? snapshot.mcpServers.filter(s => s.enabled).map(s => s.name)
+
     const adapter = new ClaudeCodeAdapter({
       cwd: spec.cwd,
       model: spec.model ?? this.defaults.model,
@@ -143,6 +150,7 @@ export class Registry {
       ...(this.defaults.configDir ? { configDir: this.defaults.configDir } : {}),
       ...(spec.resume ? { resume: spec.resume } : { sessionId: id }),
       ...(spec.askTools?.length ? { askTools: spec.askTools } : {}),
+      ...(mcp.length ? { mcp } : {}),
       onRaw: m => raw.write(JSON.stringify(m)),
       onPayload: p => {
         const e = journal.append(p)      // prima il disco
@@ -369,6 +377,9 @@ export class Registry {
         return { ok: true }
       case 'session.setMode':
         await l.adapter.setMode(cmd.mode)
+        return { ok: true }
+      case 'session.setMcp':
+        await l.adapter.setMcp(cmd.server, cmd.enabled)
         return { ok: true }
       case 'session.sleep': {
         // Addormentarsi con un turno in corso perderebbe il lavoro in volo: si

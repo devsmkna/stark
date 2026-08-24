@@ -9,7 +9,7 @@
 import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
-  type AgentQuestion, type ModeChoice, type ModelChoice, type PermissionMode,
+  type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
   type PromptPart, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
@@ -98,6 +98,12 @@ export type SessionSnapshot = {
   capabilities?: Capabilities
   tools: string[]
   slashCommands: SlashCommand[]
+  /**
+   * I server MCP di questa conversazione. Vuoto finche l'adapter non li ha guardati,
+   * e vuoto per sempre su un journal scritto prima che STARK sapesse chiederglielo:
+   * la UI mostra allora il chip spento, che e la verita.
+   */
+  mcpServers: McpServer[]
   turns: TurnView[]
   files: FileEditView[]
   shell: CommandRunView[]
@@ -126,7 +132,7 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
-    models: [], modes: [],
+    models: [], modes: [], mcpServers: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
     blocked: [], notices: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
@@ -166,6 +172,9 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     case 'session.model': s.model = p.model; break
     case 'session.tools': s.tools = p.tools; break
+    // Si sostituisce, non si fonde: l'evento porta la fotografia intera di com'erano
+    // in quel momento. Fondere terrebbe in vita un server sparito dalla macchina.
+    case 'session.mcp': s.mcpServers = p.servers; break
     case 'session.resumeRef': s.resumeRef = p.ref; break
     case 'session.mode': s.mode = p.mode; break
     case 'session.slept': s.state = 'sleeping'; break

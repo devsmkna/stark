@@ -880,7 +880,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="status">
           <div class="l">
             <span class="tune"><svg class="ic" style="color:var(--accent)"><use href="#i-bolt"/></svg>auto<svg class="ic"><use href="#i-down"/></svg></span>
-            <span class="tune"><span style="color:var(--muted)">MCP</span>none<svg class="ic"><use href="#i-down"/></svg></span>
+            <span class="tune"><span style="color:var(--muted)">MCP</span>1<svg class="ic"><use href="#i-down"/></svg></span>
             <span class="sep">·</span>
             <svg class="ic"><use href="#i-folder"/></svg><span>~/stark</span>
             <span class="sep">·</span>
@@ -905,10 +905,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="mi"><span>fable-5<span class="sub">Supports auto mode</span></span></div>
         <div class="mi"><svg class="ic" style="color:var(--wait)"><use href="#i-warn"/></svg><span>haiku-4.5<span class="sub">No auto mode — this chat would fall back to Manual and ask for everything</span></span></div>
       </div>
-      <div class="menu" style="width:210px">
-        <div class="mi on"><span>none<span class="sub">Fastest, cheapest, nothing leaves the folder</span></span><svg class="ic" style="margin-left:auto;color:var(--accent)"><use href="#i-check"/></svg></div>
-        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>notion-mio<span class="sub">32 tools</span></span></div>
-        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>atlassian<span class="sub">19 tools</span></span></div>
+      <div class="menu" style="width:290px">
+        <div class="mi on"><svg class="ic"><use href="#i-plug"/></svg><span>notion-digitizers<span class="sub">connected</span></span><svg class="ic" style="margin-left:auto;color:var(--accent)"><use href="#i-check"/></svg></div>
+        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>atlassian<span class="sub">off for this chat</span></span></div>
+        <div class="mi"><svg class="ic"><use href="#i-plug"/></svg><span>claude.ai Gmail<span class="sub">off for this chat</span></span></div>
       </div>
     </div>
     <p style="margin-top:12px"><b>Sei modalità, non cinque.</b> <code>bypassPermissions</code> resta in
@@ -925,9 +925,15 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
     <div class="note">
       <div><b>Modello e modalità cambiano a caldo</b> — verificato nello spike. Nessun «riavvia per
       applicare»: il turno dopo è già col modello nuovo. Ecco perché sceglierli prima non serve.</div>
-      <div><b>MCP è la manopola che pesa.</b> Una chat nuova non prende nessun server. Ereditare
-      quelli della macchina costa circa <b>5× di contesto per turno</b> — su quota fissa è la voce
-      più cara della barra, ed è per questo che sta lì e non sepolta nelle impostazioni.</div>
+      <div><b>MCP &egrave; la manopola che pesa.</b> Una chat nuova non prende nessun server, e da qui
+      se ne accende quanti se ne vogliono &mdash; il menu resta aperto, perch&eacute; accenderne due &egrave; il caso
+      normale. Ereditarli tutti costa circa <b>5&times; di contesto per turno</b>: su quota fissa &egrave; la
+      voce pi&ugrave; cara della barra, ed &egrave; per questo che sta l&igrave; e non sepolta nelle impostazioni.
+      <b>Spento vuol dire spento davvero</b>: STARK non si limita a non chiederli, li spegne per nome
+      prima di ogni turno &mdash; i connettori di claude.ai compaiono qualche secondo <i>dopo</i> che la
+      chat &egrave; nata, e spegnerli una volta sola all&rsquo;avvio li lasciava accesi (misurato: 71 tool
+      <code>mcp__</code> entrati in un turno che doveva averne zero). Se un server chiede un login,
+      la riga lo dice e dice il comando da dare nel terminale, invece di sparire.</div>
     </div>
   </section>
 

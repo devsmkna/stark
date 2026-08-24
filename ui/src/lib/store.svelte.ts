@@ -207,6 +207,10 @@ export class Store {
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
   setMode(mode: PermissionMode): Promise<boolean> { return this.send({ c: 'session.setMode', mode }) }
+  /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18). */
+  setMcp(server: string, enabled: boolean): Promise<boolean> {
+    return this.send({ c: 'session.setMcp', server, enabled })
+  }
   setModel(model: string): Promise<boolean> { return this.send({ c: 'session.setModel', model }) }
 
   async rename(id: string, title: string): Promise<void> {
