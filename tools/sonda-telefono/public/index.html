@@ -1,0 +1,121 @@
+<!doctype html><html lang="it"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json"><link rel="apple-touch-icon" href="/icona.png">
+<title>Sonda STARK</title>
+<style>
+ :root{color-scheme:dark}
+ body{margin:0;padding:16px;background:#111;color:#eee;font:15px/1.5 system-ui,sans-serif}
+ h1{font-size:17px;margin:0 0 4px} p.sub{color:#888;margin:0 0 18px;font-size:13px}
+ .r{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #262626}
+ .r b{font-weight:500;color:#bbb} .si{color:#4ade80} .no{color:#f87171} .fo{color:#888}
+ button{width:100%;padding:14px;margin:8px 0 0;font-size:15px;border:0;border-radius:10px;
+   background:#2563eb;color:#fff;font-weight:500}
+ button:disabled{background:#333;color:#777}
+ h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#777;margin:26px 0 6px}
+ #log{white-space:pre-wrap;font:11px/1.45 ui-monospace,monospace;color:#9ca3af;margin-top:8px}
+ .box{background:#1a1a1a;border-radius:10px;padding:12px;margin-top:10px;font-size:13px;color:#ccc}
+</style>
+<h1>Sonda STARK — «continua da telefono»</h1>
+<p class="sub">Misura cosa sa fare <i>questo</i> telefono. Niente di STARK è esposto qui.</p>
+
+<h2>1 · La piattaforma</h2><div id="cap"></div>
+
+<h2>2 · Farsi chiamare</h2>
+<button id="bSub">Concedi le notifiche e iscrivimi</button>
+<button id="bPush" disabled>Mandami un push fra 30 secondi</button>
+<div class="box" id="istr" hidden><b>Adesso blocca lo schermo e metti via il telefono.</b><br>
+Se la notifica arriva a schermo spento, «ti chiama quando guardi altrove» è implementabile.</div>
+
+<h2>3 · Il flusso in background</h2>
+<button id="bSse">Apri il flusso e misura</button>
+<div class="box" id="sseBox" hidden>Ora <b>cambia app</b> o blocca lo schermo per un minuto, poi torna qui.</div>
+<div id="log"></div>
+
+<script type="module">
+const $ = s => document.querySelector(s)
+const manda = (tipo, d = {}) => fetch('/api/log', { method: 'POST',
+  headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tipo, ...d }) }).catch(() => {})
+const scrivi = t => { $('#log').textContent += t + '\n' }
+
+const installato = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+
+// Il rilevamento del browser interno: e' il requisito nato dall'incidente del 25 agosto.
+// Non ci si arriva dallo user-agent — quello di Telegram diceva `Version/27.0`, cioe' la
+// firma di Safari vero, ed e' proprio da li' che era partita la diagnosi sbagliata.
+// Il segnale affidabile e' funzionale: contesto sicuro SI ma Service Worker NO non
+// esiste in un browser vero, e su iOS un webview non e' nemmeno installabile.
+const dentroUnApp = isSecureContext && !('serviceWorker' in navigator)
+const cap = {
+  'Contesto sicuro': isSecureContext,
+  'Service Worker': 'serviceWorker' in navigator,
+  'PushManager': 'PushManager' in window,
+  'Notification': 'Notification' in window,
+  'crypto.subtle': !!(crypto && crypto.subtle),
+  'Installato sulla Home': installato,
+}
+if (dentroUnApp) {
+  const a = document.createElement('div')
+  a.className = 'box'
+  a.style.cssText = 'background:#3b1113;border:1px solid #7f1d1d;color:#fecaca'
+  a.innerHTML = '<b>Sei nel browser interno di un\'app.</b><br>Qui Service Worker e notifiche '
+    + 'non esistono, e la pagina <i>sembra</i> sana lo stesso. Aprila in Safari o Chrome, '
+    + 'poi aggiungila alla schermata Home.'
+  $('#cap').before(a)
+}
+
+$('#cap').innerHTML = Object.entries(cap).map(([k, v]) =>
+  `<div class="r"><b>${k}</b><span class="${v ? 'si' : 'no'}">${v ? 'sì' : 'NO'}</span></div>`).join('')
+  + `<div class="r"><b>Permesso notifiche</b><span class="fo" id="perm">${
+      'Notification' in window ? Notification.permission : '—'}</span></div>`
+
+manda('capacita', { ...cap, installato, dentroUnApp, ua: navigator.userAgent,
+  perm: 'Notification' in window ? Notification.permission : null })
+
+const b64 = s => { const p = '='.repeat((4 - s.length % 4) % 4)
+  const r = atob((s + p).replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from([...r].map(c => c.charCodeAt(0))) }
+
+$('#bSub').onclick = async () => {
+  try {
+    if (!('serviceWorker' in navigator)) { scrivi('✗ niente Service Worker: si ferma qui'); return manda('sw-assente') }
+    const reg = await navigator.serviceWorker.register('/sw.js')
+    await navigator.serviceWorker.ready
+    scrivi('✓ Service Worker registrato')
+    const perm = await Notification.requestPermission()
+    $('#perm').textContent = perm
+    scrivi('permesso: ' + perm)
+    manda('permesso', { perm })
+    if (perm !== 'granted') return scrivi('✗ senza permesso non si va oltre')
+    const { key } = await (await fetch('/api/vapid')).json()
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) })
+    await fetch('/api/sub', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(sub) })
+    scrivi('✓ iscritto a ' + new URL(sub.endpoint).host)
+    $('#bPush').disabled = false
+  } catch (e) { scrivi('✗ ' + e.message); manda('errore-iscrizione', { errore: String(e) }) }
+}
+
+$('#bPush').onclick = async () => {
+  await fetch('/api/push?delay=30'); $('#istr').hidden = false
+  scrivi('push programmato fra 30 s — blocca lo schermo ORA')
+}
+
+$('#bSse').onclick = () => {
+  $('#sseBox').hidden = false
+  let ultimo = 0, ultimoA = Date.now(), nascostoDa = 0
+  const es = new EventSource('/api/sse?chi=' + (installato ? 'installato' : 'scheda'))
+  es.addEventListener('tic', e => { ultimo = JSON.parse(e.data).n; ultimoA = Date.now() })
+  es.onerror = () => scrivi('flusso: errore/riconnessione')
+  scrivi('flusso aperto — vai in background per un minuto')
+  addEventListener('visibilitychange', () => {
+    if (document.hidden) { nascostoDa = Date.now(); manda('in-background', { ultimoTic: ultimo }) }
+    else {
+      const via = Math.round((Date.now() - nascostoDa) / 1000)
+      const buco = Math.round((Date.now() - ultimoA) / 1000)
+      scrivi(`tornato dopo ${via}s · ultimo tic ${buco}s fa · stato ${es.readyState}`)
+      manda('tornato-in-primo-piano', { via_s: via, silenzio_s: buco, readyState: es.readyState, ultimoTic: ultimo })
+    }
+  })
+}
+if (location.search.includes('da=notifica')) { scrivi('✓ aperto TOCCANDO la notifica'); manda('aperto-da-notifica') }
+</script>
