@@ -386,10 +386,16 @@ export class Store {
     this.working = true
     this.refused = null
     try {
+      // `opts.profile` arriva solo dalla prima chat di un progetto (NewChat lo chiede
+      // solo allora). Da quella successiva in poi non c'è più nulla da chiedere: il
+      // profilo è già un fatto del progetto, e va riletto da qui — esattamente come fa
+      // `wake()` — altrimenti la seconda chat parte senza `CLAUDE_CONFIG_DIR` e sembra
+      // rotta senza motivo apparente (MCP e modelli del profilo giusto assenti).
+      const profile = opts.profile ?? this.project(cwd).profile
       const { id } = await this.api.open({
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
-        ...(opts.profile ? { configDir: opts.profile } : {}),
+        ...(profile ? { configDir: profile } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
         void this.setProject(cwd, { profile: opts.profile })
