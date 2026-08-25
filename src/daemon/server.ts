@@ -138,6 +138,9 @@ async function route(
       // mostrare lo stato vero invece di quello che sperava di aver impostato.
       return send(res, 200, { settings: registry.saveSettings(body) })
     }
+    if (method === 'GET' && path === '/api/browse') {
+      return send(res, 200, registry.browse(url.searchParams.get('path') ?? undefined))
+    }
     if (method === 'GET' && path === '/api/storage') {
       return send(res, 200, registry.storage())
     }

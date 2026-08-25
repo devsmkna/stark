@@ -23,6 +23,9 @@ export type ToolPartView = {
   summary?: string
   startedAt: number; endedAt?: number
   done: boolean; ok?: boolean; error?: string; blocked?: 'classifier' | 'denyRule'
+  /** Cio che il tool ha restituito, per intero. Arriva con `tool.ended`: prima di
+   *  quel momento non esiste, e un tool bloccato non ce l'ha mai. */
+  output?: string
 }
 /**
  * Cosa hai risposto, li dov'e successo.
@@ -205,6 +208,14 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         startedAt: e.ts, ended: false,
       })
       break
+    case 'turn.promptAdded': {
+      // Si accoda al prompt che c'era, non lo sostituisce: è un secondo «per favore
+      // anche» dentro lo stesso turno, non un turno a sé (vedi il commento su
+      // `turn.promptAdded` in events.ts).
+      const t = s.turns.find(x => x.turnId === p.turnId)
+      if (t) t.prompt = [...t.prompt, ...p.prompt]
+      break
+    }
     case 'turn.ended': {
       const t = s.turns.find(x => x.turnId === p.turnId)
       if (t) {
@@ -267,6 +278,9 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       if (part) {
         part.done = true; part.ok = p.ok; part.endedAt = e.ts
         if (p.error !== undefined) part.error = p.error
+        if (p.output !== undefined) {
+          part.output = typeof p.output === 'string' ? p.output : JSON.stringify(p.output, null, 2)
+        }
       }
       break
     }

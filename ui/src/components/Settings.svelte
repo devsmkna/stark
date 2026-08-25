@@ -13,6 +13,8 @@
   import type { Storage, SystemInfo } from '../lib/api.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
+  import type { TextSize } from '../lib/textsize.svelte.ts'
+  import type { FontFamily } from '../lib/fontfamily.svelte.ts'
   import { project } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -74,6 +76,15 @@
     { id: 'light', nome: 'Light' }, { id: 'dark', nome: 'Dark' }, { id: 'system', nome: 'System' },
   ]
 
+  const TAGLIE: { id: TextSize; nome: string }[] = [
+    { id: 'sm', nome: 'Small' }, { id: 'md', nome: 'Default' },
+    { id: 'lg', nome: 'Large' }, { id: 'xl', nome: 'Extra large' },
+  ]
+
+  const FONT: { id: FontFamily; nome: string }[] = [
+    { id: 'default', nome: 'Default' }, { id: 'system', nome: "This computer's font" },
+  ]
+
   // ─── quello che si chiede al daemon solo quando serve ──────────────────────
 
   let storage = $state<Storage | null>(null)
@@ -87,7 +98,9 @@
     if (sez === 'storage' && !storage) {
       void store.api.storage().then(s => { storage = s }, e => { erroreStorage = String(e.message ?? e) })
     }
-    if (sez === 'system' && !system) {
+    // 'projects' la chiede anche lei: le è servono i profili trovati sulla macchina
+    // per la scelta per cartella, qui sotto.
+    if ((sez === 'system' || sez === 'projects') && !system) {
       void store.api.system().then(s => { system = s }, e => { errore = String(e.message ?? e) })
     }
   })
@@ -195,19 +208,39 @@
 
         <div class="fgroup">
           <div class="flabel">Claude profile</div>
-          <!-- Il profilo è una `CLAUDE_CONFIG_DIR`, e il registro ne apre una sola per
-               tutto il daemon: prometterlo per progetto senza saperlo fare sarebbe una
-               bugia con conseguenze — chi lo cambiasse non troverebbe più le sue chat. -->
-          <div class="notice">
-            <Icon name="i-warn" />
-            <span><b>Not per project yet.</b> Every agent STARK launches uses
-            <code>the CLAUDE_CONFIG_DIR you see in System</code>. Which
-            profiles exist on this machine is in <b>System</b>; choosing one per project needs the
-            daemon to run more than one at a time, and it does not yet.</span>
-          </div>
-          <div class="hint"><b>Quota is counted per profile</b>, which is the real reason this wants
-          to be a per-project choice: two projects on different profiles would not eat each other's
-          week.</div>
+          <!-- Ogni sessione spawna il proprio processo (ADR-009): il `CLAUDE_CONFIG_DIR`
+               viaggia nel suo `env`, non in quello del daemon. Due progetti su profili
+               diversi non si toccano — è per questo che la scelta può essere per cartella. -->
+          {#if !system}
+            <div class="hint">{errore || 'Reading — STARK is asking the executable which version it is.'}</div>
+          {:else if system.agent.profiles.length <= 1}
+            <div class="hint">This machine has a single Claude profile — nothing to choose yet.
+            A second one shows up here the moment a <code>~/.claude-*</code> folder exists.</div>
+          {:else}
+            {@const sys = system}
+            {@const dflt = sys.agent.profiles.find(p => p.current)?.path}
+            <div>
+              {#each progetti as [cwd, nome] (cwd)}
+                <div class="pjrow">
+                  <span class="sw p{store.project(cwd).colour ?? 0}"></span>
+                  <div class="pjn"><div class="pn2">{nome}</div><div class="pjp">{cwd}</div></div>
+                  <span class="chips">
+                    {#each sys.agent.profiles as p (p.path)}
+                      <button class="chip" class:on={(store.project(cwd).profile ?? dflt) === p.path}
+                        onclick={() => void store.setProject(cwd, { profile: p.path })}>{p.name}</button>
+                    {/each}
+                  </span>
+                </div>
+              {/each}
+              {#if progetti.length === 0}
+                <div class="hint">No projects yet — they appear here as soon as a chat has a folder.</div>
+              {/if}
+            </div>
+            <div class="hint"><b>Quota is counted per profile</b>, which is the real reason this is
+            a per-project choice: two projects on different profiles do not eat each other's week.
+            This only reaches <b>chats you open from now on</b> — one already running keeps the
+            profile it started with, same as model and mode.</div>
+          {/if}
         </div>
 
       <!-- ─── Notifications ───────────────────────────────────────────── -->
@@ -288,6 +321,35 @@
           desktop in an office.</div>
           <div class="hint">Project colours live in <b>Projects</b>: a colour belongs to the
           project, not to a page about how STARK looks.</div>
+        </div>
+
+        <div class="fgroup">
+          <div class="flabel">Text size</div>
+          <div class="chips">
+            {#each TAGLIE as t (t.id)}
+              <button class="chip" class:on={store.textSize.scelto === t.id}
+                onclick={() => store.textSize.set(t.id)}>
+                {#if store.textSize.scelto === t.id}<Icon name="i-check" />{/if}{t.nome}
+              </button>
+            {/each}
+          </div>
+          <div class="hint">Everything scales together — the list, the conversation, the
+          blocks — so nothing lines up wrong at a size STARK wasn't measured at by hand.
+          Saved in <b>this browser</b>.</div>
+        </div>
+
+        <div class="fgroup">
+          <div class="flabel">Font</div>
+          <div class="chips">
+            {#each FONT as f (f.id)}
+              <button class="chip" class:on={store.font.scelto === f.id}
+                onclick={() => store.font.set(f.id)}>
+                {#if store.font.scelto === f.id}<Icon name="i-check" />{/if}{f.nome}
+              </button>
+            {/each}
+          </div>
+          <div class="hint">Commands and code always stay monospaced — this only changes
+          what you read, not what you copy. Saved in <b>this browser</b>.</div>
         </div>
 
       <!-- ─── Storage ─────────────────────────────────────────────────── -->

@@ -13,18 +13,27 @@
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
   import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
-  import { colours, hhmm, project, since, toolIcon } from '../lib/view.ts'
+  import { colours, hhmm, project, since, toolIcon, turnStatus } from '../lib/view.ts'
+  import { renderMarkdown } from '../lib/markdown.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap, link }:
     { store: Store; snap: SessionSnapshot; link: LinkStatus } = $props()
 
-  // Aperto solo l'ultimo turno, che è quello a cui si sta lavorando. `!id` marca un
-  // turno chiuso a mano: senza, richiudere l'ultimo non avrebbe effetto, perché la
-  // regola «l'ultimo è aperto» lo riaprirebbe subito.
+  // Di default è aperto il turno **attivo** — quello che l'agent sta davvero facendo,
+  // che non è sempre l'ultimo: se mandi un messaggio mentre lavora ancora al
+  // precedente, quello nuovo si accoda e non ha ancora un blocco. Aprire «l'ultimo»
+  // alla lettera richiuderebbe il lavoro vero proprio mentre è in corso. Quando
+  // nessun turno è attivo si torna alla regola semplice: l'ultimo. `!id` marca un
+  // turno chiuso a mano: senza, richiuderlo non avrebbe effetto, perché la regola di
+  // default lo riaprirebbe subito.
   let opened = $state<Set<string>>(new Set())
+  const defaultOpenIdx = $derived.by((): number => {
+    const attivo = snap.turns.findIndex(t => !t.ended)
+    return attivo !== -1 ? attivo : snap.turns.length - 1
+  })
   const isOpen = (t: TurnView, i: number): boolean =>
-    opened.has(t.turnId) ? true : (i === snap.turns.length - 1 && !opened.has(`!${t.turnId}`))
+    opened.has(t.turnId) ? true : (i === defaultOpenIdx && !opened.has(`!${t.turnId}`))
 
   function toggle(t: TurnView, i: number): void {
     const next = new Set(opened)
@@ -32,6 +41,121 @@
     else { next.add(t.turnId); next.delete(`!${t.turnId}`) }
     opened = next
   }
+
+  // ─── i singoli blocchi: reasoning e tool si aprono a loro volta ────────────
+  // Chiusi di default per lo stesso motivo per cui lo è il turno: tredici scambi
+  // veri fanno ~400 blocchi, e mostrarli per intero renderebbe illeggibile proprio
+  // ciò che dovrebbe stare a colpo d'occhio.
+  let openedBlocks = $state<Set<string>>(new Set())
+  const blockOpen = (key: string): boolean => openedBlocks.has(key)
+  function toggleBlock(key: string): void {
+    const next = new Set(openedBlocks)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    openedBlocks = next
+  }
+  /** L'input del tool, leggibile: già strutturato se è arrivato, grezzo se no. */
+  const prettyInput = (part: Extract<PartView, { kind: 'tool' }>): string => {
+    if (part.input !== undefined) {
+      try { return JSON.stringify(part.input, null, 2) } catch { /* usa il grezzo */ }
+    }
+    return part.inputRaw
+  }
+
+  // ─── raggruppare le operazioni: solo quella in corso resta in vista ────────
+  //
+  // Bash, Read, il reasoning: non sono scritti per l'utente, sono il *come*. Uno
+  // via l'altro diventano un muro che nasconde proprio il poco che è scritto per
+  // lui — la risposta. Resta in piena vista solo l'operazione ancora in corso;
+  // quelle finite si accorpano in «N operations», chiuso di default, che si apre
+  // sull'elenco esatto di prima (ogni riga resta cliccabile per il suo dettaglio).
+  //
+  // «Consecutive» è la parola che conta: se in mezzo l'agent scrive del testo,
+  // quel testo è la prova che si è fermato a dire qualcosa — accorpare oltre
+  // quel punto nasconderebbe dove finiva un pensiero e cominciava il prossimo.
+  type OpPart = Extract<PartView, { kind: 'tool' | 'reasoning' }>
+  type Grp =
+    | { kind: 'solo'; key: string; part: PartView }
+    | { kind: 'live'; key: string; part: OpPart }
+    | { kind: 'done'; key: string; parts: OpPart[] }
+
+  const isOp = (p: PartView): p is OpPart => p.kind === 'tool' || p.kind === 'reasoning'
+  const isLive = (p: OpPart): boolean => p.kind === 'tool' ? !p.done : p.open
+  const keyOf = (p: PartView): string => p.kind === 'tool' ? p.callId : p.partId
+
+  // Un `thinking` che Claude ha chiuso senza avere emesso un solo delta non è un
+  // pensiero corto: è vuoto. Aprirlo mostrerebbe solo «…», che non è un contenuto,
+  // è l'assenza travestita da riga cliccabile. Mentre è ancora aperto resta invece
+  // in vista: lì il segnale «sta pensando» vale anche a zero caratteri, perché dice
+  // che il turno è vivo.
+  const isEmptyReasoning = (p: PartView): boolean =>
+    p.kind === 'reasoning' && !p.open && p.text.trim() === ''
+
+  function groupParts(parts: PartView[]): Grp[] {
+    const out: Grp[] = []
+    let buf: OpPart[] = []
+    const flush = (): void => {
+      if (buf.length === 0) return
+      const last = buf[buf.length - 1]!
+      if (isLive(last)) {
+        const fatte = buf.slice(0, -1)
+        if (fatte.length > 0) out.push({ kind: 'done', key: `d:${keyOf(fatte[0]!)}`, parts: fatte })
+        out.push({ kind: 'live', key: `l:${keyOf(last)}`, part: last })
+      } else {
+        out.push({ kind: 'done', key: `d:${keyOf(buf[0]!)}`, parts: buf })
+      }
+      buf = []
+    }
+    for (const p of parts) {
+      if (isEmptyReasoning(p)) continue
+      if (isOp(p)) { buf.push(p); continue }
+      flush()
+      out.push({ kind: 'solo', key: keyOf(p), part: p })
+    }
+    flush()
+    return out
+  }
+
+  /**
+   * L'ultima cosa scritta per l'utente finisce con un punto di domanda? È il
+   * messaggio più facile da perdere in un muro di testo, perché non somiglia a una
+   * domanda — è una `answer`/`Ask` a somigliarci. Vale solo per l'ultimo blocco di
+   * testo dell'ultimo turno: è l'unico che si può ancora perdere, il resto è storia.
+   */
+  const isOpenQuestion = (i: number, part: PartView): boolean => {
+    if (part.kind !== 'text' || i !== snap.turns.length - 1) return false
+    const testi = snap.turns[i]!.parts.filter((p): p is Extract<PartView, { kind: 'text' }> => p.kind === 'text')
+    const ultimo = testi[testi.length - 1]
+    return !!ultimo && ultimo.partId === part.partId && /\?\s*$/.test(part.text.trim())
+  }
+
+  // ─── auto-scroll ─────────────────────────────────────────────────────────
+  // Segue il fondo finché l'utente non risale a leggere qualcosa: solo allora
+  // smette, perché altrimenti lo strapperebbe via da quello che stava leggendo.
+  // Torna a seguirlo da solo se l'utente riscende in fondo a mano.
+  let scrollerEl = $state<HTMLDivElement | null>(null)
+  let stick = $state(true)
+  function onScroll(): void {
+    if (!scrollerEl) return
+    const gap = scrollerEl.scrollHeight - scrollerEl.scrollTop - scrollerEl.clientHeight
+    stick = gap < 56
+  }
+  let lastSession = $state('')
+  $effect(() => {
+    if (snap.sessionId !== lastSession) { lastSession = snap.sessionId; stick = true }
+  })
+  $effect(() => {
+    // Letture che fanno da dipendenza: quanti turni, quanti blocchi nell'ultimo, e
+    // quanto testo — un `text.delta` cresce lo stesso blocco senza aggiungerne uno.
+    const ultimo = snap.turns[snap.turns.length - 1]
+    const misura = ultimo
+      ? ultimo.parts.reduce((n, p) => n + (p.kind === 'text' || p.kind === 'reasoning' ? p.text.length : 1), 0)
+      : 0
+    void snap.turns.length; void misura
+    if (stick && scrollerEl) {
+      const el = scrollerEl
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+    }
+  })
 
   const promptOf = (t: TurnView): string => promptText(t.prompt)
   /** Gli allegati il cui file non si trova più. Non è stato dell'app, è stato del disco. */
@@ -114,16 +238,73 @@
     </div>
   {/if}
 
-  <div class="scroller conv">
+  <!-- Una riga sola per una reasoning e per un tool, in vista o dentro il gruppo
+       collassato: lo stesso disegno, un posto solo da tenere allineato. -->
+  {#snippet opRow(part: OpPart)}
+    {#if part.kind === 'reasoning'}
+      {@const key = `r:${part.partId}`}
+      {@const ropen = blockOpen(key)}
+      <button class="row think clickable" onclick={() => toggleBlock(key)}>
+        <Icon name="i-brain" />
+        <span class="k">Reasoning</span>
+        <span class="v">{part.estimatedTokens ? `${part.estimatedTokens} tokens` : ''}</span>
+        <span class="end">{ropen ? '▾' : '▸'}</span>
+      </button>
+      {#if ropen}
+        <div class="blockbody">{part.text || '…'}</div>
+      {/if}
+    {:else}
+      {@const key = `t:${part.callId}`}
+      {@const topen = blockOpen(key)}
+      <!-- `bad` solo se NON è bloccata: un'azione fermata dal classificatore torna
+           comunque come tool fallito, e senza questa esclusione le due classi si
+           sovrappongono e vince il rosso. Ma bloccato non è un fallimento — è
+           «fermato, e puoi consentirlo tu». -->
+      <button class="row clickable" class:bad={part.done && part.ok === false && !part.blocked}
+           class:block={!!part.blocked} onclick={() => toggleBlock(key)}>
+        <Icon name={part.blocked ? 'i-block' : toolIcon(part.name)} />
+        <span class="k">{part.blocked ? 'Blocked' : part.name}</span>
+        <span class="v">{subject(part)}</span>
+        <span class="end">
+          {#if part.blocked}stopped for safety
+          {:else if !part.done}…
+          {:else if part.ok}✓{:else}✗{/if}
+          {topen ? '▾' : '▸'}
+        </span>
+      </button>
+      {#if topen}
+        <div class="blockbody">
+          <div class="bblabel">Input</div>{prettyInput(part)}
+          {#if part.error}
+            <div class="bblabel err">Error</div>{part.error}
+          {:else if part.output}
+            <div class="bblabel">Output</div>{part.output}
+          {/if}
+        </div>
+      {/if}
+
+      <!-- I file toccati da questa chiamata, dove sono stati toccati. Lo stesso file
+           può comparire più volte nel turno: sono modifiche avvenute in momenti
+           diversi, e in mezzo l'agent ha fatto altro. -->
+      {#each editsOf(part.callId) as edit (edit.ts)}
+        <FileBlock edits={[edit]} narrow={store.narrow} />
+      {/each}
+    {/if}
+  {/snippet}
+
+  <div class="scroller conv" bind:this={scrollerEl} onscroll={onScroll}>
     {#each snap.turns as turn, i (turn.turnId)}
       {@const open = isOpen(turn, i)}
-      <div class="turn" class:open>
+      {@const status = turnStatus(snap.turns, i)}
+      <div class="turn" class:open class:active={status === 'active'} class:queued={status === 'queued'}>
         <button class="th" onclick={() => toggle(turn, i)}>
           <span class="cx">{open ? '▾' : '▸'}</span>
           <span class="tm">{hhmm(turn.startedAt)}</span>
           <span class="q">{promptOf(turn)}</span>
           <span class="n">
-            {turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'}{#if turn.endedAt}{' · '}{since(turn.startedAt, turn.endedAt)}{/if}
+            {#if status === 'queued'}queued — waiting its turn
+            {:else if status === 'active'}{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'} · working…
+            {:else}{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'}{#if turn.endedAt}{' · '}{since(turn.startedAt, turn.endedAt)}{/if}{/if}
           </span>
         </button>
 
@@ -155,74 +336,72 @@
                 {/each}
               </div>
             {/if}
-            {#each turn.parts as part (part.kind === 'tool' ? part.callId : part.partId)}
-              {#if part.kind === 'text'}
-                <!-- Sempre per intero: è l'unica cosa scritta per l'utente. -->
-                <div class="prose">{part.text}</div>
+            {#each groupParts(turn.parts) as g (g.key)}
+              {#if g.kind === 'solo'}
+                {@const part = g.part}
+                {#if part.kind === 'text'}
+                  <!-- Sempre per intero: è l'unica cosa scritta per l'utente, e in
+                       Markdown — è quello che il CLI stesso rende. Evidenziato se è
+                       l'ultima cosa detta e finisce con un punto di domanda: è quello
+                       che si perde più facilmente in un muro di testo. -->
+                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                  <div class="prose" class:asked={isOpenQuestion(i, part)}>{@html renderMarkdown(part.text)}</div>
 
-              {:else if part.kind === 'compact'}
-                <!-- Una riga che taglia il flusso, perché è esattamente quello che è
-                     successo: sopra, il modello non ha più i messaggi per intero ma un
-                     riassunto. È la spiegazione di metà delle volte in cui sembra aver
-                     dimenticato qualcosa, e nasconderla lascerebbe quel «sembra». -->
-                <div class="compact">
-                  <span class="l"></span>
-                  <span class="t">
-                    Context compacted{#if part.trigger === 'manual'}, because you asked{:else if part.trigger === 'auto'}, it had filled up{/if}
-                    {#if part.after !== undefined}
-                      · {kilo(part.before)} → {kilo(part.after)} tokens
-                    {:else}
-                      · {kilo(part.before)} tokens before
-                    {/if}
-                  </span>
-                  <span class="l"></span>
-                </div>
+                {:else if part.kind === 'compact'}
+                  <!-- Una riga che taglia il flusso, perché è esattamente quello che è
+                       successo: sopra, il modello non ha più i messaggi per intero ma un
+                       riassunto. È la spiegazione di metà delle volte in cui sembra aver
+                       dimenticato qualcosa, e nasconderla lascerebbe quel «sembra». -->
+                  <div class="compact">
+                    <span class="l"></span>
+                    <span class="t">
+                      Context compacted{#if part.trigger === 'manual'}, because you asked{:else if part.trigger === 'auto'}, it had filled up{/if}
+                      {#if part.after !== undefined}
+                        · {kilo(part.before)} → {kilo(part.after)} tokens
+                      {:else}
+                        · {kilo(part.before)} tokens before
+                      {/if}
+                    </span>
+                    <span class="l"></span>
+                  </div>
 
-              {:else if part.kind === 'reasoning'}
-                <div class="row think">
-                  <Icon name="i-brain" />
-                  <span class="k">Reasoning</span>
-                  <span class="v">{part.estimatedTokens ? `${part.estimatedTokens} tokens` : ''}</span>
-                  <span class="end">▸</span>
-                </div>
+                {:else if part.kind === 'answer'}
+                  <!-- La richiesta non è passata di qui: si era espanso il blocco in
+                       basso. Ciò che resta nel flusso è cosa hai risposto, dove è
+                       successo, così che due giorni dopo si capisca cosa si era deciso. -->
+                  <div class="row answer">
+                    <Icon name={part.of === 'question' ? 'i-ask' : 'i-shield'} />
+                    <span class="k">You</span>
+                    <span class="v">{part.asked}</span>
+                    <!-- Nessun rosso: aver detto di no non è un fallimento, è una
+                         decisione. Il rosso qui la farebbe leggere come qualcosa
+                         andato storto, e la prossima volta si esiterebbe a dirlo. -->
+                    <span class="end" class:no={part.refused}>{part.answer}</span>
+                  </div>
+                {/if}
 
-              {:else if part.kind === 'answer'}
-                <!-- La richiesta non è passata di qui: si era espanso il blocco in
-                     basso. Ciò che resta nel flusso è cosa hai risposto, dove è
-                     successo, così che due giorni dopo si capisca cosa si era deciso. -->
-                <div class="row answer">
-                  <Icon name={part.of === 'question' ? 'i-ask' : 'i-shield'} />
-                  <span class="k">You</span>
-                  <span class="v">{part.asked}</span>
-                  <!-- Nessun rosso: aver detto di no non è un fallimento, è una
-                       decisione. Il rosso qui la farebbe leggere come qualcosa
-                       andato storto, e la prossima volta si esiterebbe a dirlo. -->
-                  <span class="end" class:no={part.refused}>{part.answer}</span>
-                </div>
+              {:else if g.kind === 'live'}
+                <!-- L'unica operazione ancora in corso: resta in piena vista, perché
+                     è l'unica di cui ha senso chiedersi «a che punto è». -->
+                {@render opRow(g.part)}
 
               {:else}
-                <!-- `bad` solo se NON è bloccata: un'azione fermata dal classificatore
-                     torna comunque come tool fallito, e senza questa esclusione le due
-                     classi si sovrappongono e vince il rosso. Ma bloccato non è un
-                     fallimento — è «fermato, e puoi consentirlo tu». -->
-                <div class="row" class:bad={part.done && part.ok === false && !part.blocked}
-                     class:block={!!part.blocked}>
-                  <Icon name={part.blocked ? 'i-block' : toolIcon(part.name)} />
-                  <span class="k">{part.blocked ? 'Blocked' : part.name}</span>
-                  <span class="v">{subject(part)}</span>
-                  <span class="end">
-                    {#if part.blocked}stopped for safety
-                    {:else if !part.done}…
-                    {:else if part.ok}✓{:else}✗{/if}
-                  </span>
-                </div>
-
-                <!-- I file toccati da questa chiamata, dove sono stati toccati. Lo
-                     stesso file può comparire più volte nel turno: sono modifiche
-                     avvenute in momenti diversi, e in mezzo l'agent ha fatto altro. -->
-                {#each editsOf(part.callId) as edit (edit.ts)}
-                  <FileBlock edits={[edit]} narrow={store.narrow} />
-                {/each}
+                <!-- Finite, e accorpate: il *come* non serve più una volta che il
+                     *cosa* è successo, a meno che non lo si chieda apposta. -->
+                {@const gkey = g.key}
+                {@const gopen = blockOpen(gkey)}
+                <button class="row clickable ops" onclick={() => toggleBlock(gkey)}>
+                  <Icon name="i-bars" />
+                  <span class="k">{g.parts.length} {g.parts.length === 1 ? 'operation' : 'operations'}</span>
+                  <span class="end">{gopen ? '▾' : '▸'}</span>
+                </button>
+                {#if gopen}
+                  <div class="opgroup">
+                    {#each g.parts as part (part.kind === 'tool' ? part.callId : part.partId)}
+                      {@render opRow(part)}
+                    {/each}
+                  </div>
+                {/if}
               {/if}
             {/each}
 
@@ -243,6 +422,58 @@
 </div>
 
 <style>
+  /* Il turno attivo (l'agent ci sta davvero lavorando) e quello in coda (dietro un
+     altro ancora in corso) si distinguono col colore già usato per gli stessi stati
+     altrove in STARK: blu = working, ambra = tocca aspettare. */
+  .turn.active { border-color: var(--work); }
+  .turn.active > .th { border-left: 3px solid var(--work); padding-left: 8px; }
+  .turn.queued { border-color: var(--wait); }
+  .turn.queued > .th { border-left: 3px solid var(--wait); padding-left: 8px; }
+  .turn.queued .n { color: var(--wait); }
+
+  /* Un blocco (reasoning, tool) si apre come il turno: stesso segno, stesso posto.
+     È un <button>, quindi il colore e il fondo che `.row` dà a un <div> vanno
+     ridichiarati: lo user agent li sovrascrive con lo stile di sistema dei controlli
+     altrimenti — è lo stesso motivo per cui `.th` più sopra fa `color: inherit`. */
+  .row.clickable {
+    width: 100%; border: 0; text-align: left; cursor: pointer;
+    background: var(--surface-2); color: inherit; font: inherit;
+  }
+  .row.clickable.block { background: var(--wait-bg); color: var(--wait); }
+  .row.clickable.bad { background: var(--stop-bg); color: var(--stop); }
+  .row.clickable.think { color: var(--muted); }
+
+  /* Il gruppo di operazioni finite: stesso disegno di una riga singola, ma il
+     colore resta neutro apposta — non è successo niente lì dentro che meriti
+     l'attenzione che un tool fallito o bloccato chiede con il suo colore. */
+  .row.ops { color: var(--muted); }
+  .row.ops .k { font-weight: 500; }
+  .opgroup {
+    display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px 8px;
+    padding-left: 8px; border-left: 2px solid var(--line-2);
+  }
+  .row.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .blockbody {
+    white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
+    font-size: 10.5px; color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--line-2); border-radius: 7px; padding: 7px 9px;
+    margin: 2px 0 6px; max-height: 360px; overflow: auto;
+  }
+  .bblabel {
+    font-family: var(--sans); font-size: 9px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); margin: 6px 0 2px;
+  }
+  .bblabel:first-child { margin-top: 0; }
+  .bblabel.err { color: var(--stop); }
+
+  /* La risposta che finisce con un punto di domanda: è quella che si perde più
+     facilmente in un muro di testo, e per questo prende lo stesso ambra di ogni
+     altro «tocca a te». */
+  .prose.asked {
+    background: var(--wait-bg); color: var(--ink);
+    border: 1px solid var(--wait); border-radius: 8px; padding: 8px 10px; font-weight: 600;
+  }
+
   /* La riga della compattazione: un taglio, non un blocco. */
   .compact { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
   .compact .l { flex: 1; height: 1px; background: var(--line-2); }
@@ -268,7 +499,45 @@
     outline: 2px solid var(--accent); outline-offset: -2px;
   }
   .iconb[disabled] { opacity: .4; cursor: default; }
-  .prose { white-space: pre-wrap; }
+  /* Il testo ora è HTML vero (Markdown reso), non più righe grezze da preservare a
+     mano: `pre-wrap` avrebbe reintrodotto righe vuote fra i blocchi che il browser
+     ignorerebbe altrimenti da solo. Gli elementi che Markdown può produrre prendono
+     uno stile minimo, coerente col resto di STARK — non è un foglio di stile a sé,
+     è `.prose` che impara qualche tag in più. */
+  .prose :global(p) { margin: 0 0 8px; white-space: pre-wrap; }
+  .prose :global(p:last-child) { margin-bottom: 0; }
+  .prose :global(ul), .prose :global(ol) { margin: 0 0 8px; padding-left: 20px; }
+  .prose :global(li) { margin: 2px 0; }
+  .prose :global(li > p) { margin: 0; }
+  .prose :global(h1), .prose :global(h2), .prose :global(h3),
+  .prose :global(h4), .prose :global(h5), .prose :global(h6) {
+    color: var(--ink); font-weight: 700; margin: 12px 0 6px; line-height: 1.3;
+  }
+  .prose :global(h1) { font-size: 15px; } .prose :global(h2) { font-size: 13.5px; }
+  .prose :global(h3), .prose :global(h4), .prose :global(h5), .prose :global(h6) { font-size: 12px; }
+  .prose :global(:first-child) { margin-top: 0; }
+  .prose :global(a) { color: var(--accent); text-decoration: underline; }
+  .prose :global(code) { font-family: var(--mono); font-size: .92em; }
+  .prose :global(pre) {
+    font-family: var(--mono); font-size: 10.5px; background: var(--surface);
+    border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px;
+    margin: 0 0 8px; overflow: auto; white-space: pre;
+  }
+  .prose :global(pre code) { background: none; padding: 0; font-size: 1em; }
+  .prose :global(blockquote) {
+    margin: 0 0 8px; padding: 2px 10px; border-left: 3px solid var(--line-2);
+    color: var(--muted);
+  }
+  .prose :global(hr) { border: 0; border-top: 1px solid var(--line-2); margin: 10px 0; }
+  .prose :global(table) {
+    border-collapse: collapse; margin: 0 0 8px; font-size: 10.5px;
+    display: block; max-width: 100%; overflow-x: auto;
+  }
+  .prose :global(th), .prose :global(td) {
+    border: 1px solid var(--line-2); padding: 4px 8px; text-align: left;
+  }
+  .prose :global(th) { background: var(--surface-2); color: var(--ink); font-weight: 700; }
+  .prose :global(strong) { color: var(--ink); }
 
   .bar .t { border: 0; padding: 0; text-align: left; cursor: text; }
   .rn {

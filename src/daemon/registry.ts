@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
 import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
@@ -28,6 +28,13 @@ export type OpenSpec = {
   askTools?: string[]
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
+  /**
+   * Il profilo Claude da usare — una `CLAUDE_CONFIG_DIR` diversa da quella di default
+   * del daemon. Omesso: resta quella di default. Ogni sessione spawna il suo processo
+   * (ADR-009), quindi due chat con profili diversi non si toccano: non serve che il
+   * daemon ne tenga «aperto uno solo», serve solo passare il valore giusto qui.
+   */
+  configDir?: string
 }
 
 export type SessionRow = {
@@ -166,6 +173,28 @@ export class Registry {
   saveSettings(s: Settings): Settings { return writeSettings(STARK_HOME, s) }
 
   /**
+   * Le sottocartelle di un percorso, per scegliere dove aprire una chat senza
+   * doverlo ricordare a memoria. Il daemon ha già accesso a tutto il filesystem
+   * (gira come root, ADR-002): la scelta non era «può farlo», era «c'era la
+   * rotta». Percorso vuoto o illeggibile: si riparte dalla home, non da un errore.
+   */
+  browse(path?: string): { path: string; parent: string | null; dirs: string[]; error?: string } {
+    const chiesto = path && path.trim() ? resolve(path.trim()) : homedir()
+    const su = (p: string): string | null => { const d = dirname(p); return d === p ? null : d }
+    try {
+      const dirs = readdirSync(chiesto, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name)
+        .sort((a, b) => a.localeCompare(b))
+      return { path: chiesto, parent: su(chiesto), dirs }
+    } catch (e) {
+      // Un percorso digitato a mano (o una cartella senza permessi) non deve rompere
+      // il dialogo: si dice cos'è successo, e si resta dove si era.
+      return { path: chiesto, parent: su(chiesto), dirs: [], error: String((e as Error).message ?? e) }
+    }
+  }
+
+  /**
    * Quanto occupa ogni conversazione, e dove. È la domanda che ci si fa quando il
    * disco si riempie, e la risposta onesta comprende gli allegati: sono parte della
    * conversazione, e cancellandola se ne vanno con lei.
@@ -216,7 +245,10 @@ export class Registry {
       cwd: spec.cwd,
       model: spec.model ?? this.defaults.model,
       mode: spec.mode ?? this.defaults.mode,
-      ...(this.defaults.configDir ? { configDir: this.defaults.configDir } : {}),
+      // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
+      // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
+      // è partito, come sempre.
+      ...((spec.configDir ?? this.defaults.configDir) ? { configDir: spec.configDir ?? this.defaults.configDir } : {}),
       ...(spec.resume ? { resume: spec.resume } : { sessionId: id }),
       // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
       // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo

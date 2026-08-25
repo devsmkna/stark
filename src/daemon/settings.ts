@@ -26,6 +26,12 @@ export type ProjectSettings = {
   colour?: number
   /** Silenziato: niente notifiche da nessuna delle sue chat. */
   muted?: boolean
+  /**
+   * Il `CLAUDE_CONFIG_DIR` di questo progetto — quale login, MCP e memoria usa. Deciso
+   * alla prima chat quando la macchina ne ha più di uno (vedi NewChat); assente vuol
+   * dire «quello di default del daemon», com'era prima che esistesse questo campo.
+   */
+  profile?: string
 }
 
 export type Settings = {
@@ -100,9 +106,11 @@ function saneProjects(raw: unknown): Record<string, ProjectSettings> {
     const p = v as Record<string, unknown>
     const colour = typeof p['colour'] === 'number' ? Math.floor(p['colour']) : undefined
     const muted = p['muted'] === true
+    const profile = typeof p['profile'] === 'string' && p['profile'] ? p['profile'] : undefined
     out[cwd] = {
       ...(colour !== undefined && colour >= 0 && colour < 7 ? { colour } : {}),
       ...(muted ? { muted } : {}),
+      ...(profile ? { profile } : {}),
     }
   }
   return out

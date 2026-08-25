@@ -203,6 +203,19 @@ check('§7: la compattazione entra nel turno, con quanto c\'era e quanto è rima
 check('turno chiuso come completato',
   replayed.turns[0]?.reason === 'completed')
 
+// §7: un messaggio mandato mentre il turno gira si piega dentro, non ne apre uno suo
+// (verificato nei tipi dell'Agent SDK, vedi il commento su `turn.promptAdded` in
+// events.ts — non doveva restare solo un'affermazione, doveva restare un test).
+const PIEGATO = reduce([
+  { v: MODEL_VERSION, seq: 1, ts: 1_000, sessionId: 'sess-piega',
+    payload: { k: 'turn.started', turnId: 'tp', prompt: [{ type: 'text', text: 'uno' }] } },
+  { v: MODEL_VERSION, seq: 2, ts: 1_500, sessionId: 'sess-piega',
+    payload: { k: 'turn.promptAdded', turnId: 'tp', prompt: [{ type: 'text', text: 'due' }] } },
+], 'sess-piega')
+check('§7: `turn.promptAdded` si accoda al turno aperto, non ne crea uno fantasma',
+  PIEGATO.turns.length === 1 && promptText(PIEGATO.turns[0]?.prompt ?? []) === 'uno due',
+  JSON.stringify(PIEGATO.turns.map(t => ({ id: t.turnId, prompt: t.prompt }))))
+
 check('§6: la fotografia dei server MCP sostituisce la precedente, non ci si fonde',
   replayed.mcpServers.length === 1 && replayed.mcpServers[0]?.status === 'connected',
   replayed.mcpServers.map(s => `${s.name}:${s.status}`).join(','))

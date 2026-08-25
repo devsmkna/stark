@@ -66,7 +66,13 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
 .dlg{z-index:9}
 .shell *{min-width:0}
 .scroller{overflow:auto}
-button{font-family:inherit;cursor:pointer}
+/* `color:inherit` e `background:none` qui e non solo sui singoli bottoni: senza,
+   ogni <button> senza uno stile proprio prende l'aspetto di default dei controlli
+   di sistema — testo quasi nero (illeggibile in tema scuro) su un fondo grigio
+   rilevato, che sembra un evidenziatore acceso su testo semplice (il titolo della
+   conversazione, per dirne uno). Chi ha già un colore o un fondo propri (.opt.pri,
+   .chip, .row, …) vince comunque: sono selettori più specifici di uno per tag. */
+button{font-family:inherit;cursor:pointer;color:inherit;background:none}
 code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:1px 5px;border-radius:5px}
 .dotk{width:7px;height:7px;border-radius:50%;flex:none}
 /* un colore per progetto, assegnato in ordine — vedi docs/ui-schermate.md */
@@ -95,8 +101,12 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .sidetop .plus{color:var(--muted);display:flex}
 .gstate{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:11px 10px 4px}
 .gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-.sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px}
-.sit.on{background:var(--accent-soft)}
+.sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px;border-left:3px solid transparent}
+/* La riga della chat aperta adesso: non solo un fondo tenue (si perdeva contro
+   `--side`, che gli somiglia troppo) ma anche un bordo pieno, come lo stesso
+   trattamento usato per il turno attivo dentro la conversazione. */
+.sit.on{background:var(--accent-soft);border-left-color:var(--accent)}
+.sit.on .ttl{color:var(--accent)}
 .sit .ttl{font-weight:600;color:var(--ink);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sit .meta{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
 .sit .sst{font-weight:600}

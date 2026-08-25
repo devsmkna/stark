@@ -19,6 +19,8 @@ import {
 import { Notifier, type Call } from './notify.svelte.ts'
 import { fromPath, go } from './route.ts'
 import { Themer } from './theme.svelte.ts'
+import { Sizer } from './textsize.svelte.ts'
+import { Fonter } from './fontfamily.svelte.ts'
 import { activityText, project } from './view.ts'
 
 /** Gli stati in cui una chat *stava lavorando*: solo da lì ha senso dire «ha finito». */
@@ -74,6 +76,10 @@ export class Store {
   readonly calls = new Notifier()
   /** Il tema, che è del dispositivo e non della macchina. Vedi `theme.svelte.ts`. */
   readonly theme = new Themer()
+  /** La dimensione del testo, stesso motivo del tema. Vedi `textsize.svelte.ts`. */
+  readonly textSize = new Sizer()
+  /** La famiglia del font, stesso motivo. Vedi `fontfamily.svelte.ts`. */
+  readonly font = new Fonter()
 
   /**
    * Le impostazioni della macchina. `null` finché non sono arrivate: prima di allora
@@ -258,12 +264,12 @@ export class Store {
     }
   }
 
-  /** Il colore e il silenzio di un progetto, per cartella. */
-  project(cwd: string | undefined): { colour?: number; muted?: boolean } {
+  /** Il colore, il silenzio e il profilo Claude di un progetto, per cartella. */
+  project(cwd: string | undefined): { colour?: number; muted?: boolean; profile?: string } {
     return (cwd ? this.settings?.projects[cwd] : undefined) ?? {}
   }
 
-  async setProject(cwd: string, patch: { colour?: number; muted?: boolean }): Promise<void> {
+  async setProject(cwd: string, patch: { colour?: number; muted?: boolean; profile?: string }): Promise<void> {
     const s = this.settings
     if (!s) return
     await this.saveSettings({
@@ -368,12 +374,26 @@ export class Store {
     }
   }
 
-  /** Apre una conversazione nuova e ci entra: creare una chat è aggiungere una riga. */
-  async newChat(cwd: string, model?: string): Promise<void> {
+  /**
+   * Apre una conversazione nuova e ci entra: creare una chat è aggiungere una riga.
+   *
+   * `profile` arriva da NewChat solo quando la macchina ha più di un `CLAUDE_CONFIG_DIR`
+   * e la cartella è nuova per STARK (docs/ui-schermate.md §Projects): lo si salva subito
+   * come fatto del progetto, così la prossima chat sulla stessa cartella lo eredita senza
+   * chiederlo di nuovo — «il profilo è deciso» vuol dire deciso da qui in poi.
+   */
+  async newChat(cwd: string, opts: { model?: string; profile?: string } = {}): Promise<void> {
     this.working = true
     this.refused = null
     try {
-      const { id } = await this.api.open({ cwd, ...(model ? { model } : {}) })
+      const { id } = await this.api.open({
+        cwd,
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.profile ? { configDir: opts.profile } : {}),
+      })
+      if (opts.profile && this.project(cwd).profile !== opts.profile) {
+        void this.setProject(cwd, { profile: opts.profile })
+      }
       this.dialog = null
       await this.select(id)
     } catch (e) {
@@ -393,7 +413,13 @@ export class Store {
     this.working = true
     this.refused = null
     try {
-      await this.api.open({ cwd: row.cwd, resume: { ref: row.id } })
+      // Il profilo è un fatto del progetto, non della singola apertura: risvegliare
+      // con quello sbagliato è esattamente il modo in cui questa cosa si rompe senza
+      // motivo apparente (nessuna conversazione da riprendere, forse nemmeno il login).
+      const profile = this.project(row.cwd).profile
+      await this.api.open({
+        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { configDir: profile } : {}),
+      })
       this.dialog = null
       // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso.
       const id = row.id

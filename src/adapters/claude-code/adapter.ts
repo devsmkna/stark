@@ -238,8 +238,6 @@ export class ClaudeCodeAdapter {
    * stanno in un file, e qui viaggia il riferimento (vedi `PromptPart`).
    */
   prompt(text: string, immagini: PromptImage[] = []): string {
-    const turnId = randomUUID()
-    this.tr.beginTurn(turnId)
     const parts: PromptPart[] = [
       ...immagini.map(i => ({
         type: 'image' as const, ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
@@ -247,8 +245,30 @@ export class ClaudeCodeAdapter {
       })),
       { type: 'text' as const, text },
     ]
+
+    // Un turno è già aperto (il primo non ancora chiuso, oppure quello nato ma non
+    // ancora annunciato perché la sessione sta partendo)? Questo messaggio ci si piega
+    // dentro invece di aprirne uno suo — è verificato, non supposto: vedi il commento
+    // su `turn.promptAdded` in events.ts. Aprirne uno nuovo qui produrrebbe un turno
+    // fantasma che non riceve mai eventi, perché l'agent non lo tratterà mai come un
+    // turno a sé.
+    const aperto = this.pendingTurn?.turnId ?? this.tr.openTurnId
+    if (aperto !== undefined) {
+      if (this.pendingTurn) this.pendingTurn.parts.push(...parts)
+      else this.emit({ k: 'turn.promptAdded', turnId: aperto, prompt: parts })
+      this.input.push(this.userMessage(text, immagini))
+      return aperto
+    }
+
+    const turnId = randomUUID()
+    this.tr.beginTurn(turnId)
     if (this.created) this.emit({ k: 'turn.started', turnId, prompt: parts })
     else this.pendingTurn = { turnId, parts }
+    this.input.push(this.userMessage(text, immagini))
+    return turnId
+  }
+
+  private userMessage(text: string, immagini: PromptImage[]): SDKUserMessage {
     const msg: SDKUserMessage = {
       type: 'user',
       message: {
@@ -264,8 +284,7 @@ export class ClaudeCodeAdapter {
       parent_tool_use_id: null,
       session_id: '',
     } as SDKUserMessage
-    this.input.push(msg)
-    return turnId
+    return msg
   }
 
   /** Aspetta la fine del turno in corso. */

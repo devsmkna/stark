@@ -84,6 +84,23 @@ export function modelSupportsAutoMode(model: string): boolean {
   return !/haiku/i.test(model)
 }
 
+/**
+ * La finestra di contesto del modello, in token — verificata (skill `claude-api`,
+ * letta il 25 agosto 2026), non indovinata: Sonnet 5, Opus 5 e il resto della
+ * famiglia 4.6+ portano 1M come default, non come opzione beta; Haiku e i modelli
+ * più vecchi restano a 200K. Un alias può arrivare con una data appesa
+ * (`-20260101`): la si toglie prima del confronto, altrimenti un modello di punta
+ * sembrerebbe uno sconosciuto e si sottostimerebbe lo spazio vero.
+ */
+const CONTESTO_1M = [
+  'claude-fable-5', 'claude-mythos-5', 'claude-opus-5', 'claude-opus-4-8',
+  'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6',
+]
+export function contextWindowFor(model: string): number {
+  const base = model.replace(/-\d{8}$/, '')
+  return CONTESTO_1M.some(m => base === m || base.startsWith(`${m}-`)) ? 1_000_000 : 200_000
+}
+
 export function capabilitiesFor(model: string): Capabilities {
   return {
     interrupt: true,
@@ -129,6 +146,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       const label = typeof m?.['displayName'] === 'string' ? m['displayName'] : undefined
       out.push({
         id, autoMode: modelSupportsAutoMode(resolved ?? id),
+        contextWindow: contextWindowFor(resolved ?? id),
         ...(label ? { label } : {}), ...(resolved ? { resolved } : {}),
       })
     }
@@ -137,7 +155,10 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
   // l'handshake non lo elenca: una tendina che non contiene il valore corrente
   // sembrerebbe dire che è stato scelto qualcosa di impossibile.
   if (!out.some(m => m.id === current || m.resolved === current)) {
-    out.unshift({ id: current, autoMode: modelSupportsAutoMode(current) })
+    out.unshift({
+      id: current, autoMode: modelSupportsAutoMode(current),
+      contextWindow: contextWindowFor(current),
+    })
   }
   return out
 }

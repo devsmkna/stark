@@ -10,15 +10,74 @@
   //
   // «Niente opzioni qui» resta valido per la prima: modello, modalità e server MCP
   // servono *mentre* si lavora e si cambiano a caldo, dalla barra sotto la casella.
+  //
+  // Il profilo Claude è diverso e per questo sta qui: non si cambia a caldo (è una
+  // `CLAUDE_CONFIG_DIR`, letta una volta sola all'avvio del processo figlio), e come
+  // la cartella decide un'identità che dura quanto il progetto — non quanto la singola
+  // conversazione. Compare **solo** quando serve davvero: la macchina ha più di un
+  // profilo E questa cartella non ne ha già uno deciso (docs/ui-schermate.md §Projects).
   import Icon from './Icon.svelte'
   import { colours, hhmm, project } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
+  import type { SystemInfo } from '../lib/api.ts'
 
   let { store }: { store: Store } = $props()
 
   let cwd = $state('')
   let chosen = $state<string | null>(null)
   let filter = $state('')
+
+  // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
+  let profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
+  let profilePick = $state<string | null>(null)
+  $effect(() => {
+    if (store.tab === 'new' && profiles === null) {
+      void store.api.system().then(
+        s => { profiles = s.agent.profiles },
+        () => { profiles = [] },
+      )
+    }
+  })
+  // Assente vuol dire «non ancora deciso per questa cartella»: se STARK la conosce
+  // già e ha un profilo salvato, non si chiede di nuovo — è deciso.
+  const savedProfile = $derived(store.project(cwd.trim()).profile)
+  const showProfiles = $derived(cwd.trim().length > 0 && !savedProfile && (profiles?.length ?? 0) > 1)
+  const effectiveProfile = $derived(
+    profilePick ?? profiles?.find(p => p.current)?.path ?? profiles?.[0]?.path ?? null,
+  )
+
+  // ─── il dialogo «apri path» ─────────────────────────────────────────────
+  // Il daemon gira come root e ha già accesso a tutto il filesystem (ADR-002):
+  // mancava solo la rotta per elencarlo, non il permesso. Vedi `registry.browse`.
+  let browsing = $state(false)
+  let browsePath = $state('')
+  let browseDirs = $state<string[]>([])
+  let browseParent = $state<string | null>(null)
+  let browseError = $state('')
+  let browseLoading = $state(false)
+
+  async function loadBrowse(path?: string): Promise<void> {
+    browseLoading = true
+    try {
+      const r = await store.api.browse(path)
+      browsePath = r.path
+      browseParent = r.parent
+      browseDirs = r.dirs
+      browseError = r.error ?? ''
+    } catch (e) {
+      browseError = (e as Error).message
+    } finally {
+      browseLoading = false
+    }
+  }
+  function openBrowse(): void {
+    browsing = true
+    void loadBrowse(cwd.trim() || undefined)
+  }
+  function useThisFolder(): void {
+    cwd = browsePath
+    browsing = false
+  }
 
   // Le cartelle già viste, dalla più recente. Non sono una comodità: la cartella
   // decide il progetto e il suo colore, e riscriverla a mano è il modo più facile di
@@ -44,7 +103,9 @@
   const ready = $derived(cwd.trim().length > 0 && !store.working)
 
   function start(): void {
-    if (ready) void store.newChat(cwd.trim())
+    if (ready) {
+      void store.newChat(cwd.trim(), showProfiles && effectiveProfile ? { profile: effectiveProfile } : {})
+    }
   }
 
   function goto(tab: 'new' | 'import'): void {
@@ -106,22 +167,72 @@
 
       <div class="fgroup">
         <div class="flabel">Folder</div>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input class="field" autofocus bind:value={cwd} placeholder="/root/DevsMachna/stark"
-          onkeydown={e => { if (e.key === 'Enter') start() }} />
-        {#if recents.length > 0}
-          <div class="recents">
-            {#each recents as r (r)}
-              <button class="rec" onclick={() => { cwd = r }} title={r}>
-                <i class="dotk p{palette.get(project(r)) ?? 0}"></i> {project(r)}
-              </button>
-            {/each}
+        <div class="pathrow">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="field" autofocus bind:value={cwd} placeholder="/root/DevsMachna/stark"
+            onkeydown={e => { if (e.key === 'Enter') start() }} />
+          <button class="btn" type="button" onclick={openBrowse}>Open path…</button>
+        </div>
+
+        {#if browsing}
+          <div class="browser">
+            <div class="bpath" title={browsePath}>{browsePath}</div>
+            <div class="blist">
+              {#if browseParent !== null}
+                <button class="brow up" type="button" onclick={() => void loadBrowse(browseParent ?? undefined)}>
+                  <Icon name="i-folder" /> ..
+                </button>
+              {/if}
+              {#each browseDirs as d (d)}
+                <button class="brow" type="button"
+                  onclick={() => void loadBrowse(`${browsePath.replace(/\/$/, '')}/${d}`)}>
+                  <Icon name="i-folder" /> {d}
+                </button>
+              {/each}
+              {#if !browseLoading && browseDirs.length === 0 && !browseError}
+                <div class="mid" style="padding:14px 4px">No subfolders here.</div>
+              {/if}
+            </div>
+            {#if browseError}
+              <div class="warn" style="margin-top:6px"><Icon name="i-warn" /><span>{browseError}</span></div>
+            {/if}
+            <div class="bactions">
+              <button class="btn" type="button" onclick={() => { browsing = false }}>Cancel</button>
+              <button class="btn pri" type="button" onclick={useThisFolder}>Use this folder</button>
+            </div>
           </div>
+        {:else}
+          {#if recents.length > 0}
+            <div class="recents">
+              {#each recents as r (r)}
+                <button class="rec" onclick={() => { cwd = r }} title={r}>
+                  <i class="dotk p{palette.get(project(r)) ?? 0}"></i> {project(r)}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <div class="hint">The folder decides the project and its colour. Type the full path,
+            or <b>Open path…</b> to browse the machine.</div>
         {/if}
-        <div class="hint">The folder decides the project and its colour. Type the full path —
-          STARK has <b>no folder browser yet</b>, because the daemon has no route to list
-          directories.</div>
       </div>
+
+      {#if showProfiles}
+        <div class="fgroup">
+          <div class="flabel">Claude profile</div>
+          {#each profiles ?? [] as p (p.path)}
+            <button type="button" class="inst instbtn" class:on={effectiveProfile === p.path}
+              onclick={() => { profilePick = p.path }}>
+              <span class="rd"></span>
+              <span class="nm">{p.name}</span>
+              <span class="where">{p.conversations} {p.conversations === 1 ? 'chat' : 'chats'}
+                {#if p.current}{' · current'}{/if}</span>
+            </button>
+          {/each}
+          <div class="hint">This machine has more than one <code>CLAUDE_CONFIG_DIR</code> — login,
+            MCP servers and memory differ by profile. <b>This project keeps whichever you pick</b>:
+            the next chat on this folder won't ask again.</div>
+        </div>
+      {/if}
 
       {#if store.refused}
         <div class="warn"><Icon name="i-warn" /><span>{store.refused}</span></div>
@@ -216,7 +327,39 @@
   .x { background: none; border: 0; padding: 0; cursor: pointer; display: flex; color: var(--muted); }
   .rec, .btn { font: inherit; cursor: pointer; }
   .rec:focus-visible, .x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* `.inst` esiste già per la riga «Claude Code», sempre sola e non cliccabile: qui
+     serve anche come bottone, e i profili sono più di uno. */
+  .instbtn { width: 100%; text-align: left; font: inherit; cursor: pointer; margin-bottom: 5px; }
+  .instbtn:last-of-type { margin-bottom: 0; }
+  .instbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   input.field { width: 100%; }
+  .pathrow { display: flex; gap: 6px; }
+  .pathrow .field { flex: 1; }
+  .pathrow .btn { flex: none; white-space: nowrap; }
+
+  /* Il browser di cartelle: stesso posto della casella che sostituisce, non un
+     dialogo sopra il dialogo — aprirne un secondo sopra il primo per scegliere
+     dove va il primo sarebbe esattamente la finestra dentro la finestra che il
+     principio fondante di STARK vieta. */
+  .browser {
+    margin-top: 8px; border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 8px; background: var(--surface-2);
+  }
+  .bpath {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .blist { max-height: 190px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+  .brow {
+    display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+    font: inherit; font-size: 11px; padding: 4.5px 6px; border-radius: 6px;
+    background: none; border: 0; cursor: pointer; color: inherit;
+  }
+  .brow:hover { background: var(--surface-3); }
+  .brow.up { color: var(--muted); }
+  .brow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .bactions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
   input.field:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
   input.field::placeholder { color: var(--muted); font-family: var(--sans); }
   .btn[disabled] { opacity: .5; cursor: default; }

@@ -6,6 +6,7 @@
 
 import type { Activity } from '$core/activity.ts'
 import type { SessionState } from '$core/events.ts'
+import type { TurnView } from '$core/reduce.ts'
 import type { SessionRow } from './api.ts'
 
 export type Group = 'Waiting' | 'Working' | 'Sleeping'
@@ -90,6 +91,22 @@ export function hhmm(ts: number): string {
 
 
 // ─── la conversazione e il blocco in basso ──────────────────────────────────
+
+/**
+ * Un turno non finito non vuol dire «in corso»: se ne mandi uno mentre l'agent sta
+ * ancora lavorando a un altro, `turn.started` arriva subito (§4 — è un fatto, non
+ * un'attesa) ma il lavoro vero resta uno alla volta. Il primo turno non finito nella
+ * lista è quello che l'agent sta davvero facendo; quelli non finiti dopo di lui sono
+ * solo in coda, e non hanno ancora un solo blocco perché nessuno li ha ancora toccati.
+ * Senza questa distinzione, aprire di default «l'ultimo turno» richiuderebbe quello
+ * vero proprio mentre lavora — la bugia peggiore, perché è quella su cui si aspetta.
+ */
+export function turnStatus(turns: TurnView[], i: number): 'active' | 'queued' | undefined {
+  const t = turns[i]
+  if (!t || t.ended) return undefined
+  const primoAperto = turns.findIndex(x => !x.ended)
+  return i === primoAperto ? 'active' : 'queued'
+}
 
 /**
  * Che segno disegnare per un tool. Il nome è vocabolario dell'agent e questa mappa è

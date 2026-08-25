@@ -69,6 +69,9 @@ export type ModelChoice = {
   label?: string
   resolved?: string
   autoMode: boolean
+  /** In token. Stesso motivo di `autoMode`: dipende dal modello, non dall'agent, e
+   *  saperlo fuori dall'adapter vorrebbe dire indovinare la finestra di contesto. */
+  contextWindow: number
 }
 
 /**
@@ -206,6 +209,14 @@ export type Payload =
 
   // §7 turni, step, parti
   | { k: 'turn.started'; turnId: string; prompt: PromptPart[] }
+  /**
+   * Un messaggio mandato mentre il turno `turnId` è ancora aperto. Non apre un turno
+   * suo: verificato nei tipi dell'Agent SDK (parole loro: "coalesced into one turn",
+   * un uuid "folded" così "never runs as its own turn") — Claude Code lo piega dentro
+   * il turno in corso, non lo mette in una fila che gira dopo. Un secondo `turn.started`
+   * per questo messaggio produrrebbe un turno fantasma che non riceve mai eventi.
+   */
+  | { k: 'turn.promptAdded'; turnId: string; prompt: PromptPart[] }
   | { k: 'turn.ended'; turnId: string; reason: 'completed' | 'aborted' | 'error'
       usage: Usage; cost: Cost }
   | { k: 'step.started'; stepId: string }

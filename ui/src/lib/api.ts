@@ -27,11 +27,16 @@ export type SessionRow = {
   live: boolean
 }
 
+/** Le sottocartelle di un percorso, per il dialogo «apri path» di New chat. */
+export type BrowseResult = { path: string; parent: string | null; dirs: string[]; error?: string }
+
 export type OpenSpec = {
   cwd: string
   model?: string
   mode?: string
   resume?: { ref: string; fork?: boolean }
+  /** Quale profilo Claude (`CLAUDE_CONFIG_DIR`) usare. Omesso: quello di default. */
+  configDir?: string
 }
 
 /** Una conversazione nata nel terminale, come la elenca il daemon. */
@@ -51,7 +56,7 @@ export type ImportableRow = {
 /** Le impostazioni della macchina. Il tema e i suoni no: quelli sono del browser. */
 export type Settings = {
   permissions: Record<string, 'allow' | 'ask'>
-  projects: Record<string, { colour?: number; muted?: boolean }>
+  projects: Record<string, { colour?: number; muted?: boolean; profile?: string }>
 }
 
 export type Storage = {
@@ -131,6 +136,9 @@ export class Api {
   }
 
   storage(): Promise<Storage> { return this.json('/api/storage') }
+  browse(path?: string): Promise<BrowseResult> {
+    return this.json(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+  }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
 
   snapshot(id: string): Promise<{ snapshot: SessionSnapshot }> {

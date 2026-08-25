@@ -71,6 +71,50 @@
   })
   const total = $derived(usage.input + usage.output + usage.cacheRead + usage.cacheWrite)
 
+  /**
+   * Quanto è piena la finestra **adesso**, non quanto è costata la conversazione
+   * finora: sono due domande diverse, e `usage`/`total` qui sopra rispondono alla
+   * seconda. Questa guarda solo l'ultima lettura — l'ultimo turno vero, o quella
+   * cumulativa se `usage.updated` non è ancora arrivato dal vivo — perché un turno
+   * nuovo non si porta dietro i token del turno prima se non sono rientrati nel
+   * prompt di adesso.
+   */
+  const now = $derived.by(() => {
+    const u = snap.usage
+    if (u.input + u.output + u.cacheRead + u.cacheWrite > 0) return u
+    for (let i = snap.turns.length - 1; i >= 0; i--) {
+      const tu = snap.turns[i]?.usage
+      if (tu) return tu
+    }
+    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  })
+  const nowTotal = $derived(now.input + now.output + now.cacheRead + now.cacheWrite)
+
+  // La finestra è del MODELLO, non dell'agent (§1): la porta `snap.models`, che
+  // l'adapter riempie apposta (vedi `contextWindowFor` in sdk-options.ts). Un
+  // journal scritto prima che STARK la portasse non ce l'ha, e allora non si
+  // inventa una percentuale — si torna al conteggio grezzo, che è quello che c'è.
+  const contextWindow = $derived(
+    snap.models.find(m => m.id === snap.model || m.resolved === snap.model)?.contextWindow,
+  )
+  const pct = $derived(
+    contextWindow ? Math.min(100, Math.round((nowTotal / contextWindow) * 100)) : null,
+  )
+
+  /** I quattro blocchi della finestra, in percentuale sulla finestra intera (non
+   *  sul loro stesso totale): è quello che rende la barra confrontabile col resto
+   *  del chip, dove «pieno» vuol dire pieno della finestra, non di se stessa. */
+  const segments = $derived.by(() => {
+    if (!contextWindow) return []
+    const of = (n: number): number => (n / contextWindow) * 100
+    return [
+      { label: 'input', n: now.input, pct: of(now.input), colour: 'var(--accent)' },
+      { label: 'output', n: now.output, pct: of(now.output), colour: 'var(--p4)' },
+      { label: 'cache read', n: now.cacheRead, pct: of(now.cacheRead), colour: 'var(--done)' },
+      { label: 'cache write', n: now.cacheWrite, pct: of(now.cacheWrite), colour: 'var(--wait)' },
+    ].filter(s => s.n > 0)
+  })
+
   const fmt = (n: number): string =>
     n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 
@@ -195,9 +239,30 @@
          non sono la risorsa che scarseggia. Si dice quanto lavoro è passato di qui e
          quando la finestra si riapre. -->
     <button class="ctx" type="button">
-      {fmt(total)} tokens
+      {#if pct !== null}{pct}% context{:else}{fmt(total)} tokens{/if}
       <span class="tip">
-        <div class="tr"><span>This chat</span><b>{fmt(total)}</b></div>
+        <div class="tr"><span>Context window</span>
+          <b>{pct !== null ? `${pct}%` : '—'}</b></div>
+        {#if contextWindow}
+          <div class="segbar">
+            {#each segments as s (s.label)}
+              <i style="width:{s.pct}%;background:{s.colour}" title="{s.label}: {fmt(s.n)}"></i>
+            {/each}
+          </div>
+          <div class="tr">
+            <small>{fmt(nowTotal)} of {fmt(contextWindow)} tokens · last turn</small>
+          </div>
+          <div class="seglegend">
+            {#each segments as s (s.label)}
+              <span><i style="background:{s.colour}"></i>{s.label} {fmt(s.n)}</span>
+            {/each}
+          </div>
+        {:else}
+          <div class="tr"><small>This chat predates the context-window field —
+            showing raw tokens only.</small></div>
+        {/if}
+        <hr />
+        <div class="tr"><span>This chat, total</span><b>{fmt(total)}</b></div>
         <div class="tr"><small>{fmt(usage.input)} in · {fmt(usage.output)} out
           · {fmt(usage.cacheRead + usage.cacheWrite)} cache</small></div>
         <hr />
@@ -229,6 +294,23 @@
      <button> perché quella seconda strada esista, non perché ci sia da premerlo. */
   button.ctx { border: 0; border-bottom: 1px dotted var(--muted); background: none;
     font: inherit; font-size: 10px; color: inherit; padding: 0; cursor: default; }
+
+  /* La barra segmentata: un blocco per ciascuna delle quattro voci che già
+     esistevano come numeri qui sotto — non un dato nuovo, solo un modo di
+     vederlo a colpo d'occhio invece di doverli sommare a mente. */
+  .segbar {
+    display: flex; height: 6px; border-radius: 3px; overflow: hidden;
+    background: var(--surface-3); margin: 4px 0 6px;
+  }
+  .segbar i { display: block; height: 100%; }
+  .seglegend {
+    display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 9px;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .seglegend span { display: inline-flex; align-items: center; gap: 4px; }
+  .seglegend i {
+    width: 7px; height: 7px; border-radius: 2px; display: inline-block; flex: none;
+  }
 
   .pop { position: relative; display: inline-flex; }
   /* Le tendine si aprono verso l'alto: sotto non c'è niente, la barra è l'ultima riga. */

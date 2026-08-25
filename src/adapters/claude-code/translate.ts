@@ -29,6 +29,10 @@ export class Translator {
 
   /** Il turno lo apre STARK, non l'agent: l'agent non sa cosa sia un prompt utente. */
   beginTurn(turnId: string): void { this.turnId = turnId }
+  /** C'è un turno aperto in questo momento? Lo chiede l'adapter prima di aprirne un
+   *  altro: se la risposta è sì, il prossimo prompt va piegato in questo, non in uno
+   *  nuovo — vedi il commento su `turn.promptAdded` in events.ts. */
+  get openTurnId(): string | undefined { return this.turnId }
 
   handle(e: NativeEvent): Payload[] {
     switch (e['type']) {

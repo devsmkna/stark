@@ -128,7 +128,7 @@
       </div>
       <div class="dlgf">
         <button class="btn" onclick={() => { store.dialog = null }}>Cancel</button>
-        <button class="btn dgr" onclick={() => { store.dialog = null; void store.remove(row.id) }}>
+        <button class="btn dgr" onclick={() => { const id = row.id; store.dialog = null; void store.remove(id) }}>
           Delete
         </button>
       </div>

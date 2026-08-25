@@ -55,8 +55,13 @@
   const chosen = (q: AgentQuestion, label: string): boolean =>
     (draft[q.question] ?? []).includes(label)
 
+  // «Scrivi tu» e i bottoni preimpostati sono due strade alternative, non due
+  // caselle da spuntare entrambe: chi scrive la propria risposta non deve ANCHE
+  // cliccare un'opzione per sbloccare Send, altrimenti la casella libera esiste
+  // solo per finta — è esattamente il bug segnalato dal vivo.
   const complete = $derived(
-    !!question && question.questions.every(q => (draft[q.question] ?? []).length > 0),
+    !!question && (typed.trim().length > 0
+      || question.questions.every(q => (draft[q.question] ?? []).length > 0)),
   )
 
   async function reply(): Promise<void> {

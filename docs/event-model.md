@@ -287,9 +287,10 @@ quindi non passa dal `POST /command` del §18, che risponderebbe «sessione non 
 ## 7. Turni, step e parti
 
 ```ts
-| { k: 'turn.started',  turnId: string, prompt: PromptPart[] }
-| { k: 'turn.ended',    turnId: string, reason: 'completed'|'aborted'|'error',
-                        usage: Usage, cost: Cost }
+| { k: 'turn.started',     turnId: string, prompt: PromptPart[] }
+| { k: 'turn.promptAdded', turnId: string, prompt: PromptPart[] }
+| { k: 'turn.ended',       turnId: string, reason: 'completed'|'aborted'|'error',
+                           usage: Usage, cost: Cost }
 
 | { k: 'step.started',  stepId: string }
 | { k: 'step.ended',    stepId: string, finish: string, usage: Usage }
@@ -307,6 +308,17 @@ quindi non passa dal `POST /command` del §18, che risponderebbe «sessione non 
 | { k: 'tool.input.ended',  callId: string, input: unknown, summary?: string }
 | { k: 'tool.ended',        callId: string, ok: boolean, output?: unknown, error?: string }
 ```
+
+`turn.promptAdded` esiste perché un turno non finisce quando smette di aspettare — finisce quando
+l'agent lo dice (`turn.ended`, dall'evento `result` dell'SDK). Un prompt mandato mentre `turnId`
+non ha ancora ricevuto `turn.ended` non apre un secondo turno: verificato nei tipi ufficiali
+dell'Agent SDK, non supposto — un messaggio arrivato a metà viene **"coalesced into one turn"**,
+e un uuid così **"folded"** dentro **"never runs as its own turn"**. STARK apriva un turno a testa
+per ogni `prompt()`, e quando il vero turno finiva chiudeva (`turn.ended`) qualunque `turnId`
+fosse l'ultimo aperto — gli altri restavano orfani per sempre, con zero parti e nessuna chiusura:
+esattamente il fantasma che l'invariante del §4 non dovrebbe produrre. Non è un evento
+"cosmetico": senza, l'elenco dei turni di una sessione con più di un messaggio ravvicinato mente
+su quale ha lavorato davvero.
 
 Su `reasoning.delta`: Claude Code emette il testo del ragionamento nei `content_block_delta` dei
 blocchi `thinking`, **e in più** un evento `system:thinking_tokens` con `estimated_tokens` ed
