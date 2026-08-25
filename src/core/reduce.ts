@@ -28,6 +28,14 @@ export type ToolPartView = {
   output?: string
 }
 /**
+ * Una domanda sola dentro una risposta: com'era intitolata, cosa chiedeva, cosa si e
+ * risposto. Una richiesta `AskUserQuestion` ne porta da 1 a 4, e sono cose DIVERSE —
+ * non pezzi di una frase sola. Appiattirle in una riga separata da `·` faceva perdere
+ * l'unica informazione che conta quando si rilegge: quale risposta stava a quale
+ * domanda.
+ */
+export type AnswerItemView = { header: string; asked: string; answer: string }
+/**
  * Cosa hai risposto, li dov'e successo.
  *
  * La richiesta non entra nel flusso — si espande il blocco in basso, sempre nello
@@ -40,6 +48,12 @@ export type AnswerPartView = {
   asked: string
   /** Cosa si e risposto. */
   answer: string
+  /**
+   * Le domande una per una, quando ce n'era piu d'una — o anche una sola, purche si
+   * sappia com'era formulata. Assente sui permessi, che una domanda sola ce l'hanno
+   * per definizione, e assente quando la richiesta non e piu ricostruibile.
+   */
+  items?: AnswerItemView[]
   /** Una risposta negata non e un fallimento, ma va distinta da una concessa. */
   refused: boolean
   at: number
@@ -316,6 +330,14 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       const asked = s.pendingQuestions.find(x => x.requestId === p.requestId)
       s.pendingQuestions = s.pendingQuestions.filter(x => x.requestId !== p.requestId)
       const replied = p.k === 'question.replied'
+      // L'ordine viene dalle domande poste, non da `Object.keys(answers)`: e quello
+      // in cui sono state lette nello stepper, e rileggerle in un altro ordine due
+      // giorni dopo vuol dire rileggere un'altra cosa.
+      const items: AnswerItemView[] | undefined = replied && asked
+        ? asked.questions.map(q => ({
+          header: q.header, asked: q.question, answer: flatten(p.answers[q.question]),
+        }))
+        : undefined
       turn()?.parts.push({
         kind: 'answer', partId: p.requestId, of: 'question',
         asked: asked?.questions.map(q => q.question).join(' · ') ?? 'question',
@@ -323,6 +345,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
           ? Object.values(p.answers).map(v => Array.isArray(v) ? v.join(', ') : v).join(' · ')
             || (p.response ?? '')
           : 'dismissed without answering',
+        ...(items ? { items } : {}),
         refused: !replied, at: e.ts,
       })
       if (s.pendingQuestions.length === 0 && s.pendingPermissions.length === 0
@@ -377,6 +400,17 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
   }
   if (s.state !== before || s.stateSince === 0) s.stateSince = e.ts
   return s
+}
+
+/**
+ * Una risposta a scelta multipla e un array; a scelta singola e una stringa. Qui
+ * diventa sempre testo, perche a valle c'e una riga da leggere, non un dato da
+ * elaborare. Una domanda saltata resta stringa vuota: la UI deve poter distinguere
+ * «non risposta» da «risposta vuota», e non inventare un trattino al posto suo.
+ */
+function flatten(v: string | string[] | undefined): string {
+  if (v === undefined) return ''
+  return Array.isArray(v) ? v.join(', ') : v
 }
 
 function findText(s: SessionSnapshot, partId: string): TextPartView | undefined {

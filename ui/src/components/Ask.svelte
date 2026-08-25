@@ -22,72 +22,146 @@
   const question = $derived(snap.pendingQuestions[0])
   const head = $derived(permission ? permissionHeadline(permission.action) : null)
 
+  /**
+   * Una richiesta porta da 1 a 4 domande, e sono domande DIVERSE: mostrarle tutte
+   * insieme le fa leggere come un modulo da compilare, dove si risponde alla prima
+   * guardando già la terza. Una alla volta, con i passi in cima, è come le fa il CLI
+   * — e qui c'è in più che i passi si possono ripercorrere per rivedere.
+   *
+   * Per ogni domanda si sceglie **una** di tre strade, mai due insieme:
+   * - `pick`    una o più opzioni fra quelle proposte (più d'una solo se `multiSelect`)
+   * - `typed`   la propria risposta scritta a mano
+   * - `discuss` non rispondo: parliamone. La domanda torna all'agent come richiesta di
+   *             approfondimento, e vale **solo per quella** — le altre restano risposte.
+   */
+  type Choice =
+    | { mode: 'pick'; labels: string[] }
+    | { mode: 'typed'; text: string }
+    | { mode: 'discuss' }
+
+  /**
+   * Cosa riceve l'agent quando una domanda è marcata «parliamone». Non è un codice da
+   * interpretare: è la frase vera che gli arriva come risposta a quella domanda, ed è
+   * il canale garantito dal contratto del tool (`answers`, una voce per domanda).
+   */
+  const DISCUSS = 'Let\'s talk this one through before I answer — walk me through the '
+    + 'options and what each one costs, then ask me again.'
+
   // Le risposte in corso di composizione, azzerate a ogni richiesta nuova: `requestId`
   // nella chiave è ciò che impedisce a una scelta fatta per la domanda di prima di
   // ricomparire già spuntata in quella dopo.
-  let draft = $state<Record<string, string[]>>({})
-  let typed = $state<string>('')
-  let typing = $state(false)
+  let draft = $state<Record<string, Choice>>({})
+  let step = $state(0)
   let currentId = $state<string>('')
 
   $effect(() => {
     const id = question?.requestId ?? ''
-    if (id !== currentId) { currentId = id; draft = {}; typed = ''; typing = false }
+    if (id !== currentId) { currentId = id; draft = {}; step = 0 }
   })
 
-  function pick(q: AgentQuestion, label: string): void {
-    const chosen = draft[q.question] ?? []
-    if (q.multiSelect) {
-      draft = {
-        ...draft,
-        [q.question]: chosen.includes(label)
-          ? chosen.filter(x => x !== label)
-          : [...chosen, label],
-      }
-      return
-    }
-    draft = { ...draft, [q.question]: [label] }
-    // Una domanda sola a scelta singola non ha niente da confermare: la scelta È la
-    // conferma. Con più domande, o a scelta multipla, serve un passaggio in più.
-    if (question && question.questions.length === 1 && !typing) void reply()
+  const qs = $derived(question?.questions ?? [])
+  // Il passo può restare indietro rispetto alla richiesta per un istante, mentre
+  // `$effect` non ha ancora azzerato: `cur` può quindi essere `undefined`, e tutto
+  // ciò che lo usa deve reggerlo invece di dare per scontato che ci sia.
+  const cur = $derived(qs[step])
+
+  const choice = (q: AgentQuestion): Choice | undefined => draft[q.question]
+  const set = (q: AgentQuestion, c: Choice): void => { draft = { ...draft, [q.question]: c } }
+
+  const answered = (q: AgentQuestion | undefined): boolean => {
+    const c = q ? draft[q.question] : undefined
+    if (!c) return false
+    return c.mode === 'pick' ? c.labels.length > 0
+      : c.mode === 'typed' ? c.text.trim().length > 0
+        : true
   }
 
-  const chosen = (q: AgentQuestion, label: string): boolean =>
-    (draft[q.question] ?? []).includes(label)
+  const complete = $derived(qs.length > 0 && qs.every(q => answered(q)))
 
-  // «Scrivi tu» e i bottoni preimpostati sono due strade alternative, non due
-  // caselle da spuntare entrambe: chi scrive la propria risposta non deve ANCHE
-  // cliccare un'opzione per sbloccare Send, altrimenti la casella libera esiste
-  // solo per finta — è esattamente il bug segnalato dal vivo.
-  const complete = $derived(
-    !!question && (typed.trim().length > 0
-      || question.questions.every(q => (draft[q.question] ?? []).length > 0)),
+  /**
+   * Il caso in cui la scelta È la conferma: una domanda sola, a scelta singola,
+   * risposta premendo un'opzione. Non c'è niente da rivedere e niente da confermare,
+   * quindi non compare nemmeno un Send. Scrivere la propria risposta o chiedere di
+   * parlarne no: lì un momento per ripensarci serve.
+   */
+  const autoSends = $derived(
+    qs.length === 1 && !qs[0]?.multiSelect
+    && (choice(qs[0]!)?.mode ?? 'pick') === 'pick',
   )
+
+  /** Sull'ultimo passo, o appena c'è una risposta per tutte: si può aver girato indietro. */
+  const showSend = $derived(!autoSends && (step === qs.length - 1 || complete))
+
+  function advance(): void {
+    if (step < qs.length - 1) { step += 1; return }
+    if (autoSends) void reply()
+  }
+
+  function pick(q: AgentQuestion, label: string): void {
+    const c = choice(q)
+    const labels = c?.mode === 'pick' ? c.labels : []
+    if (q.multiSelect) {
+      // A scelta multipla non si avanza da soli: non si può sapere quando ha finito.
+      set(q, {
+        mode: 'pick',
+        labels: labels.includes(label) ? labels.filter(x => x !== label) : [...labels, label],
+      })
+      return
+    }
+    set(q, { mode: 'pick', labels: [label] })
+    advance()
+  }
+
+  function typeIn(q: AgentQuestion): void {
+    if (choice(q)?.mode !== 'typed') set(q, { mode: 'typed', text: '' })
+  }
+
+  function discuss(q: AgentQuestion): void {
+    // Premuto due volte torna indietro: è una scelta come le altre, e una scelta
+    // che non si può disfare è una trappola.
+    if (choice(q)?.mode === 'discuss') { set(q, { mode: 'pick', labels: [] }); return }
+    set(q, { mode: 'discuss' })
+    if (step < qs.length - 1) step += 1
+  }
+
+  const picked = (q: AgentQuestion, label: string): boolean => {
+    const c = choice(q)
+    return c?.mode === 'pick' && c.labels.includes(label)
+  }
 
   async function reply(): Promise<void> {
     if (!question) return
     // La chiave è il testo della domanda: è la forma documentata di `AskUserQuestion`,
     // e il vocabolario canonico la ripete tale e quale in `question.replied.answers`.
     const answers: Record<string, string | string[]> = {}
+    const scritte: string[] = []
     for (const q of question.questions) {
-      const v = draft[q.question] ?? []
-      answers[q.question] = q.multiSelect ? v : (v[0] ?? '')
+      const c = draft[q.question]
+      if (!c) { answers[q.question] = q.multiSelect ? [] : ''; continue }
+      if (c.mode === 'pick') {
+        answers[q.question] = q.multiSelect ? c.labels : (c.labels[0] ?? '')
+      } else if (c.mode === 'typed') {
+        const t = c.text.trim()
+        answers[q.question] = q.multiSelect ? [t] : t
+        scritte.push(t)
+      } else {
+        answers[q.question] = DISCUSS
+      }
     }
     await store.send({
       c: 'question.reply', requestId: question.requestId, answers,
-      ...(typed.trim() ? { response: typed.trim() } : {}),
+      // `response` continua a portare ciò che è stato scritto a mano: è il campo che
+      // lo faceva arrivare finora, e toglierlo perché *dovrebbe* bastare `answers`
+      // sarebbe dedurre un comportamento invece di verificarlo.
+      ...(scritte.length > 0 ? { response: scritte.join('\n') } : {}),
     })
   }
 
-  /** L'anteprima dell'opzione scelta, quando ne porta una: serve a confrontare. */
+  /** L'anteprima dell'opzione scelta in QUESTO passo, quando ne porta una. */
   const preview = $derived.by(() => {
-    if (!question) return null
-    for (const q of question.questions) {
-      const label = (draft[q.question] ?? [])[0]
-      const o = q.options.find(x => x.label === label)
-      if (o?.preview) return o.preview
-    }
-    return null
+    const c = cur ? choice(cur) : undefined
+    if (!cur || c?.mode !== 'pick') return null
+    return cur.options.find(o => o.label === c.labels[0])?.preview ?? null
   })
 </script>
 
@@ -125,11 +199,12 @@
     </div>
   </div>
 
-{:else if question}
+{:else if question && cur}
   <div class="askbox q">
     <div class="h">
       <Icon name="i-ask" style="color:var(--wait)" />
-      {question.questions[0]?.header || 'A question'}
+      {cur.header || 'A question'}
+      {#if qs.length > 1}<span class="stepn">{step + 1} of {qs.length}</span>{/if}
       {#if canStop}
         <button class="stopb" title="Stop" onclick={() => void store.stop()}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
@@ -137,32 +212,87 @@
       {/if}
     </div>
 
-    {#each question.questions as q (q.question)}
-      <div class="s">{q.question}</div>
-      <div class="opts">
-        {#each q.options as o (o.label)}
-          <button class="opt" class:pri={chosen(q, o.label)}
-            title={o.description} onclick={() => pick(q, o.label)}>{o.label}</button>
+    <!-- I passi non sono una decorazione di avanzamento: sono la mappa della richiesta.
+         Dicono quante domande sono in tutto — cosa che una domanda alla volta
+         nasconderebbe — e si premono, perché rivedere la prima dopo aver letto la terza
+         è esattamente ciò che si vuole fare. -->
+    {#if qs.length > 1}
+      <div class="steps">
+        {#each qs as q, i (q.question)}
+          <button class="stp" class:on={i === step} class:ok={answered(q)}
+            title={q.question} aria-current={i === step ? 'step' : undefined}
+            onclick={() => { step = i }}>
+            <span class="d"></span><span class="t">{q.header || `Question ${i + 1}`}</span>
+          </button>
         {/each}
       </div>
-    {/each}
+    {/if}
+
+    <div class="s">{cur.question}</div>
+
+    <div class="opts">
+      {#each cur.options as o (o.label)}
+        <button class="opt" class:pri={picked(cur, o.label)}
+          title={o.description} onclick={() => pick(cur, o.label)}>{o.label}</button>
+      {/each}
+
+      <!-- Le due strade in più ci sono SEMPRE, anche quando le opzioni sembrano
+           coprire tutto: che le coprano lo ha deciso l'agent, e chi risponde deve
+           poter dire sia «nessuna di queste» sia «non ho abbastanza per scegliere». -->
+      <button class="opt alt" class:pri={choice(cur)?.mode === 'typed'}
+        title="Answer this one in your own words" onclick={() => typeIn(cur)}>
+        <Icon name="i-pencil" /> Type in your answer
+      </button>
+      <button class="opt alt" class:pri={choice(cur)?.mode === 'discuss'}
+        title="Send the other answers, and have the agent walk you through this one"
+        onclick={() => discuss(cur)}>
+        <Icon name="i-chat" /> Chat about this
+      </button>
+    </div>
+
+    {#if choice(cur)?.mode === 'typed'}
+      {@const c = choice(cur)}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input class="typed" autofocus placeholder="Your answer to this question…"
+        value={c?.mode === 'typed' ? c.text : ''}
+        oninput={e => set(cur, { mode: 'typed', text: e.currentTarget.value })}
+        onkeydown={e => {
+          if (e.key !== 'Enter' || !answered(cur)) return
+          e.preventDefault()
+          if (step < qs.length - 1) step += 1
+          else if (complete) void reply()
+        }} />
+    {/if}
+
+    {#if choice(cur)?.mode === 'discuss'}
+      <!-- Cosa succederà, detto adesso: «parliamone» non è un annulla, e non ferma le
+           altre risposte. Senza dirlo si scoprirebbe dopo aver premuto Send. -->
+      <div class="hintline">
+        <Icon name="i-chat" />
+        The other answers go through as they are. This one comes back as a question to
+        talk about, and the agent asks you again after.
+      </div>
+    {/if}
 
     {#if preview}
       <pre class="prev">{preview}</pre>
     {/if}
 
-    {#if typing}
-      <!-- svelte-ignore a11y_autofocus -->
-      <input class="typed" autofocus bind:value={typed} placeholder="Your own answer…"
-        onkeydown={e => { if (e.key === 'Enter' && complete) void reply() }} />
-    {/if}
-
     <div class="opts" style="margin-top:8px">
-      {#if question.questions.length > 1 || question.questions[0]?.multiSelect || typing}
-        <button class="opt pri" disabled={!complete} onclick={() => void reply()}>Send</button>
+      {#if qs.length > 1}
+        <button class="opt" disabled={step === 0} onclick={() => { step -= 1 }}>
+          <Icon name="i-back" /> Back
+        </button>
+        {#if step < qs.length - 1}
+          <button class="opt" disabled={!answered(cur)} onclick={() => advance()}>
+            Next <Icon name="i-fwd" />
+          </button>
+        {/if}
       {/if}
-      {#if !typing}
-        <button class="opt" onclick={() => { typing = true }}>Let me type it…</button>
+      {#if showSend}
+        <button class="opt pri" disabled={!complete} onclick={() => void reply()}>
+          {qs.length > 1 ? `Send ${qs.length} answers` : 'Send'}
+        </button>
       {/if}
       <!-- Chiudere non è «nessuna risposta»: è una risposta vera, e l'agent la riceve
            come rifiuto e può cambiare strada. -->
@@ -175,7 +305,9 @@
 <style>
   .opt { cursor: pointer; }
   .opt[disabled] { opacity: .45; cursor: default; }
-  .opt:focus-visible, .stopb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .opt:focus-visible, .stopb:focus-visible, .stp:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
   .askbox .s code + code { margin-left: 4px; }
   .prev {
     margin: 8px 0 0; padding: 7px 9px; border-radius: 7px;

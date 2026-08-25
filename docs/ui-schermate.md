@@ -316,9 +316,45 @@ essere interrogato su categorie precise, e allora compaiono più spesso.
 
 **Ferma solo quella conversazione.** Le altre continuano a lavorare.
 
-Dopo la risposta, il riquadro sparisce ma **la domanda e la risposta restano nella
+### Più domande insieme: uno stepper, non un modulo
+
+Una richiesta può portare **fino a quattro domande**, e sono domande diverse. Il riquadro
+ne mostra **una per passo**, con i passi in cima: quante sono in tutto, a quale si è, e
+quali hanno già una risposta. I passi si **premono**: rivedere la prima dopo aver letto la
+terza è esattamente ciò che si vuole fare, e con quattro domande *quale mi manca* è la
+domanda che ci si fa davvero — a cui un avanzamento lineare non saprebbe rispondere.
+
+A scelta singola, premere un'opzione porta al passo dopo. A scelta multipla no: non si può
+sapere quando si ha finito di spuntare. Quando c'è **una domanda sola**, a scelta singola,
+non compare nemmeno un Send: lì la scelta *è* la conferma.
+
+### Due strade in più, su ogni domanda, sempre
+
+Oltre alle opzioni proposte ci sono sempre due voci, disegnate **tratteggiate** perché non
+le propone l'assistente — le mette STARK, e non devono sembrare un'opzione uscita dal
+modello:
+
+- **Type in your answer** — rispondere a parole proprie, per quella domanda
+- **Chat about this** — «non ho abbastanza per scegliere: parliamone»
+
+Che le opzioni coprano tutto lo ha deciso l'assistente. Chi risponde deve poter dire sia
+*nessuna di queste* sia *non ho abbastanza per scegliere*.
+
+«Parliamone» vale per **una domanda sola, non per la richiesta**: le altre risposte partono
+lo stesso, e solo quella marcata torna indietro come richiesta di approfondimento, che
+l'assistente ripone dopo. Non è un annulla — ed è scritto nel riquadro **prima** di premere
+Send, perché scoprirlo dopo sarebbe una sorpresa a spese di chi risponde.
+
+### Cosa resta nella conversazione
+
+Dopo la risposta il riquadro sparisce, ma **la domanda e la risposta restano nella
 conversazione**, nel punto in cui sono avvenute. Riaprendo il lavoro due giorni dopo si
 capisce cosa si era deciso, e perché l'assistente ha fatto in quel modo.
+
+Quando le domande erano più d'una resta un **blocco**, non una riga: ogni domanda con la
+propria risposta sotto, numerate, nell'ordine in cui sono state poste. Una riga sola con le
+risposte separate da `·` faceva perdere l'unica cosa che serve rileggendo — **quale
+risposta stava a quale domanda**.
 
 ---
 

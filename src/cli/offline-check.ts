@@ -371,6 +371,60 @@ check('§16.5: si salva ciò che si riconosce, e si butta il resto',
 check('§16.5: le categorie da chiedere si rileggono da disco',
   askCategories(readSettings(casa)).join(',') === 'shell')
 
+// ─── §8 una richiesta con più domande ────────────────────────────────────────
+// Lo stepper mostra una domanda per volta, e nel flusso resta un blocco con tutte:
+// il rischio è di perdere l'accoppiamento fra domanda e risposta, che è l'unica cosa
+// che serve quando si rilegge. Qui si verifica che l'accoppiamento sopravviva al
+// giro completo evento → snapshot, ordine compreso.
+const TRE = [
+  { question: 'Which auth method?', header: 'Auth', multiSelect: false,
+    options: [{ label: 'OAuth', description: '' }, { label: 'Token', description: '' }] },
+  { question: 'Where do sessions live?', header: 'Storage', multiSelect: false,
+    options: [{ label: 'Disk', description: '' }, { label: 'Memory', description: '' }] },
+  { question: 'Which platforms?', header: 'Targets', multiSelect: true,
+    options: [{ label: 'Web', description: '' }, { label: 'CLI', description: '' }] },
+]
+const DOM = reduce([
+  ev(1, 1_000, { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'vai' }] }),
+  ev(2, 2_000, { k: 'question.asked', requestId: 'q1', questions: TRE }),
+  ev(3, 3_000, {
+    k: 'question.replied', requestId: 'q1',
+    answers: {
+      // Di proposito in ordine SBAGLIATO: `Object.keys` seguirebbe questo, e nel
+      // flusso le domande comparirebbero in un ordine che nessuno ha mai visto.
+      'Which platforms?': ['Web', 'CLI'],
+      'Which auth method?': 'OAuth',
+      'Where do sessions live?': 'Let\'s talk this one through',
+    },
+  }),
+], 'sess-dom')
+const ANS = DOM.turns[0]?.parts.find(p => p.kind === 'answer')
+check('§8: la risposta a più domande resta un blocco, una voce per domanda',
+  ANS?.kind === 'answer' && ANS.items?.length === 3,
+  JSON.stringify(ANS))
+check('§8: l\'ordine è quello in cui le domande sono state poste, non quello di `answers`',
+  ANS?.kind === 'answer'
+  && ANS.items?.map(i => i.header).join(',') === 'Auth,Storage,Targets',
+  JSON.stringify(ANS?.kind === 'answer' ? ANS.items : null))
+check('§8: ogni risposta resta attaccata alla propria domanda',
+  ANS?.kind === 'answer'
+  && ANS.items?.[0]?.answer === 'OAuth'
+  && ANS.items?.[1]?.answer === 'Let\'s talk this one through'
+  && ANS.items?.[2]?.answer === 'Web, CLI',
+  JSON.stringify(ANS?.kind === 'answer' ? ANS.items : null))
+// Un permesso non è una domanda a scelta multipla: la riga sola gli basta, e un
+// blocco vuoto al suo posto sarebbe una cornice attorno a niente.
+const PERM = reduce([
+  ev(1, 1_000, { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'vai' }] }),
+  ev(2, 2_000, { k: 'permission.asked', requestId: 'p1', action: 'Bash',
+    resources: ['rm -rf dist'], savable: [], source: {} }),
+  ev(3, 3_000, { k: 'permission.replied', requestId: 'p1', decision: 'once' }),
+], 'sess-perm')
+const PANS = PERM.turns[0]?.parts.find(p => p.kind === 'answer')
+check('§8: un permesso resta una riga sola, senza il blocco delle domande',
+  PANS?.kind === 'answer' && PANS.items === undefined,
+  JSON.stringify(PANS))
+
 let failed = 0
 for (const [name, ok, detail] of checks) {
   if (!ok) failed++

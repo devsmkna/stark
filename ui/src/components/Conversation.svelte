@@ -369,15 +369,40 @@
                   <!-- La richiesta non è passata di qui: si era espanso il blocco in
                        basso. Ciò che resta nel flusso è cosa hai risposto, dove è
                        successo, così che due giorni dopo si capisca cosa si era deciso. -->
-                  <div class="row answer">
-                    <Icon name={part.of === 'question' ? 'i-ask' : 'i-shield'} />
-                    <span class="k">You</span>
-                    <span class="v">{part.asked}</span>
-                    <!-- Nessun rosso: aver detto di no non è un fallimento, è una
-                         decisione. Il rosso qui la farebbe leggere come qualcosa
-                         andato storto, e la prossima volta si esiterebbe a dirlo. -->
-                    <span class="end" class:no={part.refused}>{part.answer}</span>
-                  </div>
+                  {#if part.items && part.items.length > 0}
+                    <!-- Le domande erano più d'una, ed erano domande diverse: una riga
+                         sola con le risposte incollate da `·` costringeva a indovinare
+                         quale stesse a quale. Qui ogni domanda si porta dietro la
+                         propria risposta, nell'ordine in cui sono state lette. -->
+                    <div class="answers">
+                      <div class="ah">
+                        <Icon name="i-ask" />
+                        <span class="k">You answered</span>
+                        {#if part.items.length > 1}
+                          <span class="end">{part.items.length} questions</span>
+                        {/if}
+                      </div>
+                      {#each part.items as it, n (it.asked)}
+                        <div class="aq">
+                          <span class="n">{n + 1}</span>
+                          <span class="q" title={it.asked}>{it.asked}</span>
+                          <!-- Una domanda saltata non inventa un trattino: dice che
+                               non è stata risposta, che è un fatto diverso. -->
+                          <span class="a">{it.answer || 'left unanswered'}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <div class="row answer">
+                      <Icon name={part.of === 'question' ? 'i-ask' : 'i-shield'} />
+                      <span class="k">You</span>
+                      <span class="v">{part.asked}</span>
+                      <!-- Nessun rosso: aver detto di no non è un fallimento, è una
+                           decisione. Il rosso qui la farebbe leggere come qualcosa
+                           andato storto, e la prossima volta si esiterebbe a dirlo. -->
+                      <span class="end" class:no={part.refused}>{part.answer}</span>
+                    </div>
+                  {/if}
                 {/if}
 
               {:else if g.kind === 'live'}
