@@ -117,6 +117,12 @@ se la macchina ha più di un profilo e la cartella è nuova per STARK. Nello ste
 **percorso si sfoglia** (`GET /api/browse`) invece di scriverlo a mano, e un blocco `reasoning`
 chiuso senza un solo `delta` non è più una riga da aprire su «…».
 
+**La risposta a parole è Markdown** (`ui/src/lib/markdown.ts`): `marked` per il parsing,
+**DOMPurify** per pulire l'HTML prima di `{@html}` — quel testo può contenere qualunque cosa
+l'agent abbia letto, quindi non è fidato solo perché arriva da noi. I link vanno in una scheda
+nuova: STARK non ha una barra degli indirizzi con cui tornare indietro. Sono le **prime
+dipendenze dopo l'SDK**, quindi dopo un `git pull` `npm install` non si salta più.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
 mai fatte.
 
