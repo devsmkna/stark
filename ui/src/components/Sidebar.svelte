@@ -30,8 +30,15 @@
   const tree = $derived(
     ORDER.map(g => {
       const byProject = new Map<string, SessionRow[]>()
+      // `since`, non `lastTs`: `lastTs` avanza a ogni evento, quindi due chat "in
+      // progress" si scavalcherebbero di continuo — una scrive un token, sale sopra
+      // l'altra, che ne scrive uno e risale sopra la prima. `since` cambia solo
+      // quando lo stato cambia (§1, `stateSince`): resta fermo per tutta la durata
+      // del turno, e la più recente a essere *iniziata* sta sopra. Quando una finisce
+      // per prima, cambia gruppo con un `since` nuovo — è così che finisce in cima
+      // al suo, senza bisogno di un caso speciale per «chi ha risposto per primo».
       for (const r of store.rows.filter(r => group(r.state) === g)
-        .sort((a, b) => b.lastTs - a.lastTs)) {
+        .sort((a, b) => b.since - a.since)) {
         const p = project(r.cwd)
         const list = byProject.get(p)
         if (list) list.push(r); else byProject.set(p, [r])

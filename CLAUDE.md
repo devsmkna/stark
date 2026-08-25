@@ -96,7 +96,7 @@ aperta si ricollega da sola dopo un riavvio.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 48 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 49 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -110,13 +110,19 @@ che hanno bisogno di un processo vero. Vedi `docs/ui-implementazione.md` §1.
 applicati alle chat nuove), colore per progetto, notifiche, tema, spazio su disco, diagnostica.
 Quello che STARK non sa ancora fare sta in elenco **spento con la spiegazione**, mai nascosto.
 
-Passo corrente: **da decidere**. Restano i divieti veri (`deny`), il profilo di Claude per
-progetto — il daemon ne apre uno solo — e le due misure di quota mai fatte.
+**Il profilo di Claude è per progetto** (25 agosto 2026): `OpenSpec` porta un `configDir` che il
+registro preferisce al default, e `settings.ts` lo ricorda per cartella — quindi la scelta
+sopravvive al riavvio ed è quella che il risveglio riusa da solo. In «New chat» compare **solo**
+se la macchina ha più di un profilo e la cartella è nuova per STARK. Nello stesso giro: il
+**percorso si sfoglia** (`GET /api/browse`) invece di scriverlo a mano, e un blocco `reasoning`
+chiuso senza un solo `delta` non è più una riga da aprire su «…».
+
+Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
+mai fatte.
 
 Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
-`deny` sarebbe una promessa non mantenibile); il **profilo di Claude per progetto**, che
-richiede al daemon di tenerne aperti più d'uno; scegliere un **file per percorso** senza
-scriverlo a mano; la **scelta dei suoni**; e una prova automatica dell'instradamento.
+`deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica
+dell'instradamento.
 
 Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
 classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
@@ -170,6 +176,10 @@ Decisioni già prese:
 - il **token sta su disco** (`~/.stark/token`, `0600`) e la porta è fissa. Costo accettato: è
   un segreto a riposo, ma sta accanto ai journal, che contengono già tutto ciò che l'agent ha
   letto. In cambio l'indirizzo si può tenere aperto, che è il senso di un daemon che dura.
+- dentro un gruppo l'elenco si ordina per **`since`**, non per ultimo evento: `lastTs` avanza a
+  ogni token, quindi due chat che lavorano insieme si scavalcherebbero di continuo. `since`
+  cambia solo quando cambia lo stato, e chi finisce per primo cambia gruppo con un `since`
+  nuovo — quindi sale in cima al suo senza bisogno di un caso speciale.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
