@@ -179,7 +179,9 @@ altro, un servizio alla volta. `npm run daemon` passa a **24** verifiche.
 riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto. E la riga di un tool
 con una motivazione (F2) diventa **due righe**: sopra nome e perché, sotto — piccolo, monospace —
 il comando o il percorso esatto, che prima stava solo in un tooltip. Senza motivazione la riga
-resta una sola linea, identica a prima.
+resta una sola linea, identica a prima. Lo stesso blu-azzurro copre anche il blocco «You
+answered»: è di nuovo l'utente a parlare, solo rispondendo invece di chiedere, e riconoscerlo
+scorrendo vale la stessa ragione.
 
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
 mai fatte.

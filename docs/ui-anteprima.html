@@ -214,8 +214,8 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .hintline{display:flex;align-items:flex-start;gap:6px;margin-top:8px;font-size:10px;line-height:1.45;color:var(--ink-2)}
 .hintline svg.ic{width:12px;height:12px;margin-top:1px;color:var(--wait)}
 /* Cosa hai risposto, domanda per domanda. Non una riga sola: erano domande diverse. */
-.answers{background:var(--surface-2);border:1px solid transparent;border-radius:7px;padding:6px 8px}
-.answers .ah{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:600;margin-bottom:5px}
+.answers{background:var(--user-bg);border:1px solid transparent;border-radius:7px;padding:6px 8px}
+.answers .ah{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:600;margin-bottom:5px;color:var(--user)}
 .answers .ah .end{margin-left:auto;font-weight:500;font-size:10px;color:var(--muted)}
 .aq{display:grid;grid-template-columns:14px 1fr;gap:2px 6px;padding:3px 0}
 .aq + .aq{border-top:1px solid var(--line);margin-top:1px}
@@ -1649,7 +1649,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-ask"/></svg> Cosa hai risposto</div><div class="vnote">resta nel flusso, dove &egrave; successo</div></div>
-        <div class="vdemo"><div class="row" style="background:var(--accent-soft)"><svg class="ic"><use href="#i-ask"/></svg><span class="k">You answered</span><span class="v" style="color:var(--ink)">Tabs</span><span class="end">2 days ago</span></div></div>
+        <div class="vdemo"><div class="row" style="background:var(--user-bg)"><svg class="ic"><use href="#i-ask"/></svg><span class="k" style="color:var(--user)">You answered</span><span class="v" style="color:var(--ink)">Tabs</span><span class="end">2 days ago</span></div></div>
       </div>
       <div class="vrow">
         <div><div class="vname"><svg class="ic"><use href="#i-mail"/></svg> Da portare fuori</div><div class="vnote">campi separati, copiabili</div></div>

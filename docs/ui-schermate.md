@@ -505,7 +505,9 @@ browser.
 sia da `--work`, il blu di stato): scorrendo una conversazione lunga, ogni turno inizia con una
 riga colorata che salta all'occhio senza doverla leggere — è dove hai chiesto qualcosa, e da lì
 riparte quello che segue. Vale sia chiuso sia aperto: anche il turno che si sta leggendo deve
-restare riconoscibile come tale.
+restare riconoscibile come tale. Lo stesso colore copre il blocco «You answered» — la risposta a
+una o più domande dell'agent: è ancora l'utente a parlare, e la ragione per riconoscerlo scorrendo
+è identica.
 
 **La riga di un tool con una motivazione (F2) mostra prima quella, il comando dopo e più
 piccolo.** Prima il comando esatto stava solo in un tooltip — bisognava sapere che c'era per

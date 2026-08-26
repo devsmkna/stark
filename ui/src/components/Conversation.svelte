@@ -741,7 +741,11 @@
 
   /* La risposta data non è né un successo né un errore: è una decisione, e si legge
      come tale. Il rosso resta per quelle negate. */
-  .row.answer { background: var(--accent-soft); }
+  /* Stesso blu-azzurro del blocco del prompt e di `.answers` in app.css: una
+     domanda sola è la stessa categoria di cosa — l'utente che risponde —
+     solo con un'unica riga invece del blocco a elenco. */
+  .row.answer { background: var(--user-bg); }
+  .row.answer .k { color: var(--user); }
   .row.answer .end { color: var(--ink-2); font-weight: 600; }
   .row.answer .end.no { color: var(--wait); }
 </style>
