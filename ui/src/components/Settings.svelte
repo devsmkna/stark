@@ -271,6 +271,61 @@
           yet — there are three, and they are the three above.</div>
         </div>
 
+        <!-- Le notifiche che arrivano quando STARK **non è aperto**. Stanno qui e non
+             sotto la campanella perché sono un'altra cosa: la campanella è il volume di
+             questa scheda, questo è «avvisami anche quando la scheda non c'è». E sono
+             **di questo dispositivo**: accenderle sull'iPhone non le accende altrove. -->
+        <div class="fgroup">
+          <div class="flabel">On this device, even when STARK is closed</div>
+          <div>
+            <div class="nrow">
+              <div>
+                <div class="nn">Push notifications</div>
+                <div class="nd">
+                  {#if store.push.stato === 'accese'}
+                    on — the daemon calls this device{store.push.iscritti > 1
+                      ? `, and ${store.push.iscritti - 1} other` : ''}
+                  {:else if store.push.stato === 'negato'}
+                    the browser blocked them for this site
+                  {:else if store.push.stato === 'nonSupportato' || store.push.stato === 'nonDisponibile'}
+                    not available here
+                  {:else}
+                    off — nothing reaches you with STARK closed
+                  {/if}
+                </div>
+              </div>
+              <span class="rt">
+                <button class="tog" class:on={store.push.stato === 'accese'}
+                  disabled={store.push.stato === 'nonSupportato'
+                    || store.push.stato === 'nonDisponibile' || store.push.stato === 'negato'}
+                  aria-label="Push notifications on this device"
+                  onclick={() => void (store.push.stato === 'accese'
+                    ? store.push.spegni() : store.push.accendi())}><i></i></button>
+              </span>
+            </div>
+            {#if store.push.stato === 'accese'}
+              <div class="nrow">
+                <div><div class="nn">Send a test</div><div class="nd">proves it really arrives, without waiting for a real turn</div></div>
+                <span class="rt">
+                  <button class="btn" onclick={() => void store.push.prova()}>Send</button>
+                </span>
+              </div>
+            {/if}
+          </div>
+          {#if store.push.motivo}
+            <div class="notice">
+              <Icon name="i-bell" />
+              <span>{store.push.motivo}</span>
+            </div>
+          {/if}
+          <div class="hint"><b>Different from the bell above.</b> That one is the volume of this
+          tab, and it needs the tab open. This one is sent by the daemon, so it reaches you with
+          the screen off — the only case where a notification is really worth something.
+          The message travels <b>encrypted</b>, but it does pass through Apple's or Google's push
+          servers: it is the one part of STARK that does not stay on your machine, which is why
+          it is off until you turn it on.</div>
+        </div>
+
         <div class="fgroup">
           <div class="flabel">Stay quiet for…</div>
           <div>

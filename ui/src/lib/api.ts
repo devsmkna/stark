@@ -112,6 +112,10 @@ export class Api {
     return { authorization: `Bearer ${this.token}` }
   }
 
+  /** Le stesse intestazioni, per chi parla col daemon senza passare da qui — il push,
+   *  che ha un ciclo suo (Service Worker, permesso del browser, iscrizione). */
+  get authHeaders(): Record<string, string> { return this.auth }
+
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(path, {
       ...init,

@@ -10,6 +10,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
+import { callFor } from '../core/calls.ts'
+import { vigila, type Push, type PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
@@ -644,6 +646,59 @@ const PANS = PERM.turns[0]?.parts.find(p => p.kind === 'answer')
 check('§8: un permesso resta una riga sola, senza il blocco delle domande',
   PANS?.kind === 'answer' && PANS.items === undefined,
   JSON.stringify(PANS))
+
+// ─── notifiche sul telefono: quando il daemon deve chiamare ─────────────────
+//
+// La regola sta in `core/calls.ts` **una volta sola** perché se la pongono in due: il
+// browser per suonare, il daemon per mandare il push. Qui si prova la regola, e poi il
+// giro completo: un turno che finisce fa partire una notifica sola, con dentro di che
+// aprire la chat giusta.
+check('§notifiche: un turno finito chiama «ha finito»', callFor('busy', 'idle') === 'done')
+check('§notifiche: una domanda chiama «ti aspetta»', callFor('busy', 'awaiting') === 'needsYou')
+check('§notifiche: fermarsi chiama «si è fermata»', callFor('busy', 'closed') === 'stopped')
+// Aprire una chat la porta da `starting` a `idle` senza che nessuno abbia fatto niente:
+// chiamare «ha finito» lì sarebbe la prima notifica falsa, e una notifica falsa insegna
+// a spegnerle tutte.
+check('§notifiche: una chat appena aperta NON chiama', callFor('starting', 'idle') === null)
+check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
+
+{
+  // Un registro finto: `vigila` non deve sapere com'è fatto quello vero.
+  let stato = 'busy'
+  // Un array e non una variabile: TypeScript restringerebbe a `null` un `let` che vede
+  // assegnato solo dentro una callback, e `sveglia?.()` diventerebbe una chiamata su
+  // `never`. Qui non c'è niente da restringere.
+  const svegliatori: Array<() => void> = []
+  const sveglia = (): void => { for (const s of svegliatori) s() }
+  const finto = {
+    list: () => [{ id: 's1', title: 'sistema il bug', state: stato, cwd: '/casa/progetto' }],
+    watchAll: (f: () => void) => { svegliatori.push(f); return () => { svegliatori.length = 0 } },
+  }
+  const mandate: PushPayload[] = []
+  const spia = { manda: async (p: PushPayload) => { mandate.push(p) } } as unknown as Push
+  vigila(finto, spia)
+
+  stato = 'idle'
+  sveglia()
+  await new Promise(r => setTimeout(r, 400))   // `vigila` aspetta 250ms, come il flusso
+
+  check('§notifiche: il daemon manda quando il turno finisce', mandate.length === 1,
+    JSON.stringify(mandate))
+  check('§notifiche: dice quale progetto e quale prompt',
+    mandate[0]?.title === 'Done · progetto' && mandate[0]?.body === 'sistema il bug',
+    JSON.stringify(mandate[0]))
+  // Senza questo la notifica si può leggere ma non seguire: toccandola si aprirebbe
+  // STARK e basta, e la chat che ti stava chiamando andrebbe cercata a mano.
+  check('§notifiche: porta l\'id della chat, per aprirla al tocco',
+    mandate[0]?.sessionId === 's1')
+
+  // Un secondo giro senza cambiamenti non deve richiamare: `bump()` scatta a ogni
+  // evento, e senza questo controllo il telefono suonerebbe a ogni delta di testo.
+  sveglia()
+  await new Promise(r => setTimeout(r, 400))
+  check('§notifiche: stato invariato → nessuna seconda notifica', mandate.length === 1,
+    `${mandate.length}`)
+}
 
 let failed = 0
 for (const [name, ok, detail] of checks) {

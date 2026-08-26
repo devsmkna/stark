@@ -576,6 +576,44 @@ via `/model` in questa stessa conversazione), non da capo a fondo con un risvegl
 richiede un turno reale sul journal di prova, e non l'ho speso. `npm run check` resta **80**,
 `npm run daemon` **25**.
 
+**E ora il telefono suona anche a STARK chiuso** (26 agosto 2026). Le notifiche che c'erano dal
+24 agosto le fa **la pagina** (`new Notification(...)`): valgono finché quella pagina è viva, e
+su un telefono non lo è quasi mai — a schermo spento o con Safari in secondo piano nella scheda
+non gira niente. L'unico modo di avvisare un telefono che non ti sta guardando è il **Web Push**:
+il daemon consegna al servizio di push del sistema, che sveglia un Service Worker senza pagina.
+Non è stato un salto nel buio: la sonda in `tools/sonda-telefono/` aveva già fatto arrivare un
+push vero su questo iPhone in ~3s, e questo lavoro è quella prova portata dentro il daemon.
+Il pezzo che rende tutto **una regola sola** è `core/calls.ts`: `callFor` stava in
+`store.svelte.ts`, cioè nella UI, ma ora la stessa domanda se la pongono in due — il browser per
+suonare, il daemon per mandare il push. Due copie avrebbero voluto dire che un giorno il telefono
+suona e il portatile no, senza sapere quale dei due ha ragione.
+Lato daemon: `push.ts` tiene le chiavi VAPID e le iscrizioni in `~/.stark/push.json` (`0600`,
+come il token: la chiave privata lì dentro permette di mandare notifiche a nome di questo STARK),
+`vigila()` guarda l'elenco con la stessa attesa di 250ms del flusso — `bump()` scatta a ogni
+delta di testo, e senza quella il telefono suonerebbe a ogni parola — e le iscrizioni morte
+(`404`/`410`) si tolgono da sole. Il primo giro non notifica niente, se no riavviare il daemon
+manderebbe una raffica di «ha finito» per conversazioni ferme da ore.
+Lato telefono: `ui/public/sw.js` (nessuna cache, di proposito: senza daemon non c'è niente da
+mostrare, e una cache sarebbe solo un altro posto in cui restare indietro), manifest, e le icone
+generate dal marchio che c'è già con `tools/gen-app-icons.mjs` — la «A» col gradiente presa da
+`Logo.svelte`, perché la scritta intera a 180px diventa cinque macchie.
+**Il vincolo che decide come si usa**: su iOS il push arriva **solo** a un sito aggiunto alla
+schermata Home. Non è una scelta nostra, è Safari: in una scheda normale `PushManager` non
+esiste proprio. Per questo l'interruttore, quando il supporto manca, non è un bottone morto ma
+dice cosa fare («Condividi → Aggiungi alla schermata Home»). Ed è anche il motivo per cui il
+tipo MIME del manifest è stato corretto (`application/manifest+json`): servito come
+`octet-stream` il manifest viene ignorato, e senza manifest l'aggiunta alla Home non vale.
+Costo dichiarato in chiaro nelle impostazioni: il contenuto viaggia **cifrato** da capo a fondo,
+ma il *fatto* che una notifica parta passa dai server di Apple. È l'unica parte di STARK che non
+resta sulla macchina, e per questo è **spenta finché non la accendi** — senza iscrizioni il
+daemon non manda niente.
+`npm run check` passa a **89**: le nove nuove provano la regola (un turno finito chiama, una chat
+appena aperta **no**) e il giro completo con un registro finto — una notifica sola, col progetto,
+il prompt e l'id per aprire la chat giusta al tocco, e nessuna seconda notifica se lo stato non
+cambia. Verificato nel browser vero: manifest col tipo giusto, `apple-touch-icon`, Service Worker
+registrato su scope `/`, chiave VAPID servita. L'**iscrizione** vera no: headless non ha un
+servizio di push, quindi quel passo si prova solo dal telefono.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).

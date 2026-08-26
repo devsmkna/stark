@@ -17,7 +17,11 @@
 // scelta, negare il riquadro è una scelta del browser, e sono due cose diverse.
 
 /** Le tre cose che meritano di chiamarti, e che le impostazioni sapranno separare. */
-export type Call = 'needsYou' | 'done' | 'stopped'
+// Il tipo vive in `$core/calls.ts` insieme alla regola che decide *quando* chiamare:
+// se la pone anche il daemon, per il push al telefono. Qui si ri-esporta perché i
+// componenti lo importano da questo file da prima che quella regola fosse condivisa.
+import type { Call } from '$core/calls.ts'
+export type { Call }
 
 export type Permission = 'default' | 'granted' | 'denied' | 'unsupported'
 

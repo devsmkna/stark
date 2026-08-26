@@ -16,35 +16,19 @@ import {
   Api, bootToken,
   type ImportableRow, type LinkStatus, type SessionRow, type Settings,
 } from './api.ts'
-import { Notifier, type Call } from './notify.svelte.ts'
+import { Notifier } from './notify.svelte.ts'
+import { CALL_HEAD, callFor, type Call } from '$core/calls.ts'
+import { PushPhone } from './push.svelte.ts'
 import { fromPath, go } from './route.ts'
 import { Themer } from './theme.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
 import { activityText, project } from './view.ts'
 
-/** Gli stati in cui una chat *stava lavorando*: solo da lì ha senso dire «ha finito». */
-const WORKING = new Set(['busy', 'starting', 'awaiting'])
-
-/**
- * Quale delle tre chiamate merita un passaggio di stato. Fermarsi da sola e fermarsi
- * perché gliel'hai detto tu portano allo stesso stato, e non si distinguono da qui:
- * a non gridarti in faccia mentre sei sulla chat ci pensa il filtro in `#ring`.
- */
-function callFor(was: string, now: string): Call | null {
-  if (now === 'awaiting') return 'needsYou'
-  if (!WORKING.has(was)) return null
-  // Aprire una chat la porta da `starting` a `idle` senza che nessuno abbia fatto
-  // niente: chiamarti «ha finito» per una conversazione appena nata sarebbe la prima
-  // notifica falsa, e una notifica falsa insegna a spegnerle tutte.
-  if (now === 'idle') return was === 'starting' ? null : 'done'
-  if (now === 'closed' || now === 'error') return 'stopped'
-  return null
-}
-
-const HEAD: Record<Call, string> = {
-  needsYou: 'Needs you', done: 'Done', stopped: 'Stopped',
-}
+// `callFor` e `CALL_HEAD` stavano qui, e da qui sono passati in `$core/calls.ts`: la
+// stessa domanda ora se la pone anche il daemon, per mandare il push al telefono quando
+// questa pagina non esiste più. Tenerne due copie avrebbe voluto dire che un giorno il
+// telefono suona e il portatile no, e nessuno saprebbe quale dei due ha ragione.
 
 /** Cosa occupa l'area grande: la conversazione, o gli effetti al suo posto. */
 export type View = 'chat' | 'effects'
@@ -74,6 +58,9 @@ export class Store {
   readonly api = new Api(bootToken())
   /** Come vieni chiamato quando guardi altrove. Vedi `notify.svelte.ts`. */
   readonly calls = new Notifier()
+  /** Come vieni chiamato quando STARK non è nemmeno aperto: le notifiche le manda il
+   *  daemon, non la pagina. Vedi `push.svelte.ts` — è una cosa diversa da `calls`. */
+  readonly push = new PushPhone(() => this.api.authHeaders)
   /** Il tema, che è del dispositivo e non della macchina. Vedi `theme.svelte.ts`. */
   readonly theme = new Themer()
   /** La dimensione del testo, stesso motivo del tema. Vedi `textsize.svelte.ts`. */
@@ -204,7 +191,7 @@ export class Store {
       // sentire, e due corti che invece sì.
       if (this.project(r.cwd).muted) continue
       this.calls.call(kind, {
-        title: `${HEAD[kind]} · ${project(r.cwd)}`,
+        title: `${CALL_HEAD[kind]} · ${project(r.cwd)}`,
         // Il titolo dice *quale* lavoro, l'operazione dice *cosa* voleva fare: senza la
         // seconda riga «Needs you» costringe comunque ad aprire per sapere cosa vuole.
         body: r.doing ? `${r.title}\n${activityText(r.doing)}` : r.title,

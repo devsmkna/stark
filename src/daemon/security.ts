@@ -70,7 +70,7 @@ export function createGuard(port: () => number, dato?: string): Guard {
  * riconfigurata, dispositivo rinominato) serve un riavvio, esattamente come per la
  * porta o per il token.
  */
-function detectTailnetHost(): string | null {
+export function detectTailnetHost(): string | null {
   try {
     const j = JSON.parse(execFileSync('tailscale', ['status', '--json'], { timeout: 2000 }).toString())
     const dns = (j.Self?.DNSName as string | undefined)?.replace(/\.$/, '')

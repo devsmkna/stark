@@ -71,7 +71,10 @@ il daemon con il suo perimetro di sicurezza.
 vivo con turni richiudibili, casella di scrittura e Stop, permessi e domande nel blocco in
 basso, effetti nelle due letture con il confronto affiancato, modello e modalità che cambiano
 a caldo, nuova chat, import di conversazioni dal terminale, risveglio, rinomina, sleep,
-elimina. Restano fuori le **impostazioni** e le **notifiche di sistema**.
+elimina, impostazioni, e **notifiche**: suono e notifica di sistema mentre la pagina è
+aperta, e **push sul telefono** quando non lo è — quelle le manda il daemon, quindi arrivano
+a schermo spento. Su iPhone funzionano solo aggiungendo STARK alla schermata Home: è un
+limite di Safari, e l'interruttore lo dice invece di restare un bottone morto.
 
 Il disegno di tutte le schermate, con il perché di ogni scelta, sta in
 [`docs/ui-schermate.md`](docs/ui-schermate.md) e nell'anteprima
@@ -137,16 +140,17 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 | `npm run stark` | il daemon in primo piano (staccato: `stark:start`, vedi sopra) |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
-| `npm run check` | catena completa su eventi finti: 78 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 89 verifiche, **zero quota spesa** |
 | `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
-| `npm run daemon` | prova il daemon da capo a fondo: 24 verifiche, perimetro compreso |
+| `npm run daemon` | prova il daemon da capo a fondo: 25 verifiche, perimetro compreso (con `-- --reveal` una in più, che apre una finestra vera) |
 | `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
 | `npm run queue` | manda due prompt ravvicinati e verifica che restino due turni, in fila |
 | `npm run icons` · `python3 tools/gen-logo.py` | rigenerano icone e marchio dalle sorgenti |
+| `node tools/gen-app-icons.mjs` | rigenera l'icona dell'app (schermata Home) dal marchio |
 
 `npm run check` è quello da eseguire spesso: la risorsa scarsa è la quota, non i dollari, e
 un test che costa un turno di modello è un test che nessuno esegue.

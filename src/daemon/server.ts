@@ -11,6 +11,7 @@ import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
+import { Push, vigila, type Subscription } from './push.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -63,8 +64,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // adesso, mentre nessuno la sta aspettando.
   warmDiagnostics()
 
+  // Le notifiche sul telefono. Vive nel daemon e non nella pagina perché è **l'unico**
+  // posto da cui si può avvisare un telefono che non ti sta guardando: a schermo
+  // spento nella scheda del browser non gira niente. Senza iscrizioni non fa nulla e
+  // non costa nulla — vedi `push.ts`.
+  const push = new Push(STARK_HOME)
+  if (push.disponibile) vigila(registry, push)
+
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'])
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -90,7 +98,7 @@ async function route(
   guard: ReturnType<typeof createGuard>, registry: Registry, token: string,
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
-  port: () => number, configDir?: string,
+  port: () => number, configDir?: string, push?: Push,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -109,6 +117,51 @@ async function route(
 
   try {
     if (method === 'GET' && path === '/api/health') return send(res, 200, { ok: true })
+
+    // ─── notifiche sul telefono ──────────────────────────────────────────────
+    //
+    // Tre rotte e nient'altro: dire la chiave pubblica, prendere un'iscrizione,
+    // toglierla. Il resto lo fa `push.ts`. Stanno dietro lo stesso guard di tutto,
+    // quindi un'altra pagina non può iscrivere il proprio telefono alle notifiche
+    // di questo STARK.
+    if (path === '/api/push') {
+      if (!push?.disponibile) {
+        // Spento **con la spiegazione**, non nascosto: la UI ne fa una riga che dice
+        // cosa manca, invece di un interruttore che non fa niente.
+        return send(res, 200, { disponibile: false, motivo: 'web-push non è installato', iscritti: 0 })
+      }
+      if (method === 'GET') {
+        return send(res, 200, { disponibile: true, key: push.chiavePubblica, iscritti: push.quanti })
+      }
+    }
+    if (method === 'POST' && path === '/api/push/subscribe') {
+      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      const b = await readJson<Subscription>(req)
+      if (!b?.endpoint || !b.keys?.p256dh || !b.keys?.auth) {
+        return send(res, 400, { error: 'iscrizione incompleta' })
+      }
+      push.iscrivi(b)
+      return send(res, 200, { ok: true, iscritti: push.quanti })
+    }
+    if (method === 'POST' && path === '/api/push/unsubscribe') {
+      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      const b = await readJson<{ endpoint?: string }>(req)
+      if (!b?.endpoint) return send(res, 400, { error: 'endpoint obbligatorio' })
+      push.disiscrivi(b.endpoint)
+      return send(res, 200, { ok: true, iscritti: push.quanti })
+    }
+    // Provare **davvero** che arriva, senza aspettare la fine di un turno vero. Non è
+    // un lusso: fra il telefono e qui ci sono i server di Apple, la VAPID e la
+    // schermata Home, e senza un modo di provarlo si scopre che non funziona la prima
+    // volta che serviva.
+    if (method === 'POST' && path === '/api/push/test') {
+      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      await push.manda({
+        kind: 'done', title: 'STARK · prova',
+        body: 'Se leggi questo, le notifiche sul telefono funzionano.', sessionId: '',
+      })
+      return send(res, 200, { ok: true, iscritti: push.quanti })
+    }
 
     if (method === 'GET' && path === '/api/sessions') {
       return send(res, 200, { sessions: registry.list() })

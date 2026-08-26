@@ -27,6 +27,10 @@ const TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  // Il tipo giusto conta davvero qui: servito come `application/octet-stream` il
+  // manifest viene ignorato, e su iOS «Aggiungi alla schermata Home» è il passaggio
+  // senza il quale le notifiche push non esistono proprio.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 }
 
 export function uiIsBuilt(): boolean {
