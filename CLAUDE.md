@@ -614,6 +614,25 @@ cambia. Verificato nel browser vero: manifest col tipo giusto, `apple-touch-icon
 registrato su scope `/`, chiave VAPID servita. L'**iscrizione** vera no: headless non ha un
 servizio di push, quindi quel passo si prova solo dal telefono.
 
+**E anche le impostazioni sono due schermate da telefono** (26 agosto 2026): prima il menu delle
+sei sezioni, poi la sezione, con la freccia per tornare — la stessa idea di elenco e
+conversazione (§8 di `ui-schermate.md`), applicata dove mancava. Affiancate a 390px la colonna
+delle sezioni si prendeva 132px, un terzo dello schermo, per restare comunque stretta, e alla
+sezione ne restavano due terzi.
+Due cose che si scoprono solo facendolo. La prima: la X per chiudere sta nell'intestazione della
+colonna **di destra**, che sotto soglia è l'altra schermata — senza aggiungerne una al menu,
+quello sarebbe stato un vicolo cieco da cui si esce solo entrando in una sezione a caso. La
+seconda: `.via{display:none}` non bastava, perché `.dlgcol{display:flex}` è dichiarato **più in
+basso** nello stesso foglio e a parità di specificità vince l'ultima — la sezione restava
+visibile anche stando sul menu. Risolto con `.dlg .via`, un selettore in più invece di
+`!important`, che avrebbe nascosto il problema invece di risolverlo.
+Nello stesso giro l'evidenziazione della voce scelta sparisce sotto soglia: su schermo largo
+dice «è questa che stai guardando accanto», ma lì accanto non c'è niente e resterebbe un colore
+senza significato sulla riga da cui sei appena tornato. Al suo posto un chevron, che dice che la
+riga **apre** invece di selezionare. Verificato a 320, 390 e 1400px: menu da solo → sezione da
+sola con la freccia → ritorno, chiudibile da entrambe, e desktop invariato (due colonne insieme,
+nessuna freccia).
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).

@@ -409,6 +409,28 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .snav{width:132px;flex:none;border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:1px;background:var(--surface)}
 .sn{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;font-size:11px;color:var(--ink-2)}
 .sn.on{background:var(--surface-3);color:var(--ink);font-weight:600}
+/* Le impostazioni sotto gli 860px: due colonne diventano **due schermate**, la stessa
+   idea dell'elenco e della conversazione. `.via` è quella che in questo momento non si
+   sta guardando — vedi Settings.svelte per quale delle due e quando.
+   `width:auto` e `flex:1` insieme: senza il primo il menu resterebbe largo 132px con
+   mezzo schermo vuoto accanto, e senza il secondo non prenderebbe l'altezza. */
+@media (max-width: 860px) {
+  .snav{width:auto;flex:1;border-right:0;padding:0 0 8px}
+  .snav .navh{margin-bottom:6px}
+  /* Righe da toccare, non da cliccare: il menu è l'unica cosa a schermo, quindi lo
+     spazio per farle alte c'è, e il dito non ha la precisione del puntatore. */
+  .snav .sn{padding:10px 12px;font-size:12px;border-radius:0}
+  .snav .sn .chev{margin-left:auto;color:var(--muted);font-size:15px;line-height:1}
+  /* La selezione non si evidenzia più: su schermo largo dice «è questa che stai
+     guardando accanto», qui accanto non c'è niente e resterebbe un colore senza
+     significato sulla riga da cui sei appena tornato. */
+  .snav .sn.on{background:none;color:var(--ink-2);font-weight:400}
+  /* `.dlg .via` e non `.via`: `.dlgcol{display:flex}` è dichiarato più in basso in
+     questo stesso foglio, e a parità di specificità vincerebbe l'ultima — la sezione
+     resterebbe visibile anche stando sul menu. Un selettore in più la supera senza
+     ricorrere a `!important`, che nasconderebbe il problema invece di risolverlo. */
+  .dlg .via{display:none}
+}
 .prow{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line)}
 .prow:last-child{border-bottom:0}
 .prow .pn{font-size:11px;color:var(--ink);font-weight:500}

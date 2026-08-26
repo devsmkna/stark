@@ -22,6 +22,10 @@
 
   type Sezione = 'permissions' | 'projects' | 'notifications' | 'appearance' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
+  /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
+   *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
+   *  entrare in una stanza senza aver visto la casa. */
+  let dentro = $state(false)
 
   const SEZIONI: { id: Sezione; nome: string; icona: string }[] = [
     { id: 'permissions', nome: 'Permissions', icona: 'i-shield' },
@@ -119,17 +123,43 @@
 </script>
 
 <div class="scrim" role="presentation" onclick={() => { store.dialog = null }}></div>
+<!-- Su schermo stretto le due colonne diventano **due schermate**, come l'elenco e la
+     conversazione (§8 di ui-schermate.md): prima il menu, poi la sezione, con la freccia
+     per tornare. Affiancate a 390px l'elenco si prendeva un terzo della larghezza per
+     restare comunque illeggibile, e alla sezione ne restavano due terzi.
+     `dentro` vale solo lì: su schermo largo le due colonne si vedono insieme, e questa
+     variabile non tocca niente. -->
 <div class="dlg wide">
-  <div class="snav">
+  <div class="snav" class:via={store.narrow && dentro}>
+    <!-- La X sta nell'intestazione della colonna di destra, che qui è l'altra
+         schermata: senza questa, il menu sarebbe un vicolo cieco da cui si esce solo
+         entrando in una sezione qualsiasi. -->
+    {#if store.narrow}
+      <div class="dlgh navh">
+        <div class="dt">Settings</div>
+        <button class="x" aria-label="Close" onclick={() => { store.dialog = null }}>
+          <Icon name="i-x" />
+        </button>
+      </div>
+    {/if}
     {#each SEZIONI as s (s.id)}
-      <button class="sn" class:on={sez === s.id} onclick={() => { sez = s.id }}>
+      <button class="sn" class:on={!store.narrow && sez === s.id}
+        onclick={() => { sez = s.id; dentro = true }}>
         <Icon name={s.icona} /> {s.nome}
+        <!-- Il segno che la riga **apre** qualcosa invece di selezionarlo: su schermo
+             largo la selezione si vede dallo sfondo, qui la sezione non è accanto. -->
+        {#if store.narrow}<span class="chev">›</span>{/if}
       </button>
     {/each}
   </div>
 
-  <div class="dlgcol">
+  <div class="dlgcol" class:via={store.narrow && !dentro}>
     <div class="dlgh">
+      {#if store.narrow}
+        <button class="iconb" aria-label="Back to settings" onclick={() => { dentro = false }}>
+          <Icon name="i-back" />
+        </button>
+      {/if}
       <div class="dt">{SEZIONI.find(s => s.id === sez)?.nome}</div>
       <button class="x" aria-label="Close" onclick={() => { store.dialog = null }}>
         <Icon name="i-x" />
