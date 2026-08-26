@@ -430,6 +430,31 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
      resterebbe visibile anche stando sul menu. Un selettore in più la supera senza
      ricorrere a `!important`, che nasconderebbe il problema invece di risolverlo. */
   .dlg .via{display:none}
+
+  /* Il pannellino del contesto si apre **dove si aprono gli altri**: ancorato al blocco
+     in basso, non al proprio bottone. Da solo si apriva ancora attaccato alla
+     percentuale, cioè in un punto diverso dalle tre tendine accanto — e largo 220px
+     fissi, che a 320px sfonda. Stessa cura: `.ctx` a `static` perché lo sticky del
+     posizionamento assoluto salga fino a `.dock`, e larghezza dai due bordi invece che
+     dichiarata. */
+  .status .ctx{position:static}
+  .status .tip{
+    left:12px; right:12px; width:auto; bottom:calc(100% + 8px);
+    max-height:60vh; overflow-y:auto;
+  }
+  /* Più aria ai lati: in un'app della schermata Home non c'è la cornice del browser
+     attorno, e i chip finivano incollati al vetro. `env(safe-area-inset-*)` è quanto
+     iOS chiede di stare lontani da notch e angoli arrotondati; `max()` fa sì che in una
+     scheda normale, dove quegli inset sono zero, resti comunque il margine nostro. */
+  .status{
+    padding-left:max(16px, env(safe-area-inset-left));
+    padding-right:max(16px, env(safe-area-inset-right));
+  }
+  .input{margin-left:max(16px, env(safe-area-inset-left));margin-right:max(16px, env(safe-area-inset-right))}
+  /* E sotto: la barra del gesto «home» si mangia l'ultimo mezzo centimetro dello
+     schermo, e senza questo il blocco ci finisce sotto. In Safari l'inset è zero e non
+     cambia niente. */
+  .dock{padding-bottom:env(safe-area-inset-bottom)}
 }
 .prow{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line)}
 .prow:last-child{border-bottom:0}

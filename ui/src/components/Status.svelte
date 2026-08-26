@@ -354,11 +354,25 @@
         <div class="tr"><span>Context window</span>
           <b>{pct !== null ? `${pct}%` : '—'}</b></div>
         {#if contextWindow}
-          <div class="segbar">
-            {#each segments as s (s.label)}
-              <i style="width:{s.pct}%;background:{s.colour}" title="{s.label}: {fmt(s.n)}"></i>
-            {/each}
-          </div>
+          <!-- Da telefono la scomposizione per categoria non si mostra: sono sei o sette
+               voci con numeri piccoli, e su una colonna larga un dito diventano un muro
+               proprio dentro il pannellino che dovrebbe dire **una** cosa. Resta il
+               valore complessivo — la percentuale sopra e i token qui sotto — che è
+               quello per cui il pannellino si apre. Su schermo largo le categorie
+               restano: là lo spazio c'è, e sapere *cosa* riempie il contesto è la
+               ragione per cui sono state messe (sono quelle vere di Claude Code, non un
+               conto nostro). -->
+          {#if !store.narrow}
+            <div class="segbar">
+              {#each segments as s (s.label)}
+                <i style="width:{s.pct}%;background:{s.colour}" title="{s.label}: {fmt(s.n)}"></i>
+              {/each}
+            </div>
+          {:else}
+            <!-- Una barra sola, come quelle delle finestre del piano qui sotto: dice
+                 quanto è pieno senza dire di cosa. -->
+            <div class="meter"><i style="width:{Math.min(100, pct ?? 0)}%;background:var(--accent)"></i></div>
+          {/if}
           <div class="tr">
             <!-- «Right now» quando la fonte è `getContextUsage()` (è una domanda fatta
                  apposta, non un residuo dell'ultimo turno); «last turn» nel ripiego
@@ -366,11 +380,13 @@
             <small>{fmt(totalNow)} of {fmt(contextWindow)} tokens
               {ctx ? '· right now' : '· last turn'}</small>
           </div>
-          <div class="seglegend">
-            {#each segments as s (s.label)}
-              <span><i style="background:{s.colour}"></i>{s.label} {fmt(s.n)}</span>
-            {/each}
-          </div>
+          {#if !store.narrow}
+            <div class="seglegend">
+              {#each segments as s (s.label)}
+                <span><i style="background:{s.colour}"></i>{s.label} {fmt(s.n)}</span>
+              {/each}
+            </div>
+          {/if}
         {:else}
           <div class="tr"><small>This chat predates the context-window field —
             showing raw tokens only.</small></div>

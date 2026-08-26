@@ -680,6 +680,26 @@ Riprodotto il caso esatto dello screenshot (solo cookie, memoria svuotata): prim
 adesso la UI parte e carica le chat. E senza **nessuna** credenziale la pagina non arriva
 comunque, perché il 403 scatta prima, al confine.
 
+**Il pannellino del contesto, e l'aria attorno alla barra** (26 agosto 2026, chiesto da
+telefono). Tre cose in un giro solo. Il pannellino si apriva ancora ancorato al **proprio**
+bottone, cioè in un punto diverso dalle tre tendine accanto che erano già state spostate sul
+blocco — e largo 220px fissi, che a 320px sfondano. Stessa cura delle altre: `.ctx` a `static`
+perché l'ancoraggio salga fino a `.dock`, e larghezza dai due bordi invece che dichiarata.
+Misurato: `left`, `right` e `bottom` **identici** a quelli della tendina della modalità.
+Dentro, la scomposizione per categoria sparisce sotto soglia: sei o sette voci con numeri
+piccoli sono un muro dentro un pannellino che deve dire **una** cosa. Resta il valore
+complessivo — percentuale, una barra sola come quelle delle finestre del piano, e i token. Su
+schermo largo le categorie **restano**: là lo spazio c'è, e sapere *cosa* riempie il contesto è
+la ragione per cui erano state messe (sono quelle vere di Claude Code). Verificato che a 1400px
+ci siano ancora tutte e sette.
+E l'aria ai lati: in un'app della schermata Home non c'è la cornice del browser attorno, e i
+chip finivano incollati al vetro. Padding a 16px sotto soglia, ma scritto
+`max(16px, env(safe-area-inset-*))`: `env()` è quanto iOS chiede di stare lontani da notch e
+angoli, e `max()` fa sì che in una scheda normale — dove quegli inset sono zero — resti comunque
+il margine nostro. Sul fondo `padding-bottom: env(safe-area-inset-bottom)` sul `.dock`, perché
+la barra del gesto «home» si mangia l'ultimo mezzo centimetro e senza quello il blocco ci
+finisce sotto. In Safari l'inset è zero e non cambia niente.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
