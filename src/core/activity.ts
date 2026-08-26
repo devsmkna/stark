@@ -12,8 +12,9 @@
 import type { SessionSnapshot } from './reduce.ts'
 
 export type Activity =
-  /** Un tool aperto: è il caso normale, ed è quello che si vuole leggere. */
-  | { kind: 'tool'; name: string; summary?: string; from: number }
+  /** Un tool aperto: è il caso normale, ed è quello che si vuole leggere. `intent` è
+   *  la motivazione scritta dall'agent stesso, quando c'è (F2) — vedi `summary.ts`. */
+  | { kind: 'tool'; name: string; summary?: string; intent?: string; from: number }
   /** Sta scrivendo la risposta. */
   | { kind: 'writing'; from: number }
   /** Sta ragionando. */
@@ -37,6 +38,7 @@ export function activity(s: SessionSnapshot): Activity | null {
       return {
         kind: 'tool', name: p.name, from: p.startedAt,
         ...(p.summary !== undefined ? { summary: p.summary } : {}),
+        ...(p.intent !== undefined ? { intent: p.intent } : {}),
       }
     }
     if (p.kind === 'text' && p.open) return { kind: 'writing', from: t.startedAt }

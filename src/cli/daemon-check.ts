@@ -4,6 +4,7 @@
 
 import { mkdirSync } from 'node:fs'
 import { connect } from 'node:net'
+import { resolve } from 'node:path'
 import { startDaemon } from '../daemon/server.ts'
 import type { CanonicalEvent } from '../core/events.ts'
 
@@ -54,6 +55,70 @@ check('Host locale con token → 200',
 check('token giusto → 200', (await fetch(`${url}/api/sessions`, { headers: auth })).status === 200)
 check('Origin nostro → 200',
   (await fetch(`${url}/api/sessions`, { headers: { ...auth, origin: url } })).status === 200)
+
+// ─── F3: arrivare a un file citato in chat ──────────────────────────────────
+//
+// Costa zero quota: è una rotta di sistema, non un turno. Sta dietro le stesse
+// quattro difese di ogni altra — provato qui, non dedotto dal fatto che `route()`
+// gira per tutte allo stesso modo.
+check('senza token → 403 anche per /api/reveal',
+  (await fetch(`${url}/api/reveal`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: import.meta.url }),
+  })).status === 403)
+const rivelaSenzaPath = await fetch(`${url}/api/reveal`, {
+  method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}',
+})
+check('senza `path` → 400', rivelaSenzaPath.status === 400, String(rivelaSenzaPath.status))
+const rivelaSconosciuto = await fetch(`${url}/api/reveal`, {
+  method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+  body: JSON.stringify({ path: '/non/esiste/davvero.txt' }),
+})
+const corpoSconosciuto = await rivelaSconosciuto.json() as { ok: boolean; error?: string }
+check('un file che non c\'è → 404, non un\'eccezione',
+  rivelaSconosciuto.status === 404 && corpoSconosciuto.ok === false,
+  `${rivelaSconosciuto.status} ${JSON.stringify(corpoSconosciuto)}`)
+// Un file vero di questo repo: prova che il comando di sistema gira davvero sulla
+// macchina che sta eseguendo la verifica, non solo che il codice compila.
+const rivelaVero = await fetch(`${url}/api/reveal`, {
+  method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+  body: JSON.stringify({ path: resolve('package.json') }),
+})
+const corpoVero = await rivelaVero.json() as { ok: boolean; error?: string }
+check('un file vero del repo si rivela sul serio',
+  rivelaVero.status === 200 && corpoVero.ok === true,
+  `${rivelaVero.status} ${JSON.stringify(corpoVero)}`)
+
+// ─── F1: aprire un link con la sua app ──────────────────────────────────────
+//
+// Solo il perimetro qui: `serviceFor` rifiuta prima ancora di controllare se
+// l'app c'è, quindi queste prove non toccano il filesystem né lanciano niente.
+// Il lancio vero — «l'app si apre davvero sulla pagina giusta» — non è
+// automatizzabile senza far comparire Notion sullo schermo di chi esegue
+// `npm run daemon`: provato dal vivo il 26 agosto 2026, con conferma dell'utente
+// che la pagina giusta si è aperta due volte su due (vedi Notion, F1).
+check('senza `url`/`scheme` → 400',
+  (await fetch(`${url}/api/open-app`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}',
+  })).status === 400)
+check('schema sconosciuto → 400, non un tentativo di lancio',
+  (await fetch(`${url}/api/open-app`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://notion.so/qualcosa', scheme: 'zzz-mai-sentito' }),
+  })).status === 400)
+check('dominio che non appartiene allo schema dichiarato → 400',
+  (await fetch(`${url}/api/open-app`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    // Un client che chiedesse di aprire un dominio qualunque spacciandolo per
+    // Notion non deve poterlo fare: il daemon ricontrolla da sé, non si fida
+    // di ciò che il client dichiara.
+    body: JSON.stringify({ url: 'https://sito-cattivo.example', scheme: 'notion' }),
+  })).status === 400)
+check('un url malformato → 400, non un\'eccezione che porta giù la richiesta',
+  (await fetch(`${url}/api/open-app`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'not-a-url', scheme: 'notion' }),
+  })).status === 400)
 
 // ─── una sessione che non parte ─────────────────────────────────────────────
 

@@ -92,8 +92,9 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 48 verifiche sulla catena, costo zero di quota |
-| `npm run daemon` | 16 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
+| `npm run check` | 71 verifiche sulla catena, costo zero di quota |
+| `npm run daemon` | 24 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
+| `npm run queue` | la fila dei prompt, dal vivo: due prompt ravvicinati restano due turni |
 
 ---
 
@@ -272,9 +273,24 @@ dell'agent e «chi rifiuta `bypassPermissions` e perché» lo sa solo l'adapter.
 vecchio gli elenchi sono vuoti: le modalità si mostrano lo stesso (sono canoniche), il chip del
 modello no.
 
-**Niente percentuale di contesto inventata.** Lo snapshot non sa quanto della finestra resta:
-si mostrano i token passati di qui e, quando `quota.updated` è arrivato, quando la finestra si
-riapre. Su una chat importata `usage` è vuoto e si sommano i turni.
+**Il pannellino della quota dice tre cose, e sono tre domande diverse** *(26 agosto 2026)*:
+quanto **contesto** ha in mano questa chat, quanto hai consumato della finestra da **5 ore**,
+quanto della **settimana** — più le settimane ristrette a un modello, se il piano ne manda.
+
+Le prime due righe non si possono sommare qui: il contesto è della conversazione, la quota è del
+**piano**, e la consumano anche le altre chat e l'altra macchina. Per questo il livello si
+**chiede** (`quota.windows`, vedi §10 del modello di eventi) invece di dedurlo dai token, e per
+questo la lettura porta l'ora: aperto su una chat che dorme, il pannellino dice «letto 40m fa»
+invece di far passare per attuale una fotografia vecchia. Si rilegge da solo quando lo apri, non
+più di una volta ogni quindici secondi.
+
+Il reset è scritto **nei due formati** — «fra 6d 12h · Sep 01 23:00» — perché le due domande sono
+diverse: quanto manca dice se conviene aspettare, quando esattamente dice se conviene rimandare a
+domani mattina. Su un'attesa di giorni la prima da sola non basta a decidere.
+
+Su una chat importata `usage` è vuoto e si sommano i turni; su un journal scritto prima che STARK
+sapesse chiedere il livello, le due righe dicono che non lo sanno — mai una barra a zero, che si
+leggerebbe come «non hai consumato niente».
 
 ### 5.5 Nuova chat, import, risveglio, menu contestuale
 

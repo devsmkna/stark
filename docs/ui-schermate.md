@@ -81,7 +81,8 @@ Le due conseguenze che hanno deciso la scelta:
 - **Sotto la casella una barra di stato**: a sinistra modalità, **strumenti esterni**, cartella e
   branch; a destra modello
   e percentuale di contesto. La percentuale, al passaggio del mouse, apre un pannellino con
-  contesto, sessione corrente e settimana, e quando si azzerano le ultime due.
+  contesto, sessione corrente e settimana, e quando si azzerano le ultime due — **nei due
+  formati**: fra quanto, e a che ora esattamente.
 - **Gli effetti prendono il posto della conversazione**, con una freccia per tornare, e un
   interruttore compatto fra due letture: **per file** (blocchi che si aprono, stile pull request)
   e **in ordine di tempo** (comandi e singole modifiche in sequenza, quindi lo stesso file tre
@@ -408,6 +409,131 @@ soltanto.
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
 
+### Scrivere mentre l'agent lavora
+
+Corretto il **26 agosto 2026**. La casella non si blocca quando l'agent sta lavorando — nel CLI
+non si blocca, quindi qui nemmeno (Principio 5). Quello che cambia è dove finisce quel messaggio:
+**apre un turno suo e si mette in fila**, e parte quando il precedente ha finito. In ordine, uno
+alla volta.
+
+- **nella conversazione si vede aspettare**: il blocco c'è già, bordato d'ambra, con scritto
+  «queued — waiting its turn». Il prompt è un fatto appena l'hai mandato, non appena l'agent lo
+  guarda — quindi si mostra subito.
+- **prima finiva dentro il turno in corso**, e la risposta al primo prompt compariva nel blocco
+  del secondo: due domande diventavano un pastone illeggibile. Il perché di quell'errore e come
+  è stato smontato stanno nel modello di eventi (§7): vale la pena leggerlo, perché la premessa
+  sbagliata sembrava un limite della piattaforma.
+- **Stop ferma tutto, fila compresa.** Chi preme il quadrato rosso vuole che la macchina si
+  fermi; se il prossimo partisse mezzo secondo dopo, tre prompt in coda vorrebbero quattro Stop.
+  I turni che non gireranno restano nella conversazione, chiusi come interrotti — spariti
+  sarebbero peggio: hai scritto qualcosa, e dov'è finito deve vedersi.
+- **fra un turno e il successivo la chat non si dichiara ferma.** Sembra un dettaglio: è lo
+  stato su cui suona la notifica «ha finito», e suonerebbe a metà lavoro.
+
+### Perché un comando è stato lanciato, non solo quale
+
+Fatto il **26 agosto 2026** (F2, Notion). La riga di un tool mostrava il soggetto nudo —
+`grep -rn "summary" src/adapters/` — e chi guardava doveva dedurre da solo cosa l'agent stesse
+cercando. Ora, quando l'agent ha scritto perché, è quella la riga: **«Search for summarize
+definition»** invece del comando. È il principio fondante applicato al posto più frequente del
+flusso — un terminale mostra il comando perché non ha altro da mostrare, una GUI può mostrare
+l'intenzione.
+
+- **il comando non sparisce**: resta nel tooltip al passaggio del mouse, e per intero — con la
+  motivazione accanto — aprendo la riga, come sempre. Non è mai a più di un tocco.
+- **non è STARK a inventarla.** È testo che l'agent scrive già da sé in un campo `description`
+  del tool, e prima veniva buttato via. Generarla con un modello sarebbe costata quota su ogni
+  comando di ogni turno — la risorsa scarsa — quindi non si fa: se l'agent non l'ha scritta, la
+  riga torna quella di sempre.
+- **dipende dal modello.** Verificato dal vivo, non dedotto dallo schema: con Opus arriva quasi
+  sempre, con Sonnet su un comando breve spesso manca. Nessun problema quando manca — è il caso
+  già gestito — ma è la ragione per cui questa riga non compare identica su ogni sessione.
+- **vale anche nella riga «cosa sta facendo adesso»**, sotto la casella e nell'elenco: è lì che
+  conta di più, mentre l'agent lavora e il comando scorre via.
+
+### Arrivare a un file citato, non solo leggerne il percorso
+
+Fatto il **26 agosto 2026** (F3, Notion). Un piccolo bottone «cartella aperta» compare accanto
+alla riga di un tool che nomina un file (`Read`, `Edit`, `Write`, …) e accanto al blocco di un
+file modificato: apre il gestore di file della macchina sulla cartella giusta, **col file
+selezionato**. È la versione minima che la specifica sancisce come sufficiente — non serve che
+STARK sappia qual è l'editor preferito, basta arrivarci.
+
+- **non sostituisce il clic esistente.** Il blocco di un file modificato si apre ancora sul
+  confronto affiancato, come sempre: il bottone nuovo è un secondo bottone, attaccato di fianco,
+  non un rimpiazzo — un bottone dentro un bottone non è nemmeno HTML valido.
+- **solo dove STARK sa già che è un percorso.** `file_path`, `path`, `notebook_path`: gli stessi
+  campi che il riassunto del tool riconosce già (`summary.ts`). Non scandaglia il testo libero
+  della risposta in cerca di qualcosa che somiglia a un percorso — riconoscere un percorso in
+  Markdown non fidato è un problema diverso, e più fragile.
+- **su WSL2 apre Explorer di Windows**, col percorso tradotto da `wslpath` — funziona sia per un
+  repo su `/mnt/…` sia per uno nativo, verificato su entrambe le forme. Su macOS apre Finder. Su
+  Linux nativo usa Nautilus se c'è, altrimenti apre la cartella (senza garanzia di selezione: non
+  esiste un comando universale per «seleziona» su ogni gestore file Linux) — quest'ultimo ramo
+  non è verificato dal vivo, le due macchine reali sono entrambe WSL2.
+- **non allarga il perimetro** — il daemon esegue già comandi come root — ma sta dietro le stesse
+  quattro difese di ogni altra rotta (`POST /api/reveal`, token, `Origin`, `Host`, loopback):
+  provato, non dato per scontato solo perché passa dallo stesso `route()`.
+
+### Aprire un link con la sua app, non solo nel browser
+
+Fatto il **26 agosto 2026** (F1, Notion). Un link riconosciuto — oggi solo verso Notion — porta
+accanto un piccolo bottone **«Open in Notion»**. Il link resta quello che era, clic normale,
+scheda nuova: il bottone è la seconda via, non un rimpiazzo — decisione dell'utente, non dedotta,
+perché la prima proposta (riscrivere il link stesso) rischiava di sorprendere chi si aspettava il
+browser.
+
+- **l'app non c'è? Lo dice, non fallisce in silenzio.** Windows non avvisa chi lancia un
+  protocollo non registrato — fallisce muto, o mostra un dialogo di sistema che STARK non vede.
+  Per questo si controlla nel registro **prima** di tentare (`HKCR\<schema>` su WSL,
+  `xdg-mime query` su Linux), non dopo: verificato dal vivo, non dedotto dallo schema di un URL.
+- **verificato per davvero**, non solo per esito HTTP: il link cliccato nella UI vera ha aperto la
+  pagina Notion giusta — provato due volte, con conferma diretta di cosa si è visto sullo schermo,
+  perché è l'unica cosa che STARK non può controllare da sé.
+- **su WSL2 (le due macchine reali) passa da Windows**, non da un browser Linux che non c'è:
+  `cmd.exe /c start` con l'URL tradotto nello schema dell'app, dalla cartella di sistema di
+  Windows — lanciarlo dalla cartella del daemon (un percorso WSL) fallisce, verificato dal vivo.
+- **il perimetro non si fida del client.** La rotta (`POST /api/open-app`) ricontrolla da sé che
+  il dominio dell'URL appartenga davvero al servizio dichiarato: un client che chiedesse di aprire
+  un sito qualunque spacciandolo per Notion non deve poterlo fare.
+- **un servizio alla volta.** Solo Notion per ora — è l'unico verificato — non un elenco di domini
+  indovinati. Aggiungerne un altro è un'aggiunta a `core/services.ts`, non un redesign.
+
+### Due rifiniture del 26 agosto, in serata
+
+**Il blocco del prompt è blu-azzurro** (`--user`/`--user-bg`, distinto sia da `--accent`, indaco,
+sia da `--work`, il blu di stato): scorrendo una conversazione lunga, ogni turno inizia con una
+riga colorata che salta all'occhio senza doverla leggere — è dove hai chiesto qualcosa, e da lì
+riparte quello che segue. Vale sia chiuso sia aperto: anche il turno che si sta leggendo deve
+restare riconoscibile come tale.
+
+**La riga di un tool con una motivazione (F2) mostra prima quella, il comando dopo e più
+piccolo.** Prima il comando esatto stava solo in un tooltip — bisognava sapere che c'era per
+andarlo a cercare. Ora, quando l'agent ha scritto perché, la riga diventa due: sopra il nome del
+tool e la motivazione, sotto — piccolo, monospace, mai il soggetto della riga — il comando o il
+percorso esatto. Senza motivazione la riga resta esattamente com'era, una sola linea: la
+struttura a due righe esiste solo per chi ne ha bisogno.
+
+### Quanto ne resta
+
+Fatto il **26 agosto 2026**. Il pannellino sotto la percentuale di contesto dice **tre cose, e
+sono tre domande diverse**: quanto contesto ha in mano *questa* chat, quanto hai consumato della
+finestra da **5 ore**, quanto della **settimana**. Sotto la settimana, rientrate, le finestre che
+il piano tiene separate per modello, quando ce ne sono.
+
+- **contesto e quota non stanno sulla stessa scala.** Il contesto è della conversazione e si
+  legge dai token; la quota è del **piano**, e la consumano anche le altre chat e l'altra
+  macchina. Sommarli qui darebbe un numero che non esiste da nessuna parte: il livello si chiede
+  al piano, e si dice **quando** è stato letto.
+- **il reset è scritto due volte**: «fra 6d 12h» e «Sep 01 23:00». Non è ridondanza — la prima
+  dice se conviene aspettare, la seconda se conviene rimandare a domani mattina, e su un'attesa
+  di giorni la prima da sola non basta per decidere.
+- **niente barra a zero quando non si sa.** Una finestra che il piano non riporta lo dice a
+  parole: uno zero disegnato si leggerebbe come «non hai consumato niente», che è l'opposto.
+- **quello che c'era prima è uscito.** «This chat, total» ripeteva in un altro modo il numero già
+  scritto sopra, e la riga degli eventi era diagnostica. Il pannellino si apre di sfuggita,
+  mentre si sta scrivendo: tre voci si leggono, sei si guardano soltanto.
+
 ### Quando il contesto si riassume
 
 Deciso implementando il 24 agosto 2026. Una conversazione lunga prima o poi **compatta**: il
@@ -530,7 +656,10 @@ Dove compare:
   progetto già visto il profilo è deciso, e si mostra senza chiederlo
 - in **System**, in sola lettura: quali profili esistono sulla macchina, con quante
   conversazioni e quanti MCP ciascuno
-- nel pannellino della quota, che dice **su quale profilo** sta contando
+- nel pannellino della quota, che dovrà dire **su quale profilo** sta contando — disegnato,
+  **non ancora fatto**: oggi quel pannellino dice le tre voci (contesto, 5 ore, settimana) e
+  tace su quale profilo le sta contando, che è un'informazione che manca proprio quando i
+  profili sono due
 
 Puntare un progetto al profilo sbagliato è il modo più confondente in cui questa cosa può
 rompersi: l'agent non trova nessuna conversazione da riprendere e forse nemmeno il login, con

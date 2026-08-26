@@ -305,20 +305,57 @@ quindi non passa dal `POST /command` del §18, che risponderebbe «sessione non 
 
 | { k: 'tool.started',      callId: string, name: string }
 | { k: 'tool.input.delta',  callId: string, delta: string }
-| { k: 'tool.input.ended',  callId: string, input: unknown, summary?: string }
+| { k: 'tool.input.ended',  callId: string, input: unknown, summary?: string, intent?: string }
 | { k: 'tool.ended',        callId: string, ok: boolean, output?: unknown, error?: string }
 ```
 
-`turn.promptAdded` esiste perché un turno non finisce quando smette di aspettare — finisce quando
-l'agent lo dice (`turn.ended`, dall'evento `result` dell'SDK). Un prompt mandato mentre `turnId`
-non ha ancora ricevuto `turn.ended` non apre un secondo turno: verificato nei tipi ufficiali
-dell'Agent SDK, non supposto — un messaggio arrivato a metà viene **"coalesced into one turn"**,
-e un uuid così **"folded"** dentro **"never runs as its own turn"**. STARK apriva un turno a testa
-per ogni `prompt()`, e quando il vero turno finiva chiudeva (`turn.ended`) qualunque `turnId`
-fosse l'ultimo aperto — gli altri restavano orfani per sempre, con zero parti e nessuna chiusura:
-esattamente il fantasma che l'invariante del §4 non dovrebbe produrre. Non è un evento
-"cosmetico": senza, l'elenco dei turni di una sessione con più di un messaggio ravvicinato mente
-su quale ha lavorato davvero.
+### Un prompt mandato mentre l'agent lavora: **fa la fila**
+
+*Corretto il 26 agosto 2026, misurando.* Un turno non finisce quando smette di aspettare —
+finisce quando l'agent lo dice (`turn.ended`, dall'evento `result` dell'SDK). La domanda è cosa
+succede a un prompt mandato prima di allora, e per un giorno STARK ha risposto male.
+
+**Come rispondeva.** Il prompt veniva *piegato* dentro il turno in corso (`turn.promptAdded`) e
+consegnato subito all'agent. La motivazione stava scritta, e veniva dai tipi ufficiali dell'Agent
+SDK: un messaggio arrivato a metà viene **"coalesced into one turn"**, e un uuid così **"folded"**
+dentro **"never runs as its own turn"**. Sembrava un limite della piattaforma.
+
+**Cos'era davvero.** Quelle parole descrivono cosa fa il CLI con **un lotto di messaggi che gli
+arrivano mentre lavora**: li accoda e, quando drena, li fonde in un turno solo. Non dicono che un
+secondo prompt *non possa* essere un turno a sé — dicono cosa succede se glieli consegni tutti
+insieme. Era di nuovo la trappola del progetto: **un'assenza osservata in una configurazione
+presa per un'assenza in generale**.
+
+E costava. Il secondo prompt non apriva un turno, ma il suo lavoro arrivava lo stesso: parti,
+tool e risposta finivano appiccicati al turno di prima — che nel frattempo risultava già chiuso —
+e il `result` del secondo giro non chiudeva niente, perché per il traduttore non c'era più nessun
+turno aperto. Due domande diventavano un blocco solo, illeggibile.
+
+**Come risponde adesso.** La fila è di STARK, non del CLI:
+
+1. `prompt()` con qualcosa in volo → `turn.started` **subito** (è un fatto: l'utente l'ha
+   mandato), e il messaggio resta nell'adapter. L'agent non lo vede.
+2. Il turno in corso finisce → si consegna il **primo** della fila, **uno solo**. A sessione
+   ferma e uno alla volta non c'è nessun lotto da fondere, quindi un turno di STARK resta uguale
+   a un turno dell'agent.
+3. Finché la fila non è vuota, l'`idle` che chiude un turno **non viene emesso**: durerebbe un
+   decimo di secondo, ma è lo stato su cui suona la notifica «ha finito».
+
+Misurato, non dedotto: secondo prompt mandato dopo 4 s su un turno lungo dodici →
+`turn.started`(1), `turn.started`(2), … `turn.ended`(1) `completed`, … `turn.ended`(2)
+`completed`, `idle`. In ordine, e con l'ordine c'è l'unica garanzia che conta: **FIFO**.
+
+**Stop svuota la fila.** Chi preme il quadrato rosso vuole che la macchina si fermi, non che
+parta il prossimo mezzo secondo dopo; tre prompt in coda vorrebbero altrimenti quattro Stop. I
+turni che non gireranno vengono chiusi con `reason: 'aborted'` — un turno aperto che non riceverà
+mai eventi è la cosa peggiore da lasciare in un journal, perché alla rilettura resta «in attesa»
+per sempre (§4). Nella stessa passata: il turno **interrotto dall'utente** torna dall'SDK come
+`is_error`, e STARK lo raccontava come `error`; adesso, e solo quando lo Stop è arrivato da noi,
+è `aborted`. Dal messaggio non si distingue: l'unico che lo sa è chi ha ricevuto il comando.
+
+`turn.promptAdded` resta nel vocabolario e nel reducer — i journal scritti prima di oggi ne
+contengono — ma **non lo produce più nessuno**. Tornerà il giorno in cui STARK offrirà di
+*guidare* il turno in corso invece di accodarsi: è un gesto diverso, e va chiesto.
 
 Su `reasoning.delta`: Claude Code emette il testo del ragionamento nei `content_block_delta` dei
 blocchi `thinking`, **e in più** un evento `system:thinking_tokens` con `estimated_tokens` ed
@@ -333,6 +370,23 @@ dall'adapter, che è esattamente ciò che il §1 vieta. La conoscenza non è spa
 ma è tornata dalla parte giusta del confine (`adapters/claude-code/summary.ts`). È opzionale
 perché i journal scritti prima non ce l'hanno: là la UI mostra `inputRaw` troncato, che è ciò
 che ha, senza interpretarlo.
+
+`intent` è **perché**, non **cosa** — F2 (Notion, aggiunta il 26 agosto 2026). Prima la riga di
+un tool mostrava il soggetto nudo: `grep -rn "summary" src/adapters/`, e chi guardava doveva
+dedurre da solo cosa si stesse cercando. Non è STARK a scriverla, e non poteva esserlo: un LLM
+che spiega ogni comando costerebbe quota su ogni tool di ogni turno, la risorsa scarsa. È testo
+che l'agent scrive già da sé — `description` in `BashInput`, dai tipi ufficiali dell'SDK — e
+prima veniva buttato via. Verificato su una cattura vera prima di scriverlo (265 chiamate `Bash`
+reali nei propri journal, non dedotto dallo schema soltanto): il campo arriva, ma **non sempre**
+— dipende dal modello. Con Opus è quasi costante; con Sonnet, su comandi brevi, spesso manca.
+`intentOf()` in `summary.ts` non lo genera mai: assente quando l'agent non l'ha scritta, nessuna
+riga muta né una spiegazione inventata al suo posto.
+
+La regola è generica, non una lista di tool: qualunque input con un campo `description` proprio
+lo mostra, tranne dove `description` è già **il soggetto** (`Task`/`Agent` — mostrarlo due volte
+direbbe la stessa cosa) o è dichiaratamente inerte (`Workflow`: «Ignored — set the workflow
+description in the script's meta block», dai tipi stessi). Vale quindi anche per un domani
+server MCP che scriva il proprio `description`, senza una riga di codice in più.
 
 `tool.input.delta` esiste perché entrambi gli agent trasmettono l'input del tool in streaming
 (Claude Code con `input_json_delta`, OpenCode con `session.next.tool.input.delta`). La UI può
@@ -448,6 +502,7 @@ oggi su una Edit reale:
 ```ts
 | { k: 'usage.updated', usage: Usage, cost: Cost }
 | { k: 'quota.updated', status: string, kind: string, resetsAt: number, usingOverage: boolean }
+| { k: 'quota.windows', windows: QuotaWindow[] }
 | { k: 'context.compacted', before: number, after: number }
 | { k: 'notice', level: 'info'|'warn'|'error', text: string }
 | { k: 'action.blocked', by: 'classifier'|'denyRule', callId?: string, reason: string }
@@ -474,6 +529,53 @@ a listino API, non una spesa. La cattura di oggi conferma che il dato buono arri
 Quindi la UI può mostrare **"quota a cinque ore, si riazzera alle HH:MM"** invece di dollari finti.
 Questa è la resa concreta di un vincolo che finora era solo una nota su Notion.
 
+`quota.windows` è la seconda metà della stessa domanda, aggiunta il **26 agosto 2026**.
+`quota.updated` è un **semaforo**: dice se sei passato e quando si riapre la finestra che ti sta
+stretta. Non dice **quanto ne hai consumata**, che è il numero su cui si decide se cominciare
+adesso un lavoro lungo — e non lo dice per una ragione strutturale: arriva *quando* qualcosa
+cambia, mentre il livello va **chiesto**.
+
+```ts
+type QuotaWindow = {
+  kind: 'session' | 'weekly'   // canonico: `five_hour`/`seven_day` restano nell'adapter
+  scope?: string               // il modello a cui la finestra è ristretta, quando lo è
+  used?: number                // 0-100
+  resetsAt?: number            // epoch ms
+}
+```
+
+La sorgente è il metodo `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()` dell'SDK —
+si chiama davvero così, ed è l'SDK stesso a dire che la forma può cambiare. Vale comunque la
+regola del progetto (se una cosa ufficiale c'è, si usa quella): il prezzo dell'instabilità si
+paga in **un file solo**, `adapters/claude-code/quota.ts`, che di fronte a una forma sconosciuta
+restituisce un elenco vuoto invece di numeri inventati. La cattura vera del 26 agosto 2026 è in
+`offline-check.ts`, ed è ciò che renderà visibile il giorno in cui quella forma cambierà.
+
+Cattura, ridotta alle chiavi che contano:
+
+```json
+{ "rate_limits_available": true,
+  "rate_limits": {
+    "five_hour": { "utilization": 6, "resets_at": "2026-08-26T12:30:00.446429+00:00" },
+    "seven_day": { "utilization": 3, "resets_at": "2026-09-01T21:00:00.446456+00:00" },
+    "model_scoped": [ { "display_name": "Fable", "utilization": 1,
+                        "resets_at": "2026-09-01T21:00:00.446826+00:00" } ] } }
+```
+
+Tre cose non ovvie, tutte verificate:
+
+- il piano manda anche finestre **in codice** (`nimbus_quill`, `tangelo`) e finestre a `null`.
+  Non si traducono: una riga senza nome non è un'informazione.
+- `resets_at` è **ISO 8601**, non epoch: diventa ms qui, perché il modello canonico usa i ms
+  ovunque e due convenzioni nella stessa UI sono una trappola.
+- l'istante del reset **balla di un secondo** fra due letture (il server lo ricalcola). Chi lo
+  mostra deve arrotondare al minuto, altrimenti l'orario cambia da solo sotto gli occhi.
+
+Il livello si rilegge in tre momenti — avvio, fine turno, e quando l'utente apre il pannellino —
+e nel journal ci finisce **solo se è cambiato**. La quota la consumano anche le altre chat e
+l'altra macchina: per questo l'evento porta con sé il suo `ts`, che è ciò che permette di dire
+«6% due ore fa» invece di spacciare una fotografia vecchia per il presente.
+
 ---
 
 ## 11. Comandi: dalla UI al daemon
@@ -483,6 +585,7 @@ type Command =
   | { c: 'session.open',    agent: string, cwd: string, model?: string, mode?: PermissionMode }
   | { c: 'session.prompt',  text: string, attachments?: Attachment[] }
   | { c: 'session.interrupt' }
+  | { c: 'session.refreshQuota' }
   | { c: 'session.setModel', model: string }
   | { c: 'session.setMode',  mode: PermissionMode }
   | { c: 'session.setMcp',   server: string, enabled: boolean }
@@ -601,6 +704,7 @@ al journal.
 | `action.blocked` | `tool_result` con `is_error` e testo del classificatore di auto mode |
 | `usage.updated` | `result.usage` e `result.modelUsage` |
 | `quota.updated` | `rate_limit_event` |
+| `quota.windows` | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`, chiesto da STARK |
 
 > ⚠️ **Corretto dal codice.** Le sorgenti qui sopra non si leggono più a mano: le fornisce
 > l'Agent SDK (ADR-009), che emette le stesse forme di messaggio. Cambia **chi** trasporta, non
@@ -728,7 +832,7 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 30 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/offline-check.ts` | `npm run check` — 71 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 | `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |

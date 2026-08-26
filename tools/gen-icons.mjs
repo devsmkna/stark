@@ -17,6 +17,9 @@ const ICONS = {
   'i-sliders': 'sliders-horizontal',
   'i-wifi-off': 'wifi-off', 'i-loader': 'loader-circle', 'i-x': 'x',
   'i-import': 'download', 'i-chat': 'message-circle', 'i-fwd': 'chevron-right',
+  'i-copy': 'copy',
+  'i-reveal': 'folder-open',
+  'i-open': 'external-link',
 }
 
 const symbols = Object.entries(ICONS).map(([id, name]) => {

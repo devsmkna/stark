@@ -39,6 +39,34 @@ export type Usage = {
 export type Cost = { nominalUsd: number }
 
 /**
+ * Una finestra di quota del piano, come la racconta il piano stesso.
+ *
+ * `quota.updated` dice **se stai passando** e quando la finestra che ti sta stretta si
+ * riapre; questa dice **quanto ne hai consumata**, per ciascuna finestra insieme. Sono
+ * due domande diverse e servono tutte e due: la prima è un semaforo, la seconda è il
+ * livello del serbatoio — ed è quella che si guarda per decidere se cominciare adesso
+ * un lavoro lungo.
+ *
+ * `kind` è canonico, non il nome del fornitore: `five_hour` e `seven_day` sono
+ * vocabolario di Claude Code e restano nell'adapter (§1). `scope` è il modello a cui
+ * la finestra è ristretta, quando lo è — il piano ne manda una per modello oltre a
+ * quella generale, e sono numeri diversi.
+ *
+ * `used` e `resetsAt` sono **opzionali sul serio**: il piano li manda a `null` quando
+ * non li sa, e mostrare uno zero al posto di «non lo so» sarebbe la solita bugia
+ * comoda (Principio 3).
+ */
+export type QuotaWindow = {
+  kind: 'session' | 'weekly'
+  /** Il modello a cui questa finestra è ristretta. Assente = vale per tutto. */
+  scope?: string
+  /** Percentuale consumata, 0-100. */
+  used?: number
+  /** Epoch **ms**, come ogni altro istante del modello canonico. */
+  resetsAt?: number
+}
+
+/**
  * Un comando slash offerto dalla sessione.
  *
  * `argumentHint` è ciò che va scritto dopo il nome (`<file>`, `[low|high]`), e senza
@@ -210,14 +238,29 @@ export type Payload =
   // §7 turni, step, parti
   | { k: 'turn.started'; turnId: string; prompt: PromptPart[] }
   /**
-   * Un messaggio mandato mentre il turno `turnId` è ancora aperto. Non apre un turno
-   * suo: verificato nei tipi dell'Agent SDK (parole loro: "coalesced into one turn",
-   * un uuid "folded" così "never runs as its own turn") — Claude Code lo piega dentro
-   * il turno in corso, non lo mette in una fila che gira dopo. Un secondo `turn.started`
-   * per questo messaggio produrrebbe un turno fantasma che non riceve mai eventi.
+   * Un messaggio piegato dentro il turno `turnId`, che era ancora aperto.
+   *
+   * **STARK non lo produce più** (26 agosto 2026), e la storia di come c'è finito vale
+   * la riga che occupa. Era stato scritto leggendo i tipi dell'Agent SDK — "coalesced
+   * into one turn", un uuid "folded" che "never runs as its own turn" — e concludendone
+   * che un prompt mandato durante un turno *non può* essere un turno a sé. Quelle
+   * parole però descrivono cosa fa il CLI con **un lotto di messaggi che gli arrivano
+   * mentre lavora**, non un limite del modello: se glieli si consegna uno alla volta e
+   * a sessione ferma, ogni prompt è un turno suo. Misurato, non dedotto:
+   * `prompt` numero 2 mandato dopo 4s su un turno lungo dodici → due `turn.started`,
+   * due `turn.ended`, in ordine (vedi la fila in `adapters/claude-code/adapter.ts`).
+   *
+   * L'errore non era il codice ma il passo prima: un'assenza osservata in una
+   * configurazione presa per un'assenza in generale. Costava caro, perché il secondo
+   * messaggio si mangiava il turno del primo e la conversazione diventava illeggibile.
+   *
+   * L'evento resta nel vocabolario per due ragioni: i journal scritti prima di oggi
+   * ne contengono, e `applyTo` deve continuare a saperli rileggere (§4); e il giorno
+   * in cui STARK offrirà di **guidare** il turno in corso invece di accodarsi — che è
+   * un gesto diverso, e va chiesto — è questo l'evento che lo racconta.
    */
   | { k: 'turn.promptAdded'; turnId: string; prompt: PromptPart[] }
-  | { k: 'turn.ended'; turnId: string; reason: 'completed' | 'aborted' | 'error'
+  | { k: 'turn.ended'; turnId: string; reason: 'completed' | 'aborted' | 'error' | 'interrupted'
       usage: Usage; cost: Cost }
   | { k: 'step.started'; stepId: string }
   | { k: 'step.ended'; stepId: string; finish: string; usage: Usage }
@@ -235,7 +278,13 @@ export type Payload =
   // `summary` e "su cosa" il tool ha lavorato, gia pronto: il comando, il percorso,
   // l'indirizzo. Lo scrive l'adapter perche estrarlo da `input` vuol dire conoscere la
   // forma di un agent, ed e esattamente cio che il §1 vieta fuori di li.
-  | { k: 'tool.input.ended'; callId: string; input: unknown; summary?: string }
+  //
+  // `intent` e "perche", non "cosa": e la motivazione che l'agent stesso scrive in un
+  // campo `description` del tool (verificato: Bash la porta sempre), non qualcosa che
+  // STARK deduce o genera — un LLM che spiega ogni comando costerebbe quota su ogni
+  // tool di ogni turno (F2, Notion, 25 agosto 2026). Assente quando l'agent non l'ha
+  // scritta: nessuna riga muta, nessuna spiegazione inventata al suo posto.
+  | { k: 'tool.input.ended'; callId: string; input: unknown; summary?: string; intent?: string }
   | { k: 'tool.ended'; callId: string; ok: boolean; output?: unknown; error?: string }
 
   // §8 richieste bloccanti — nel caso normale NON esistono affatto (ADR-008)
@@ -262,6 +311,15 @@ export type Payload =
   | { k: 'usage.updated'; usage: Usage; cost: Cost }
   | { k: 'quota.updated'; status: string; kind: string; resetsAt: number
       usingOverage: boolean }
+  /**
+   * Quanto è pieno il serbatoio, tutte le finestre insieme. Arriva da una domanda che
+   * STARK fa (all'avvio, a fine turno, e quando l'utente apre il pannellino), non da un
+   * messaggio che l'agent manda per conto suo: per questo porta con sé il momento in cui
+   * è stata misurata — l'evento ha già `ts`, e su una chat che dorme è quello che
+   * permette di dire «misurato due ore fa» invece di spacciare un numero vecchio per
+   * attuale.
+   */
+  | { k: 'quota.windows'; windows: QuotaWindow[] }
   /**
    * Il contesto è stato riassunto: da qui in su il modello non ha più i messaggi per
    * intero, ma un riassunto. Osservato dal vivo: `manual` con 34.802 → 743 token in
@@ -330,6 +388,12 @@ export type Command =
   | { c: 'session.setModel'; model: string }
   | { c: 'session.setMode'; mode: PermissionMode }
   | { c: 'session.setMcp'; server: string; enabled: boolean }
+  /**
+   * Rileggi il livello della quota adesso. Non cambia niente nella conversazione: è una
+   * domanda al piano, e la si fa quando l'utente guarda il pannellino — che è l'unico
+   * momento in cui quel numero deve essere fresco.
+   */
+  | { c: 'session.refreshQuota' }
   | { c: 'permissions.setRules'; rules: PermissionRules }
   | { c: 'session.rename'; title: string }
   | { c: 'session.sleep' }

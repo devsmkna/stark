@@ -11,9 +11,11 @@
   import { stats } from '$core/diff.ts'
   import type { FileEditView } from '$core/reduce.ts'
   import { hhmm } from '../lib/view.ts'
+  import type { Store } from '../lib/store.svelte.ts'
 
-  let { edits, narrow = false, when = false, open = $bindable(false) }:
-    { edits: FileEditView[]; narrow?: boolean; when?: boolean; open?: boolean } = $props()
+  let { edits, narrow = false, when = false, open = $bindable(false), store }:
+    { edits: FileEditView[]; narrow?: boolean; when?: boolean; open?: boolean; store: Store }
+    = $props()
 
   const totals = $derived(stats(edits.flatMap(e => e.hunks)))
   const created = $derived(edits.some(e => e.created))
@@ -21,18 +23,26 @@
 </script>
 
 <div class="fileblk">
-  <button class="fh" onclick={() => { open = !open }} aria-expanded={open}>
-    <Icon name="i-brick" />
-    <span class="nm">{path}</span>
-    <span class="st">
-      {#if when}<span style="color:var(--muted)">{hhmm(edits[0]?.ts ?? 0)}</span>{/if}
-      {#if created}<span style="color:var(--muted)">created</span>
-      {:else if edits.length > 1}<span style="color:var(--muted)">{edits.length} changes</span>{/if}
-      <span class="pl">+{totals.added}</span>
-      <span class="mn">−{totals.removed}</span>
-      <span style="color:var(--muted)">{open ? '▾' : '▸'}</span>
-    </span>
-  </button>
+  <div class="fhrow">
+    <button class="fh" onclick={() => { open = !open }} aria-expanded={open}>
+      <Icon name="i-brick" />
+      <span class="nm">{path}</span>
+      <span class="st">
+        {#if when}<span style="color:var(--muted)">{hhmm(edits[0]?.ts ?? 0)}</span>{/if}
+        {#if created}<span style="color:var(--muted)">created</span>
+        {:else if edits.length > 1}<span style="color:var(--muted)">{edits.length} changes</span>{/if}
+        <span class="pl">+{totals.added}</span>
+        <span class="mn">−{totals.removed}</span>
+        <span style="color:var(--muted)">{open ? '▾' : '▸'}</span>
+      </span>
+    </button>
+    <!-- F3: una seconda via, non una sostituzione — il clic sul blocco resta quello
+         che apre il confronto, questo arriva al file dove sta davvero. -->
+    <button class="reveal" title="Reveal in file manager" aria-label="Reveal in file manager"
+      onclick={() => void store.reveal(path)}>
+      <Icon name="i-reveal" />
+    </button>
+  </div>
 
   {#if open}
     {#each edits as edit, i (edit.callId ?? i)}

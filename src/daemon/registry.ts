@@ -543,6 +543,11 @@ export class Registry {
       case 'session.setMcp':
         await l.adapter.setMcp(cmd.server, cmd.enabled)
         return { ok: true }
+      // Rileggere il livello della quota non tocca la conversazione: se il piano non
+      // risponde, la risposta resta quella di prima e il pannellino lo dice.
+      case 'session.refreshQuota':
+        await l.adapter.refreshQuota()
+        return { ok: true }
       case 'session.sleep': {
         // Addormentarsi con un turno in corso perderebbe il lavoro in volo: si
         // interrompe prima, invece di rifiutare e lasciare l'utente senza una via.

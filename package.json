@@ -15,6 +15,7 @@
     "resume": "node src/cli/resume-check.ts",
     "takeover": "node src/cli/takeover-check.ts",
     "import": "node src/cli/import-check.ts",
+    "queue": "node src/cli/queue-check.ts",
     "stark": "node src/cli/stark.ts",
     "stark:start": "node src/cli/stark.ts start",
     "stark:status": "node src/cli/stark.ts status",

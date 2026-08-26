@@ -128,6 +128,49 @@
     return !!ultimo && ultimo.partId === part.partId && /\?\s*$/.test(part.text.trim())
   }
 
+  /**
+   * Il bottone «Copy» sopra un blocco di codice non è mai un elemento Svelte: nasce
+   * come stringa HTML dentro `renderMarkdown` (vedi `markdown.ts`), quindi non c'è
+   * niente a cui attaccare un `onclick` suo, né uno `$state` sensato — Svelte non sa
+   * che esiste. Un solo listener delegato su `.prose` copre tutti i blocchi di quella
+   * risposta, e la spunta «Copied» si scrive direttamente sul nodo cliccato: è DOM
+   * grezzo, e trattarlo come tale è più semplice che fingerlo reattivo.
+   *
+   * Se la risposta si sta ancora scrivendo, un nuovo delta rifà l'HTML e il bottone
+   * cliccato sparisce con lui: il `setTimeout` in sospeso non fa danni (agisce su un
+   * nodo staccato dal documento), e quello nuovo nasce già con la scritta giusta.
+   */
+  async function onProseClick(e: MouseEvent): Promise<void> {
+    const target = e.target as HTMLElement
+
+    // F1: il bottone «Open in …» accanto a un link riconosciuto. Vedi `addAppLinks`
+    // in `markdown.ts` per perché non è il link stesso a essere riscritto.
+    const appBtn = target.closest<HTMLElement>('[data-open-app]')
+    if (appBtn) {
+      const url = appBtn.getAttribute('data-url')
+      const scheme = appBtn.getAttribute('data-scheme')
+      if (url && scheme) await store.openApp(url, scheme)
+      return
+    }
+
+    const btn = target.closest<HTMLElement>('[data-copy]')
+    const pre = btn?.closest('.codeblock')?.querySelector('pre')
+    if (!btn || !pre) return
+    try {
+      await navigator.clipboard.writeText(pre.textContent ?? '')
+    } catch {
+      store.refused = 'the browser did not allow copying'
+      return
+    }
+    const label = btn.querySelector('span')
+    btn.classList.add('done')
+    if (label) label.textContent = 'Copied'
+    setTimeout(() => {
+      btn.classList.remove('done')
+      if (label) label.textContent = 'Copy'
+    }, 1500)
+  }
+
   // ─── auto-scroll ─────────────────────────────────────────────────────────
   // Segue il fondo finché l'utente non risale a leggere qualcosa: solo allora
   // smette, perché altrimenti lo strapperebbe via da quello che stava leggendo.
@@ -175,15 +218,35 @@
   const title = $derived(store.row?.title ?? project(snap.cwd))
 
   /**
-   * Su cosa ha lavorato un tool. Arriva **già pronto** dal modello canonico: fino a
-   * ieri era questa funzione a frugare dentro `input` cercando `command`/`file_path`,
-   * cioè a conoscere la forma di Claude Code fuori dall'adapter. Adesso quel mestiere
-   * sta in `adapters/claude-code/summary.ts`, che è dove ha diritto di stare.
-   * Il ripiego serve solo ai journal scritti prima, e mostra ciò che c'è senza
-   * interpretarlo.
+   * Su cosa ha lavorato un tool — il *cosa*, non il *perché* (quello è `part.intent`,
+   * F2, mostrato al suo posto nella riga qui sotto). Arriva **già pronto** dal
+   * modello canonico: fino a ieri era questa funzione a frugare dentro `input`
+   * cercando `command`/`file_path`, cioè a conoscere la forma di Claude Code fuori
+   * dall'adapter. Adesso quel mestiere sta in `adapters/claude-code/summary.ts`, che
+   * è dove ha diritto di stare. Il ripiego serve solo ai journal scritti prima, e
+   * mostra ciò che c'è senza interpretarlo.
    */
   const subject = (part: Extract<PartView, { kind: 'tool' }>): string =>
     part.summary ?? part.inputRaw.slice(0, 120)
+
+  /**
+   * Il percorso che questo tool ha nominato, se ce n'è uno — non indovinato dal
+   * testo, letto dagli stessi campi che `summary.ts` già riconosce come «un
+   * percorso» (F3, Notion). `pattern`/`url`/`query`/`prompt`/`command` restano
+   * fuori: un comando può *contenere* un percorso in mezzo ad altro, ma non è lui il
+   * percorso, e sbagliare qui vorrebbe dire offrire di "rivelare" una stringa che
+   * non esiste sul disco.
+   */
+  const PATH_KEYS = ['file_path', 'path', 'notebook_path']
+  const pathOf = (part: Extract<PartView, { kind: 'tool' }>): string | undefined => {
+    const o = part.input as Record<string, unknown> | undefined
+    if (!o || typeof o !== 'object') return undefined
+    for (const k of PATH_KEYS) {
+      const v = o[k]
+      if (typeof v === 'string' && v) return v
+    }
+    return undefined
+  }
 
   /** Le modifiche prodotte da questa chiamata, per mostrarle dove sono accadute. */
   const editsOf = (callId: string) => snap.files.filter(f => f.callId === callId)
@@ -256,22 +319,46 @@
     {:else}
       {@const key = `t:${part.callId}`}
       {@const topen = blockOpen(key)}
-      <!-- `bad` solo se NON è bloccata: un'azione fermata dal classificatore torna
-           comunque come tool fallito, e senza questa esclusione le due classi si
-           sovrappongono e vince il rosso. Ma bloccato non è un fallimento — è
-           «fermato, e puoi consentirlo tu». -->
-      <button class="row clickable" class:bad={part.done && part.ok === false && !part.blocked}
-           class:block={!!part.blocked} onclick={() => toggleBlock(key)}>
-        <Icon name={part.blocked ? 'i-block' : toolIcon(part.name)} />
-        <span class="k">{part.blocked ? 'Blocked' : part.name}</span>
-        <span class="v">{subject(part)}</span>
-        <span class="end">
-          {#if part.blocked}stopped for safety
-          {:else if !part.done}…
-          {:else if part.ok}✓{:else}✗{/if}
-          {topen ? '▾' : '▸'}
-        </span>
-      </button>
+      {@const revealPath = pathOf(part)}
+      <!-- F3: quando il tool ha nominato un percorso, la riga si affianca a un
+           secondo bottone che arriva lì — senza rubare il posto al clic che apre il
+           dettaglio, ed è per questo che diventano due bottoni fratelli invece di
+           uno dentro l'altro (non sarebbe HTML valido). Sugli altri tool (Bash senza
+           percorso, WebFetch, …) la riga resta esattamente com'era. -->
+      <div class="oprow" class:withreveal={!!revealPath}>
+        <!-- `bad` solo se NON è bloccata: un'azione fermata dal classificatore torna
+             comunque come tool fallito, e senza questa esclusione le due classi si
+             sovrappongono e vince il rosso. Ma bloccato non è un fallimento — è
+             «fermato, e puoi consentirlo tu». -->
+        <button class="row clickable tool" class:bad={part.done && part.ok === false && !part.blocked}
+             class:block={!!part.blocked} onclick={() => toggleBlock(key)}>
+          <div class="rtop">
+            <Icon name={part.blocked ? 'i-block' : toolIcon(part.name)} />
+            <span class="k">{part.blocked ? 'Blocked' : part.name}</span>
+            <!-- F2: quando l'agent ha scritto PERCHÉ (`intent`), è quella la riga
+                 principale — dice dove sta andando, non solo cosa sta eseguendo. -->
+            <span class="v" class:plain={!!part.intent}>{part.intent ?? subject(part)}</span>
+            <span class="end">
+              {#if part.blocked}stopped for safety
+              {:else if !part.done}…
+              {:else if part.ok}✓{:else}✗{/if}
+              {topen ? '▾' : '▸'}
+            </span>
+          </div>
+          {#if part.intent}
+            <!-- Il soggetto esatto (comando, percorso) non sparisce dietro la
+                 motivazione: resta visibile, sotto e più piccolo — un tooltip
+                 avrebbe richiesto di sapere che c'era prima di poterlo cercare. -->
+            <div class="rsub">{subject(part)}</div>
+          {/if}
+        </button>
+        {#if revealPath}
+          <button class="reveal" title="Reveal in file manager" aria-label="Reveal in file manager"
+            onclick={() => void store.reveal(revealPath)}>
+            <Icon name="i-reveal" />
+          </button>
+        {/if}
+      </div>
       {#if topen}
         <div class="blockbody">
           <div class="bblabel">Input</div>{prettyInput(part)}
@@ -287,7 +374,7 @@
            può comparire più volte nel turno: sono modifiche avvenute in momenti
            diversi, e in mezzo l'agent ha fatto altro. -->
       {#each editsOf(part.callId) as edit (edit.ts)}
-        <FileBlock edits={[edit]} narrow={store.narrow} />
+        <FileBlock edits={[edit]} narrow={store.narrow} {store} />
       {/each}
     {/if}
   {/snippet}
@@ -345,7 +432,20 @@
                        l'ultima cosa detta e finisce con un punto di domanda: è quello
                        che si perde più facilmente in un muro di testo. -->
                   <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                  <div class="prose" class:asked={isOpenQuestion(i, part)}>{@html renderMarkdown(part.text)}</div>
+                  <!-- L'onclick qui sotto è delegazione, non un div-bottone: il div
+                       resta testo normale, leggibile come sempre. Il click che
+                       intercetta è dei `<button data-copy>` che `renderMarkdown`
+                       disegna dentro — un bottone vero, già raggiungibile da tastiera,
+                       il cui click nativo (anche quello sintetizzato da Invio/Spazio)
+                       risale fin qui da solo. Un secondo handler qui sopra
+                       aggiungerebbe rumore, non accessibilità. -->
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <!-- L'evidenza ambra va sul PARAGRAFO che contiene la domanda,
+                       non su tutto il blocco (bug B1): `renderMarkdown` la mette
+                       sull'ultimo elemento del testo reso, non sul contenitore. -->
+                  <div class="prose"
+                    onclick={onProseClick}>{@html renderMarkdown(part.text, { asked: isOpenQuestion(i, part) })}</div>
 
                 {:else if part.kind === 'compact'}
                   <!-- Una riga che taglia il flusso, perché è esattamente quello che è
@@ -467,6 +567,36 @@
   .row.clickable.block { background: var(--wait-bg); color: var(--wait); }
   .row.clickable.bad { background: var(--stop-bg); color: var(--stop); }
   .row.clickable.think { color: var(--muted); }
+  /* `.v` è monospace di default perché di solito porta un comando o un percorso —
+     codice. La motivazione (F2) è una frase, non codice: qui riprende il font della
+     UI, altrimenti «Look for the quota panel» si legge come un identificatore. */
+  .row .v.plain { font-family: var(--sans); color: var(--ink-2); }
+  /* La riga di un tool era un `<button class="row">` flex diretto; ora il flex sta
+     su `.rtop` dentro di lui, per poter aggiungere sotto — solo quando c'è una
+     motivazione (F2) — una seconda riga più piccola col comando esatto. Senza
+     motivazione `.rtop` è tutto ciò che il bottone contiene: identica a prima.
+     Scoperto su `.tool`, non su `.row.clickable` in generale: il reasoning e il
+     gruppo «N operations» sono anche loro `.row.clickable`, ma restano un flex
+     diretto — non hanno `.rtop`, e diventare un blocco li spezzerebbe su due righe
+     senza motivo. */
+  .row.clickable.tool { display: block; }
+  .row.clickable.tool .rtop { display: flex; align-items: center; gap: 7px; }
+  .row.clickable.tool .rsub {
+    margin: 2px 0 0 21px; font-family: var(--mono); font-size: 9px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* F3: il bottone che arriva al file, attaccato alla riga del tool. `.oprow` senza
+     `.withreveal` non cambia niente — è il caso normale, senza percorso da rivelare
+     — quindi non tocca il disegno di ogni altra riga. */
+  .oprow.withreveal { display: flex; align-items: stretch; border-radius: 7px; overflow: hidden; }
+  .oprow.withreveal .row { border-radius: 0; }
+  .oprow .reveal {
+    flex: none; border: 0; border-left: 1px solid var(--line-2);
+    background: var(--surface-2); color: var(--muted); padding: 0 9px; cursor: pointer;
+  }
+  .oprow .reveal:hover { color: var(--ink); background: var(--surface-3); }
+  .oprow .reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   /* Il gruppo di operazioni finite: stesso disegno di una riga singola, ma il
      colore resta neutro apposta — non è successo niente lì dentro che meriti
@@ -493,8 +623,11 @@
 
   /* La risposta che finisce con un punto di domanda: è quella che si perde più
      facilmente in un muro di testo, e per questo prende lo stesso ambra di ogni
-     altro «tocca a te». */
-  .prose.asked {
+     altro «tocca a te». Sul **paragrafo finale**, non su tutto il blocco (bug B1) —
+     `markAsked` in `markdown.ts` marca l'ultimo elemento reso, qualunque tag sia; i
+     margini di quel tag sono già `0` in alto (vedi le regole sopra), quindi non
+     serve toglierne uno che non c'è. */
+  .prose :global(.asked) {
     background: var(--wait-bg); color: var(--ink);
     border: 1px solid var(--wait); border-radius: 8px; padding: 8px 10px; font-weight: 600;
   }
@@ -543,10 +676,45 @@
   .prose :global(:first-child) { margin-top: 0; }
   .prose :global(a) { color: var(--accent); text-decoration: underline; }
   .prose :global(code) { font-family: var(--mono); font-size: .92em; }
+  /* Ogni `<pre>` che Markdown produce esce da `renderMarkdown` già avvolto in un
+     `.codeblock` con sopra la barra del bottone «Copy» — vedi `markdown.ts`. Il
+     margine che separava un blocco di codice dal successivo sta ora sul contenitore,
+     non più sul `<pre>`, altrimenti si duplicherebbe con quello della barra. */
+  .prose :global(.codeblock) { margin: 0 0 8px; }
+  .prose :global(.cbbar) {
+    display: flex; background: var(--surface-2);
+    border: 1px solid var(--line-2); border-bottom: 0; border-radius: 7px 7px 0 0;
+    padding: 3px;
+  }
+  /* In alto a sinistra, sempre visibile: è il pezzo di risposta che si copia più
+     spesso, e un bottone che si scopre solo al passaggio del mouse costa un
+     movimento in più proprio dove si vuole essere veloci. */
+  .prose :global(.copybtn) {
+    display: inline-flex; align-items: center; gap: 4px;
+    font: inherit; font-size: 9.5px; color: var(--muted);
+    background: none; border: 0; border-radius: 5px; padding: 3px 7px; cursor: pointer;
+  }
+  .prose :global(.copybtn svg.ic) { width: 11px; height: 11px; }
+  .prose :global(.copybtn:hover) { background: var(--surface-3); color: var(--ink); }
+  .prose :global(.copybtn:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .prose :global(.copybtn.done) { color: var(--done); }
+
+  /* F1: il bottone accanto a un link riconosciuto. Inline come il link stesso — non
+     va a capo da solo, segue il testo — perché è una seconda via per la stessa
+     frase, non un blocco a parte come il codice. */
+  .prose :global(.applink) {
+    display: inline-flex; align-items: center; gap: 3px; vertical-align: middle;
+    font: inherit; font-size: 9.5px; color: var(--accent);
+    background: var(--accent-soft); border: 0; border-radius: 5px;
+    padding: 2px 6px; margin-left: 4px; cursor: pointer;
+  }
+  .prose :global(.applink svg.ic) { width: 10px; height: 10px; }
+  .prose :global(.applink:hover) { filter: brightness(0.94); }
+  .prose :global(.applink:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
   .prose :global(pre) {
     font-family: var(--mono); font-size: 10.5px; background: var(--surface);
-    border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px;
-    margin: 0 0 8px; overflow: auto; white-space: pre;
+    border: 1px solid var(--line-2); border-radius: 0 0 7px 7px; padding: 8px 10px;
+    margin: 0; overflow: auto; white-space: pre;
   }
   .prose :global(pre code) { background: none; padding: 0; font-size: 1em; }
   .prose :global(blockquote) {

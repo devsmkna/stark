@@ -10,8 +10,8 @@
   // rifiuta** (Principio 5). Nasconderle farebbe sembrare STARK meno capace del CLI.
   import Icon from './Icon.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
-  import type { ModeChoice, PermissionMode } from '$core/events.ts'
-  import { MODE_BLURB, MODE_ICON, tilde } from '../lib/view.ts'
+  import type { ModeChoice, PermissionMode, QuotaWindow } from '$core/events.ts'
+  import { MODE_BLURB, MODE_ICON, since, stamp, tilde, until } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
@@ -115,16 +115,65 @@
     ].filter(s => s.n > 0)
   })
 
+  // ─── quanto ne resta del piano ────────────────────────────────────────────
+  //
+  // Tre voci, e sono tre domande diverse: quanto contesto ha in mano *questa* chat,
+  // quanto hai consumato della finestra corta (5 ore), quanto della settimana. Le
+  // ultime due non sono della conversazione ma del piano — le consumano anche le altre
+  // chat e l'altra macchina — ed è per questo che si rileggono invece di sommarle qui.
+  const sessionWin = $derived(snap.quotaWindows.find(w => w.kind === 'session'))
+  const weeklyWin = $derived(snap.quotaWindows.find(w => w.kind === 'weekly' && !w.scope))
+  const weeklyScoped = $derived(snap.quotaWindows.filter(w => w.kind === 'weekly' && w.scope))
+
+  // Il conto alla rovescia si muove da solo, al minuto: mostrarlo fermo mentre la
+  // finestra si avvicina sarebbe peggio che non mostrarlo. Mezzo minuto di passo basta
+  // — sotto il minuto quel numero non cambia comunque.
+  // Si chiama `clock` e non `now` perché `now` qui sopra è già preso, e vuol dire
+  // un'altra cosa: l'ultima lettura dei token. Due `now` nello stesso file sarebbero
+  // due trappole.
+  let clock = $state(Date.now())
+  $effect(() => {
+    const t = setInterval(() => { clock = Date.now() }, 30_000)
+    return () => clearInterval(t)
+  })
+
+  /** Da quanto è vecchia la misura. Se ha più di due minuti si dice, perché nel
+   *  frattempo la quota la consumano anche gli altri e nessuno ce lo viene a dire. */
+  const stale = $derived(
+    snap.quotaWindowsAt && clock - snap.quotaWindowsAt > 120_000 ? snap.quotaWindowsAt : null,
+  )
+
+  // Si rilegge quando l'utente apre il pannellino: è l'unico momento in cui quel numero
+  // deve essere fresco. Non più di una volta ogni quindici secondi — aprire e chiudere
+  // due volte non è una richiesta nuova.
+  let ultimaLettura = 0
+  function peek(): void {
+    const t = Date.now()
+    if (t - ultimaLettura < 15_000) return
+    ultimaLettura = t
+    void store.refreshQuota()
+  }
+
+  /** Verde finché c'è margine, ambra quando ne resta poco, rosso quando è quasi finita.
+   *  Le soglie sono di lettura, non del piano: il piano dice solo la percentuale. */
+  const meterColour = (used: number): string =>
+    used >= 90 ? 'var(--stop)' : used >= 75 ? 'var(--wait)' : 'var(--accent)'
+
+  /**
+   * Il semaforo di `quota.updated`, che è un'altra cosa dal livello: dice se l'ultima
+   * richiesta è passata. Si mostra **solo quando non è «allowed»** — un avviso che c'è
+   * sempre non è un avviso — e si appoggia alla finestra a cui si riferisce.
+   */
+  function alarm(kind: 'session' | 'weekly'): string | null {
+    const q = snap.quota
+    if (!q || q.status === 'allowed') return null
+    const sua = q.kind === 'five_hour' ? 'session' : 'weekly'
+    if (sua !== kind) return null
+    return q.status === 'rejected' ? 'limit reached' : 'close to the limit'
+  }
+
   const fmt = (n: number): string =>
     n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
-
-  /** `resetsAt` arriva in secondi su Claude Code e in millisecondi altrove: si guarda
-   *  l'ordine di grandezza invece di fidarsi di una delle due convenzioni. */
-  function at(ts: number): string {
-    if (!ts) return ''
-    const d = new Date(ts < 1e12 ? ts * 1000 : ts)
-    return d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
-  }
 
   function choose(what: 'mode' | 'model' | 'mcp'): void {
     open = open === what ? null : what
@@ -238,7 +287,7 @@
     <!-- Nessuna cifra in denaro, mai: l'abbonamento è a quota fissa, quindi i soldi
          non sono la risorsa che scarseggia. Si dice quanto lavoro è passato di qui e
          quando la finestra si riapre. -->
-    <button class="ctx" type="button">
+    <button class="ctx" type="button" onpointerenter={peek} onfocus={peek}>
       {#if pct !== null}{pct}% context{:else}{fmt(total)} tokens{/if}
       <span class="tip">
         <div class="tr"><span>Context window</span>
@@ -262,27 +311,60 @@
             showing raw tokens only.</small></div>
         {/if}
         <hr />
-        <div class="tr"><span>This chat, total</span><b>{fmt(total)}</b></div>
-        <div class="tr"><small>{fmt(usage.input)} in · {fmt(usage.output)} out
-          · {fmt(usage.cacheRead + usage.cacheWrite)} cache</small></div>
+
+        <!-- 2. e 3.: non sono della conversazione, sono del **piano**. La quota la
+             consumano anche le altre chat e l'altra macchina, quindi questi due numeri
+             non si possono sommare qui: si chiedono, e si dice quando sono stati letti. -->
+        {@render window_(sessionWin, 'Session · 5 hours', 'session', false)}
         <hr />
-        {#if snap.quota}
-          <div class="tr"><span>{snap.quota.kind.replace(/_/g, ' ')}</span><b>{snap.quota.status}</b></div>
-          {#if snap.quota.resetsAt}
-            <div class="tr"><small>resets {at(snap.quota.resetsAt)}</small></div>
-          {/if}
-          {#if snap.quota.usingOverage}
-            <div class="tr"><small>counting against overage</small></div>
-          {/if}
-        {:else}
-          <div class="tr"><small>The agent has not reported a rate limit for this chat yet.</small></div>
+        {@render window_(weeklyWin, 'Weekly', 'weekly', false)}
+        {#each weeklyScoped as w (w.scope)}
+          {@render window_(w, `Weekly · ${w.scope}`, 'weekly', true)}
+        {/each}
+
+        {#if stale}
+          <div class="tr"><small class="faint">read {since(stale, clock)} ago{
+            store.live ? '' : ' — this chat has no process behind it now'}</small></div>
         {/if}
-        <hr />
-        <div class="tr"><small>{snap.lastSeq} events · {snap.turns.length} turns</small></div>
       </span>
     </button>
   </div>
 </div>
+
+<!--
+  Una finestra del piano. Tre righe e non una: la percentuale è il numero, la barra è
+  il colpo d'occhio, e il reset va detto **nei due formati** — «fra quanto» dice se
+  conviene aspettare, «quando» dice se conviene rimandare a domani. Su un'attesa di
+  giorni la prima da sola non basta a decidere.
+-->
+{#snippet window_(w: QuotaWindow | undefined, label: string, kind: 'session' | 'weekly',
+  sub: boolean)}
+  {#if w}
+    {@const warn = sub ? null : alarm(kind)}
+    <div class="tr" class:sub>
+      <span>{label}{#if warn}<em class="alarm">{warn}</em>{/if}</span>
+      <b>{w.used !== undefined ? `${w.used}%` : '—'}</b>
+    </div>
+    {#if w.used !== undefined}
+      <div class="meter" class:sub>
+        <i style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></i>
+      </div>
+    {/if}
+    {#if w.resetsAt}
+      <div class="tr" class:sub>
+        <small>resets in {until(clock, w.resetsAt)} · {stamp(w.resetsAt)}</small>
+      </div>
+    {/if}
+  {:else}
+    <div class="tr"><span>{label}</span><b>—</b></div>
+    <!-- Non è un guasto e non è uno zero: è che nessuno l'ha ancora chiesto al piano,
+         o il piano non lo dice (chiave API, Bedrock, Vertex). Dirlo è meglio di
+         disegnare una barra vuota, che si leggerebbe come «non hai consumato niente». -->
+    <div class="tr"><small>{store.live
+      ? 'the plan has not reported this window yet'
+      : 'wake this chat to read it — a sleeping chat has no one to ask'}</small></div>
+  {/if}
+{/snippet}
 
 <style>
   /* Il chip si preme, quindi è un <button>: qui c'è solo ciò che serve a togliergli
@@ -311,6 +393,23 @@
   .seglegend i {
     width: 7px; height: 7px; border-radius: 2px; display: inline-block; flex: none;
   }
+
+  /* La barra di una finestra del piano. Stessa grammatica della segbar qui sopra —
+     «pieno» vuol dire pieno della finestra — ma un blocco solo, perché una finestra
+     è un numero solo e non ha parti da confrontare. */
+  .meter {
+    height: 6px; border-radius: 3px; overflow: hidden;
+    background: var(--surface-3); margin: 3px 0 5px;
+  }
+  .meter i { display: block; height: 100%; }
+  /* Le settimane per modello sono figlie di quella generale: rientrano, così chi
+     guarda può saltarle in blocco quando gli interessa solo il totale. */
+  .tr.sub { padding-left: 12px; }
+  .meter.sub { margin-left: 12px; }
+  /* Compare solo quando il piano ha detto di no, o quasi: un avviso sempre acceso
+     smette di essere un avviso. */
+  .alarm { font-style: normal; color: var(--stop); margin-left: 6px; }
+  .faint { font-style: italic; }
 
   .pop { position: relative; display: inline-flex; }
   /* Le tendine si aprono verso l'alto: sotto non c'è niente, la barra è l'ultima riga. */

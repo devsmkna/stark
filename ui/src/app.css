@@ -17,6 +17,11 @@
   --done:#186A3B; --done-bg:#E6F4EC;
   --add:#186A3B; --add-bg:#E9F6EE;
   --del:#B42318; --del-bg:#FDECEA;
+  /* Il blocco del prompt di un turno: blu-azzurro apposta diverso da `--accent`
+     (indaco) e da `--work` (blu di stato) — qui non dice "sta lavorando", dice
+     "è qui che hai chiesto qualcosa", e serve riconoscerlo scorrendo la
+     conversazione senza doverlo leggere. */
+  --user:#0284C7; --user-bg:#E0F2FE;
   /* un colore per progetto, non per sezione */
   --p1:#3B5BF5; --p2:#D97706; --p3:#0F9D76; --p4:#8B5CF6; --p5:#DB2777; --p6:#0891B2; --p7:#65A30D;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
@@ -33,6 +38,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --user:#38BDF8; --user-bg:#123247;
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
 }}
 :root[data-theme="dark"]{
@@ -46,6 +52,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --user:#38BDF8; --user-bg:#123247;
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
 }
 
@@ -145,11 +152,15 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
    conversazione vera, che è esattamente il caso che deve reggere. */
 .turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface);flex:none}
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2)}
-.turn.open>.th{background:var(--surface)}
+/* Blu-azzurro apposta: è il blocco del PROMPT, la riga da cui riparte la
+   discussione ogni volta che ne mandi uno nuovo — scorrendo una conversazione
+   lunga deve saltare all'occhio senza doverlo leggere, per vedere subito fin
+   dove si era arrivati e da dove è ripresa. */
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg)}
+.turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
-.th .tm{color:var(--muted);font-size:10px;flex:none;font-variant-numeric:tabular-nums}
-.th .q{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.th .tm{color:var(--user);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:600}
+.th .q{font-weight:600;color:var(--user);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{margin-left:auto;color:var(--muted);font-size:10px;flex:none}
 .tb{padding:2px 11px 11px;display:flex;flex-direction:column;gap:6px}
 
@@ -233,9 +244,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .switch span{padding:3px 9px;color:var(--muted)}
 .switch span.on{background:var(--surface-3);color:var(--ink);font-weight:600}
 .fileblk{border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-bottom:6px}
-.fileblk .fh{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--surface-2)}
-.fileblk .fh .nm{font-family:var(--mono);font-size:10.5px;color:var(--ink);font-weight:500}
-.fileblk .fh .st{margin-left:auto;display:flex;gap:6px;font-family:var(--mono);font-size:10px}
+.fileblk .fhrow{display:flex;align-items:stretch;background:var(--surface-2)}
+.fileblk .fh{display:flex;align-items:center;gap:7px;padding:6px 10px;flex:1;min-width:0}
+.fileblk .fh .nm{font-family:var(--mono);font-size:10.5px;color:var(--ink);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fileblk .fh .st{margin-left:auto;display:flex;gap:6px;font-family:var(--mono);font-size:10px;flex:none}
+/* F3: la seconda via per arrivare al file, attaccata alla barra invece che dentro —
+   un bottone dentro un bottone non è HTML valido, e il clic doveva restare separato
+   da quello che apre il confronto. */
+.fileblk .reveal{flex:none;border:0;border-left:1px solid var(--line-2);background:none;color:var(--muted);padding:0 10px;cursor:pointer}
+.fileblk .reveal:hover{color:var(--ink);background:var(--surface-3)}
+.fileblk .reveal:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .diff{font-family:var(--mono);font-size:10.5px;border-top:1px solid var(--line);overflow-x:auto}
 .dgrid{display:grid;grid-template-columns:26px 1fr 26px 1fr;min-width:420px}
 .dgrid>div{padding:1.5px 6px;border-bottom:1px solid var(--line)}

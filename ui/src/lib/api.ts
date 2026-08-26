@@ -141,6 +141,31 @@ export class Api {
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
 
+  /** F3: apre il gestore di file della macchina su `path`. Un rifiuto (file sparito
+   *  dal disco, gestore che non parte) è una frase da mostrare, non un'eccezione. */
+  async reveal(path: string): Promise<Ack> {
+    const res = await fetch('/api/reveal', {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    try { return await res.json() as Ack }
+    catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
+  /** F1: apre `url` con l'app dedicata (`scheme`). Il rifiuto più comune è «l'app
+   *  non c'è» — controllato dal daemon **prima** di tentare, non dedotto da un
+   *  lancio silenzioso che non dice se ha funzionato. */
+  async openApp(url: string, scheme: string): Promise<Ack> {
+    const res = await fetch('/api/open-app', {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ url, scheme }),
+    })
+    try { return await res.json() as Ack }
+    catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
   snapshot(id: string): Promise<{ snapshot: SessionSnapshot }> {
     return this.json(`/api/sessions/${id}`)
   }

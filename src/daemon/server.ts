@@ -10,6 +10,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
+import { reveal } from './reveal.ts'
+import { openApp } from './launch.ts'
+import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
 import { diagnostics, warmDiagnostics } from '../adapters/claude-code/profiles.ts'
 import { readToken } from './identity.ts'
@@ -140,6 +143,33 @@ async function route(
     }
     if (method === 'GET' && path === '/api/browse') {
       return send(res, 200, registry.browse(url.searchParams.get('path') ?? undefined))
+    }
+    // Arrivare a un file citato in chat (F3): apre il gestore di file della macchina
+    // sulla cartella giusta, col file selezionato quando l'ambiente lo consente. Non
+    // allarga il perimetro — il daemon esegue già comandi come root — ma sta dietro
+    // le stesse quattro difese di ogni altra rotta, perché è di quelle rotte che è
+    // comodo aggiungere «al volo» fuori dalla guardia, ed è così che se ne apre uno.
+    if (method === 'POST' && path === '/api/reveal') {
+      const body = await readJson<{ path?: string }>(req)
+      if (!body?.path) return send(res, 400, { error: 'path obbligatorio' })
+      const esito = await reveal(body.path)
+      return send(res, esito.ok ? 200 : 404, esito)
+    }
+    // Apre un link con l'app dedicata invece che nel browser (F1). Il perimetro non
+    // si fida del client: `url` deve appartenere davvero a un dominio che STARK
+    // riconosce per `scheme`, altrimenti la rotta diventerebbe «lancia qualunque
+    // schema il client chieda con qualunque URL» — un primitivo più potente di
+    // quanto serva, e comodo da bucare proprio perché sembra innocuo.
+    if (method === 'POST' && path === '/api/open-app') {
+      const body = await readJson<{ url?: string; scheme?: string }>(req)
+      if (!body?.url || !body.scheme) return send(res, 400, { error: 'url e scheme obbligatori' })
+      let host: string
+      try { host = new URL(body.url).hostname } catch { return send(res, 400, { error: 'url non valido' }) }
+      if (serviceFor(host)?.scheme !== body.scheme) {
+        return send(res, 400, { error: 'dominio non riconosciuto per questo schema' })
+      }
+      const esito = await openApp(body.url, body.scheme)
+      return send(res, esito.ok ? 200 : 404, esito)
     }
     if (method === 'GET' && path === '/api/storage') {
       return send(res, 200, registry.storage())

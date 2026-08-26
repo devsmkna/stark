@@ -12,7 +12,7 @@
 import type { Cost, Payload, Usage } from '../../core/events.ts'
 import type { NativeEvent } from './raw.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
-import { summarize } from './summary.ts'
+import { intentOf, summarize } from './summary.ts'
 
 type OpenBlock =
   | { kind: 'text'; partId: string; acc: string }
@@ -29,9 +29,10 @@ export class Translator {
 
   /** Il turno lo apre STARK, non l'agent: l'agent non sa cosa sia un prompt utente. */
   beginTurn(turnId: string): void { this.turnId = turnId }
-  /** C'è un turno aperto in questo momento? Lo chiede l'adapter prima di aprirne un
-   *  altro: se la risposta è sì, il prossimo prompt va piegato in questo, non in uno
-   *  nuovo — vedi il commento su `turn.promptAdded` in events.ts. */
+  /** C'è un turno aperto in questo momento? Lo chiede l'adapter a ogni prompt: se la
+   *  risposta è sì, il prossimo **apre un turno suo e si mette in fila**, e sarà
+   *  l'adapter a consegnarlo quando questo sarà chiuso. Non si piega più dentro —
+   *  vedi il commento su `turn.promptAdded` in events.ts. */
   get openTurnId(): string | undefined { return this.turnId }
 
   handle(e: NativeEvent): Payload[] {
@@ -158,9 +159,11 @@ export class Translator {
         const input = parseJson(block.acc)
         this.calls.set(block.callId, { name: block.name, input })
         const summary = summarize(block.name, input)
+        const intent = intentOf(block.name, input)
         return [{
           k: 'tool.input.ended', callId: block.callId, input,
           ...(summary !== undefined ? { summary } : {}),
+          ...(intent !== undefined ? { intent } : {}),
         }]
       }
       case 'message_stop':

@@ -79,7 +79,7 @@
   <div class="scroller" style="padding:12px;flex:1">
     {#if mode === 'file'}
       {#each byFile as edits (edits[0]!.path)}
-        <FileBlock {edits} narrow={store.narrow} />
+        <FileBlock {edits} narrow={store.narrow} {store} />
       {/each}
       {#if byFile.length === 0}
         <div class="mid">No file has been touched in this chat.</div>
@@ -91,7 +91,7 @@
           <div class="when">{hhmm(m.ts)}</div>
           <div class="body">
             {#if m.kind === 'file'}
-              <FileBlock edits={[m.edit]} narrow={store.narrow} />
+              <FileBlock edits={[m.edit]} narrow={store.narrow} {store} />
             {:else if m.kind === 'shell'}
               {@const o = outcome(m.run)}
               <div class="row" class:bad={o.bad}>

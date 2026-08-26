@@ -132,6 +132,39 @@ export function since(from: number, to: number): string {
 }
 
 /**
+ * Quanto manca. È `since` guardato dall'altro verso, con una differenza che non è un
+ * dettaglio: qui si arriva ai **giorni**, perché una finestra settimanale si riapre fra
+ * sei giorni e «148h 12m» non è un tempo che qualcuno legge. Sotto il minuto non si
+ * contano i secondi: su un'attesa di ore i secondi sono rumore.
+ */
+export function until(from: number, to: number): string {
+  const m = Math.max(0, Math.round((to - from) / 60000))
+  if (m < 1) return 'any moment'
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${String(m % 60).padStart(2, '0')}m`
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
+/**
+ * `Aug 26 14:30`. Il doppio formato serve perché le due domande sono diverse: «quanto
+ * manca» dice se conviene aspettare, «quando esattamente» dice se conviene rimandare a
+ * domani mattina — e su un'attesa di giorni la prima da sola non basta a decidere.
+ */
+const MESI = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export function stamp(ts: number): string {
+  if (!ts) return ''
+  // Al minuto **più vicino**, non troncato. Il piano ricalcola l'istante del reset a
+  // ogni domanda e lo manda con i decimi: fra due letture ballava di un secondo, e
+  // troncando si vedeva l'orario cambiare da 23:00 a 22:59 senza che fosse successo
+  // niente. Arrotondare toglie quel tremolio; mezzo minuto su una finestra di giorni
+  // non cambia nessuna decisione.
+  const d = new Date(Math.round(ts / 60000) * 60000)
+  const due = (n: number): string => String(n).padStart(2, '0')
+  return `${MESI[d.getMonth()]} ${due(d.getDate())} ${due(d.getHours())}:${due(d.getMinutes())}`
+}
+
+/**
  * Come si legge «cosa sta facendo adesso». Il fatto lo calcola `core/activity.ts`,
  * perché serve identico al blocco in basso e alla riga dell'elenco — che il daemon
  * riempie per tutte le sessioni, comprese quelle che non stai guardando. Qui restano
@@ -139,7 +172,10 @@ export function since(from: number, to: number): string {
  */
 export function activityText(a: Activity): string {
   switch (a.kind) {
-    case 'tool': return a.summary ? `${a.name} · ${a.summary}` : a.name
+    // La motivazione, quando l'agent l'ha scritta, dice più del nome del tool: «Look
+    // for context hover component» dice dove sta andando, «Bash · grep -rn "summary"
+    // src/adapters/» no. Senza, si torna al nome/soggetto di sempre (F2).
+    case 'tool': return a.intent ?? (a.summary ? `${a.name} · ${a.summary}` : a.name)
     case 'writing': return 'writing the answer…'
     case 'thinking': return 'thinking…'
     default: return 'working…'

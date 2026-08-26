@@ -12,8 +12,9 @@ import {
   type McpServerStatus, type Options, type PermissionResult, type PermissionUpdate,
   type Query, type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type {
-  AgentQuestion, McpServer, Payload, PermissionMode, PromptPart,
+import {
+  EMPTY_USAGE,
+  type AgentQuestion, type McpServer, type Payload, type PermissionMode, type PromptPart,
 } from '../../core/events.ts'
 
 /** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
@@ -30,8 +31,16 @@ import {
   resolveModel, slashCommands, type LaunchOptions,
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
+import { quotaWindows } from './quota.ts'
 import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
+
+/**
+ * Un prompt che ha già il suo turno aperto e aspetta il proprio giro. `annunciato`
+ * distingue quelli mandati prima che la sessione fosse nata: il loro `turn.started`
+ * non è ancora potuto uscire.
+ */
+type InCoda = { turnId: string; parts: PromptPart[]; msg: SDKUserMessage; annunciato: boolean }
 
 /** Cosa STARK decide su una richiesta di permesso. */
 export type PermissionAnswer =
@@ -124,6 +133,45 @@ export class ClaudeCodeAdapter {
     this.input.before(() => this.reconcileMcp())
     await this.reconcileMcp()
     await this.refreshCommands()
+    // Non si aspetta: è una domanda al piano, non alla conversazione, e la chat deve
+    // poter partire anche se quella risposta tarda o non arriva mai.
+    void this.refreshQuota()
+  }
+
+  // ─── quanto ne resta ──────────────────────────────────────────────────────
+
+  /** L'ultima fotografia scritta, per non riscrivere nel journal la stessa riga. */
+  private ultimaQuota = ''
+
+  /**
+   * Chiede al piano quanto è pieno il serbatoio e lo scrive nel journal.
+   *
+   * Gira in tre momenti, e ognuno ha la sua ragione: all'**avvio**, perché una chat
+   * appena risvegliata deve dire numeri di adesso e non quelli di quando si è
+   * addormentata; a **fine turno**, perché è il momento in cui quei numeri si sono
+   * appena mossi; e **quando l'utente guarda il pannellino**, perché è l'unico istante
+   * in cui la freschezza serve davvero — nel frattempo la quota la consumano anche le
+   * altre chat e l'altra macchina, e nessuno ce lo verrebbe a dire.
+   *
+   * Non costa quota: è una domanda sul consumo, non un turno di modello.
+   */
+  async refreshQuota(): Promise<void> {
+    const q = this.q as unknown as Record<string, unknown> | null
+    const metodo = q?.['usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET']
+    // Il nome dice che può sparire, quindi si guarda se c'è invece di fidarsi del tipo.
+    // Una versione che non ce l'ha non è un guasto: il pannellino dirà che non lo sa.
+    if (typeof metodo !== 'function') return
+    let windows
+    try {
+      windows = quotaWindows(await (metodo as () => Promise<unknown>).call(q))
+    } catch {
+      return
+    }
+    if (windows.length === 0) return
+    const firma = JSON.stringify(windows)
+    if (firma === this.ultimaQuota) return
+    this.ultimaQuota = firma
+    this.emit({ k: 'quota.windows', windows })
   }
 
   // ─── comandi slash ────────────────────────────────────────────────────────
@@ -246,26 +294,83 @@ export class ClaudeCodeAdapter {
       { type: 'text' as const, text },
     ]
 
-    // Un turno è già aperto (il primo non ancora chiuso, oppure quello nato ma non
-    // ancora annunciato perché la sessione sta partendo)? Questo messaggio ci si piega
-    // dentro invece di aprirne uno suo — è verificato, non supposto: vedi il commento
-    // su `turn.promptAdded` in events.ts. Aprirne uno nuovo qui produrrebbe un turno
-    // fantasma che non riceve mai eventi, perché l'agent non lo tratterà mai come un
-    // turno a sé.
-    const aperto = this.pendingTurn?.turnId ?? this.tr.openTurnId
-    if (aperto !== undefined) {
-      if (this.pendingTurn) this.pendingTurn.parts.push(...parts)
-      else this.emit({ k: 'turn.promptAdded', turnId: aperto, prompt: parts })
-      this.input.push(this.userMessage(text, immagini))
-      return aperto
+    const turnId = randomUUID()
+    const msg = this.userMessage(text, immagini)
+
+    // C'è già qualcosa in volo? Allora questo prompt **apre un turno suo e aspetta**:
+    // non si piega dentro quello in corso e non parte adesso. È una coda FIFO, e le
+    // due metà della frase contano tutte e due.
+    //
+    // «Apre un turno suo» perché è ciò che l'utente ha fatto: due richieste separate
+    // sono due richieste, e nella conversazione devono restare due blocchi. La UI lo
+    // sa già disegnare — un turno aperto che non è il primo aperto si mostra come
+    // «queued, waiting its turn» (vedi `turnStatus` in ui/src/lib/view.ts).
+    //
+    // «E aspetta» perché è l'unico modo di essere sicuri che resti un turno suo: un
+    // messaggio consegnato mentre l'agent lavora finisce nella coda del CLI, che
+    // dequeue **a lotti** e li fonde in un turno solo ("coalesced into one turn",
+    // parole dei tipi dell'SDK). Tenendolo qui, all'agent arriva un messaggio alla
+    // volta e a sessione ferma: il caso normale, quello che già funziona. La fila è
+    // **nostra**, e questo è anche ciò che rende annullabile ciò che c'è dentro —
+    // `interrupt()` dell'SDK, in questa versione, non prende argomenti e non può
+    // cancellare la coda del CLI.
+    if (this.inVolo()) {
+      // Prima che la sessione sia nata non si può emettere niente: `session.created`
+      // non è ancora uscito. Lo annuncia `announce()`, in ordine, subito dopo.
+      this.coda.push({ turnId, parts, msg, annunciato: this.created })
+      if (this.created) this.emit({ k: 'turn.started', turnId, prompt: parts })
+      return turnId
     }
 
-    const turnId = randomUUID()
     this.tr.beginTurn(turnId)
     if (this.created) this.emit({ k: 'turn.started', turnId, prompt: parts })
     else this.pendingTurn = { turnId, parts }
-    this.input.push(this.userMessage(text, immagini))
+    this.input.push(msg)
     return turnId
+  }
+
+  // ─── la fila ──────────────────────────────────────────────────────────────
+
+  /** I prompt che hanno già un turno aperto e aspettano il loro giro. In ordine. */
+  private coda: InCoda[] = []
+
+  /** C'è un turno in corso, o uno che sta per partire, o altri già in fila? */
+  private inVolo(): boolean {
+    return this.pendingTurn !== null || this.tr.openTurnId !== undefined || this.coda.length > 0
+  }
+
+  /**
+   * Il turno in corso è finito: parte il primo della fila.
+   *
+   * Si consegna **uno alla volta**: è la regola che tiene un turno di STARK uguale a
+   * un turno dell'agent. Consegnarne due insieme li farebbe fondere, e il secondo
+   * turno resterebbe aperto per sempre senza ricevere un solo evento — il fantasma di
+   * cui parlava il commento sbagliato che stava qui.
+   */
+  private next(): void {
+    const p = this.coda.shift()
+    if (!p) return
+    this.tr.beginTurn(p.turnId)
+    this.input.push(p.msg)
+  }
+
+  /**
+   * Svuota la fila dichiarando finiti i turni che non gireranno.
+   *
+   * Serve perché un turno aperto che non riceverà mai eventi è la cosa peggiore che si
+   * possa lasciare in un journal: alla rilettura la conversazione mostrerebbe per
+   * sempre un «queued, waiting its turn» che non aspetta più niente (§4). Meglio dire
+   * che è stato interrotto, che è la verità.
+   */
+  private svuota(): void {
+    const persi = this.coda
+    this.coda = []
+    for (const p of persi) {
+      this.emit({
+        k: 'turn.ended', turnId: p.turnId, reason: 'aborted',
+        usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+      })
+    }
   }
 
   private userMessage(text: string, immagini: PromptImage[]): SDKUserMessage {
@@ -287,12 +392,41 @@ export class ClaudeCodeAdapter {
     return msg
   }
 
-  /** Aspetta la fine del turno in corso. */
+  /** Aspetta la fine del turno in corso — **non** dello svuotamento della fila: chi
+   *  chiama sa quanti prompt ha mandato, e aspettarne uno alla volta è ciò che serve
+   *  a chi guida la sessione da uno script. */
   async settled(): Promise<void> {
     await new Promise<void>(res => { this.turnEnd = res })
   }
 
-  async interrupt(): Promise<void> { await this.q?.interrupt() }
+  /**
+   * Stop vuol dire stop, **anche per la fila**.
+   *
+   * Non è ovvio e la scelta è questa: chi preme il quadrato rosso vuole che la
+   * macchina si fermi, non che parta il prossimo della fila mezzo secondo dopo. Con
+   * l'altra scelta, tre prompt in coda vorrebbero quattro Stop — e ogni Stop mancato
+   * fa partire lavoro che nessuno voleva più. È anche la lettura che ne dà l'SDK, che
+   * chiama «Stop-means-stop-everything client» proprio il pulsante Stop di una UI
+   * remota. Si svuota **prima** di interrompere, così il turno che sta morendo non
+   * trova nessuno da far partire quando si chiude.
+   */
+  async interrupt(): Promise<void> {
+    // Solo se c'è davvero un turno da fermare: altrimenti la bandierina resterebbe su
+    // e il prossimo errore vero verrebbe raccontato come «l'ha fermato l'utente».
+    this.fermato = this.tr.openTurnId !== undefined
+    this.svuota()
+    await this.q?.interrupt()
+  }
+
+  /**
+   * L'utente ha premuto Stop, e il turno che sta per chiudersi è quello.
+   *
+   * Serve perché il turno interrotto torna indietro come `is_error`, che STARK
+   * tradurrebbe in `error` — e la conversazione mostrerebbe un «Turn error» rosso
+   * dove la verità è «l'hai fermato tu». Dal messaggio non si distingue: l'unico che
+   * lo sa è chi ha ricevuto il comando, cioè noi.
+   */
+  private fermato = false
   async setMode(mode: PermissionMode): Promise<void> {
     await this.q?.setPermissionMode(mode)
     this.emit({ k: 'session.mode', mode })
@@ -309,6 +443,10 @@ export class ClaudeCodeAdapter {
   }
 
   async close(): Promise<void> {
+    // Anche qui prima: chiudere lo stdin fa annullare al CLI il turno in corso, e i
+    // turni in fila non partiranno mai. Lasciarli aperti nel journal li farebbe
+    // riapparire «in attesa» a ogni risveglio, per sempre.
+    this.svuota()
     this.input.close()
     await this.loop
   }
@@ -354,6 +492,13 @@ export class ClaudeCodeAdapter {
       this.pendingTurn = null
       this.emit({ k: 'turn.started', turnId: t.turnId, prompt: t.parts })
     }
+    // Chi è arrivato mentre la sessione nasceva ha già il suo turno e il suo posto in
+    // fila: quello che gli mancava era solo il momento buono per dirlo.
+    for (const p of this.coda) {
+      if (p.annunciato) continue
+      p.annunciato = true
+      this.emit({ k: 'turn.started', turnId: p.turnId, prompt: p.parts })
+    }
   }
 
   private async consume(q: Query): Promise<void> {
@@ -361,10 +506,30 @@ export class ClaudeCodeAdapter {
       for await (const m of q) {
         this.opts.onRaw?.(m)
         this.watchCommands(m as Record<string, unknown>)
-        for (const p of this.tr.handle(m as Record<string, unknown>)) {
+        let finito = false
+        for (const grezzo of this.tr.handle(m as Record<string, unknown>)) {
+          const p = grezzo.k === 'turn.ended' && this.fermato
+            ? { ...grezzo, reason: 'aborted' as const }
+            : grezzo
+          // Fra un turno e il successivo la conversazione **non è ferma**. L'`idle`
+          // che chiude il turno durerebbe un decimo di secondo, ma non è un dettaglio
+          // grafico: è lo stato su cui suona la notifica «ha finito», e suonerebbe
+          // mentre invece c'è ancora la fila da fare.
+          if (p.k === 'session.state' && p.state === 'idle' && this.coda.length > 0) continue
           this.emit(p)
-          if (p.k === 'turn.ended') { this.turnEnd?.(); this.turnEnd = null }
+          if (p.k === 'turn.ended') {
+            finito = true
+            this.fermato = false
+            this.turnEnd?.(); this.turnEnd = null
+            // Dopo, non prima: il turno che si è appena chiuso ha consumato quota, e
+            // chiederlo adesso è l'unico modo perché il numero comprenda anche lui.
+            void this.refreshQuota()
+          }
         }
+        // Fuori dal giro degli eventi, non dentro: `turn.ended` arriva insieme
+        // all'`usage` e allo stato, e il turno dopo va aperto quando quel messaggio è
+        // stato raccontato tutto.
+        if (finito) this.next()
       }
     } catch (e) {
       this.emit({ k: 'session.error', message: String((e as Error).message ?? e), fatal: true })

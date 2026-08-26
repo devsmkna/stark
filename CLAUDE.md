@@ -81,6 +81,24 @@ della macchina e li accende uno per uno, spenti di default, con la scelta che to
 risveglio. E i **comandi slash** si scrivono: la casella li propone appena scrivi `/`, con
 argomenti e alias.
 
+**I prompt fanno la fila** (26 agosto 2026): mandarne uno mentre l'agent lavora non lo
+piega più dentro il turno in corso — apre **un turno suo** e aspetta, **FIFO**. La fila è di
+STARK, non del CLI: si consegna un messaggio alla volta e a sessione ferma, perché un lotto
+consegnato insieme il CLI lo fonde in un turno solo. **Stop svuota la fila** (chi preme il
+quadrato rosso non vuole che parta il prossimo mezzo secondo dopo) e il turno interrotto
+dall'utente ora si chiama `aborted`, non `error`. Erano tre bug in uno: il terzo stava nel
+reducer, che attaccava le parti all'**ultimo** turno invece che al **primo aperto** — così la
+risposta al primo prompt compariva dentro il secondo. Provato dal vivo: `npm run queue`.
+
+**Il pannellino della quota dice quanto ne resta** (26 agosto 2026): tre voci e basta —
+contesto di questa chat, finestra da **5 ore**, **settimana** (più le settimane per modello, se
+il piano ne manda), col reset scritto nei due formati, «fra 6d 12h · Sep 01 23:00». Il livello
+non si deduce dai token: è del **piano**, non della conversazione, e lo si chiede con
+`quota.windows` — avvio, fine turno, e quando apri il pannellino. Sorgente: il metodo
+`usage_EXPERIMENTAL_…` dell'SDK, instabile per ammissione sua, isolato in
+`adapters/claude-code/quota.ts` con la cattura vera in `npm run check`. Resta disegnato e non
+fatto: dire **su quale profilo** sta contando.
+
 **La compattazione si vede**: una riga nel flusso con quanto c'era, quanto è rimasto e se
 l'hai chiesta tu o si era riempito. Prima l'evento finiva in un `break`.
 
@@ -96,7 +114,7 @@ aperta si ricollega da sola dopo un riavvio.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 49 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 71 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -122,6 +140,46 @@ chiuso senza un solo `delta` non è più una riga da aprire su «…».
 l'agent abbia letto, quindi non è fidato solo perché arriva da noi. I link vanno in una scheda
 nuova: STARK non ha una barra degli indirizzi con cui tornare indietro. Sono le **prime
 dipendenze dopo l'SDK**, quindi dopo un `git pull` `npm install` non si salta più.
+
+**Bugfix B1 e feature F2, dalla pagina «Bugfix and future features» di Notion** (26 agosto 2026):
+la domanda finale evidenziava tutto il blocco, non il paragrafo che la conteneva — lo stile è
+passato dal contenitore all'ultimo elemento renderizzato (`markdown.ts`). E la riga di un tool
+mostra ora **perché** è stato lanciato, non solo cosa: quando l'agent ha scritto una
+`description`, è quella la riga — «Search for summarize definition» invece di
+`grep -rn "summary" src/adapters/`. Non generata da STARK (costerebbe quota su ogni tool di ogni
+turno): è testo che l'agent scrive già da sé e prima veniva buttato via. Verificato dal vivo che
+dipende dal modello — con Opus quasi sempre, con Sonnet su comandi brevi spesso manca — e che il
+comando esatto resta raggiungibile (tooltip, e per intero aprendo la riga).
+
+**Feature F3, stessa pagina** (26 agosto 2026): un bottone «cartella aperta» accanto alla riga di
+un tool con un percorso (`file_path`/`path`/`notebook_path`, gli stessi campi che `summary.ts`
+riconosce già) e accanto al blocco di un file modificato — apre il gestore di file della macchina
+col file **selezionato**, senza sostituire il clic che apre il confronto. `POST /api/reveal`,
+dietro le stesse quattro difese di ogni altra rotta (`src/daemon/reveal.ts`). Su WSL2 (le due
+macchine reali) usa Explorer via `wslpath`, verificato su entrambe le forme di percorso
+(`/mnt/…` e nativo). Il ramo Linux nativo/Nautilus non è verificato dal vivo — nessuna delle due
+macchine lo è — e lo dice il codice, non solo questa riga.
+
+**F1, stessa pagina, fatta** (26 agosto 2026): un link riconosciuto (oggi solo Notion) porta un
+bottone **«Open in Notion»** accanto — il link resta quello che era, il bottone è la seconda via.
+Decisione dell'utente, non la mia proposta iniziale: niente riscrittura silenziosa dell'`href`
+(rischiava di sorprendere chi si aspettava il browser), due vie esplicite. L'app che non c'è si
+scopre **prima** di tentare — `HKCR\<schema>` su WSL, `xdg-mime` su Linux — perché Windows non
+avvisa chi lancia un protocollo non registrato, fallisce muto. Verificato dal vivo per davvero,
+non solo per esito HTTP: cliccato nella UI vera, ha aperto la pagina Notion giusta, due volte,
+con conferma diretta di cosa si vedeva sullo schermo — l'unica cosa che non potevo controllare da
+sola. Su WSL2 passa da `cmd.exe /c start` con l'URL tradotto nello schema dell'app, lanciato dalla
+cartella di sistema di Windows (dalla cartella del daemon, un percorso WSL, fallisce — verificato,
+non dedotto). Il perimetro non si fida del client: `POST /api/open-app` ricontrolla da sé che il
+dominio appartenga al servizio dichiarato. `core/services.ts` è il posto dove aggiungerne un
+altro, un servizio alla volta. `npm run daemon` passa a **24** verifiche.
+
+**Due rifiniture volute dall'utente, stessa sera**: il blocco del prompt è **blu-azzurro**
+(`--user`/`--user-bg` in `app.css`, distinto da `--accent` e da `--work`) — ogni turno si
+riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto. E la riga di un tool
+con una motivazione (F2) diventa **due righe**: sopra nome e perché, sotto — piccolo, monospace —
+il comando o il percorso esatto, che prima stava solo in un tooltip. Senza motivazione la riga
+resta una sola linea, identica a prima.
 
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
 mai fatte.

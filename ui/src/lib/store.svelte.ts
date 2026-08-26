@@ -340,6 +340,40 @@ export class Store {
   }
   setModel(model: string): Promise<boolean> { return this.send({ c: 'session.setModel', model }) }
 
+  /**
+   * Rilegge il livello della quota. Non passa da `send`, di proposito: è una domanda
+   * che parte da sola quando si apre il pannellino, e un rifiuto — su una chat che
+   * dorme non c'è nessuno a cui chiederlo — non deve accendere la riga rossa che
+   * l'utente associa a un comando che *lui* ha dato. Se non risponde, restano i numeri
+   * di prima con scritto di quando sono.
+   */
+  async refreshQuota(): Promise<void> {
+    const id = this.selected
+    if (!id || !this.live) return
+    try { await this.api.command(id, { c: 'session.refreshQuota' }) } catch { /* restano i vecchi */ }
+  }
+
+  /**
+   * F3: arriva al file dove sta, invece di lasciarlo un percorso da copiare a mano.
+   * Non passa da `send()`: non è un comando su una sessione, è un'azione sulla
+   * macchina — vale anche su una chat che dorme, dove non c'è nessun processo a cui
+   * chiedere niente.
+   */
+  async reveal(path: string): Promise<void> {
+    this.refused = null
+    const esito = await this.api.reveal(path)
+    if (!esito.ok) this.refused = esito.error ?? 'could not open the file manager'
+  }
+
+  /** F1: apre un link riconosciuto (Notion, …) con la sua app. Anche questo vale
+   *  su una chat che dorme: non è un comando sulla sessione, è un'azione sulla
+   *  macchina — la stessa ragione per cui `reveal` non passa da `send()`. */
+  async openApp(url: string, scheme: string): Promise<void> {
+    this.refused = null
+    const esito = await this.api.openApp(url, scheme)
+    if (!esito.ok) this.refused = esito.error ?? 'could not open the app'
+  }
+
   async rename(id: string, title: string): Promise<void> {
     this.renaming = null
     if (title.trim()) await this.send({ c: 'session.rename', title }, id)

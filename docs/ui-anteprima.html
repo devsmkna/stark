@@ -16,6 +16,7 @@
   --done:#186A3B; --done-bg:#E6F4EC;
   --add:#186A3B; --add-bg:#E9F6EE;
   --del:#B42318; --del-bg:#FDECEA;
+  --user:#0284C7; --user-bg:#E0F2FE;
   /* un colore per progetto, non per sezione */
   --p-stark:#3B5BF5; --p-pay:#D97706; --p-site:#0F9D76;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
@@ -32,6 +33,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --user:#38BDF8; --user-bg:#123247;
   --p-stark:#7A92FF; --p-pay:#FBBF24; --p-site:#34D399;
 }}
 :root[data-theme="dark"]{
@@ -45,6 +47,7 @@
   --done:#7BC79B; --done-bg:#12301F;
   --add:#7BC79B; --add-bg:#12301F;
   --del:#F09A92; --del-bg:#3A1A17;
+  --user:#38BDF8; --user-bg:#123247;
   --p-stark:#7A92FF; --p-pay:#FBBF24; --p-site:#34D399;
 }
 
@@ -154,11 +157,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
    conversazione vera, che è esattamente il caso che deve reggere. */
 .turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface);flex:none}
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2)}
-.turn.open>.th{background:var(--surface)}
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg)}
+.turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
-.th .tm{color:var(--muted);font-size:10px;flex:none;font-variant-numeric:tabular-nums}
-.th .q{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.th .tm{color:var(--user);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:600}
+.th .q{font-weight:600;color:var(--user);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{margin-left:auto;color:var(--muted);font-size:10px;flex:none}
 .tb{padding:2px 11px 11px;display:flex;flex-direction:column;gap:6px}
 
@@ -234,7 +237,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .tip .tr b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 .tip .tr small{color:var(--muted);font-size:9.5px}
 .tip hr{margin:6px 0;border-top-color:var(--line)}
-.meter{height:4px;border-radius:3px;background:var(--surface-3);overflow:hidden;margin-top:3px}
+.meter{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden;margin:3px 0 5px}
 .meter i{display:block;height:100%;background:var(--accent)}
 
 /* effetti */
@@ -581,17 +584,20 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
               <span class="tune">sonnet-5<svg class="ic"><use href="#i-down"/></svg></span><span class="sep">&middot;</span>
               <span class="ctx" tabindex="0">context 34%
                 <span class="tip">
-                  <div class="tr"><span>Context</span><b>34%</b></div>
+                  <div class="tr"><span>Context window</span><b>34%</b></div>
                   <div class="meter"><i style="width:34%"></i></div>
-                  <div class="tr"><small>68k of 200k tokens</small></div>
+                  <div class="tr"><small>68k of 200k tokens &middot; last turn</small></div>
                   <hr>
-                  <div class="tr"><span>Session</span><b>21%</b></div>
-                  <div class="tr"><small>resets at 21:00</small></div>
+                  <div class="tr"><span>Session &middot; 5 hours</span><b>21%</b></div>
+                  <div class="meter"><i style="width:21%"></i></div>
+                  <div class="tr"><small>resets in 3h 50m &middot; Aug 26 14:30</small></div>
                   <hr>
-                  <div class="tr"><span>Week</span><b>58%</b></div>
-                  <div class="tr"><small>resets Monday</small></div>
-                  <hr>
-                  <div class="tr"><small>counted on profile <b style="font-weight:600">digitizers</b></small></div>
+                  <div class="tr"><span>Weekly</span><b>58%</b></div>
+                  <div class="meter"><i style="width:58%"></i></div>
+                  <div class="tr"><small>resets in 6d 12h &middot; Sep 01 23:00</small></div>
+                  <div class="tr" style="padding-left:12px"><span>Weekly &middot; Fable</span><b>12%</b></div>
+                  <div class="meter" style="margin-left:12px"><i style="width:12%"></i></div>
+                  <div class="tr" style="padding-left:12px"><small>resets in 6d 12h &middot; Sep 01 23:00</small></div>
                 </span>
               </span>
             </div>

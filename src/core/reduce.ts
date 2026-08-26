@@ -10,7 +10,7 @@ import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
   type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
-  type PromptPart, type SessionState, type SlashCommand, type Usage,
+  type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
 export type TextPartView = { kind: 'text'; partId: string; text: string; open: boolean }
@@ -21,6 +21,9 @@ export type ToolPartView = {
   kind: 'tool'; callId: string; name: string; inputRaw: string; input?: unknown
   /** Su cosa ha lavorato, gia pronto dall'adapter. Vedi `tool.input.ended`. */
   summary?: string
+  /** Perche l'agent l'ha lanciato — la sua motivazione, non una dedotta da STARK.
+   *  Assente quando l'agent non l'ha scritta (F2, vedi `summary.ts`). */
+  intent?: string
   startedAt: number; endedAt?: number
   done: boolean; ok?: boolean; error?: string; blocked?: 'classifier' | 'denyRule'
   /** Cio che il tool ha restituito, per intero. Arriva con `tool.ended`: prima di
@@ -84,7 +87,7 @@ export type TurnView = {
   startedAt: number
   endedAt?: number
   ended: boolean
-  reason?: 'completed' | 'aborted' | 'error'
+  reason?: 'completed' | 'aborted' | 'error' | 'interrupted'
   usage?: Usage
   cost?: Cost
 }
@@ -145,6 +148,16 @@ export type SessionSnapshot = {
   usage: Usage
   cost: Cost
   quota?: QuotaView
+  /**
+   * Quanto hai consumato di ciascuna finestra del piano. Vuoto finché nessuno l'ha
+   * chiesto, e vuoto per sempre su un journal scritto prima che STARK sapesse
+   * chiederlo: la UI dice allora che non lo sa, invece di disegnare una barra a zero.
+   */
+  quotaWindows: QuotaWindow[]
+  /** Quando sono state misurate. Su una chat che dorme è un numero vecchio, e va
+   *  detto: senza questo istante il pannellino spaccerebbe per attuale una fotografia
+   *  di due ore fa. */
+  quotaWindowsAt?: number
   lastSeq: number
   /** Quando è successo l'ultimo evento. La barra laterale mostra l'ora, e per il §4
    *  ogni cosa che la UI mostra deve nascere dal journal e non da altrove. */
@@ -165,7 +178,7 @@ function emptySnapshot(sessionId: string): SessionSnapshot {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
     models: [], modes: [], mcpServers: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
-    blocked: [], notices: [],
+    blocked: [], notices: [], quotaWindows: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
     stateSince: 0,
   }
@@ -187,15 +200,43 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
   // dopo è l'unico modo perché `stateSince` non dimentichi uno di quei sei.
   const before = s.state
   const p = e.payload
-  const turn = (): TurnView | undefined => s.turns[s.turns.length - 1]
+  /**
+   * A quale turno appartiene quello che sta arrivando: il **primo aperto**, non
+   * l'ultimo della lista.
+   *
+   * Erano la stessa cosa finché i turni nascevano uno alla volta. Da quando i prompt
+   * fanno la fila (§7) non lo sono più: l'ultimo della lista può essere uno che
+   * aspetta il suo giro, e attaccargli le parti del turno che sta *lavorando* gliele
+   * ruba. Si vedeva, ed è il motivo per cui questa riga è cambiata: la risposta al
+   * primo prompt compariva dentro il secondo, sopra la sua.
+   *
+   * Il ripiego sull'ultimo resta per ciò che arriva a turno già chiuso: appenderlo
+   * all'ultimo è comunque meglio che buttarlo via in silenzio.
+   */
+  const turn = (): TurnView | undefined =>
+    s.turns.find(t => !t.ended) ?? s.turns[s.turns.length - 1]
 
   switch (p.k) {
-    case 'session.created':
+    case 'session.created': {
       s.agent = p.agent; s.cwd = p.cwd; s.model = p.model
       s.capabilities = p.capabilities; s.tools = p.tools; s.slashCommands = p.commands
       if (p.models) s.models = p.models
       if (p.modes) s.modes = p.modes
+      // `session.created` arriva ogni volta che nasce un processo figlio nuovo per
+      // questa sessione — non solo alla prima: anche a ogni risveglio, e a ogni
+      // riavvio del daemon che la ospitava. Un processo che *nasce* non puo' avere
+      // ereditato un turno davvero in corso — se lo snapshot ne ha uno con `ended:
+      // false`, e' per forza un turno che il processo di prima ha lasciato a meta',
+      // tipicamente un `kill` del daemon prima che scrivesse il proprio `turn.ended`
+      // (misurato dal vivo il 26 agosto: una sessione ripresa con un turno rimasto
+      // aperto per sempre, e ogni risposta successiva finita li' dentro invece che
+      // nel proprio turno — vedi `turn()` qui sotto). Diverso da un turno ancora
+      // aperto quando *parte* un altro turno nella stessa sessione viva: quello e'
+      // l'overlap normale della coda (provato in `npm run queue`), e va lasciato
+      // stare. Qui invece non c'e' overlap possibile: e' un processo nuovo.
+      for (const t of s.turns) if (!t.ended) { t.ended = true; t.reason = 'interrupted'; t.endedAt = e.ts }
       break
+    }
     case 'session.renamed': s.title = p.title; break
     case 'session.state':
       s.state = p.state
@@ -284,6 +325,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       if (part) {
         part.input = p.input
         if (p.summary !== undefined) part.summary = p.summary
+        if (p.intent !== undefined) part.intent = p.intent
       }
       break
     }
@@ -375,6 +417,8 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         status: p.status, kind: p.kind, resetsAt: p.resetsAt, usingOverage: p.usingOverage,
       }
       break
+    case 'quota.windows':
+      s.quotaWindows = p.windows; s.quotaWindowsAt = e.ts; break
     case 'context.compacted': {
       // Senza un turno aperto non c'e un posto nel flusso in cui metterla, e non e mai
       // successo: la compattazione avviene mentre un turno gira. Se un giorno arrivasse
