@@ -660,6 +660,25 @@ manda affatto.
 Verificato A/B simulando il lancio dalla Home in un contesto **nuovo** (niente cookie, niente
 storage, come su iOS): con `start_url` nudo **HTTP 403**, col manifest composto la UI si carica;
 e regge anche il rilancio successivo con `sessionStorage` svuotato a mano.
+**Non bastava**, e il secondo giro ha trovato la causa vera (segnalata con un altro screenshot:
+«No token» dentro l'app della Home). Per **specifica** un `<link rel="manifest">` viene
+richiesto **senza cookie**, e il nostro sta dietro il guard: tornava 403, iOS restava senza
+manifest e ripiegava sull'indirizzo della pagina come `start_url` — che a quel punto è `/` nudo,
+perché `bootToken()` il token l'ha appena tolto dalla barra. Serve
+`crossorigin="use-credentials"` sul link, che è l'unica cosa che fa viaggiare il cookie con
+quella richiesta. Misurato: il manifest senza credenziali → **403**, e `location.search` dopo il
+boot → **vuoto**.
+Dietro c'era però un difetto più grosso e più generale: **la UI si rifiutava di provare**.
+`{#if !store.hasToken}` mostrava «No token» ogni volta che il token non era *in memoria* — ma il
+token non è l'unica credenziale, c'è il cookie, e su iOS l'app della schermata Home ha proprio
+solo quello (memoria separata da Safari). La pagina si caricava — cioè il cookie funzionava — e
+la UI si arrendeva sopra un daemon perfettamente raggiungibile. Adesso si prova comunque e ci si
+arrende solo dopo un rifiuto **vero**: un colpo a `/api/health` all'avvio, e `refusedAuth` solo
+sul 403. Una rete che non risponde non è un rifiuto — quello lo dice già `fatal`, e mandare a
+cercare un token quando il daemon è spento è mandare a cercare la cosa sbagliata.
+Riprodotto il caso esatto dello screenshot (solo cookie, memoria svuotata): prima «No token»,
+adesso la UI parte e carica le chat. E senza **nessuna** credenziale la pagina non arriva
+comunque, perché il 403 scatta prima, al confine.
 
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di

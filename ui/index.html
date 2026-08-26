@@ -11,7 +11,14 @@
          queste due righe non c'è modo di aggiungercelo come si deve (l'icona diventa uno
          screenshot della pagina). `apple-touch-icon` è la riga che iOS guarda davvero:
          il manifest da solo, lì, non basta. -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- `crossorigin="use-credentials"` non è un dettaglio: per specifica il manifest
+         viene richiesto **senza cookie**, e il nostro sta dietro il guard — quindi
+         tornava 403, iOS restava senza manifest e ripiegava sull'indirizzo della pagina
+         come `start_url`. Che a quel punto è `/` nudo, perché il token l'abbiamo appena
+         tolto dalla barra: l'app della schermata Home partiva senza credenziale.
+         Con questo attributo la richiesta porta il cookie, il manifest arriva davvero, e
+         `start_url` è quello composto dal daemon — col token dentro. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="apple-touch-icon" href="/icona-180.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="STARK" />

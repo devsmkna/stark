@@ -127,6 +127,16 @@ export class Store {
 
   get hasToken(): boolean { return this.api.hasToken }
 
+  /**
+   * Il daemon ci ha detto di no per davvero.
+   *
+   * Non è «non ho un token»: quella è una cosa diversa, e non basta a fermarsi, perché
+   * il cookie autentica lo stesso (è il caso dell'app della schermata Home su iOS, che
+   * ha una memoria separata da Safari). Si prova, e solo se il primo colpo torna 403 si
+   * dice all'utente che gli serve l'indirizzo col token.
+   */
+  refusedAuth = $state(false)
+
   /** La riga dell'elenco che corrisponde alla chat aperta. */
   get row(): SessionRow | undefined {
     return this.rows.find(r => r.id === this.selected)
@@ -145,6 +155,15 @@ export class Store {
     // Il tasto «indietro» del browser deve tornare alla chat di prima, non uscire
     // dall'app: è l'unico gesto di navigazione che qui non abbiamo inventato noi.
     addEventListener('popstate', this.#popstate)
+    // Un colpo solo, prima di tutto, per sapere **se siamo autenticati**: il token in
+    // memoria non è l'unica credenziale — c'è il cookie, e su iOS l'app della schermata
+    // Home ha solo quello. Non si può dedurre dal token mancante, quindi si chiede.
+    // `/api/health` è la rotta più economica che esista: risponde `{ok:true}` e basta.
+    void fetch('/api/health', { headers: this.api.authHeaders })
+      .then(r => { this.refusedAuth = r.status === 403 })
+      // Una rete che non risponde non è un rifiuto: quello lo dice `fatal`, e mostrare
+      // «No token» a chi ha solo il daemon spento manderebbe a cercare la cosa sbagliata.
+      .catch(() => { this.refusedAuth = false })
     // Servono subito: da qui nascono i colori dei progetti e il silenzio per progetto,
     // che si vedono nella barra laterale prima ancora che si apra una chat.
     void this.loadSettings()

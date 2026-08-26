@@ -45,11 +45,20 @@
 <Sprite />
 
 <div class="shell">
-  {#if !store.hasToken}
+  <!-- Si prova comunque, e ci si arrende solo se il daemon dice davvero di no.
+       Prima bastava non avere un token **in memoria** per fermarsi qui — ma il token non
+       è l'unico modo di essere autenticati: c'è anche il cookie, che il daemon accetta e
+       che dura un giorno. Su iOS è esattamente il caso dell'app della schermata Home, che
+       ha una memoria separata da Safari: il cookie ce l'ha, il token no. La pagina si
+       caricava (quindi il cookie funzionava) e la UI si rifiutava di provare lo stesso,
+       mostrando «No token» sopra un daemon perfettamente raggiungibile.
+       Segnalato dall'utente con uno screenshot, 26 agosto 2026. Adesso il messaggio
+       compare solo dopo un rifiuto vero — `refusedAuth`, cioè un 403 all'apertura. -->
+  {#if store.refusedAuth}
     <div class="mid">
       <div>
         <p><b>No token.</b></p>
-        <p>Open the address <code>npm run stark</code> prints when it starts. It carries the
+        <p>Open the address <code>stark</code> prints when it starts. It carries the
         token once; STARK moves it into a cookie and clears it from the address bar.</p>
       </div>
     </div>
