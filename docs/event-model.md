@@ -309,6 +309,32 @@ quindi non passa dal `POST /command` del §18, che risponderebbe «sessione non 
 | { k: 'tool.ended',        callId: string, ok: boolean, output?: unknown, error?: string }
 ```
 
+### L'uscita di un comando locale non passava da qui — e si perdeva
+
+Bug segnalato dall'utente, corretto il **26 agosto 2026**: mandare `/usage` (o `/model`, `/cost`,
+…) come prompt chiudeva il turno regolarmente, ma senza un solo blocco dentro. Non
+un'interruzione — una risposta vera, arrivata e mai mostrata.
+
+**Cosa succede davvero.** Un comando locale non passa dal modello: il CLI lo esegue da sé, a
+costo zero (`usage` tutto a zero, verificato), e restituisce il risultato come un **unico**
+messaggio `assistant` completo — nessun `content_block_start`/`_delta`/`_stop` prima, perché non
+c'è stato niente da trasmettere in streaming. Si riconosce da `message.model === '<synthetic>'`,
+che è l'SDK stesso a scriverci per dire «questo non è passato dal modello».
+
+**Dove si perdeva.** Il traduttore aveva una regola sola per i messaggi `assistant`: ignorarli,
+perché una risposta vera arriva già per streaming e ripetere quella consolidata alla fine la
+duplicherebbe. Regola giusta per ogni turno normale — e l'unica eccezione, quella sintetica, ci
+cadeva dentro allo stesso modo. Il `result` arrivava comunque (`turn.ended` si chiudeva
+regolarmente), ma senza che nessun `text.*` fosse mai stato emesso: la UI mostrava il prompt
+dell'utente sopra un riquadro vuoto.
+
+**La correzione.** `assistant()` in `translate.ts` distingue il caso: se `model` non è
+`'<synthetic>'`, resta ignorato come sempre; se lo è, il testo del contenuto diventa
+`text.started` → `text.delta` (il testo intero, in un colpo solo, perché non c'è altro da
+accumulare) → `text.ended` — lo stesso ciclo di ogni altra parte di testo, solo senza streaming
+reale dietro. Un `partId` proprio (dall'`id` del messaggio sintetico), perché questo messaggio
+non ha mai aperto un blocco con `content_block_start` e quindi non c'è un indice da riusare.
+
 ### Un prompt mandato mentre l'agent lavora: **fa la fila**
 
 *Corretto il 26 agosto 2026, misurando.* Un turno non finisce quando smette di aspettare —
@@ -881,7 +907,7 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 76 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/offline-check.ts` | `npm run check` — 78 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 | `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |

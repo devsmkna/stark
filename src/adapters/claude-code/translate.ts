@@ -42,7 +42,7 @@ export class Translator {
       case 'user': return this.toolResults(e)
       case 'result': return this.result(e)
       case 'rate_limit_event': return this.quota(e)
-      case 'assistant': return []   // ridondante con stream_event quando c'è lo streaming
+      case 'assistant': return this.assistant(e)
       default: return []
     }
   }
@@ -92,6 +92,43 @@ export class Translator {
       default:
         return []
     }
+  }
+
+  // ─── assistant ────────────────────────────────────────────────────────────
+
+  /**
+   * Quasi sempre `[]`: una risposta vera arriva già per streaming
+   * (`content_block_delta`), quindi il messaggio `assistant` consolidato che arriva
+   * alla fine è ridondante — ripeterlo qui duplicherebbe il testo.
+   *
+   * **Bug trovato il 26 agosto 2026, segnalato dall'utente**: l'uscita di un comando
+   * locale (`/usage`, `/model`, …) non passa da lì. Arriva come un **unico**
+   * messaggio `assistant` completo, senza un solo `content_block_delta` prima —
+   * riconoscibile da `model: "<synthetic>"`, che l'SDK stesso usa per dire «questo
+   * non è passato dal modello». Trattarlo come "ridondante con lo streaming" e
+   * buttarlo via, la regola giusta per ogni altro caso, qui voleva dire buttare via
+   * l'unica copia che esiste: il turno si chiudeva regolarmente (`result` arriva lo
+   * stesso, a costo zero — verificato: `usage` tutto a zero) ma restava senza un
+   * solo blocco dentro. Non un'interruzione: una risposta vera, mai mostrata.
+   */
+  private assistant(e: NativeEvent): Payload[] {
+    const msg = (e['message'] ?? {}) as Record<string, unknown>
+    if (msg['model'] !== '<synthetic>') return []
+    const blocchi = Array.isArray(msg['content']) ? msg['content'] : []
+    const testo = blocchi
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === 'object' && b['type'] === 'text')
+      .map(b => String(b['text'] ?? ''))
+      .join('')
+    if (!testo) return []
+    // Un `partId` suo, non quello dell'ultimo `messageId` di streaming: questo
+    // messaggio non ha aperto nessun blocco con `content_block_start`, quindi non
+    // c'è un indice da riusare — l'id del messaggio stesso basta a renderlo stabile.
+    const partId = `${String(msg['id'] ?? e['uuid'] ?? this.messageId)}#0`
+    return [
+      { k: 'text.started', partId },
+      { k: 'text.delta', partId, delta: testo },
+      { k: 'text.ended', partId, text: testo },
+    ]
   }
 
   // ─── stream_event ─────────────────────────────────────────────────────────

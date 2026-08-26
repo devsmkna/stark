@@ -196,6 +196,17 @@ memoria, riserva di auto-compattazione…), non più `input`/`output`/`cache*`. 
 della quota: avvio, fine turno, apertura del pannellino (`context.usage`, §10 del modello di
 eventi). `npm run check` passa a **76**.
 
+**L'uscita di un comando locale (`/usage`, `/model`, `/cost`, …) si perdeva** (bug segnalato
+dall'utente, 26 agosto 2026, nella stessa sera). Il turno si chiudeva regolarmente — non
+un'interruzione — ma restava senza un solo blocco dentro: il CLI esegue quei comandi da sé, a
+costo zero, e torna un **unico** messaggio `assistant` completo (`model: "<synthetic>"`), senza
+streaming prima. Il traduttore aveva una regola sola per `assistant` — ignoralo, tanto una
+risposta vera arriva già per streaming — e quella sintetica ci cadeva dentro allo stesso modo.
+`translate.ts` ora distingue il caso sintetico e lo trasforma nello stesso ciclo
+`text.started`/`text.delta`/`text.ended` di ogni altra parte, con tutto il testo in un colpo
+solo invece che a pezzi. Verificato dal vivo mandando `/usage` per davvero: il pannellino della
+UI mostra ora l'output identico a quello del terminale. `npm run check` passa a **78**.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
 mai fatte.
 
