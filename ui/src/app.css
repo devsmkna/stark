@@ -454,6 +454,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
      fissi, che a 320px sfonda. Stessa cura: `.ctx` a `static` perché lo sticky del
      posizionamento assoluto salga fino a `.dock`, e larghezza dai due bordi invece che
      dichiarata. */
+  /* Il conteggio dei blocchi sparisce da telefono: accanto al tempo di esecuzione è la
+     voce meno utile della riga — quanto è durato un turno dice se è andato liscio,
+     quanti blocchi ha prodotto lo si scopre aprendolo. E lì lo spazio serve al prompt,
+     che è ciò che fa riconoscere il turno. */
+  .th .n .blk{display:none}
   .status .ctx{position:static}
   .status .tip{
     left:12px; right:12px; width:auto; bottom:calc(100% + 8px);

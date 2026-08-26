@@ -254,6 +254,11 @@
   }
 
   const promptOf = (t: TurnView): string => promptText(t.prompt)
+
+  /** Il prompt che si sta guardando per intero, o `null`. È di questa schermata e non
+   *  dello store: nessun altro componente ha bisogno di saperlo, e metterlo là vorrebbe
+   *  dire un altro stato globale da tenere in ordine. */
+  let promptAperto = $state<string | null>(null)
   /** Gli allegati il cui file non si trova più. Non è stato dell'app, è stato del disco. */
   let persi = $state(new SvelteSet<string>())
 
@@ -479,16 +484,31 @@
       {@const open = isOpen(turn, i)}
       {@const status = turnStatus(snap.turns, i)}
       <div class="turn" class:open class:active={status === 'active'} class:queued={status === 'queued'}>
-        <button class="th" onclick={() => toggle(turn, i)}>
-          <span class="cx">{open ? '▾' : '▸'}</span>
-          <span class="tm">{hhmm(turn.startedAt)}</span>
-          <span class="q">{promptOf(turn)}</span>
-          <span class="n">
-            {#if status === 'queued'}queued — waiting its turn
-            {:else if status === 'active'}{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'} · working…
-            {:else}{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'}{#if turn.endedAt}{' · '}{since(turn.startedAt, turn.endedAt)}{/if}{/if}
-          </span>
-        </button>
+        <!-- Il contenitore è un `div` e non più il bottone stesso: dentro ce ne stanno
+             due, e un bottone dentro un bottone non è HTML valido. È la stessa forma di
+             `.oprow`, dove la riga del tool e la lente per il file sono fratelli. -->
+        <div class="th">
+          <button class="thmain" onclick={() => toggle(turn, i)}>
+            <span class="cx">{open ? '▾' : '▸'}</span>
+            <span class="tm">{hhmm(turn.startedAt)}</span>
+            <span class="q">{promptOf(turn)}</span>
+            <span class="n">
+              {#if status === 'queued'}queued — waiting its turn
+              {:else if status === 'active'}<span class="blk">{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'} · </span>working…
+              {:else}<span class="blk">{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'}{#if turn.endedAt}{' · '}{/if}</span>{#if turn.endedAt}{since(turn.startedAt, turn.endedAt)}{/if}{/if}
+            </span>
+          </button>
+          <!-- La riga tronca il prompt coi puntini, e fin qui va bene: serve a
+               riconoscere il turno, non a rileggerlo. Ma senza una via per vederlo
+               **intero** quel testo diventa irraggiungibile — su un turno vecchio è
+               spesso l'unica cosa che dice di cosa si stava parlando. Questo bottone è
+               quella via, ed è separato dal clic che apre il turno perché sono due
+               intenzioni diverse: «fammi vedere cosa avevo chiesto» non è «aprimi le
+               diciotto operazioni che ne sono seguite». -->
+          <button class="thmore" title="Show the full prompt"
+            aria-label="Show the full prompt"
+            onclick={() => { promptAperto = promptOf(turn) }}>…</button>
+        </div>
 
         {#if open}
           <div class="tb">
@@ -661,6 +681,28 @@
   <Dock {store} {snap} />
 </div>
 
+<!-- Il prompt per intero. Stesso riquadro di ogni altra finestra dell'app — `.dlg` ha
+     già il tetto di larghezza e altezza, quindi da telefono non esce dallo schermo e su
+     un prompt lungo scorre invece di allungarsi. Il testo sta in un `pre`: un prompt
+     porta a capo, rientri ed elenchi, e riflowarlo come un paragrafo cambierebbe la
+     cosa che si è aperto il pannello per rileggere. -->
+{#if promptAperto !== null}
+  <div class="scrim" role="presentation" onclick={() => { promptAperto = null }}></div>
+  <div class="dlg" style="width:520px">
+    <div class="dlgh">
+      <div class="dt">Your prompt</div>
+      <button class="x" aria-label="Close" onclick={() => { promptAperto = null }}>
+        <Icon name="i-x" />
+      </button>
+    </div>
+    <div class="dlgb">
+      <pre class="fullp">{promptAperto}</pre>
+    </div>
+  </div>
+{/if}
+
+<svelte:document onkeydown={e => { if (e.key === 'Escape' && promptAperto !== null) promptAperto = null }} />
+
 <style>
   /* Il turno attivo (l'agent ci sta davvero lavorando) e quello in coda (dietro un
      altro ancora in corso) si distinguono col colore già usato per gli stessi stati
@@ -814,10 +856,31 @@
     font-size: 10px; color: var(--muted);
   }
 
-  .th, .iconb, .effbtn { background: none; font: inherit; color: inherit; }
-  .th { width: 100%; border: 0; text-align: left; }
-  .th:focus-visible, .iconb:focus-visible, .effbtn:focus-visible {
+  /* `.thmain` è quello che era `.th`: il bottone che apre e chiude. `.th` adesso è il
+     contenitore che li tiene insieme e che si appiccica in cima. */
+  .thmain, .thmore, .iconb, .effbtn { background: none; font: inherit; color: inherit; }
+  .thmain {
+    width: 100%; border: 0; text-align: left; padding: 0;
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  /* Il bottone del prompt intero. Piccolo e spento: è una seconda via, non l'azione
+     principale della riga — quella resta aprire il turno. `flex:none` perché non ceda
+     spazio quando il prompt è lungo, che è esattamente il caso in cui serve. */
+  .thmore {
+    flex: none; border: 0; padding: 0 4px; cursor: pointer;
+    color: var(--muted); font-size: 13px; line-height: 1;
+    align-self: stretch; display: flex; align-items: center;
+  }
+  .thmore:hover { color: var(--ink); }
+  .thmain:focus-visible, .thmore:focus-visible,
+  .iconb:focus-visible, .effbtn:focus-visible {
     outline: 2px solid var(--accent); outline-offset: -2px;
+  }
+  /* Il prompt intero nel pannello: `pre` perché un prompt ha a capo e rientri, e
+     riflowarlo cambierebbe la cosa che si è aperto il pannello per rileggere. */
+  .fullp {
+    margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--ink);
   }
   .iconb[disabled] { opacity: .4; cursor: default; }
   /* Il testo ora è HTML vero (Markdown reso), non più righe grezze da preservare a

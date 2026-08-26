@@ -719,6 +719,26 @@ contenuto del turno, e arrotondare lì aprirebbe due spicchi di fondo in mezzo a
 continua. Verificato che l'aria a riposo resti quella di prima (16.2px da telefono con lo zoom,
 12 su desktop, uguale in cima e ai lati).
 
+**Il prompt intero si può rileggere** (26 agosto 2026, chiesto da telefono: «vedo il prompt
+interrotto ma senza bottone per vederlo esteso»). La riga lo tronca coi puntini, e va bene —
+serve a riconoscere il turno, non a rileggerlo — ma senza una via per aprirlo quel testo
+diventava **irraggiungibile**, e su un turno vecchio è spesso l'unica cosa che dice di cosa si
+stava parlando. Ora c'è un `…` accanto, che apre il prompt per intero in un riquadro.
+Il pezzo strutturale: `.th` **era** il bottone, e un bottone dentro un bottone non è HTML
+valido. È diventato il contenitore — quello che si appiccica in cima — con dentro due fratelli,
+`.thmain` (apre e chiude, com'era) e `.thmore`. È la stessa forma di `.oprow`, dove la riga del
+tool e la lente per il file sono già fratelli. Il testo sta in un `pre`: un prompt ha a capo e
+rientri, e riflowarlo come un paragrafo cambierebbe la cosa che si è aperto il pannello per
+rileggere.
+Sono due intenzioni diverse di proposito: «fammi vedere cosa avevo chiesto» non è «aprimi le
+diciotto operazioni che ne sono seguite».
+Nello stesso giro, da telefono sparisce il **conteggio dei blocchi** accanto al tempo: quanto è
+durato un turno dice se è andato liscio, quanti blocchi ha prodotto lo si scopre aprendolo — e
+lì lo spazio serve al prompt. Su desktop resta.
+Verificato dopo la ristrutturazione che lo **sticky regga ancora** (era il rischio vero del
+cambio): agganciato a 390 e 1400px, fascia scoperta sopra **0**, `maiSopraLHeader`, e il nuovo
+bottone premibile con `elementFromPoint` anche mentre il prompt è appeso.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
