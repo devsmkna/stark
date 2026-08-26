@@ -199,7 +199,8 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    da lì). `top:0` è il bordo alto dello scrollport, e l'intestazione della chat sta
    **fuori** dallo scrollport: sotto di lei, non sopra, senza doverne sapere l'altezza.
    `z-index` perché il prompt deve passare sopra il contenuto del proprio turno, non
-   sotto; il fondo è già opaco (`--user-bg`), altrimenti si leggerebbe in trasparenza. */
+   sotto; e il fondo dev'essere **opaco** — qualunque dei tre qui sotto — altrimenti il
+   contenuto che ci scorre dietro si leggerebbe in trasparenza. */
 /* Angoli arrotondati in alto anche sul prompt, e non solo sul turno che lo contiene.
    Finché sta in cima al proprio turno non serviva: a smussarlo era il taglio del
    contenitore. Ma appiccicato sta **in mezzo** al turno, dove non c'è nessun angolo da
@@ -208,8 +209,21 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    la curva del prompt e quella del contenitore coincidono al pixel invece di somigliarsi.
    Solo in alto: sotto c'è il contenuto del turno, e arrotondare lì aprirebbe due spicchi
    di fondo in mezzo a una cosa continua. */
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg);position:sticky;top:0;z-index:2;border-radius:8px 8px 0 0}
-.turn.open>.th{background:var(--user-bg)}
+/* Il blu è **del turno in corso**, non di tutti i prompt.
+   Era di tutti dal 26 agosto, con l'idea di far riconoscere ogni turno scorrendo senza
+   doverlo leggere. Su una conversazione lunga però quel colore smette di distinguere
+   qualcosa: se sono blu tutti e quaranta, il blu non è più un segnale ma lo sfondo
+   della pagina — e nel frattempo copriva l'unica riga che vale davvero la pena trovare
+   a colpo d'occhio, cioè quella su cui l'agent sta lavorando adesso.
+   Chiuso `--surface-2`, aperto `--surface`: un turno chiuso è una riga di elenco e si
+   stacca appena dal fondo, uno aperto è un contenitore e la sua intestazione non deve
+   competere col contenuto. Sono i due valori che c'erano prima del blu.
+   L'ordine conta: `.turn.active>.th` e `.turn.open>.th` hanno la **stessa** specificità
+   (tre classi), e il turno in corso è quasi sempre anche aperto — quindi la riga del
+   blu deve venire dopo, o non si vedrebbe mai. */
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--surface-2);position:sticky;top:0;z-index:2;border-radius:8px 8px 0 0}
+.turn.open>.th{background:var(--surface)}
+.turn.active>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
 /* L'ora è un riferimento, non un titolo: grigia e di peso normale, come il conteggio
    dei blocchi in fondo alla stessa riga. In blu e in grassetto competeva col prompt

@@ -254,7 +254,18 @@ altro, un servizio alla volta. `npm run daemon` passa a **24** verifiche.
 
 **Due rifiniture volute dall'utente, stessa sera**: il blocco del prompt è **blu-azzurro**
 (`--user`/`--user-bg` in `app.css`, distinto da `--accent` e da `--work`) — ogni turno si
-riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto. **Il colore però è
+riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto.
+**Corretta il 26 agosto in serata, sempre su richiesta dell'utente: il blu è ora del solo turno
+in corso** (`.turn.active>.th`), gli altri tornano ai due valori che avevano prima —
+`--surface-2` da chiusi, `--surface` da aperti. La premessa di allora («ogni turno si riconosce
+scorrendo») valeva su una conversazione corta; su una da quaranta turni si rovescia, perché un
+colore che c'è su tutte le righe non distingue più niente — è lo sfondo della pagina — e nel
+frattempo copriva l'unica riga che vale la pena trovare a colpo d'occhio, cioè quella su cui
+l'agent sta lavorando adesso. Attenzione all'**ordine**: `.turn.active>.th` e `.turn.open>.th`
+hanno la stessa specificità (tre classi) e il turno in corso è quasi sempre anche aperto, quindi
+la riga del blu deve stare dopo o non si vede mai. Il blocco «You answered» resta blu: compare di
+rado, e lì il colore continua a voler dire «qui parli tu» invece di competere con quaranta righe.
+**Il colore però è
 del blocco, non del testo**: il prompt sta in `--ink` e l'ora in `--muted` a peso normale
 (corretto il 26 agosto su segnalazione dell'utente — ciano su fondo azzurro ha poco contrasto, e
 quel testo è la cosa da leggere; l'ora è un riferimento, non un titolo, e in blu grassetto
