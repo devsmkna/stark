@@ -90,21 +90,55 @@
   })
   const nowTotal = $derived(now.input + now.output + now.cacheRead + now.cacheWrite)
 
-  // La finestra è del MODELLO, non dell'agent (§1): la porta `snap.models`, che
-  // l'adapter riempie apposta (vedi `contextWindowFor` in sdk-options.ts). Un
-  // journal scritto prima che STARK la portasse non ce l'ha, e allora non si
-  // inventa una percentuale — si torna al conteggio grezzo, che è quello che c'è.
+  /**
+   * Quanto è piena la finestra, secondo Claude Code stesso — non un conto di STARK.
+   *
+   * Bug trovato il 26 agosto 2026: il vecchio calcolo divideva `nowTotal` per una
+   * finestra **indovinata dal nome del modello** (`contextWindowFor`), e quel nome
+   * poteva arrivare con un suffisso che il confronto testuale non riconosceva
+   * (`claude-opus-5[1m]`): la finestra sembrava 200K invece di un milione, e un
+   * contesto vero al 21% appariva 100%. La correzione non è un conto più furbo — è
+   * chiedere a `getContextUsage()`, la stessa domanda a cui risponde `/context` nel
+   * terminale, invece di ricostruirla da soli.
+   *
+   * `snap.contextUsage` arriva quando STARK lo chiede (avvio, fine turno, apertura
+   * del pannellino — vedi `refreshContext` nell'adapter). Finché non è ancora
+   * arrivato — la primissima frazione di secondo, o un journal scritto prima che
+   * STARK sapesse fare questa domanda — si ripiega sul vecchio conto approssimato,
+   * che è meglio di niente ma non va scambiato per quello vero.
+   */
+  const ctx = $derived(snap.contextUsage)
   const contextWindow = $derived(
-    snap.models.find(m => m.id === snap.model || m.resolved === snap.model)?.contextWindow,
+    ctx?.maxTokens
+    ?? snap.models.find(m => m.id === snap.model || m.resolved === snap.model)?.contextWindow,
   )
   const pct = $derived(
-    contextWindow ? Math.min(100, Math.round((nowTotal / contextWindow) * 100)) : null,
+    ctx ? Math.min(100, Math.round(ctx.percentage))
+      : contextWindow ? Math.min(100, Math.round((nowTotal / contextWindow) * 100))
+      : null,
   )
+  /** Quando manca `ctx` si mostra il totale grezzo di sempre; quando c'è, il totale
+   *  vero che Claude Code riporta — non necessariamente uguale, e quello vero vince. */
+  const totalNow = $derived(ctx?.totalTokens ?? nowTotal)
 
-  /** I quattro blocchi della finestra, in percentuale sulla finestra intera (non
-   *  sul loro stesso totale): è quello che rende la barra confrontabile col resto
-   *  del chip, dove «pieno» vuol dire pieno della finestra, non di se stessa. */
+  const PALETTE = ['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--p4)', 'var(--p5)', 'var(--p6)', 'var(--p7)']
+
+  /**
+   * I blocchi della barra. Con `ctx` sono le categorie **vere** di Claude Code —
+   * prompt di sistema, tool, MCP, memoria, messaggi, riserva di auto-compattazione —
+   * non più `input`/`output`/`cache*`, che raccontano una fattura API, non uno
+   * spazio occupato. «Free space» non è un blocco: è il resto della barra che gli
+   * altri blocchi non riempiono, e disegnarlo lo farebbe sembrare «pieno» sempre.
+   * Senza `ctx` si ripiega sui quattro blocchi di sempre.
+   */
   const segments = $derived.by(() => {
+    if (ctx) {
+      if (!ctx.maxTokens) return []
+      const of = (n: number): number => (n / ctx.maxTokens) * 100
+      return ctx.categories
+        .filter(c => c.name !== 'Free space' && c.tokens > 0)
+        .map((c, i) => ({ label: c.name, n: c.tokens, pct: of(c.tokens), colour: PALETTE[i % PALETTE.length]! }))
+    }
     if (!contextWindow) return []
     const of = (n: number): number => (n / contextWindow) * 100
     return [
@@ -152,6 +186,7 @@
     if (t - ultimaLettura < 15_000) return
     ultimaLettura = t
     void store.refreshQuota()
+    void store.refreshContext()
   }
 
   /** Verde finché c'è margine, ambra quando ne resta poco, rosso quando è quasi finita.
@@ -299,7 +334,11 @@
             {/each}
           </div>
           <div class="tr">
-            <small>{fmt(nowTotal)} of {fmt(contextWindow)} tokens · last turn</small>
+            <!-- «Right now» quando la fonte è `getContextUsage()` (è una domanda fatta
+                 apposta, non un residuo dell'ultimo turno); «last turn» nel ripiego
+                 vecchio, dove è davvero solo l'ultima lettura passata di qui. -->
+            <small>{fmt(totalNow)} of {fmt(contextWindow)} tokens
+              {ctx ? '· right now' : '· last turn'}</small>
           </div>
           <div class="seglegend">
             {#each segments as s (s.label)}

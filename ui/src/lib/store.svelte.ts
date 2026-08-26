@@ -353,6 +353,14 @@ export class Store {
     try { await this.api.command(id, { c: 'session.refreshQuota' }) } catch { /* restano i vecchi */ }
   }
 
+  /** Stessa ragione di `refreshQuota`: la domanda a cui risponde `/context` nel
+   *  terminale, fatta quando l'utente guarda il pannellino. */
+  async refreshContext(): Promise<void> {
+    const id = this.selected
+    if (!id || !this.live) return
+    try { await this.api.command(id, { c: 'session.refreshContext' }) } catch { /* restano i vecchi */ }
+  }
+
   /**
    * F3: arriva al file dove sta, invece di lasciarlo un percorso da copiare a mano.
    * Non passa da `send()`: non è un comando su una sessione, è un'azione sulla

@@ -133,9 +133,10 @@ export class ClaudeCodeAdapter {
     this.input.before(() => this.reconcileMcp())
     await this.reconcileMcp()
     await this.refreshCommands()
-    // Non si aspetta: è una domanda al piano, non alla conversazione, e la chat deve
-    // poter partire anche se quella risposta tarda o non arriva mai.
+    // Non si aspetta: è una domanda al piano (o all'SDK), non alla conversazione, e
+    // la chat deve poter partire anche se quella risposta tarda o non arriva mai.
     void this.refreshQuota()
+    void this.refreshContext()
   }
 
   // ─── quanto ne resta ──────────────────────────────────────────────────────
@@ -172,6 +173,43 @@ export class ClaudeCodeAdapter {
     if (firma === this.ultimaQuota) return
     this.ultimaQuota = firma
     this.emit({ k: 'quota.windows', windows })
+  }
+
+  // ─── quanto è pieno il contesto ──────────────────────────────────────────
+
+  /** L'ultima fotografia scritta, per non riscrivere nel journal la stessa riga. */
+  private ultimoContesto = ''
+
+  /**
+   * Chiede a Claude Code quanto è pieno il contesto — la stessa domanda a cui
+   * risponde `/context` nel terminale — e lo scrive nel journal. Stessi tre momenti
+   * di `refreshQuota`, per la stessa ragione: avvio, fine turno, pannellino aperto.
+   *
+   * A differenza della quota, `getContextUsage()` è un metodo pubblico e stabile
+   * dell'SDK — non serve la riflessione che protegge `refreshQuota` da un nome che
+   * l'SDK stesso dichiara instabile.
+   */
+  async refreshContext(): Promise<void> {
+    if (!this.q) return
+    let ctx
+    try {
+      ctx = await this.q.getContextUsage()
+    } catch {
+      return
+    }
+    // `maxTokens` è già la finestra pratica (con la riserva di auto-compattazione
+    // già tolta), e `percentage` è già calcolata da chi la manda: STARK la riporta,
+    // non la ricalcola — è esattamente il bug che questa domanda doveva chiudere.
+    const usage = {
+      totalTokens: ctx.totalTokens,
+      maxTokens: ctx.maxTokens,
+      percentage: ctx.percentage,
+      categories: ctx.categories.map(c => ({ name: c.name, tokens: c.tokens })),
+    }
+    const firma = JSON.stringify(usage)
+    if (firma === this.ultimoContesto) return
+    this.ultimoContesto = firma
+    this.emit({ k: 'context.usage', usage })
   }
 
   // ─── comandi slash ────────────────────────────────────────────────────────
@@ -521,9 +559,11 @@ export class ClaudeCodeAdapter {
             finito = true
             this.fermato = false
             this.turnEnd?.(); this.turnEnd = null
-            // Dopo, non prima: il turno che si è appena chiuso ha consumato quota, e
-            // chiederlo adesso è l'unico modo perché il numero comprenda anche lui.
+            // Dopo, non prima: il turno che si è appena chiuso ha consumato quota e
+            // contesto, e chiederlo adesso è l'unico modo perché i numeri comprendano
+            // anche lui.
             void this.refreshQuota()
+            void this.refreshContext()
           }
         }
         // Fuori dal giro degli eventi, non dentro: `turn.ended` arriva insieme

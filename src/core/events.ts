@@ -67,6 +67,33 @@ export type QuotaWindow = {
 }
 
 /**
+ * Quanto è pieno il contesto **adesso**, secondo Claude Code stesso — non una
+ * percentuale che STARK calcola sommando token di API e dividendo per una finestra
+ * indovinata dal nome del modello.
+ *
+ * Bug trovato il 26 agosto 2026: quel calcolo indovinato usava 200K come finestra per
+ * un modello che ne aveva un milione, perché il nome arrivava con un suffisso
+ * (`claude-opus-5[1m]`) che il confronto testuale non riconosceva — un contesto vero
+ * al 21% appariva 105%, tagliato al 100% mostrato. La correzione non è stata
+ * aggiustare la formula: è smettere di indovinare. `getContextUsage()` dell'SDK è la
+ * stessa domanda a cui risponde `/context` nel terminale, e la risposta porta già
+ * `percentage` calcolato — STARK la riporta, non la ricalcola.
+ *
+ * `categories` è la stessa scomposizione che l'SDK dà (system prompt, tool, MCP,
+ * messaggi, memoria, riserva di auto-compattazione, spazio libero…): non sono
+ * `input`/`output`/`cache*`, che raccontano una fattura, non uno spazio. Elenco
+ * aperto — un nome nuovo che l'SDK aggiunge un domani si mostra lo stesso, la UI non
+ * deve conoscerli tutti in anticipo.
+ */
+export type ContextUsage = {
+  totalTokens: number
+  maxTokens: number
+  /** 0-100, già arrotondata da chi la manda: non si ricalcola una seconda volta. */
+  percentage: number
+  categories: { name: string; tokens: number }[]
+}
+
+/**
  * Un comando slash offerto dalla sessione.
  *
  * `argumentHint` è ciò che va scritto dopo il nome (`<file>`, `[low|high]`), e senza
@@ -320,6 +347,10 @@ export type Payload =
    * attuale.
    */
   | { k: 'quota.windows'; windows: QuotaWindow[] }
+  /** Vedi `ContextUsage`. Arriva quando STARK lo chiede — avvio, fine turno, apertura
+   *  del pannellino — non quando l'agent lo decide: non è un fatto che l'agent
+   *  racconta da sé, è una domanda che STARK fa. */
+  | { k: 'context.usage'; usage: ContextUsage }
   /**
    * Il contesto è stato riassunto: da qui in su il modello non ha più i messaggi per
    * intero, ma un riassunto. Osservato dal vivo: `manual` con 34.802 → 743 token in
@@ -394,6 +425,9 @@ export type Command =
    * momento in cui quel numero deve essere fresco.
    */
   | { c: 'session.refreshQuota' }
+  /** Rileggi quanto è pieno il contesto, dalla stessa domanda a cui risponde `/context`
+   *  nel terminale — non un ricalcolo nostro. Stessa ragione di `refreshQuota`. */
+  | { c: 'session.refreshContext' }
   | { c: 'permissions.setRules'; rules: PermissionRules }
   | { c: 'session.rename'; title: string }
   | { c: 'session.sleep' }

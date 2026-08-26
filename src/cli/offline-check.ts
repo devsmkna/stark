@@ -19,7 +19,9 @@ import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
-import { capabilitiesFor, resolveModel, slashCommands } from '../adapters/claude-code/sdk-options.ts'
+import {
+  capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
+} from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
 // La risposta all'handshake: è QUI che nasce la sessione, non in system:init.
@@ -262,6 +264,39 @@ const rQuota = reduce(Journal.read(jQuota.path))
 check('§4: le finestre del piano si rileggono dal journal, con l\'ora della misura',
   rQuota.quotaWindows.length === 3 && (rQuota.quotaWindowsAt ?? 0) > 0,
   String(rQuota.quotaWindows.length))
+
+// Quanto è pieno il contesto, secondo `getContextUsage()` — non il conto approssimato
+// che ha prodotto il bug. Numeri di una cattura vera (26 agosto 2026, claude-sonnet-5).
+const jCtx = new Journal(resolve(dir, 'context.jsonl'), 'c')
+jCtx.append({
+  k: 'context.usage',
+  usage: {
+    totalTokens: 41205, maxTokens: 967000, percentage: 4,
+    categories: [
+      { name: 'System prompt', tokens: 310 }, { name: 'Messages', tokens: 4923 },
+      { name: 'Autocompact buffer', tokens: 33000 }, { name: 'Free space', tokens: 892795 },
+    ],
+  },
+})
+const rCtx = reduce(Journal.read(jCtx.path))
+check('§4: il contesto si rilegge dal journal, con l\'ora della misura',
+  rCtx.contextUsage?.percentage === 4 && rCtx.contextUsage?.maxTokens === 967000
+  && (rCtx.contextUsageAt ?? 0) > 0,
+  JSON.stringify(rCtx.contextUsage))
+// Bug del 26 agosto 2026: la finestra di contesto indovinata dal nome del modello
+// falliva su un alias con le parentesi (`claude-opus-5[1m]`, verificato sull'handshake
+// vero — vedi il commento in sdk-options.ts), ripiegando sui 200K sbagliati invece del
+// milione vero. Un contesto reale al 21% appariva quindi 100%: non un'ipotesi sulla
+// cache, un denominatore sbagliato.
+check('§12: la finestra di un alias con `[1m]` è un milione, non 200K',
+  contextWindowFor('claude-opus-5[1m]') === 1_000_000,
+  String(contextWindowFor('claude-opus-5[1m]')))
+check('§12: `[1m]` è un segnale positivo anche su un nome non in elenco',
+  contextWindowFor('un-modello-mai-visto[1m]') === 1_000_000)
+check('§12: un alias con la data appesa resta riconosciuto',
+  contextWindowFor('claude-opus-5-20260101') === 1_000_000)
+check('§12: un modello davvero a 200K non diventa un milione per sbaglio',
+  contextWindowFor('claude-haiku-4-5-20251001') === 200_000)
 check('§12: autoMode true su un modello che lo regge',
   replayed.capabilities?.autoMode === true)
 check('§12: `default` risolto nel modello vero prima di decidere autoMode',

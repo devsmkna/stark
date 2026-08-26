@@ -548,6 +548,9 @@ export class Registry {
       case 'session.refreshQuota':
         await l.adapter.refreshQuota()
         return { ok: true }
+      case 'session.refreshContext':
+        await l.adapter.refreshContext()
+        return { ok: true }
       case 'session.sleep': {
         // Addormentarsi con un turno in corso perderebbe il lavoro in volo: si
         // interrompe prima, invece di rifiutare e lasciare l'utente senza una via.

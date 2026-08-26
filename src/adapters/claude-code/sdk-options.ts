@@ -91,13 +91,26 @@ export function modelSupportsAutoMode(model: string): boolean {
  * più vecchi restano a 200K. Un alias può arrivare con una data appesa
  * (`-20260101`): la si toglie prima del confronto, altrimenti un modello di punta
  * sembrerebbe uno sconosciuto e si sottostimerebbe lo spazio vero.
+ *
+ * Bug trovato il 26 agosto 2026, verificato sull'handshake vero: `resolvedModel`
+ * per Opus arriva come `claude-opus-5[1m]`, **con** le parentesi — non tutti i
+ * modelli le tolgono (Fable, nello stesso handshake, arriva già pulito). Senza
+ * togliere anche quelle, `base` restava `claude-opus-5[1m]`, non combaciava con
+ * nulla nell'elenco, e la finestra ripiegava sui 200K sbagliati: un contesto vero
+ * al 21% del milione appariva 105%, tagliato a **100%** — che è esattamente il
+ * bug segnalato, non un'ipotesi sulla cache (verificato: `getContextUsage()`
+ * dell'SDK e la somma `input+output+cache*` di STARK davano numeri quasi
+ * identici sulla stessa sessione; il denominatore sbagliato era l'unico salto).
+ * `[1m]` è anche un segnale positivo a sé: un domani modello ancora non elencato
+ * ma marcato così è comunque un milione, non serve aspettare di aggiungerlo qui.
  */
 const CONTESTO_1M = [
   'claude-fable-5', 'claude-mythos-5', 'claude-opus-5', 'claude-opus-4-8',
   'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6',
 ]
 export function contextWindowFor(model: string): number {
-  const base = model.replace(/-\d{8}$/, '')
+  if (/\[1m\]/i.test(model)) return 1_000_000
+  const base = model.replace(/-\d{8}$/, '').replace(/\[[^\]]*\]$/, '')
   return CONTESTO_1M.some(m => base === m || base.startsWith(`${m}-`)) ? 1_000_000 : 200_000
 }
 

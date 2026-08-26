@@ -536,6 +536,22 @@ il piano tiene separate per modello, quando ce ne sono.
   scritto sopra, e la riga degli eventi era diagnostica. Il pannellino si apre di sfuggita,
   mentre si sta scrivendo: tre voci si leggono, sei si guardano soltanto.
 
+### Il contesto diceva 100%, e non era vero
+
+Bug segnalato dall'utente il 26 agosto 2026, corretto lo stesso giorno. La percentuale di
+contesto era **calcolata**, non chiesta: STARK sommava i token dell'ultimo turno e li divideva
+per una finestra che indovinava dal nome del modello. Su Opus con contesto esteso quel nome
+arriva con le parentesi (`claude-opus-5[1m]`), il confronto non lo riconosceva, e la finestra
+usata era 200K invece del milione vero — un contesto reale al 21% si vedeva 100%. Non era la
+cache, come si sospettava all'inizio: era il numero sotto la frazione, non quello sopra.
+
+La correzione è smettere di indovinare: STARK ora fa la stessa domanda a cui risponde `/context`
+nel terminale (`getContextUsage()`, un metodo stabile dell'SDK, non sperimentale), e riporta la
+percentuale che arriva — non la ricalcola. La barra sotto la percentuale mostra le categorie
+**vere** di Claude Code — prompt di sistema, tool, MCP, memoria, riserva di auto-compattazione —
+non più input/output/cache, che raccontano una fattura API e non uno spazio occupato. Si rilegge
+negli stessi tre momenti della quota: avvio, fine turno, apertura del pannellino.
+
 ### Quando il contesto si riassume
 
 Deciso implementando il 24 agosto 2026. Una conversazione lunga prima o poi **compatta**: il

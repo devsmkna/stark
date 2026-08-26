@@ -92,7 +92,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 |---|---|
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
-| `npm run check` | 71 verifiche sulla catena, costo zero di quota |
+| `npm run check` | 76 verifiche sulla catena, costo zero di quota |
 | `npm run daemon` | 24 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
 | `npm run queue` | la fila dei prompt, dal vivo: due prompt ravvicinati restano due turni |
 
@@ -291,6 +291,20 @@ domani mattina. Su un'attesa di giorni la prima da sola non basta a decidere.
 Su una chat importata `usage` è vuoto e si sommano i turni; su un journal scritto prima che STARK
 sapesse chiedere il livello, le due righe dicono che non lo sanno — mai una barra a zero, che si
 leggerebbe come «non hai consumato niente».
+
+**Anche la prima riga — il contesto — ora si chiede, non si calcola** *(bug trovato il 26 agosto
+2026, segnalato dall'utente)*. Prima STARK sommava `input+output+cache*` dell'ultimo turno e
+divideva per una finestra indovinata dal nome del modello (`contextWindowFor`): su un alias con
+le parentesi (`claude-opus-5[1m]`, verificato sull'handshake vero) il confronto testuale falliva
+e la finestra ripiegava sui 200K sbagliati — un contesto vero al 21% appariva 100%. La
+correzione è `getContextUsage()`, metodo **stabile** dell'SDK (non porta `EXPERIMENTAL` come
+quello della quota): la stessa domanda a cui risponde `/context` nel terminale, con
+`percentage` già calcolata — STARK la riporta, non la ricalcola. Stessi tre momenti della
+quota (`context.usage`, §10 del modello di eventi), stesso ripiego sul vecchio conto
+approssimato quando `ctx` non è ancora arrivato o il journal è vecchio. La barra segmentata
+mostra ora le categorie **vere** di Claude Code (prompt di sistema, tool, MCP, memoria, riserva
+di auto-compattazione…), non più `input`/`output`/`cache*`, che raccontano una fattura API,
+non uno spazio occupato.
 
 ### 5.5 Nuova chat, import, risveglio, menu contestuale
 

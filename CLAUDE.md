@@ -183,6 +183,19 @@ resta una sola linea, identica a prima. Lo stesso blu-azzurro copre anche il blo
 answered»: è di nuovo l'utente a parlare, solo rispondendo invece di chiedere, e riconoscerlo
 scorrendo vale la stessa ragione.
 
+**Il contesto diceva 100% quando non lo era** (bug segnalato dall'utente, 26 agosto 2026). La
+percentuale era calcolata da STARK — token dell'ultimo turno diviso una finestra indovinata dal
+nome del modello — e su Opus con contesto esteso quel nome arriva con le parentesi
+(`claude-opus-5[1m]`, verificato sull'handshake vero): il confronto non lo riconosceva, la
+finestra usata era 200K invece del milione vero, e un contesto reale al 21% appariva 100%. Non
+era la cache, come si sospettava: era il denominatore. Corretto smettendo di indovinare —
+`getContextUsage()`, un metodo **stabile** dell'SDK (non `EXPERIMENTAL` come quello della
+quota), è la stessa domanda a cui risponde `/context` nel terminale, con `percentage` già
+calcolata. La barra mostra ora le categorie vere di Claude Code (prompt di sistema, tool, MCP,
+memoria, riserva di auto-compattazione…), non più `input`/`output`/`cache*`. Stessi tre momenti
+della quota: avvio, fine turno, apertura del pannellino (`context.usage`, §10 del modello di
+eventi). `npm run check` passa a **76**.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
 mai fatte.
 

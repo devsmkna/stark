@@ -10,7 +10,7 @@ import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
   type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
-  type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
+  type ContextUsage, type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
 export type TextPartView = { kind: 'text'; partId: string; text: string; open: boolean }
@@ -158,6 +158,15 @@ export type SessionSnapshot = {
    *  detto: senza questo istante il pannellino spaccerebbe per attuale una fotografia
    *  di due ore fa. */
   quotaWindowsAt?: number
+  /**
+   * Quanto è pieno il contesto, secondo `getContextUsage()` — non un calcolo di
+   * STARK. Assente finché nessuno l'ha chiesto: la UI ripiega allora sul vecchio
+   * conto approssimato (token di API / finestra indovinata dal nome del modello),
+   * che è ciò che c'era prima di sapere fare la domanda giusta.
+   */
+  contextUsage?: ContextUsage
+  /** Quando è stato misurato — stessa ragione di `quotaWindowsAt`. */
+  contextUsageAt?: number
   lastSeq: number
   /** Quando è successo l'ultimo evento. La barra laterale mostra l'ora, e per il §4
    *  ogni cosa che la UI mostra deve nascere dal journal e non da altrove. */
@@ -419,6 +428,8 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     case 'quota.windows':
       s.quotaWindows = p.windows; s.quotaWindowsAt = e.ts; break
+    case 'context.usage':
+      s.contextUsage = p.usage; s.contextUsageAt = e.ts; break
     case 'context.compacted': {
       // Senza un turno aperto non c'e un posto nel flusso in cui metterla, e non e mai
       // successo: la compattazione avviene mentre un turno gira. Se un giorno arrivasse

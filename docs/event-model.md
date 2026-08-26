@@ -503,6 +503,7 @@ oggi su una Edit reale:
 | { k: 'usage.updated', usage: Usage, cost: Cost }
 | { k: 'quota.updated', status: string, kind: string, resetsAt: number, usingOverage: boolean }
 | { k: 'quota.windows', windows: QuotaWindow[] }
+| { k: 'context.usage', usage: ContextUsage }
 | { k: 'context.compacted', before: number, after: number }
 | { k: 'notice', level: 'info'|'warn'|'error', text: string }
 | { k: 'action.blocked', by: 'classifier'|'denyRule', callId?: string, reason: string }
@@ -576,6 +577,52 @@ e nel journal ci finisce **solo se è cambiato**. La quota la consumano anche le
 l'altra macchina: per questo l'evento porta con sé il suo `ts`, che è ciò che permette di dire
 «6% due ore fa» invece di spacciare una fotografia vecchia per il presente.
 
+### `context.usage` — smettere di indovinare quanto è pieno il contesto
+
+Bug trovato e corretto il **26 agosto 2026**, segnalato dall'utente: il pannellino diceva
+100% di contesto su una conversazione che, a occhio, non poteva esserci vicina.
+
+**Cosa faceva prima.** STARK non chiedeva mai quanto fosse pieno il contesto: lo *calcolava*,
+sommando `input + output + cacheRead + cacheWrite` dell'ultimo turno (`usage.updated`) e
+dividendo per una finestra **indovinata dal nome del modello** (`contextWindowFor` in
+`sdk-options.ts`, una tabella statica: Sonnet 5/Opus 5/famiglia 4.6+ → 1M, il resto → 200K).
+
+**Dove si rompeva.** L'handshake vero, letto lo stesso giorno, riporta per Opus con
+contesto esteso `resolvedModel: "claude-opus-5[1m]"` — **con le parentesi**, non tutti i
+modelli le tolgono (Fable, nello stesso handshake, arriva già pulito). Il confronto testuale
+di `contextWindowFor` non riconosceva quella stringa, non trovava corrispondenza nella
+tabella, e ripiegava sui 200K sbagliati. Un contesto vero al 21% di un milione di token
+appariva quindi 105%, tagliato al **100%** mostrato — cinque volte più pieno del vero.
+Non era la cache, come si sospettava all'inizio: verificato mettendo a confronto sulla
+stessa sessione la somma grezza e la risposta di `getContextUsage()` (sotto), i due numeri
+combaciavano quasi esattamente. Il salto era tutto nel denominatore.
+
+**La correzione non è una formula più furba.** È smettere di ricostruire quel numero da soli:
+`getContextUsage()` è un metodo **pubblico e stabile** dell'SDK (non porta il suffisso
+`EXPERIMENTAL` del metodo della quota) — la stessa domanda a cui risponde `/context` nel
+terminale. La risposta porta già `totalTokens`, `maxTokens` e `percentage` calcolati:
+
+```ts
+type ContextUsage = {
+  totalTokens: number
+  maxTokens: number       // già la finestra pratica, riserva di auto-compattazione tolta
+  percentage: number      // 0-100, già arrotondata da chi la manda
+  categories: { name: string; tokens: number }[]
+}
+```
+
+`categories` è la stessa scomposizione che l'SDK usa per `/context`: prompt di sistema, tool,
+MCP, memoria, skill, messaggi, riserva di auto-compattazione, spazio libero — non più
+`input`/`output`/`cache*`, che raccontano una fattura API, non uno spazio occupato. «Free
+space» non è un blocco da disegnare: è il resto della barra che gli altri blocchi non
+riempiono.
+
+Stessi tre momenti di `quota.windows` — avvio, fine turno, apertura del pannellino
+(`session.refreshContext`) — e nel journal solo se è cambiato. Un journal scritto prima di
+oggi non ce l'ha: la UI ripiega allora sul vecchio conto approssimato, corretto anche lui (la
+stessa svista sul nome del modello valeva pure lì) ma resta un'approssimazione, non la
+risposta vera.
+
 ---
 
 ## 11. Comandi: dalla UI al daemon
@@ -586,6 +633,7 @@ type Command =
   | { c: 'session.prompt',  text: string, attachments?: Attachment[] }
   | { c: 'session.interrupt' }
   | { c: 'session.refreshQuota' }
+  | { c: 'session.refreshContext' }
   | { c: 'session.setModel', model: string }
   | { c: 'session.setMode',  mode: PermissionMode }
   | { c: 'session.setMcp',   server: string, enabled: boolean }
@@ -705,6 +753,7 @@ al journal.
 | `usage.updated` | `result.usage` e `result.modelUsage` |
 | `quota.updated` | `rate_limit_event` |
 | `quota.windows` | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`, chiesto da STARK |
+| `context.usage` | `getContextUsage()`, chiesto da STARK — stabile, non sperimentale |
 
 > ⚠️ **Corretto dal codice.** Le sorgenti qui sopra non si leggono più a mano: le fornisce
 > l'Agent SDK (ADR-009), che emette le stesse forme di messaggio. Cambia **chi** trasporta, non
@@ -832,7 +881,7 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
 | `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 71 verifiche su eventi finti, **costo zero di quota** |
+| `src/cli/offline-check.ts` | `npm run check` — 76 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 | `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |
