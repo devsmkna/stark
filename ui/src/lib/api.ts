@@ -92,12 +92,33 @@ export function bootToken(): string {
   const url = new URL(location.href)
   const fromUrl = url.searchParams.get('token')
   if (fromUrl) {
-    sessionStorage.setItem('stark.token', fromUrl)
+    ricorda(fromUrl)
     url.searchParams.delete('token')
     history.replaceState(null, '', url.pathname + url.search + url.hash)
     return fromUrl
   }
-  return sessionStorage.getItem('stark.token') ?? ''
+  // Prima la scheda, poi il dispositivo. L'ordine non conta per il valore — è lo stesso
+  // token — ma dice qual è il caso normale e quale il ripiego.
+  return sessionStorage.getItem('stark.token') ?? localStorage.getItem('stark.token') ?? ''
+}
+
+/**
+ * Il token si ricorda in **due** posti, e il secondo esiste per l'app della schermata
+ * Home.
+ *
+ * `sessionStorage` da solo bastava finché STARK era una scheda: la si tiene aperta, e
+ * finita quella è finita la sessione. Un'app aggiunta alla schermata Home su iOS invece
+ * viene chiusa e riaperta di continuo dal sistema, e a ogni riapertura `sessionStorage`
+ * è vuoto: l'app ripartiva senza credenziale e non si collegava.
+ *
+ * Non è un peggioramento per la sicurezza: `sessionStorage` e `localStorage` sono
+ * ugualmente leggibili dal JavaScript di questa pagina — cambia solo **quanto durano**,
+ * non chi li vede. La difesa contro il testo non fidato che l'agent riporta resta
+ * quella di sempre, cioè DOMPurify prima di `{@html}`.
+ */
+function ricorda(t: string): void {
+  try { sessionStorage.setItem('stark.token', t) } catch { /* modalità privata */ }
+  try { localStorage.setItem('stark.token', t) } catch { /* idem */ }
 }
 
 export class Api {
@@ -109,7 +130,12 @@ export class Api {
   get tokenValue(): string { return this.token }
 
   private get auth(): Record<string, string> {
-    return { authorization: `Bearer ${this.token}` }
+    // Senza token **non si manda l'intestazione**, invece di mandarla vuota. Il daemon
+    // legge la credenziale in tre modi, in ordine: `Authorization`, poi il cookie, poi
+    // l'indirizzo — ma solo se il primo non c'è. Un `Bearer ` vuoto viene preso per
+    // buono come tentativo, fallisce, e **impedisce di guardare il cookie**: cioè una
+    // pagina che avrebbe potuto autenticarsi da sola si becca un 403.
+    return this.token ? { authorization: `Bearer ${this.token}` } : {}
   }
 
   /** Le stesse intestazioni, per chi parla col daemon senza passare da qui — il push,

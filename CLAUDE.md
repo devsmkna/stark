@@ -633,6 +633,34 @@ riga **apre** invece di selezionare. Verificato a 320, 390 e 1400px: menu da sol
 sola con la freccia → ritorno, chiudibile da entrambe, e desktop invariato (due colonne insieme,
 nessuna freccia).
 
+**L'app aggiunta alla schermata Home non si collegava** (26 agosto 2026, segnalato dall'utente
+appena provato: «mi aggiunge solo il path base senza token»). Tre cose che si sommavano, e
+nessuna delle tre si vede finché non si prova sul telefono vero.
+La prima: iOS **non salva l'indirizzo che stai guardando**, salva `start_url` del manifest — e
+lì c'era `"/"` scritto in un file statico, che un token non può contenerlo. La seconda: `GET /`
+senza token risponde **403** (verificato), quindi l'app partiva su una porta chiusa. La terza,
+quella che toglie ogni via di scampo: su iOS un'app della schermata Home ha una **memoria sua**,
+separata da Safari — il cookie preso nella scheda non è lì, e nemmeno `sessionStorage`.
+Il manifest si compone quindi nel daemon, con `start_url: /?token=…`, e non è un peggioramento:
+sta dietro lo stesso guard di tutto, quindi lo riceve solo chi è già autenticato, ed è lo stesso
+token dell'indirizzo che l'utente apre. Il file in `ui/public` resta senza token, quindi in git
+non finisce niente. Costo dichiarato: iOS **congela** `start_url` al momento in cui aggiungi
+l'app, perciò rigenerare il token (`stark token --new`) obbliga a rifare l'icona; e il manifest
+si serve con `no-store`, se no un manifest vecchio in cache manderebbe l'app su un indirizzo che
+non funziona più.
+Il token ora si ricorda anche in `localStorage` oltre che in `sessionStorage`: un'app della
+schermata Home viene chiusa e riaperta di continuo dal sistema, e a ogni riapertura la sessione
+è vuota. Non indebolisce niente — i due depositi sono **ugualmente** leggibili dal JavaScript
+della pagina, cambia solo quanto durano.
+Trovato per strada un difetto latente che questo caso ha messo in luce: la UI mandava
+`Authorization: Bearer ` **vuoto** quando non aveva un token, e un Bearer vuoto viene preso per
+un tentativo, fallisce, e **impedisce al daemon di guardare il cookie** — cioè una pagina che
+avrebbe potuto autenticarsi da sola si beccava un 403. Ora senza token l'intestazione non si
+manda affatto.
+Verificato A/B simulando il lancio dalla Home in un contesto **nuovo** (niente cookie, niente
+storage, come su iOS): con `start_url` nudo **HTTP 403**, col manifest composto la UI si carica;
+e regge anche il rilancio successivo con `sessionStorage` svuotato a mano.
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).

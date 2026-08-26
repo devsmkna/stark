@@ -5,10 +5,11 @@
 // Node e nel browser, quindi non introduce dipendenze, e per giunta è la stessa forma
 // che usa OpenCode — il che risparmierà lavoro al secondo adapter invece di crearne.
 
-import { createReadStream, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard } from './security.ts'
-import { serveUi } from './static.ts'
+import { serveUi, UI_DIR } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
 import { Push, vigila, type Subscription } from './push.ts'
@@ -308,6 +309,40 @@ async function route(
         if (!cmd?.c) return send(res, 400, { error: 'comando malformato' })
         const esito = await registry.command(id, cmd)
         return send(res, esito.ok ? 200 : 409, esito)
+      }
+    }
+
+    // Il manifest si compone qui invece di essere servito com'è, e la ragione è una
+    // riga sola: `start_url`.
+    //
+    // Aggiungendo STARK alla schermata Home, iOS non salva l'indirizzo che stai
+    // guardando — salva `start_url` del manifest, e da lì in poi l'app parte **sempre**
+    // da quello. Con `"/"` scritto nel file, l'app partiva su una pagina senza token e
+    // il daemon rispondeva 403: l'icona c'era, e non si collegava. Segnalato dall'utente
+    // il 26 agosto 2026, e verificato: `GET /` senza token → 403.
+    //
+    // Perché il cookie non salva la situazione: su iOS un'app della schermata Home ha
+    // una **memoria sua**, separata da quella di Safari. Il cookie preso nella scheda
+    // non è lì, e nemmeno il `sessionStorage`. La prima richiesta deve bastare a sé.
+    //
+    // Il token finisce quindi dentro il manifest — e non è un peggioramento: il manifest
+    // sta dietro lo stesso guard di tutto il resto, quindi lo riceve solo chi è già
+    // autenticato, ed è lo stesso token che sta già nell'indirizzo che l'utente apre.
+    // Costo vero, e va detto: iOS congela `start_url` al momento in cui aggiungi l'app,
+    // quindi rigenerando il token (`stark token --new`) l'icona va rifatta.
+    if (method === 'GET' && path === '/manifest.webmanifest') {
+      const file = resolve(UI_DIR, 'manifest.webmanifest')
+      if (existsSync(file)) {
+        const m = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+        m['start_url'] = `/?token=${token}`
+        res.writeHead(200, {
+          'content-type': 'application/manifest+json; charset=utf-8',
+          // Mai in cache: se il token cambia, il manifest vecchio manderebbe l'app su
+          // un indirizzo che non funziona più, e nessuno saprebbe perché.
+          'cache-control': 'no-store',
+        })
+        res.end(JSON.stringify(m))
+        return
       }
     }
 
