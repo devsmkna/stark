@@ -176,7 +176,11 @@ altro, un servizio alla volta. `npm run daemon` passa a **24** verifiche.
 
 **Due rifiniture volute dall'utente, stessa sera**: il blocco del prompt è **blu-azzurro**
 (`--user`/`--user-bg` in `app.css`, distinto da `--accent` e da `--work`) — ogni turno si
-riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto. E la riga di un tool
+riconosce scorrendo la conversazione senza doverlo leggere, chiuso o aperto. **Il colore però è
+del blocco, non del testo**: il prompt sta in `--ink` e l'ora in `--muted` a peso normale
+(corretto il 26 agosto su segnalazione dell'utente — ciano su fondo azzurro ha poco contrasto, e
+quel testo è la cosa da leggere; l'ora è un riferimento, non un titolo, e in blu grassetto
+competeva col prompt. A firmare il blocco resta lo sfondo, che da solo basta). E la riga di un tool
 con una motivazione (F2) diventa **due righe**: sopra nome e perché, sotto — piccolo, monospace —
 il comando o il percorso esatto, che prima stava solo in un tooltip. Senza motivazione la riga
 resta una sola linea, identica a prima. Lo stesso blu-azzurro copre anche il blocco «You
@@ -207,8 +211,100 @@ risposta vera arriva già per streaming — e quella sintetica ci cadeva dentro 
 solo invece che a pezzi. Verificato dal vivo mandando `/usage` per davvero: il pannellino della
 UI mostra ora l'output identico a quello del terminale. `npm run check` passa a **78**.
 
-Passo corrente: **da decidere**. Restano i divieti veri (`deny`) e le due misure di quota
-mai fatte.
+**`/clear` si vede, e chiude quello che c'era prima** (chiesto dall'utente, 26 agosto 2026).
+Prima il comando passava e non succedeva niente a schermo: il turno restava vuoto e la
+conversazione continuava a scorrere identica, come se contasse ancora tutta. Adesso tutto ciò
+che precede un `/clear` — **il turno del comando compreso** — si raccoglie in un **capitolo
+chiuso**, una riga sola che taglia il flusso («Context cleared · 3 turns before · 16:18») e si
+riapre cliccandoci: azzerato non vuol dire cancellato, il journal ce l'ha ancora. Riaperto
+resta rientrato e più spento, se no quei turni tornerebbero identici a quelli veri e sarebbe di
+nuovo invisibile dove il contesto smette di valere.
+Che `/clear` azzeri **davvero** non è stato dedotto dal nome: `spike/clear-probe.ts` lo ha
+misurato con tre prompt veri (BANANA → `/clear` → «che parola?» → «NONLOSO»). Da lì sono usciti
+due fatti che non si indovinano: il CLI lo annuncia con un messaggio suo, `conversation_reset`,
+dentro il turno del comando — quindi **STARK non legge i prompt** per capire cosa fanno, chiede
+al CLI; e il `new_conversation_id` di quel messaggio **non** è il riferimento per il risveglio
+(sono diversi: `31830557…` contro `f98faabe…`), che invece arriva col `system:init` successivo
+ed era già gestito. Nuovo evento canonico `context.cleared` (§10) e `TurnView.clearedAt`: un
+campo del turno, non una parte, perché la compattazione avviene *dentro* il flusso mentre
+questo è un taglio *del* flusso. Provato dal vivo sul daemon vero, non solo per esito HTTP.
+`npm run check` passa a **80**. Resta aperto: dopo un `/clear` il titolo della chat è ancora
+quello del primo prompt, che ora sta dentro il capitolo chiuso.
+
+**Il turno-fantasma: un `kill` mal mirato ha ammazzato il daemon due volte, e uno dei due
+turni interrotti è rimasto aperto per sempre** (26 agosto 2026, dal portatile). Causa esterna,
+non nostra: un'altra sessione ha fermato un daemon di prova con `ps | grep "stark.ts run" |
+kill`, che non distingue due daemon con `STARK_HOME` diversi — è la stessa riga in `ps`, li
+prende entrambi. A morire due volte è stato anche quello di produzione. Fix esterno (non
+nostro, non lo tocchiamo): `process.title` con l'home dentro, in `stark.ts`.
+Il bug nostro stava nel reducer: un turno troncato a metà da un `kill` non scrive mai il
+proprio `turn.ended`, e `applyTo` cerca "il primo turno non chiuso" per decidere dove
+attaccare le parti in arrivo (fix del 26 agosto precedente per la coda). Un turno mai chiuso
+resta "il primo aperto" **per sempre** — quindi tutto quello che arriva dopo, turni nuovi
+compresi, ci finisce dentro invece che nel proprio. Il primo tentativo di fix (chiudere "il
+primo aperto" ogni volta che ne parte uno nuovo) rompeva il caso sano: `npm run queue` ha
+mostrato subito che il turno N+1 legittimamente parte prima che N registri la sua chiusura.
+Il fix corretto si aggancia a `session.created`, che arriva solo quando nasce un **processo
+figlio nuovo** — mai durante una sessione viva. Un processo appena nato non può aver
+ereditato un turno davvero in corso: se lo trova aperto è per forza un residuo di crash, e lo
+chiude con un motivo nuovo e onesto (`'interrupted'`, quarto valore accanto a
+`completed`/`aborted`/`error` — la UI lo mostra già senza modifiche). Verificato con una prova
+sintetica che riproduce esattamente la sequenza reale di questo journal (turno troncato →
+`session.created` di ripresa → turno nuovo), non solo sul caso sano.
+
+**Il push su iPhone falliva con `403 BadJwtToken`, e non era il telefono** (26 agosto, stessa
+sessione). La sonda (`tools/sonda-telefono/`) usava `mailto:sonda@stark.local` come soggetto
+VAPID: Apple rifiuta qualunque dominio finto nel `sub` del JWT — stesso sintomo documentato
+altrove (github.com/openclaw/openclaw#83134). Corretto rilevando l'hostname Tailscale vero
+all'avvio (`tailscale status --json` → `Self.DNSName`), con avviso esplicito se Tailscale non
+c'è invece di fallire muto. Verificato end-to-end riusando l'iscrizione già registrata dal
+telefono: `push-inviato` (niente più 403) → `push-RICEVUTO-dal-telefono` in ~3s.
+
+**Il trasporto per il telefono è deciso e misurato: Tailscale, STARK invariato** — risponde a
+§5.1 di "Continua da telefono". `tailscale serve` fa da proxy TLS locale verso `127.0.0.1`
+(era già installato e connesso su questa macchina, portatile e iPhone nella stessa tailnet):
+SSE, chunked e WebSocket passano tutti puliti, a differenza del quick tunnel Cloudflare che li
+bufferizzava tutti. Il perimetro (`security.ts`) ora riconosce anche l'hostname Tailscale su
+`Host` e `Origin` — auto-rilevato allo stesso modo, con la stessa `Self.DNSName` — restando
+solo-localhost se Tailscale non c'è. La difesa sull'indirizzo socket non cambia: `tailscale
+serve` si collega da `127.0.0.1`, quindi la connessione resta "da questa macchina" anche col
+telefono fuori casa. **Decisione presa con l'utente, non da soli**: aprire il perimetro oltre
+localhost è esplicitamente riservato a lui (vedi "Sicurezza" più sotto).
+Trovati e sistemati nello stesso giro due debiti del perimetro: il motivo di un rifiuto
+(`{error:"vietato"}`) non veniva mai scritto nei log nonostante il commento lo promettesse —
+ora `console.error` lo fa davvero; e il cookie di sessione non aveva `Secure`, candidato
+concreto (non ancora confermato del tutto) al perché un refresh su Safari via HTTPS perdeva
+la credenziale — su `127.0.0.1` restava comunque un contesto attendibile, quindi il loopback
+non cambia. La domanda aperta §5 ("che durata deve avere la credenziale sul telefono") resta
+aperta: il workaround di oggi è riaprire il link col token.
+
+**La grafica da telefono, prima passata di rifiniture** (26 agosto, su segnalazione
+dell'utente con screenshot veri). L'impianto lista/chat a tutto schermo (§8 di
+`ui-schermate.md`, deciso il 24 agosto) esisteva solo come `store.narrow`, mai collegato al
+layout vero: ora `App.svelte` alterna sidebar e conversazione sotto gli 860px, con una freccia
+indietro in `Conversation.svelte` che torna alla lista passando dall'indirizzo (non
+`history.back()` — un link diretto da notifica potrebbe non avere una voce precedente).
+La casella di scrittura aveva incollare e trascinare, **zero vie da touch**: aggiunto un
+bottone graffetta (apre il selettore file nativo) e uno di invio accanto a Invio da tastiera,
+due icone nuove nello sprite (`i-clip`, `i-send`). La barra di stato stringeva cinque controlli
+su una riga pensata per lo schermo largo, col percorso tagliato di netto senza puntini (niente
+ellissi, e il contenitore lo nascondeva oltre il bordo invece di scorrere): ora va a capo in
+due righe sotto gli 860px, e il percorso ha un'ellissi vera. Il bottone «N files · M commands»
+lascia solo l'icona sotto la stessa soglia — stessa funzione, un'etichetta che lì non c'entra.
+Font e bottoni erano tarati per un mouse: esteso `Sizer` (già lì per la preferenza di
+dimensione testo, con `zoom` invece di riscrivere ~150 dichiarazioni) con un fattore ×1,35
+solo sotto lo schermo stretto, **sommato** alla preferenza scelta e non al suo posto —
+verificato che `zoom` non tocca `window.innerWidth`, quindi nessun rischio che la soglia
+`narrow` oscilli da sola. Ultimo pezzo, il più istruttivo: i popup di modalità/MCP/modello si
+ancoravano ciascuno al **proprio bottone** (`.pop .menu` scoped dentro `Status.svelte`, mai
+guardato prima) — «mode» capitava bene per posizione, «MCP» (290px) sconfinava di ~113px a
+destra, «model» partiva a ~225px fuori schermo a sinistra. Misurato con coordinate esatte, non
+indovinato; corretto ancorando tutti e tre allo stesso punto fisso vicino al fondo sotto la
+soglia stretta, invece che al bottone che li apre.
+
+Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
+fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
+sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
 
 Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
 `deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica

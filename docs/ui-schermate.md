@@ -509,6 +509,14 @@ restare riconoscibile come tale. Lo stesso colore copre il blocco «You answered
 una o più domande dell'agent: è ancora l'utente a parlare, e la ragione per riconoscerlo scorrendo
 è identica.
 
+> **Corretto il 26 agosto in serata, su segnalazione dell'utente**: il colore è del **blocco**,
+> non del testo. Il prompt vero e proprio è tornato al colore normale (`--ink`), perché ciano su
+> fondo azzurro ha poco contrasto e più il prompt è lungo più si fatica a leggerlo — e quel testo
+> è la cosa che si legge, non un'etichetta. Nello stesso giro l'**ora** è passata a grigio e peso
+> normale, come il conteggio dei blocchi in fondo alla stessa riga: è un riferimento, non un
+> titolo, e in blu grassetto competeva col prompt per l'attenzione. A firmare il blocco resta lo
+> **sfondo**, che da solo basta a far saltare all'occhio dove ricomincia un turno.
+
 **La riga di un tool con una motivazione (F2) mostra prima quella, il comando dopo e più
 piccolo.** Prima il comando esatto stava solo in un tooltip — bisognava sapere che c'era per
 andarlo a cercare. Ora, quando l'agent ha scritto perché, la riga diventa due: sopra il nome del
@@ -562,6 +570,31 @@ Nel flusso compare **una riga che taglia**, con quanto c'era, quanto è rimasto 
 successo. È la spiegazione di metà delle volte in cui l'agent sembra aver dimenticato qualcosa:
 non dirlo lascia quel «sembra» addosso all'utente, che al posto di una spiegazione si fa
 un'idea sbagliata dello strumento.
+
+### Quando il contesto si azzera
+
+Deciso e implementato il 26 agosto 2026, su richiesta dell'utente. `/clear` non riassume: da lì
+in giù il modello non ha più **niente** di quello che c'era sopra. Prima non si vedeva affatto —
+il turno del comando restava vuoto e la conversazione continuava a scorrere identica, come se
+contasse ancora tutta.
+
+Ora tutto ciò che precede un `/clear`, **il turno del comando compreso**, si raccoglie in un
+**capitolo chiuso**: una riga sola che taglia il flusso, «Context cleared · 3 turns before ·
+16:18».
+
+- **Chiuso di default**, perché è esattamente quello che è successo al contesto. Ma si **riapre
+  cliccandoci**: azzerato non vuol dire cancellato, il journal ce l'ha ancora, ed è spesso lì che
+  si va a rileggere cosa si stava facendo.
+- Riaperto, il capitolo resta **riconoscibile come passato**: rientrato, con una riga di lato e
+  più spento. Senza, quei turni tornerebbero identici a quelli veri e sarebbe di nuovo impossibile
+  vedere a occhio dove il contesto smette di valere — cioè il motivo per cui esiste.
+- Il turno del `/clear` non si conta fra i turni riposti: è il taglio, non uno degli scambi.
+- La stessa grammatica della compattazione (due stanghette e il fatto in mezzo), ma **più
+  marcata**: lì resta un riassunto, qui non resta niente.
+
+Aperto: dopo un `/clear` il **titolo** della chat resta quello del primo prompt, che ora sta
+dentro il capitolo chiuso. Non è stato cambiato perché nessuno l'ha chiesto, ma è la cosa che
+stona di più nella schermata.
 
 ### Fargli vedere una cosa
 

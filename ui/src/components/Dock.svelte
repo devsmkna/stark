@@ -18,6 +18,7 @@
 
   let text = $state('')
   let box = $state<HTMLTextAreaElement | null>(null)
+  let fileInput = $state<HTMLInputElement | null>(null)
   // L'orologio che fa avanzare «3s». Batte solo mentre serve: un intervallo che gira
   // su una chat ferma ridisegnerebbe la pagina una volta al secondo per niente.
   let now = $state(Date.now())
@@ -104,6 +105,17 @@
 
   /** Qualcosa sta passando sopra il blocco: si dice che qui si può lasciare. */
   let sopra = $state(false)
+
+  // Incollare e trascinare bastavano su desktop, ma da telefono non esiste nessuno
+  // dei due: non c'è una scorciatoia di incolla per un'immagine, e non c'è niente da
+  // trascinare col dito. Senza un bottone, allegare un'immagine da telefono era
+  // semplicemente impossibile — non scomodo, proprio irraggiungibile.
+  async function scegli(e: Event): Promise<void> {
+    const input = e.currentTarget as HTMLInputElement
+    for (const f of input.files ?? []) void aggiungi(f)
+    // Altrimenti scegliere di nuovo lo stesso file non fa scattare un secondo `change`.
+    input.value = ''
+  }
 
   function key(e: KeyboardEvent): void {
     // Col menu dei comandi aperto i tasti vogliono dire un'altra cosa: Invio completa
@@ -256,16 +268,34 @@
   {/if}
 
   {#if store.live}
-    <textarea
-      class="input"
-      onpaste={incolla}
-      bind:this={box}
-      bind:value={text}
-      oninput={() => { chiuso = false; grow() }}
-      onkeydown={key}
-      rows="1"
-      placeholder="Message the agent…"
-    ></textarea>
+    <div class="row-input">
+      <!-- Nascosto apposta: è il bottone vestito da graffetta a fare da etichetta,
+           non i controlli grigi di sistema che un <input type=file> porta di suo. -->
+      <input class="filepick" type="file" accept={TIPI.join(',')} multiple
+        bind:this={fileInput} onchange={scegli} tabindex="-1" aria-hidden="true" />
+      <button class="iconb attach" title="Attach an image" type="button"
+        onclick={() => fileInput?.click()}>
+        <Icon name="i-clip" />
+      </button>
+      <textarea
+        class="input"
+        onpaste={incolla}
+        bind:this={box}
+        bind:value={text}
+        oninput={() => { chiuso = false; grow() }}
+        onkeydown={key}
+        rows="1"
+        placeholder="Message the agent…"
+      ></textarea>
+      <!-- Invio manda già da tastiera (vedi `key`): il bottone non sostituisce
+           quello, è per chi preme piuttosto che scrivere — da telefono soprattutto,
+           dove «premi Invio» non è mai stato scontato quanto su una tastiera vera. -->
+      <button class="iconb send" title="Send" type="button"
+        disabled={!text.trim() && allegati.length === 0}
+        onclick={() => void send()}>
+        <Icon name="i-send" />
+      </button>
+    </div>
   {:else}
     <!-- Senza un processo dietro, una casella che accetta un messaggio lo perde. Al
          suo posto la via per riaprire — e il prezzo, detto adesso e non scoperto
@@ -290,10 +320,28 @@
 </div>
 
 <style>
+  /* La riga che porta graffetta, casella e invio. I margini che stavano sulla
+     casella (vedi `.input` in app.css) stanno ora qui: lei è tornata a riempire lo
+     spazio che le lascia la riga, come qualunque figlio flessibile. */
+  .row-input { display: flex; align-items: flex-end; gap: 4px; margin: 8px 12px; }
+  .row-input .input { flex: 1; margin: 0; width: auto; }
+  .row-input .iconb { margin-bottom: 3px; }
+  /* Visibile solo finché ha qualcosa da mandare: senza testo né allegati non c'è
+     comando da dare, e un bottone acceso lo lascerebbe credere. */
+  .row-input .send[disabled] { opacity: .35; cursor: default; }
+  .row-input .send:not([disabled]):hover { background: var(--surface-2); color: var(--ink); }
+  .row-input .attach:hover { background: var(--surface-2); color: var(--ink); }
+  /* L'`<input type=file>` reale resta invisibile ma raggiungibile da tastiera: un
+     `display:none` lo toglierebbe anche da lì. */
+  .filepick {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+
   /* La casella è un <textarea> vestito come il riquadro del disegno: stessa cornice,
      stesso passo, senza il bordo e la barra di scorrimento che il browser ci mette. */
   textarea.input {
-    display: block; width: calc(100% - 24px); resize: none; overflow-y: auto;
+    display: block; resize: none; overflow-y: auto;
     font: inherit; font-size: 11px; line-height: 1.45;
     background: var(--surface); color: var(--ink); max-height: 160px;
   }

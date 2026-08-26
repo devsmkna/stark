@@ -67,6 +67,11 @@ const NATIVE: NativeEvent[] = [
   // §7: una compattazione vera, con i numeri visti dal vivo su una sessione reale.
   { type: 'system', subtype: 'compact_boundary',
     compact_metadata: { trigger: 'manual', pre_tokens: 34802, post_tokens: 743, duration_ms: 8754 } },
+  // §10: `/clear`. Cattura vera del 26 agosto 2026 (`spike/clear-probe.ts`): il CLI
+  // annuncia l'azzeramento con un messaggio suo, dentro il turno del comando, e il
+  // `new_conversation_id` NON è il session_id nuovo che arriva subito dopo.
+  { type: 'conversation_reset', new_conversation_id: '31830557-adf7-41eb-b5e4-5eee4faf6d2a',
+    session_id: '05a0a40e-4a9b-416e-be3d-2b86e5434372' },
   // §10: il blocco del classificatore arriva come ERRORE DI TOOL, non come permesso.
   { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_2',
     is_error: true,
@@ -347,6 +352,13 @@ check('§7: la compattazione entra nel turno, con quanto c\'era e quanto è rima
   compat?.kind === 'compact' && compat.before === 34802 && compat.after === 743
   && compat.trigger === 'manual',
   JSON.stringify(compat))
+
+// §10: `/clear` azzera, non riassume. Sta sul turno e non fra le sue parti perché la
+// UI ci taglia sopra: tutto quello che precede finisce in un capitolo chiuso.
+check('§10: `/clear` marca il turno con l\'ora in cui il contesto è stato azzerato',
+  replayed.turns[0]?.clearedAt !== undefined, String(replayed.turns[0]?.clearedAt))
+check('§10: l\'azzeramento non si confonde con una compattazione',
+  replayed.turns[0]?.parts.filter(x => x.kind === 'compact').length === 1)
 
 check('turno chiuso come completato',
   replayed.turns[0]?.reason === 'completed')

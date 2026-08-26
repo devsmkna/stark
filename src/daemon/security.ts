@@ -5,6 +5,7 @@
 // sotto servono a tre attacchi diversi, e nessuna copre il buco delle altre.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import type { IncomingMessage } from 'node:http'
 
 export type Guard = {
@@ -20,6 +21,15 @@ export type Guard = {
  */
 export function createGuard(port: () => number, dato?: string): Guard {
   const token = dato ?? randomBytes(32).toString('hex')
+  // Misurato dal vivo il 26 agosto (pagina Notion "Continua da telefono" §3 e §5.1):
+  // con un mesh Tailscale privato, `tailscale serve` termina il TLS e fa da proxy
+  // verso `127.0.0.1:<porta>` — la connessione che arriva qui alla difesa 1 resta
+  // quindi da questa macchina anche quando il telefono è fuori casa, e SSE/WebSocket
+  // passano intatti (misurato: niente bufferizzato, a differenza di un tunnel
+  // Cloudflare gratuito). Cambiano solo Host e Origin, che devono imparare il nome
+  // di questa macchina sulla tailnet: la scelta di *quale* nome fidarsi resta scelta
+  // all'avvio, una volta sola, non ricalcolata a ogni richiesta.
+  const tailnetHost = detectTailnetHost()
 
   return {
     token,
@@ -34,13 +44,15 @@ export function createGuard(port: () => number, dato?: string): Guard {
       //    fosse same-origin. L'unica cosa che non può falsificare è l'Host che il
       //    browser scrive, che resterebbe il suo dominio.
       const host = (req.headers.host ?? '').split(':')[0] ?? ''
-      if (!isLocalHostname(host)) return `Host non locale: ${host}`
+      if (!isLocalHostname(host, tailnetHost)) return `Host non locale: ${host}`
 
       // 3. Origin. Difende dalle richieste cross-site: una pagina su un altro sito che
       //    prova a parlare con noi porta il proprio Origin, e viene fermata qui.
       //    Assente va bene: le richieste non-browser non lo mandano.
       const origin = req.headers.origin
-      if (origin !== undefined && !isOurOrigin(origin, port())) return `Origin rifiutato: ${origin}`
+      if (origin !== undefined && !isOurOrigin(origin, port(), tailnetHost)) {
+        return `Origin rifiutato: ${origin}`
+      }
 
       // 4. Token. È ciò che distingue STARK da qualunque altro processo sulla macchina.
       if (!hasToken(req, token)) return 'token mancante o errato'
@@ -48,6 +60,22 @@ export function createGuard(port: () => number, dato?: string): Guard {
       return null
     },
   }
+}
+
+/**
+ * Il nome di questa macchina sulla tailnet, se Tailscale c'è ed è connesso — `null`
+ * altrimenti, e allora Host e Origin restano solo-localhost come prima: l'apertura
+ * alla tailnet è un'aggiunta, mai un requisito nascosto per far ripartire STARK.
+ * Chiamata una sola volta, all'avvio del daemon: se cambia la tailnet (rete
+ * riconfigurata, dispositivo rinominato) serve un riavvio, esattamente come per la
+ * porta o per il token.
+ */
+function detectTailnetHost(): string | null {
+  try {
+    const j = JSON.parse(execFileSync('tailscale', ['status', '--json'], { timeout: 2000 }).toString())
+    const dns = (j.Self?.DNSName as string | undefined)?.replace(/\.$/, '')
+    return dns || null
+  } catch { return null }
 }
 
 function cookieToken(req: IncomingMessage): string | null {
@@ -65,15 +93,20 @@ function isLocal(addr: string): boolean {
   return a === '127.0.0.1' || a === '::1' || a.startsWith('127.')
 }
 
-function isLocalHostname(h: string): boolean {
+function isLocalHostname(h: string, tailnetHost: string | null): boolean {
   return h === '127.0.0.1' || h === 'localhost' || h === '[::1]' || h === '::1'
+    || (tailnetHost !== null && h === tailnetHost)
 }
 
-function isOurOrigin(origin: string, port: number): boolean {
+function isOurOrigin(origin: string, port: number, tailnetHost: string | null): boolean {
   for (const h of ['127.0.0.1', 'localhost', '[::1]']) {
     if (origin === `http://${h}:${port}`) return true
   }
-  return false
+  // Solo https, e senza porta: e' cosi' che `tailscale serve` lo pubblica (termina
+  // TLS sulla 443, e i browser omettono la porta di default dall'Origin). Un
+  // `http://` su questo stesso nome non e' mai stato STARK: e' un'altra cosa che
+  // punta li'.
+  return tailnetHost !== null && origin === `https://${tailnetHost}`
 }
 
 function hasToken(req: IncomingMessage, token: string): boolean {

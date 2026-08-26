@@ -90,6 +90,16 @@ export type TurnView = {
   reason?: 'completed' | 'aborted' | 'error' | 'interrupted'
   usage?: Usage
   cost?: Cost
+  /**
+   * Quando, dentro questo turno, il contesto e stato **azzerato** (`/clear`).
+   *
+   * E un dato del turno e non una parte come la compattazione, perche non e una cosa
+   * successa *dentro* il flusso: e un taglio *del* flusso. Tutto quello che sta sopra,
+   * questo turno compreso, il modello non ce l'ha piu — quindi la UI lo raccoglie in
+   * un blocco solo, chiuso, invece di lasciarlo scorrere come se contasse ancora.
+   * L'ora serve alla UI per dire *quando* e successo senza inventarsela.
+   */
+  clearedAt?: number
 }
 
 export type FileEditView = {
@@ -439,6 +449,14 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         ...(p.after !== undefined ? { after: p.after } : {}),
         ...(p.trigger !== undefined ? { trigger: p.trigger } : {}),
       })
+      break
+    }
+    case 'context.cleared': {
+      // Sul turno, non fra le sue parti: vedi `clearedAt`. `turn()` qui e il turno del
+      // comando stesso — `conversation_reset` arriva mentre quel turno e ancora aperto
+      // (verificato: fra il `result` del turno precedente e il `system:init` nuovo).
+      const t = turn()
+      if (t) t.clearedAt = e.ts
       break
     }
     case 'notice':

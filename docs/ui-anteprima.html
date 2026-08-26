@@ -141,6 +141,15 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .compact{display:flex;align-items:center;gap:8px;margin:10px 0}
 .compact .l{flex:1;height:1px;background:var(--line-2)}
 .compact .t{font-size:9.5px;color:var(--muted);white-space:nowrap}
+.cleared{display:flex;align-items:center;gap:8px;width:100%;margin:14px 0;padding:0;background:none;border:0;cursor:pointer;font:inherit;color:inherit}
+.cleared .l{flex:1;height:1px;background:var(--line-2)}
+.cleared .t{font-size:10.5px;color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.cleared .cx{font-size:9px;opacity:.7}
+.cleared:hover .t{color:var(--ink)}
+.cleared:hover .l{background:var(--muted)}
+.cleared.open{margin-bottom:6px}
+.chapter{display:flex;flex-direction:column;gap:8px;flex:none}
+.chapter.past{padding-left:12px;border-left:2px solid var(--line);margin-left:2px;opacity:.72}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
 .sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}
@@ -160,8 +169,8 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg)}
 .turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
-.th .tm{color:var(--user);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:600}
-.th .q{font-weight:600;color:var(--user);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.th .tm{color:var(--muted);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:400}
+.th .q{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{margin-left:auto;color:var(--muted);font-size:10px;flex:none}
 .tb{padding:2px 11px 11px;display:flex;flex-direction:column;gap:6px}
 
@@ -822,6 +831,70 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       <div><b>Dice anche perch&eacute;.</b> <i>Because you asked</i> o <i>it had filled up</i> sono due
       situazioni diverse: la prima l&rsquo;hai voluta, la seconda ti dice che quella conversazione sta
       diventando cara. Numeri veri, misurati su una sessione vera: 34.802 &rarr; 743 token in 8,7 s.</div>
+    </div>
+  </section>
+
+  <!-- azzeramento -->
+  <section class="sec">
+    <h2>Quando il contesto si azzera</h2>
+    <p><code>/clear</code> non riassume: da l&igrave; in gi&ugrave; il modello non ha pi&ugrave; <b>niente</b> di quello
+    che c&rsquo;era sopra, nemmeno il riassunto che lascia una compattazione. Non &egrave; stato dedotto dal
+    nome del comando: mandati tre prompt veri &mdash; &laquo;rispondi BANANA&raquo;, poi <code>/clear</code>, poi
+    &laquo;che parola ti avevo chiesto?&raquo; &mdash; la risposta &egrave; stata &laquo;NONLOSO&raquo;.</p>
+    <p>Prima non si vedeva affatto: il turno del comando restava vuoto e la conversazione
+    continuava a scorrere identica, come se contasse ancora tutta. Ora tutto ci&ograve; che precede,
+    <b>il turno del <code>/clear</code> compreso</b>, si raccoglie in un <b>capitolo chiuso</b>.</p>
+
+    <div class="mock" style="display:block;margin-top:6px;padding:14px 16px">
+      <div class="cleared"><span class="l"></span><span class="t"><span class="cx">&#9656;</span>
+      Context cleared &middot; 3 turns before &middot; 16:18</span><span class="l"></span></div>
+      <div class="turn open">
+        <div class="th"><span class="cx">&#9662;</span><span class="tm">16:20</span>
+        <span class="q">elenca i file di src/core</span><span class="n">1 block &middot; 4s</span></div>
+        <div class="tb"><div style="font-size:11.5px;color:var(--ink-2)">Sono sei: <code>activity.ts</code>,
+        <code>diff.ts</code>, <code>events.ts</code>, <code>journal.ts</code>, <code>reduce.ts</code>,
+        <code>services.ts</code>.</div></div>
+      </div>
+    </div>
+
+    <p style="margin-top:14px">Cliccando la riga si riapre, e quello che torna &egrave;
+    <b>riconoscibile come passato</b>: rientrato, con una riga di lato e pi&ugrave; spento.</p>
+
+    <div class="mock" style="display:block;margin-top:6px;padding:14px 16px">
+      <div class="cleared open"><span class="l"></span><span class="t"><span class="cx">&#9662;</span>
+      Context cleared &middot; 3 turns before &middot; 16:18</span><span class="l"></span></div>
+      <div class="chapter past">
+        <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">16:04</span><span class="q">spiegami come funziona il journal</span><span class="n">6 blocks &middot; 1m 02s</span></div></div>
+        <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">16:08</span><span class="q">e il replay a cosa serve, in pratica?</span><span class="n">3 blocks &middot; 24s</span></div></div>
+        <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">16:13</span><span class="q">ok, e se il contesto si riempie?</span><span class="n">2 blocks &middot; 18s</span></div></div>
+        <div class="turn"><div class="th"><span class="cx">&#9656;</span><span class="tm">16:18</span><span class="q">/clear</span><span class="n">0 blocks</span></div></div>
+      </div>
+      <div class="chapter" style="margin-top:8px">
+        <div class="turn open">
+          <div class="th"><span class="cx">&#9662;</span><span class="tm">16:20</span>
+          <span class="q">elenca i file di src/core</span><span class="n">1 block &middot; 4s</span></div>
+          <div class="tb"><div style="font-size:11.5px;color:var(--ink-2)">Sono sei: <code>activity.ts</code>,
+          <code>diff.ts</code>, <code>events.ts</code>, <code>journal.ts</code>, <code>reduce.ts</code>,
+          <code>services.ts</code>.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <div><b>Chiuso, ma non cancellato.</b> Chiuso di default perch&eacute; &egrave; quello che &egrave; successo al
+      contesto; riapribile perch&eacute; azzerato non vuol dire perso &mdash; il journal ce l&rsquo;ha ancora, ed &egrave;
+      spesso l&igrave; che si va a rileggere <i>cosa</i> si stava facendo.</div>
+      <div><b>Il turno del <code>/clear</code> non si conta.</b> &laquo;3 turns before&raquo;, non quattro: quello &egrave;
+      il taglio, non uno degli scambi che si stanno riponendo.</div>
+      <div><b>Pi&ugrave; marcato della compattazione.</b> Stessa grammatica &mdash; due stanghette e il fatto in
+      mezzo &mdash; ma stanghette pi&ugrave; forti e testo pi&ugrave; grande: l&igrave; resta un riassunto, qui non resta
+      niente.</div>
+      <div><b>STARK non legge i prompt per indovinare.</b> <code>/clear</code> non &egrave; riconosciuto dal
+      testo scritto nella casella: &egrave; il CLI a dire cosa &egrave; successo, con un messaggio suo e a cose
+      fatte. Un prompt che <i>sembra</i> un comando pu&ograve; non esserlo, e un alias che STARK non conosce
+      sarebbe sfuggito.</div>
+      <div><b>Resta aperto:</b> il <b>titolo</b> della chat &egrave; ancora quello del primo prompt, che ora
+      sta dentro il capitolo chiuso.</div>
     </div>
   </section>
 

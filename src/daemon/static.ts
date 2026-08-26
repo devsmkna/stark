@@ -57,8 +57,17 @@ export function serveUi(req: IncomingMessage, res: ServerResponse, token: string
     'cache-control': isPage ? 'no-store' : 'public, max-age=31536000, immutable',
   }
   if (isPage) {
+    // `Secure` mancava. Su `http://127.0.0.1` non serviva: il browser tratta il
+    // loopback come contesto attendibile anche senza TLS (stessa ragione per cui
+    // `Notification`/`AudioContext` ci funzionano senza HTTPS, misurato il 24 agosto).
+    // Ma da telefono si passa da un proxy Tailscale che **è** HTTPS per davvero, e
+    // Safari su una pagina sicura può scartare un cookie senza `Secure` invece di
+    // tenerlo — candidato concreto al «vietato» dopo un refresh che si è visto dal
+    // vivo il 26 agosto (domanda aperta §5 di "Continua da telefono": la credenziale
+    // sul telefono non regge quanto dovrebbe). Aggiungerlo non toglie nulla al
+    // loopback, che resta comunque un contesto attendibile.
     headers['set-cookie'] =
-      `stark=${token}; Path=/; SameSite=Strict; HttpOnly; Max-Age=86400`
+      `stark=${token}; Path=/; SameSite=Strict; HttpOnly; Secure; Max-Age=86400`
   }
 
   res.writeHead(200, headers)

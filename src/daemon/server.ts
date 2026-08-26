@@ -95,7 +95,11 @@ async function route(
   const motivo = guard.reject(req)
   if (motivo) {
     // Nessun dettaglio nel corpo: a chi bussa senza titolo non si spiega quale delle
-    // difese l'ha fermato. Il motivo resta nei log del daemon.
+    // difese l'ha fermato. Il motivo resta nei log del daemon — il commento lo diceva
+    // da prima, ma la riga che lo scrive per davvero mancava: trovato debuggando dal
+    // vivo un rifiuto da telefono senza nessun modo di sapere quale delle quattro
+    // difese fosse stata.
+    console.error(`[guard] ${motivo} — ${req.method ?? 'GET'} ${req.url ?? ''}`)
     send(res, 403, { error: 'vietato' })
     return
   }

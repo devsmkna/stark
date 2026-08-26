@@ -42,6 +42,40 @@
     opened = next
   }
 
+  // ─── i capitoli: dove il contesto è stato azzerato, si chiude ──────────────
+  //
+  // `/clear` non è un comando come gli altri: quello che sta sopra il modello non ce
+  // l'ha più, nemmeno riassunto. Lasciarlo scorrere uguale al resto è mostrare come
+  // corrente qualcosa che non lo è, e la conversazione continua a crescere senza
+  // dire dove ha smesso di contare. Quindi tutto ciò che precede un `/clear`, il
+  // turno del comando compreso, si raccoglie in un capitolo **chiuso**: una riga sola
+  // che si riapre cliccandoci, perché azzerato non vuol dire cancellato — il journal
+  // ce l'ha ancora, ed è spesso lì che si va a rileggere *cosa* si stava facendo.
+  //
+  // L'ultimo capitolo è quello vivo: non ha intestazione e non si chiude, è la chat.
+  type Chapter = { key: string; items: { turn: TurnView; i: number }[]; clearedAt?: number }
+  const chapters = $derived.by((): Chapter[] => {
+    const out: Chapter[] = []
+    let cur: Chapter | undefined
+    snap.turns.forEach((turn, i) => {
+      if (!cur) { cur = { key: `ch:${turn.turnId}`, items: [] }; out.push(cur) }
+      cur.items.push({ turn, i })
+      // Il turno del `/clear` sta DENTRO il capitolo che chiude, non fuori: è l'ultima
+      // cosa avvenuta con quel contesto ancora in piedi.
+      if (turn.clearedAt !== undefined) { cur.clearedAt = turn.clearedAt; cur = undefined }
+    })
+    return out
+  })
+  let openedChapters = $state<Set<string>>(new Set())
+  function toggleChapter(key: string): void {
+    const next = new Set(openedChapters)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    openedChapters = next
+  }
+  /** Quanti turni ci sono dentro, escluso il `/clear` che li ha chiusi: quello è il
+   *  taglio, non uno degli scambi che si stanno riponendo. */
+  const chapterTurns = (ch: Chapter): number => Math.max(0, ch.items.length - 1)
+
   // ─── i singoli blocchi: reasoning e tool si aprono a loro volta ────────────
   // Chiusi di default per lo stesso motivo per cui lo è il turno: tredici scambi
   // veri fanno ~400 blocchi, e mostrarli per intero renderebbe illeggibile proprio
@@ -268,6 +302,13 @@
 
 <div class="col">
   <div class="bar">
+    <!-- Solo sullo schermo stretto: là la lista non e' affiancata, e senza questo
+         non ci sarebbe modo di tornarci (§8 di ui-schermate.md). -->
+    {#if store.narrow}
+      <button class="iconb" title="Back to chats" onclick={() => store.back()}>
+        <Icon name="i-back" />
+      </button>
+    {/if}
     <i class="dotk p{colour}"></i>
     {#if renaming}
       <!-- svelte-ignore a11y_autofocus -->
@@ -286,9 +327,16 @@
       style="margin-left:auto" disabled={!store.live}
       onclick={() => void store.sleep()}><Icon name="i-moon" /></button>
 
-    <button class="effbtn" style="margin-left:0" onclick={() => store.show('effects')}>
-      <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
-        {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}</b>
+    <!-- Il conteggio in parole non ci sta su uno schermo stretto: sotto la soglia
+         resta solo l'icona, stesso bottone, stessa destinazione — non è nascosta,
+         è un'etichetta che qui non c'è spazio a scrivere per intero (Principio 5:
+         quello che sparisce è il testo, non la funzione). -->
+    <button class="effbtn" style="margin-left:0" onclick={() => store.show('effects')}
+      title="{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} · {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}">
+      {#if !store.narrow}
+        <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
+          {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}</b>
+      {/if}
       <Icon name="i-bars" />
     </button>
   </div>
@@ -380,7 +428,31 @@
   {/snippet}
 
   <div class="scroller conv" bind:this={scrollerEl} onscroll={onScroll}>
-    {#each snap.turns as turn, i (turn.turnId)}
+    {#each chapters as ch (ch.key)}
+    {#if ch.clearedAt !== undefined}
+      <!-- La riga che tiene chiuso tutto ciò che c'era prima del `/clear`. Ha le due
+           stanghette della compattazione perché è lo stesso genere di fatto — un
+           taglio nel flusso, non un blocco dentro il flusso — ma qui si apre, e
+           quello che c'è sotto sono turni interi, non una nota. -->
+      <button class="cleared" class:open={openedChapters.has(ch.key)}
+        onclick={() => toggleChapter(ch.key)}
+        title="The context was reset here: nothing above is still in the model's memory">
+        <span class="l"></span>
+        <span class="t">
+          <span class="cx">{openedChapters.has(ch.key) ? '▾' : '▸'}</span>
+          Context cleared · {chapterTurns(ch)} {chapterTurns(ch) === 1 ? 'turn' : 'turns'} before
+          · {hhmm(ch.clearedAt)}
+        </span>
+        <span class="l"></span>
+      </button>
+    {/if}
+    {#if ch.clearedAt === undefined || openedChapters.has(ch.key)}
+    <!-- Riaperto, il capitolo resta **riconoscibile come passato**: rientrato e con una
+         riga di lato. Senza, quei turni tornerebbero identici a quelli veri, e sarebbe
+         di nuovo impossibile vedere a occhio dove il contesto smette di valere — che è
+         il motivo per cui esiste tutto questo. -->
+    <div class="chapter" class:past={ch.clearedAt !== undefined}>
+    {#each ch.items as { turn, i } (turn.turnId)}
       {@const open = isOpen(turn, i)}
       {@const status = turnStatus(snap.turns, i)}
       <div class="turn" class:open class:active={status === 'active'} class:queued={status === 'queued'}>
@@ -537,6 +609,9 @@
         {/if}
       </div>
     {/each}
+    </div>
+    {/if}
+    {/each}
 
     {#if snap.turns.length === 0}
       <div class="mid">Nothing has happened in this chat yet. Write the first message below.</div>
@@ -636,6 +711,37 @@
   .compact { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
   .compact .l { flex: 1; height: 1px; background: var(--line-2); }
   .compact .t { font-size: 9.5px; color: var(--muted); white-space: nowrap; }
+
+  /* Il capitolo chiuso da un `/clear`. Stessa grammatica della compattazione — due
+     stanghette e il fatto in mezzo — ma è un bottone: quello che tiene chiuso non è
+     una nota, sono turni interi, e vanno poter riaperti. Più marcato della riga di
+     compattazione (stanghette continue, testo non spento) perché il taglio è più
+     netto: lì resta un riassunto, qui non resta niente. */
+  .cleared {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    margin: 14px 0; padding: 0; background: none; border: 0; cursor: pointer;
+    font: inherit; color: inherit;
+  }
+  .cleared .l { flex: 1; height: 1px; background: var(--line-2); }
+  .cleared .t {
+    font-size: 10.5px; color: var(--muted); white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .cleared .cx { font-size: 9px; opacity: .7; }
+  .cleared:hover .t { color: var(--ink); }
+  .cleared:hover .l { background: var(--muted); }
+  /* Aperto, il capitolo è un contenitore: la riga diventa la sua intestazione e i
+     turni che seguono sono suoi, quindi il margine sotto si stringe. */
+  .cleared.open { margin-bottom: 6px; }
+
+  /* `.conv` è una colonna flex con `gap: 8px`: il capitolo la interrompe, quindi se la
+     rifà uguale dentro di sé — senza, i turni si incollerebbero fra loro. */
+  .chapter { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .chapter.past {
+    padding-left: 12px; border-left: 2px solid var(--line);
+    margin-left: 2px; opacity: .72;
+  }
+  .chapter.past:hover { opacity: 1; }
 
   /* Le immagini mandate col prompt: piccole, perché sono un promemoria di cosa hai
      mandato, non la cosa da guardare. Un clic le apre a grandezza vera. */

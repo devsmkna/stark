@@ -19,13 +19,27 @@
   // cambia forma (docs/ui-schermate.md §4). Un ascoltatore solo per tutta l'app.
   $effect(() => {
     const mq = matchMedia('(max-width: 860px)')
-    const apply = (): void => { store.narrow = mq.matches }
+    const apply = (): void => {
+      store.narrow = mq.matches
+      // Bottoni e testo pensati per un mouse sono piccoli sotto un dito: la stessa
+      // soglia che cambia la forma della schermata (§8) alza anche la dimensione.
+      store.textSize.refresh(store.narrow)
+    }
     apply()
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
   })
 
   const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
+
+  // §8 di docs/ui-schermate.md, deciso il 24 agosto 2026: sotto la soglia stretta non
+  // ci sono due colonne rimpicciolite, ce n'è una alla volta — come WhatsApp e
+  // Telegram. L'elenco è la schermata quando non c'è una chat aperta; la chat (o gli
+  // effetti, o «sta aprendo», o l'errore di collegamento) la sostituisce quando c'è.
+  // Larga, invece, sono sempre affiancate: sono questi due booleani a fare tutta la
+  // differenza, il resto del template sotto non cambia.
+  const showList = $derived(!store.narrow || (store.selected === null && !store.fatal))
+  const showRight = $derived(!store.narrow || store.selected !== null || !!store.fatal)
 </script>
 
 <Sprite />
@@ -40,9 +54,15 @@
       </div>
     </div>
   {:else}
-    <Sidebar {store} />
+    {#if showList}
+      <Sidebar {store} />
+    {/if}
 
-    {#if store.fatal}
+    {#if !showRight}
+      <!-- Schermo stretto, niente selezionato: la lista sopra è già tutta la
+           schermata, e ripetere qui «pick a chat» sarebbe una seconda voce che dice
+           la stessa cosa mentre non si vede nemmeno. -->
+    {:else if store.fatal}
       <!-- Il testo era «The daemon is not answering: the daemon is not answering»: il
            motivo dal negozio ripeteva la frase del riquadro. Qui la frase sta in un
            posto solo, e dice anche cosa fare — che è l'unica cosa utile in quel momento. -->

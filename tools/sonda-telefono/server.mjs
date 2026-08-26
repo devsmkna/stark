@@ -21,6 +21,7 @@ import { extname, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { deflateSync } from 'node:zlib'
+import { execFileSync } from 'node:child_process'
 
 const QUI = dirname(fileURLToPath(import.meta.url))
 const PORTA = Number(process.env['SONDA_PORT'] ?? 4610)
@@ -33,10 +34,30 @@ try { webpush = (await import('web-push')).default } catch {
   console.error('\n  Manca `web-push`. E\' in devDependencies: lancia `npm install`.\n'); process.exit(1)
 }
 
+// Il `sub` della VAPID non e' burocrazia: Apple valida che sia un'email o un URL veri, e
+// rifiuta con 403 BadJwtToken un dominio finto come "@localhost" o "@stark.local" — bug
+// misurato dal vivo (vedi Notion "Continua da telefono" §3) e documentato anche altrove
+// (github.com/openclaw/openclaw#83134, stesso sintomo su un'altra codebase). Si prova a
+// riusare l'hostname vero della tailnet, che nello stesso issue risulta accettato da Apple;
+// senza tailscale si avvisa che il push su iPhone non funzionera', invece di fallire muto.
+const vapidSubject = process.env['SONDA_VAPID_SUBJECT'] ?? (() => {
+  try {
+    const j = JSON.parse(execFileSync('tailscale', ['status', '--json'], { timeout: 2000 }))
+    const dns = j.Self?.DNSName?.replace(/\.$/, '')
+    if (dns) return `https://${dns}`
+  } catch {}
+  console.log('\n  ATTENZIONE: nessun hostname tailscale trovato per il sub della VAPID.\n' +
+    '  Uso un dominio finto: Apple lo rifiutera' + "'" + ' con 403 BadJwtToken, quindi su\n' +
+    '  iPhone il push non arrivera\'. Imposta SONDA_VAPID_SUBJECT=mailto:tuo@indirizzo\n' +
+    '  o https://un-host-vero per farlo funzionare.\n')
+  return 'mailto:sonda@stark.local'
+})()
+
 const stato = existsSync(STATO) ? JSON.parse(readFileSync(STATO, 'utf8'))
   : { vapid: webpush.generateVAPIDKeys(), subs: [], log: [] }
 const salva = () => writeFileSync(STATO, JSON.stringify(stato, null, 1))
-webpush.setVapidDetails('mailto:sonda@stark.local', stato.vapid.publicKey, stato.vapid.privateKey)
+webpush.setVapidDetails(vapidSubject, stato.vapid.publicKey, stato.vapid.privateKey)
+console.log(`  VAPID sub: ${vapidSubject}`)
 salva()
 
 const T0 = Date.now()
@@ -98,7 +119,11 @@ const server = http.createServer(async (req, res) => {
           // proprio quella `fetch` che questa sonda ha dimostrato possibile su iPhone.
           await webpush.sendNotification(s, JSON.stringify({ quando: Date.now() }), { TTL: 120 })
           nota('push-inviato', { servizio: new URL(s.endpoint).host })
-        } catch (e) { nota('push-fallito', { errore: String(e.statusCode ?? e.message) }) }
+        } catch (e) {
+          // statusCode da solo non dice perche': un 403 di web-push arriva con un corpo
+          // che di solito spiega la causa vera (VAPID scaduto, sub morta, chiave sbagliata).
+          nota('push-fallito', { errore: String(e.statusCode ?? e.message), corpo: e.body ? String(e.body).slice(0, 300) : undefined, headers: e.headers })
+        }
       }
     }, fra * 1000)
     return json(res, { ok: true, fra })

@@ -278,6 +278,25 @@ export class Store {
     })
   }
 
+  /**
+   * Torna all'elenco da una chat aperta. Serve solo sullo schermo stretto (§8 di
+   * `ui-schermate.md`): là la lista e la conversazione si alternano invece di stare
+   * affiancate, e questo è il tasto freccia in alto a sinistra che fa l'alternanza
+   * inversa rispetto a `select`.
+   *
+   * Passa dall'indirizzo come ogni altra navigazione, non da `history.back()`: un
+   * indirizzo aperto da un link diretto (una notifica, per dirne una — §16 mobile) non
+   * ha per forza una voce precedente nella storia a cui tornare, e la freccia deve
+   * portare a un posto certo, non a «qualunque cosa ci fosse prima».
+   */
+  back(): void {
+    go(null, 'chat')
+    this.#stopStream?.()
+    this.#stopStream = null
+    this.selected = null
+    this.snap = null
+  }
+
   async select(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
     if (opts.indirizzo !== false) go(id, 'chat')
     if (this.selected === id) return

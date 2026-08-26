@@ -43,6 +43,15 @@ export class Translator {
       case 'result': return this.result(e)
       case 'rate_limit_event': return this.quota(e)
       case 'assistant': return this.assistant(e)
+      // `/clear`. Non lo si riconosce dal testo del prompt — STARK non legge mai i
+      // prompt per indovinare cosa fanno (§7): lo dice il CLI, con un messaggio suo,
+      // e per giunta a cose fatte. Prima finiva nel `default` qui sotto, quindi il
+      // turno del comando restava vuoto e la conversazione sembrava intatta mentre
+      // il contesto sotto era già sparito.
+      case 'conversation_reset': {
+        const ref = e['new_conversation_id']
+        return [{ k: 'context.cleared', ...(typeof ref === 'string' && ref ? { ref } : {}) }]
+      }
       default: return []
     }
   }

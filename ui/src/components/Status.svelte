@@ -257,7 +257,10 @@
         <span style="color:var(--muted)">MCP</span>{mcpLabel}<Icon name="i-down" />
       </button>
       {#if open === 'mcp'}
-        <div class="menu" style="width:290px">
+        <!-- I 290px sono per lo schermo largo: sotto la soglia stretta `.menu` prende
+             la larghezza fissa data da CSS (§8), e uno stile inline la scavalcherebbe
+             comunque — inline vince sempre su un foglio esterno, media query o no. -->
+        <div class="menu" style={store.narrow ? '' : 'width:290px'}>
           {#each snap.mcpServers as s (s.name)}
             <!-- Il menu **non** si chiude accendendo: accenderne due è il caso normale, e
                  richiuderlo a ogni tocco costringerebbe a riaprirlo per la seconda. Si
@@ -285,7 +288,8 @@
     </span>
 
     <span class="sep">·</span>
-    <Icon name="i-folder" /><span title={snap.cwd ?? ''}>{tilde(snap.cwd)}</span>
+    <Icon name="i-folder" style="flex:none" />
+    <span class="path" title={snap.cwd ?? ''}>{tilde(snap.cwd)}</span>
   </div>
 
   <div class="r">
@@ -454,6 +458,22 @@
   /* Le tendine si aprono verso l'alto: sotto non c'è niente, la barra è l'ultima riga. */
   .pop .menu { position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 7; }
   .r .pop .menu { left: auto; right: 0; }
+  /* Misurato dal vivo a 390px: ancorarsi al PROPRIO bottone — stretto quanto la sua
+     etichetta — funziona solo se il popup ci sta dentro allo spazio che resta da lì
+     al bordo. Per «mode» (primo, `left:0`) resta dentro per un caso fortunato di
+     posizione; per «MCP» (secondo `left:0`, ma largo 290px) sconfina di oltre 100px a
+     destra; per «model» (`right:0` su un bottone stretto dentro `.r`) il bordo
+     sinistro finisce fuori schermo di oltre 200px. Tre bottoni, tre posizioni, e
+     nessuno dei tre ha davvero spazio per un pannello di 250-290px accanto a sé.
+     Sotto la soglia stretta si esce dal flusso e ci si ancora allo stesso punto per
+     tutti e tre — vicino al fondo, dove l'utente sta già guardando (è la stessa area
+     in cui «mode» capitava già di funzionare bene) — invece che al bottone di turno. */
+  @media (max-width: 860px) {
+    .pop .menu, .r .pop .menu {
+      position: fixed; left: 12px; right: 12px; bottom: 12px; top: auto;
+      width: auto; max-height: 65vh; overflow-y: auto;
+    }
+  }
 
   .mi { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
   .mi[disabled] { cursor: default; }

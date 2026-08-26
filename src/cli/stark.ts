@@ -60,6 +60,18 @@ if (comando === 'run') {
     console.error(`STARK è già in esecuzione (pid ${gia}). "npm run stark:stop" per fermarlo.`)
     process.exit(1)
   }
+  // Il titolo dice **quale** STARK è questo. Due daemon con `STARK_HOME` diversi — quello
+  // vero e uno di prova — sono la stessa identica riga in `ps`, perché a distinguerli sono
+  // variabili d'ambiente, che lì non si vedono. Chi ne ferma uno con
+  // `ps | grep "stark.ts run"` li prende quindi tutti: è successo davvero, due volte in
+  // un'ora, e a morire è stato quello di produzione con dentro le conversazioni dell'utente.
+  //
+  // Attenzione a cosa risolve: rende il grep capace di **mirare**, non lo rende il modo
+  // giusto di fermare un daemon. Quello resta `stark stop`, e non perché il grep sbagli
+  // bersaglio: perché manda SIGTERM e **aspetta** la chiusura, così gli agent si fermano uno
+  // per uno e i journal si chiudono. Una `kill` secca li lascia a metà turno, e la barra
+  // laterale mostra per sempre lavori che non stanno lavorando.
+  process.title = `stark ${STARK_HOME} :${porta}`
   const daemon = await startDaemon({
     port: porta,
     ...(process.env['STARK_MODEL'] ? { model: process.env['STARK_MODEL'] } : {}),

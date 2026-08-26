@@ -173,6 +173,37 @@ Osservata dal vivo su una sessione reale (`/compact` dopo sei scambi): `trigger:
 dopo il suo `system:init` e prima del `result` — per questo nello snapshot è una **parte del
 turno** e non un fatto a sé: è lì che è successa, ed è lì che va vista.
 
+**`context.cleared` — `/clear`, verificato invece che dedotto.**
+
+```ts
+| { k: 'context.cleared', ref?: string }
+```
+
+Azzerato non è riassunto: dopo un `/clear` il modello non ha più nemmeno il riassunto che
+lascia una compattazione. Che fosse davvero così non si è dedotto dal nome del comando —
+`spike/clear-probe.ts` lo ha misurato il 26 agosto 2026 mandando tre prompt veri: «rispondi
+BANANA», poi `/clear`, poi «che parola ti avevo chiesto?». Risposta: «NONLOSO».
+
+Come arriva. Il CLI lo annuncia con un messaggio **tutto suo**, `conversation_reset`, dentro
+il turno del comando; subito dopo manda un `system:init` con un **`session_id` nuovo**, che
+diventa il `session.resumeRef` — quindi il risveglio di una chat azzerata riprende la
+conversazione vuota, non quella di prima, e questo funzionava già senza toccare niente.
+
+Due cose che non si indovinano, e per questo stanno scritte:
+
+- STARK **non legge i prompt** per capire cosa fanno. `/clear` non è riconosciuto dal testo
+  che l'utente ha scritto: è il CLI a dire cosa è successo, e per giunta a cose fatte. Vale
+  come regola generale — un prompt che *sembra* un comando può non esserlo, e un comando può
+  arrivare da un alias che STARK non conosce.
+- `ref` è il `new_conversation_id` del messaggio e **non** è il riferimento per il risveglio:
+  nella cattura i due id erano diversi (`31830557…` contro `f98faabe…`). Serve a ritrovare
+  quella conversazione nei trascritti del CLI, non a riprenderla.
+
+Nello snapshot non è una parte del turno come la compattazione, ma un campo **del turno**:
+`TurnView.clearedAt`. La differenza non è formale — la compattazione è una cosa avvenuta
+*dentro* il flusso, l'azzeramento è un taglio *del* flusso, e la UI ci raccoglie sopra tutto
+ciò che precede in un capitolo chiuso (`docs/ui-schermate.md`).
+
 **`PromptPart` — §16.3, chiuso collegando gli allegati.**
 
 ```ts

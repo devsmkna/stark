@@ -359,6 +359,25 @@ export type Payload =
    */
   | { k: 'context.compacted'; before: number; after?: number
       trigger?: 'manual' | 'auto'; ms?: number }
+  /**
+   * Il contesto è stato **azzerato**, non riassunto: `/clear`. Da qui in giù il
+   * modello non ha più niente di quello che c'era sopra — nemmeno il riassunto che
+   * lascia una compattazione.
+   *
+   * Verificato dal vivo il 26 agosto 2026 (`spike/clear-probe.ts`), perché il nome
+   * del comando non è una prova: mandato `/clear` fra due prompt, il secondo non
+   * sapeva più la parola detta nel primo. Il CLI lo annuncia con un messaggio suo,
+   * `conversation_reset`, dentro il turno del comando, e subito dopo manda un
+   * `system:init` con un **session_id nuovo** — è quello che diventa il
+   * `session.resumeRef`, ed è già gestito: risvegliare una chat azzerata riprende la
+   * conversazione vuota, non quella di prima.
+   *
+   * `ref` è il `new_conversation_id` del messaggio, e **non** è il riferimento per il
+   * risveglio: nella cattura i due id erano diversi (`31830557…` contro `f98faabe…`).
+   * Sta qui perché è l'unico modo di ritrovare quella conversazione nei trascritti
+   * del CLI, non perché serva a riprenderla.
+   */
+  | { k: 'context.cleared'; ref?: string }
   | { k: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { k: 'action.blocked'; by: 'classifier' | 'denyRule'; callId?: string; reason: string }
 

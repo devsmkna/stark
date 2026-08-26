@@ -100,6 +100,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
 /* barra sinistra */
 .side{width:212px;flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line)}
+/* §8 di ui-schermate.md: sotto la soglia stretta la lista, quando c'è, è tutta la
+   schermata — non una colonna di 212px scampata al rimpicciolimento. La soglia è la
+   stessa di `store.narrow` in App.svelte: quel booleano decide SE mostrarla, questa
+   regola SOLO quanto è larga quando App.svelte ha già deciso di mostrarla da sola. */
+@media (max-width: 860px) { .side{width:100%;border-right:none} }
 .sidetop{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
 /* il nome in cima è il marchio vettoriale, non testo: vedi Logo.svelte */
 .sidetop{color:var(--ink)}
@@ -159,8 +164,17 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg)}
 .turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
-.th .tm{color:var(--user);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:600}
-.th .q{font-weight:600;color:var(--user);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* L'ora è un riferimento, non un titolo: grigia e di peso normale, come il conteggio
+   dei blocchi in fondo alla stessa riga. In blu e in grassetto competeva col prompt
+   per l'attenzione, e a vincere doveva essere il prompt. `tabular-nums` resta: le
+   cifre incolonnate rendono leggibile una fila di orari a colpo d'occhio. */
+.th .tm{color:var(--muted);font-size:10px;flex:none;font-variant-numeric:tabular-nums;font-weight:400}
+/* Il testo del prompt sta nel colore normale, non nel blu del blocco: il blu è del
+   BLOCCO, e serve a farlo trovare scorrendo. A farlo anche del testo si perdeva la
+   cosa più importante — che quel testo è la roba da leggere: su fondo azzurro il
+   ciano su ciano ha poco contrasto, e più il prompt è lungo più si fatica.
+   Il colore-firma resta sull'ora e sullo sfondo, che bastano a riconoscere il blocco. */
+.th .q{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{margin-left:auto;color:var(--muted);font-size:10px;flex:none}
 .tb{padding:2px 11px 11px;display:flex;flex-direction:column;gap:6px}
 
@@ -229,9 +243,24 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .opt.pri{color:#0E1118}}
 .input{margin:8px 12px;border:1px solid var(--line-2);border-radius:9px;padding:8px 11px;color:var(--muted);font-size:11px}
 .status{display:flex;align-items:center;gap:9px;padding:5px 12px 7px;font-size:10px;color:var(--muted);position:relative}
-.status .l,.status .r{display:flex;align-items:center;gap:9px}
+.status .l,.status .r{display:flex;align-items:center;gap:9px;min-width:0}
 .status .r{margin-left:auto}
 .status .sep{color:var(--line-2)}
+/* Il percorso non ha un limite proprio: su una cartella con un nome lungo cresceva
+   finché non finiva contro il bordo di `.shell` (che taglia, non scorre) — sparendo a
+   metà parola, senza puntini, e portandosi via modello e contesto oltre il bordo dello
+   schermo. `min-width:0` sopra permette a un figlio flessibile di restringersi sotto
+   la sua larghezza naturale; qui si dice anche *come*, invece di lasciarlo scomparire. */
+.status .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Sotto gli 860px (la stessa soglia di `store.narrow`) la riga va in due invece di
+   stringere modalità, MCP, percorso, modello e contesto tutti sulla stessa — con
+   quella larghezza non ci sta nessuno dei cinque comodo, ed è la riga che si legge di
+   più, non quella da cui si può risparmiare qualcosa (Principio 5: si mostra tutto, si
+   riorganizza lo spazio). */
+@media (max-width: 860px) {
+  .status{flex-wrap:wrap;row-gap:4px}
+  .status .r{margin-left:0;width:100%}
+}
 .ctx{position:relative;cursor:default;border-bottom:1px dotted var(--muted)}
 .tip{position:absolute;bottom:calc(100% + 8px);right:0;width:220px;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;box-shadow:0 8px 28px rgba(16,20,32,.16);padding:10px 12px;display:none;z-index:5;color:var(--ink-2);text-align:left}
 .ctx:hover .tip,.ctx:focus-within .tip{display:block}
