@@ -700,6 +700,25 @@ il margine nostro. Sul fondo `padding-bottom: env(safe-area-inset-bottom)` sul `
 la barra del gesto «home» si mangia l'ultimo mezzo centimetro e senza quello il blocco ci
 finisce sotto. In Safari l'inset è zero e non cambia niente.
 
+**Il prompt appiccicato lasciava passare il contenuto sopra di sé** (26 agosto 2026,
+segnalato con uno screenshot: «il contenitore deve finire al prompt, non oltre»). Causa: il
+padding dello scroller. Un contenitore con `overflow` taglia i figli al proprio bordo, ma
+**l'area del padding sta dentro quel bordo** — il contenuto che scorre ci passa attraverso e si
+vede. Con `.conv{padding:12px}` e `top:0`, il prompt si agganciava 12px più in basso, e in
+quella striscia continuava a sfilare il contenuto: sopra il titolo, che è esattamente ciò che
+non deve succedere. Corretto spostando i 12px dal padding del contenitore al **margine del primo
+figlio**: così il prompt si aggancia a filo del bordo che taglia, e sopra di lui non c'è più
+niente da vedere **per costruzione**, non per un offset azzeccato. Misurato: fascia scoperta da
+8.8px a **0**, e `elementFromPoint` lungo tutta la striscia non trova più niente.
+Nello stesso giro il prompt ha preso `border-radius: 8px 8px 0 0`. Finché sta in cima al proprio
+turno non serviva — a smussarlo era il taglio del contenitore — ma **appiccicato sta in mezzo al
+turno**, dove non c'è nessun angolo da ereditare, e si leggeva come una fascia piena che sfonda
+i lati invece che come la cima di una scheda. Gli 8px sono i 9 del turno meno il suo bordo di 1,
+così a riposo le due curve coincidono al pixel invece di somigliarsi. Solo in alto: sotto c'è il
+contenuto del turno, e arrotondare lì aprirebbe due spicchi di fondo in mezzo a una cosa
+continua. Verificato che l'aria a riposo resti quella di prima (16.2px da telefono con lo zoom,
+12 su desktop, uguale in cima e ai lati).
+
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).

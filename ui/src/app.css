@@ -164,7 +164,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .effbtn{margin-left:auto;flex:none;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--surface);font-family:inherit;font-size:11.5px}
 .effbtn b{font-weight:600;color:var(--ink)}
 
-.conv{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
+/* Il padding **non** sta in cima, e la ragione è il prompt appiccicato.
+   Un contenitore con `overflow` taglia i figli al bordo, ma l'area del padding è dentro
+   quel bordo: il contenuto che scorre ci passa attraverso e si vede. Con `padding:12px`
+   e `top:0`, il prompt si agganciava 12px più in basso e in quella striscia continuava a
+   sfilare il contenuto — sopra il titolo, che è esattamente ciò che non deve succedere.
+   Portando i 12px sul primo figlio come margine, il prompt si aggancia **a filo** del
+   bordo che taglia: sopra di lui non c'è più niente da vedere, per costruzione e non per
+   un numero azzeccato. A riposo l'aria in cima è la stessa di prima. */
+.conv{padding:12px 12px 12px;padding-top:0;display:flex;flex-direction:column;gap:8px;flex:1}
+.conv>:first-child{margin-top:12px}
 /* `flex:none` non è decorativo: `.conv` è una colonna flex, e senza, un turno lungo
    fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
    conversazione vera, che è esattamente il caso che deve reggere. */
@@ -191,7 +200,15 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    **fuori** dallo scrollport: sotto di lei, non sopra, senza doverne sapere l'altezza.
    `z-index` perché il prompt deve passare sopra il contenuto del proprio turno, non
    sotto; il fondo è già opaco (`--user-bg`), altrimenti si leggerebbe in trasparenza. */
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg);position:sticky;top:0;z-index:2}
+/* Angoli arrotondati in alto anche sul prompt, e non solo sul turno che lo contiene.
+   Finché sta in cima al proprio turno non serviva: a smussarlo era il taglio del
+   contenitore. Ma appiccicato sta **in mezzo** al turno, dove non c'è nessun angolo da
+   ereditare, e si leggeva come una fascia piena che sfonda i lati invece che come la
+   cima di una scheda. Gli 8px sono i 9 del turno meno il suo bordo di 1: così, a riposo,
+   la curva del prompt e quella del contenitore coincidono al pixel invece di somigliarsi.
+   Solo in alto: sotto c'è il contenuto del turno, e arrotondare lì aprirebbe due spicchi
+   di fondo in mezzo a una cosa continua. */
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg);position:sticky;top:0;z-index:2;border-radius:8px 8px 0 0}
 .turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
 /* L'ora è un riferimento, non un titolo: grigia e di peso normale, come il conteggio
