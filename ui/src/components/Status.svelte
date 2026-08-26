@@ -223,10 +223,15 @@
 <div class="status" bind:this={bar}>
   <div class="l">
     <span class="pop">
+      <!-- `aria-label` non è un di più: sotto la soglia stretta l'etichetta sparisce e
+           le icone sono `aria-hidden`, quindi senza questo il bottone resterebbe **senza
+           nome** per chi legge a voce — cioè premibile e muto. Il `title` da solo farebbe
+           da nome, ma direbbe «Permission mode» invece di quale modalità è attiva. -->
       <button class="tune" disabled={!canSwitchMode} onclick={() => choose('mode')}
+        aria-label="Permission mode: {snap.mode ?? 'auto'}"
         title={canSwitchMode ? 'Permission mode' : 'This chat has no process behind it right now'}>
         <Icon name={MODE_ICON[snap.mode ?? 'auto'] ?? 'i-bolt'} style="color:var(--accent)" />
-        {snap.mode ?? 'auto'}
+        <span class="lbl">{snap.mode ?? 'auto'}</span>
         <Icon name="i-down" />
       </button>
       {#if open === 'mode'}
@@ -287,9 +292,16 @@
       {/if}
     </span>
 
-    <span class="sep">·</span>
-    <Icon name="i-folder" style="flex:none" />
-    <span class="path" title={snap.cwd ?? ''}>{tilde(snap.cwd)}</span>
+    <!-- Il percorso è la voce che si toglie sotto la soglia stretta (chiesto
+         dall'utente da telefono, 26 agosto 2026: «voglio solo modalità, mcp, modello
+         e contesto»). Il nome del progetto resta comunque leggibile nell'intestazione
+         della conversazione, sopra: qui sparisce il percorso per intero, non
+         l'informazione di in quale cartella si è. -->
+    <span class="cwd">
+      <span class="sep">·</span>
+      <Icon name="i-folder" style="flex:none" />
+      <span class="path" title={snap.cwd ?? ''}>{tilde(snap.cwd)}</span>
+    </span>
   </div>
 
   <div class="r">
@@ -299,7 +311,10 @@
         title={snap.models.length === 0
           ? 'This chat was recorded before STARK carried the model list'
           : 'Model'}>
-        {snap.model ?? '—'}
+        <!-- In uno span, non come testo nudo: un nodo di testo dentro un flex diventa
+             un elemento anonimo, che nessuna regola CSS può raggiungere — e questo è
+             l'unico valore della barra la cui lunghezza non si conosce in anticipo. -->
+        <span class="mname">{snap.model ?? '—'}</span>
         {#if snap.models.length > 0}<Icon name="i-down" />{/if}
       </button>
       {#if open === 'model'}
@@ -327,7 +342,14 @@
          non sono la risorsa che scarseggia. Si dice quanto lavoro è passato di qui e
          quando la finestra si riapre. -->
     <button class="ctx" type="button" onpointerenter={peek} onfocus={peek}>
-      {#if pct !== null}{pct}% context{:else}{fmt(total)} tokens{/if}
+      <!-- Da telefono resta la sola percentuale: «context» è la parola che si può
+           togliere senza perdere niente, perché il pannellino che si apre al tocco
+           comincia proprio con «Context window» e lo dice per esteso. -->
+      <!-- `&nbsp;` e non uno spazio normale: Svelte **taglia** lo spazio iniziale dentro
+           un elemento, e su schermo largo si leggeva «27%context» attaccato. Misurato,
+           non supposto: il bordo destro di «27%» e quello sinistro dello span cadevano
+           sullo stesso pixel. Uno spazio non collassabile non si può perdere per strada. -->
+      {#if pct !== null}{pct}%<span class="lbl">&nbsp;context</span>{:else}{fmt(total)} tokens{/if}
       <span class="tip">
         <div class="tr"><span>Context window</span>
           <b>{pct !== null ? `${pct}%` : '—'}</b></div>
@@ -468,10 +490,23 @@
      Sotto la soglia stretta si esce dal flusso e ci si ancora allo stesso punto per
      tutti e tre — vicino al fondo, dove l'utente sta già guardando (è la stessa area
      in cui «mode» capitava già di funzionare bene) — invece che al bottone di turno. */
+  /* Ancorate al **blocco in basso**, non al fondo della finestra.
+     `position:fixed; bottom:12px` le apriva a filo dello schermo, cioè addosso ai
+     bottoni che le avevano aperte e alla casella di scrittura: si sceglieva un server
+     MCP senza più vedere quale chip lo stava mostrando, e la metà bassa della tendina
+     copriva l'unica parte di schermo che serve tenere libera. Adesso la tendina finisce
+     **dove comincia** il blocco (`bottom: 100%` di `.dock`, più 8px d'aria): sopra c'è
+     la conversazione, che scorre ed è la cosa che si può coprire.
+     Perché `static` sui due contenitori: `position:absolute` cerca il primo antenato
+     posizionato, e `.pop` (relative, per l'ancoraggio su schermo largo) e `.status`
+     (relative) lo intercetterebbero prima di `.dock`. Neutralizzarli qui li salta
+     entrambi senza toccare il caso largo, che resta ancorato al proprio bottone. */
   @media (max-width: 860px) {
+    .status { position: static; }
+    .pop { position: static; }
     .pop .menu, .r .pop .menu {
-      position: fixed; left: 12px; right: 12px; bottom: 12px; top: auto;
-      width: auto; max-height: 65vh; overflow-y: auto;
+      position: absolute; left: 12px; right: 12px; bottom: calc(100% + 8px); top: auto;
+      width: auto; max-height: 60vh; overflow-y: auto;
     }
   }
 

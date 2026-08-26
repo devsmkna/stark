@@ -5,6 +5,7 @@
   // facendo, quando ha bisogno di te si espande, e sotto c'è la barra che si preme.
   // Non è una disposizione comoda: è la conseguenza di non far comparire le richieste
   // in mezzo alla conversazione (vedi Ask.svelte).
+  import { tick } from 'svelte'
   import Icon from './Icon.svelte'
   import Ask from './Ask.svelte'
   import Status from './Status.svelte'
@@ -46,9 +47,9 @@
     // risposta per svuotare farebbe sembrare lenta una casella che non lo è.
     text = ''
     allegati = []
-    grow()
+    await regrow()
     const ok = await store.prompt(draft, addosso)
-    if (!ok) { text = draft; allegati = addosso; grow() }
+    if (!ok) { text = draft; allegati = addosso; await regrow() }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -181,15 +182,52 @@
     // che è quello che si vuole dopo aver scelto `/clear`.
     text = `/${c.name}${c.argumentHint ? ' ' : ''}`
     box?.focus()
-    grow()
+    void regrow()
   }
 
-  /** La casella cresce col testo fino a un tetto, poi scorre. */
+  /**
+   * La casella cresce col testo fino a un tetto, poi scorre.
+   *
+   * Misura il **DOM**, non `text`: `scrollHeight` è l'altezza che la textarea ha
+   * davvero adesso. Va quindi chiamata quando il DOM è già aggiornato — da `oninput`
+   * lo è per definizione (l'utente ha appena digitato), ma dopo un'assegnazione a
+   * `text` **no**: vedi `regrow()`.
+   */
   function grow(): void {
     const el = box
     if (!el) return
+    // Da vuota si toglie l'altezza imposta invece di ricalcolarla: `scrollHeight` su
+    // una textarea vuota dà 32px, due in meno dei 34 che il CSS le darebbe da sola, e
+    // il salto si vedeva a ogni invio. Senza valore inline decide il foglio di stile,
+    // che è la risposta giusta quando non c'è niente da misurare.
+    if (el.value === '') { el.style.height = ''; return }
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }
+
+  /**
+   * Come `grow()`, ma dopo che Svelte ha scritto nel DOM.
+   *
+   * Il bug che risolve (segnalato dall'utente con uno screenshot, 26 agosto 2026: «perché
+   * è gigante?»): mandato un prompt lungo, la casella **restava alta quanto il prompt**
+   * pur essendo vuota — fino al tetto di 160px, cioè cinque volte i ~34px di una riga —
+   * e ci restava finché non si ridigitava qualcosa.
+   *
+   * La causa non è il classico auto-resize senza reset: il reset a `'auto'` c'è (riga
+   * sopra) ed è corretto. È il **momento**. `text` è `$state` legato con `bind:value`, e
+   * Svelte 5 non scrive nel DOM in modo sincrono: al ritorno da `text = ''` la textarea
+   * contiene ancora il testo di prima. `grow()` misurava quindi il prompt appena
+   * inviato e ne fissava l'altezza in `style.height`; subito dopo Svelte svuotava il
+   * valore, ma l'altezza inline restava lì, senza più nessuno a rimisurarla.
+   *
+   * `tick()` è l'attesa che Svelte offre apposta per questo. Il difetto era simmetrico
+   * in tutti e tre i punti che assegnano `text` — svuotare, ripristinare dopo un
+   * rifiuto, completare uno slash — e si vedeva solo nel primo perché è l'unico in cui
+   * l'altezza sbagliata è *più grande* di quella giusta.
+   */
+  async function regrow(): Promise<void> {
+    await tick()
+    grow()
   }
 </script>
 

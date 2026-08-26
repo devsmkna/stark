@@ -158,7 +158,16 @@ export class Registry {
 
   constructor(defaults: { model?: string; mode?: PermissionMode; configDir?: string } = {}) {
     this.defaults = {
-      model: defaults.model ?? 'claude-sonnet-5',
+      // `'default'` non è un segnaposto: è un `value` vero nella lista che l'SDK
+      // restituisce (`list_models`), e si risolve con la stessa logica di un modello
+      // scelto per nome — legato all'account, non a STARK. Prima qui c'era
+      // `'claude-sonnet-5'` cablato, e ogni chat nuova apriva su Sonnet anche per un
+      // account il cui default nativo (verificato: la stessa CLI, `claude` senza
+      // `--model`) è Opus. STARK non deve poter meno del CLI: il CLI lascia decidere
+      // all'account quando non gli si dice nulla, quindi anche STARK deve farlo —
+      // scegliere un modello fisso al posto dell'utente è la stessa cosa da cui
+      // `--strict-mcp-config` era stato scartato per i server MCP.
+      model: defaults.model ?? 'default',
       mode: defaults.mode ?? 'auto',
       ...(defaults.configDir ? { configDir: defaults.configDir } : {}),
     }
@@ -240,10 +249,16 @@ export class Registry {
     // l'utente non ha modo di collegare la cosa allo Sleep. Lo dice il journal.
     const mcp = spec.mcp ?? snapshot.mcpServers.filter(s => s.enabled).map(s => s.name)
     const ask = spec.askTools ?? askToolsFor(askCategories(this.settings()))
+    // Stessa ragione, stesso posto: il modello è quanto di più "com'era" ci sia. Prima
+    // di questo il risveglio non lo guardava, e ogni Sleep smontava silenziosamente la
+    // scelta di modello per quella chat — una sessione spostata su Opus si svegliava su
+    // Sonnet, senza che niente lo dicesse, perché `snapshot.model` è vuoto solo su una
+    // chat che non è mai partita: qui sotto è già popolato da `session.created`.
+    const model = spec.model ?? snapshot.model ?? this.defaults.model
 
     const adapter = new ClaudeCodeAdapter({
       cwd: spec.cwd,
-      model: spec.model ?? this.defaults.model,
+      model,
       mode: spec.mode ?? this.defaults.mode,
       // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
@@ -292,6 +307,29 @@ export class Registry {
       // fa finire, poi si chiude.
       try { await adapter.close() } catch { /* stava già morendo */ }
       journal.close()
+
+      // Un'apertura fallita non deve lasciare una conversazione che non è mai
+      // esistita. `session.created` è l'unico evento che porta il `cwd`: se non è mai
+      // arrivato, il journal contiene tre righe (`starting`, `error`, `closed`) e
+      // nient'altro — nessun prompt, nessuna risposta, nessuna cartella. L'elenco lo
+      // mostrava lo stesso, come una chat «no folder / stopped» comparsa dal nulla,
+      // che l'utente non poteva collegare a niente di suo.
+      //
+      // Le due condizioni sono **entrambe** necessarie, e la seconda è quella che
+      // evita un disastro: `startFrom === 0` vuol dire che prima di questa apertura il
+      // journal era vuoto. Su un **risveglio** fallito l'id è quello della
+      // conversazione vera e il file contiene tutta la sua storia: cancellarlo perché
+      // la ripresa non è partita distruggerebbe esattamente ciò che si stava cercando
+      // di riaprire.
+      const maiNata = startFrom === 0 && !snapshot.cwd
+      if (maiNata) {
+        // Il motivo non si perde: va nel log del daemon **prima** di togliere il file,
+        // che era l'unico posto in cui l'errore restava scritto.
+        console.error(`apertura fallita, journal rimosso (${id}): ${String((err as Error)?.message ?? err)}`)
+        rmSync(journal.path, { force: true })
+        rmSync(resolve(SESSIONS, `${id}.raw.jsonl`), { force: true })
+      }
+
       this.bump()
       throw err
     }

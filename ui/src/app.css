@@ -148,20 +148,50 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 /* colonna destra */
 .col{flex:1;display:flex;flex-direction:column}
 .bar{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);flex:none}
-.bar .t{font-weight:600;font-size:12.5px}
-.effbtn{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--surface);font-family:inherit;font-size:11.5px}
+/* Il titolo sta su **una riga**, e quello che avanza si taglia coi puntini.
+   Senza queste tre proprietà un titolo lungo (il primo prompt di una chat, che lungo
+   lo è quasi sempre) andava a capo: da telefono occupava tre righe e faceva alto 91px
+   un header che ne vuole 42. `min-width:0` è la metà che si dimentica — un figlio flex
+   non scende sotto la larghezza del proprio contenuto finché non glielo si permette, e
+   senza di quello `text-overflow` non ha mai occasione di entrare in gioco. */
+.bar .t{font-weight:600;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* `flex:none` per la stessa ragione per cui ce l'ha `.iconb`: questo bottone è grande
+   quanto il suo contenuto e non ha niente da cedere. Senza, il titolo qui sopra lo
+   comprimeva finché il padding destro non spariva — l'icona finiva a 2px dal bordo
+   contro i 13 di sinistra, e sembrava scentrata dentro il proprio riquadro. Non era un
+   problema di allineamento (verticalmente era già a posto, 5px sopra e 5 sotto): era il
+   riquadro a essere stato schiacciato addosso a lei. */
+.effbtn{margin-left:auto;flex:none;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--surface);font-family:inherit;font-size:11.5px}
 .effbtn b{font-weight:600;color:var(--ink)}
 
 .conv{padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
 /* `flex:none` non è decorativo: `.conv` è una colonna flex, e senza, un turno lungo
    fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una
    conversazione vera, che è esattamente il caso che deve reggere. */
-.turn{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface);flex:none}
+/* `overflow:clip` e non `hidden`, ed è **la** riga che fa funzionare il prompt appiccicato
+   qui sotto. Servono tutti e due a tagliare i figli sull'angolo arrotondato, ma `hidden`
+   fa del turno un contenitore di scorrimento, e `position:sticky` si aggancia al primo
+   contenitore di scorrimento che trova salendo: si sarebbe agganciato al turno — che non
+   scorre mai — invece che alla conversazione, cioè non si sarebbe mosso mai. `clip`
+   taglia identico ma **non** è un contenitore di scorrimento, quindi lo sticky vede la
+   conversazione. Il taglio serve ancora, ed è quello che fa sparire il prompt appiccicato
+   al momento giusto: quando il turno esce dallo schermo, il suo bordo inferiore se lo
+   porta via, e il prompt del turno dopo prende il suo posto senza sovrapporsi. */
+.turn{border:1px solid var(--line);border-radius:9px;overflow:clip;background:var(--surface);flex:none}
 /* Blu-azzurro apposta: è il blocco del PROMPT, la riga da cui riparte la
    discussione ogni volta che ne mandi uno nuovo — scorrendo una conversazione
    lunga deve saltare all'occhio senza doverlo leggere, per vedere subito fin
    dove si era arrivati e da dove è ripresa. */
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg)}
+/* Il prompt resta appeso in cima mentre il suo turno scorre.
+   Un turno lungo è più alto dello schermo, e la riga da cui lo si richiude è la **prima**:
+   una volta scesi dentro, quella riga era già passata sopra il bordo e per richiudere il
+   blocco bisognava risalire fino in cima. Ora resta appesa sotto l'intestazione finché il
+   turno è a schermo — leggibile (dice di che prompt si tratta) e premibile (lo richiude
+   da lì). `top:0` è il bordo alto dello scrollport, e l'intestazione della chat sta
+   **fuori** dallo scrollport: sotto di lei, non sopra, senza doverne sapere l'altezza.
+   `z-index` perché il prompt deve passare sopra il contenuto del proprio turno, non
+   sotto; il fondo è già opaco (`--user-bg`), altrimenti si leggerebbe in trasparenza. */
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--user-bg);position:sticky;top:0;z-index:2}
 .turn.open>.th{background:var(--user-bg)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
 /* L'ora è un riferimento, non un titolo: grigia e di peso normale, come il conteggio
@@ -192,7 +222,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .prose b{color:var(--ink)}
 
 /* blocco in basso */
-.dock{border-top:1px solid var(--line);flex:none;background:var(--surface)}
+/* `position:relative` non serve al blocco in sé: serve a fargli da **riferimento**.
+   Sotto la soglia stretta le tendine della barra di stato si ancorano a lui per
+   aprirsi tutte intere sopra la casella di scrittura, invece che sopra i bottoni che
+   le hanno aperte — vedi la media query in Status.svelte, che è dove sta il perché. */
+.dock{border-top:1px solid var(--line);flex:none;background:var(--surface);position:relative}
 .doing{display:flex;align-items:center;gap:8px;padding:8px 12px}
 .doing .txt{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .doing .el{color:var(--muted);font-size:10px;flex:none}
@@ -252,14 +286,39 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    schermo. `min-width:0` sopra permette a un figlio flessibile di restringersi sotto
    la sua larghezza naturale; qui si dice anche *come*, invece di lasciarlo scomparire. */
 .status .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-/* Sotto gli 860px (la stessa soglia di `store.narrow`) la riga va in due invece di
-   stringere modalità, MCP, percorso, modello e contesto tutti sulla stessa — con
-   quella larghezza non ci sta nessuno dei cinque comodo, ed è la riga che si legge di
-   più, non quella da cui si può risparmiare qualcosa (Principio 5: si mostra tutto, si
-   riorganizza lo spazio). */
+/* `.cwd` raccoglie separatore, icona e percorso in un solo figlio flex di `.l`, cosí
+   la riga sotto può nasconderli con una sola regola invece di tre selettori — vedi
+   Status.svelte per il perché è raggruppato lì. `min-width:0` si ripete qui perché un
+   figlio flex non eredita quello del genitore: senza, `.path` non avrebbe più margine
+   per restringersi, e tornerebbe il taglio a metà parola che il commento sopra descrive. */
+.status .cwd{display:inline-flex;align-items:center;gap:9px;min-width:0}
+/* Sotto gli 860px (la stessa soglia di `store.narrow`) la barra sta su **una riga
+   sola**, e ci sta perché prima le si toglie di dosso ciò che non è un valore:
+   il percorso per intero (`.cwd` — il nome del progetto resta nell'intestazione della
+   conversazione, sopra) e le etichette che ripetono ciò che la forma già dice
+   (`.lbl` — l'icona del fulmine *è* la modalità, e «context» è scritto per esteso nel
+   pannellino che si apre al tocco).
+
+   Prima di così andava a capo in due righe: era la scelta giusta finché restavano
+   cinque voci per intero, ma spendeva una riga di schermo per informazione che si
+   poteva togliere invece che impilare. Tolta quella, ciò che resta — modalità, MCP,
+   modello, percentuale — sta comodo in orizzontale (misurato a 390px, vedi CLAUDE.md).
+   Nessun `flex-wrap` qui: se un domani un nome di modello lunghissimo non ci stesse,
+   deve **stringersi** (è `.r`/`.l` ad avere `min-width:0`), non ricreare la seconda
+   riga di soppiatto. */
 @media (max-width: 860px) {
-  .status{flex-wrap:wrap;row-gap:4px}
-  .status .r{margin-left:0;width:100%}
+  .status .cwd{display:none}
+  .status .lbl{display:none}
+  /* Il modello è l'unica voce di lunghezza imprevedibile («claude-opus-5[1m]» è quasi
+     il doppio di «sonnet»): è lui a cedere per primo se lo spazio finisce, invece di
+     spingere la percentuale fuori dal bordo. */
+  .status .r .tune{min-width:0}
+  .status .mname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  /* Modalità e MCP non cedono mai: sono già ridotti all'osso (un'icona, e una sigla
+     con un numero), e restringerli non libera spazio utile — toglie solo leggibilità.
+     Senza questa riga, sotto pressione flex accorciava «MCP» in «MC», che non vuol
+     dire niente. A dare spazio dev'essere solo il nome del modello, qui sopra. */
+  .status .l .tune{flex:none}
 }
 .ctx{position:relative;cursor:default;border-bottom:1px dotted var(--muted)}
 .tip{position:absolute;bottom:calc(100% + 8px);right:0;width:220px;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;box-shadow:0 8px 28px rgba(16,20,32,.16);padding:10px 12px;display:none;z-index:5;color:var(--ink-2);text-align:left}
@@ -272,7 +331,13 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .meter i{display:block;height:100%;background:var(--accent)}
 
 /* effetti */
-.switch{margin-left:auto;display:flex;border:1px solid var(--line-2);border-radius:7px;overflow:hidden}
+/* `flex:none`: le due linguette sono già larghe quanto le loro parole e non hanno
+   niente da cedere. Senza, si stringevano insieme al titolo quando lo spazio finiva —
+   e siccome qui c'è `overflow:hidden` (serve a far combaciare lo sfondo della linguetta
+   attiva con l'angolo arrotondato) non sfondavano: **sparivano**, tagliate a metà
+   parola. Da telefono, con la modale rientrata nello schermo, «Import» diventava
+   «Impor». A restringersi dev'essere il titolo, che è testo che sa andare a capo. */
+.switch{margin-left:auto;flex:none;display:flex;border:1px solid var(--line-2);border-radius:7px;overflow:hidden}
 .switch span{padding:3px 9px;color:var(--muted)}
 .switch span.on{background:var(--surface-3);color:var(--ink);font-weight:600}
 .fileblk{border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-bottom:6px}
@@ -368,12 +433,34 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 
 /* dialoghi sopra l'app */
 .scrim{position:absolute;inset:0;background:rgba(16,20,32,.44)}
-.dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 24px 60px rgba(16,20,32,.32);display:flex;flex-direction:column;overflow:hidden;max-height:calc(100% - 26px)}
+/* `max-width` è la metà che mancava: `max-height` c'era già, ma la larghezza no, e le
+   modali dichiarano una misura **fissa e inline** (430px la chat nuova, 560 l'import,
+   380 la conferma di eliminazione). Su desktop ci stanno sempre; da telefono no — a
+   390px la chat nuova veniva 580px e ne sfondava 95 **per lato**, l'import 756 e ne
+   sfondava 183, cioè i bottoni «Cancel» e «Create» finivano fuori dallo schermo.
+   Qui non serve una media query: un tetto in percentuale vale a ogni larghezza e la
+   misura fissa resta quella preferita finché c'è posto. E non serve nemmeno vincere
+   una gara di specificità con lo stile inline — `width` e `max-width` sono proprietà
+   diverse, e la seconda limita la prima da qualunque parte arrivi.
+   I 26px sono gli stessi di `max-height` e di `.dlg.wide{inset:13px}`: 13 per lato. */
+.dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 24px 60px rgba(16,20,32,.32);display:flex;flex-direction:column;overflow:hidden;max-height:calc(100% - 26px);max-width:calc(100% - 26px)}
 .dlg.wide{inset:13px;transform:none;max-height:none;width:auto;height:auto;flex-direction:row}
 .dlgh{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--line);flex:none}
-.dlgh .dt{font-weight:600;font-size:12.5px}
-.dlgh .ds{font-size:10px;color:var(--muted)}
-.dlgh .x{margin-left:auto;color:var(--muted);display:flex}
+/* `overflow-wrap:anywhere` è il paracadute per gli schermi molto stretti: una volta che
+   linguette e crocetta non cedono più (vedi sotto), a restringersi resta il titolo — e
+   un titolo va a capo **fra le parole**, quindi su un iPhone SE «conversation», che da
+   sola è più larga della colonna rimasta, sfondava il proprio riquadro. `anywhere` e non
+   `break-word` perché solo il primo conta anche nel calcolo della larghezza minima, che
+   è ciò che permette al riquadro di stringersi davvero invece di restare largo quanto la
+   parola più lunga. Sopra i ~360px non cambia niente: non c'è niente da spezzare. */
+.dlgh .dt{font-weight:600;font-size:12.5px;overflow-wrap:anywhere}
+.dlgh .ds{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+/* `flex:none` come per `.switch` qui sopra, e per lo stesso motivo: `.shell *{min-width:0}`
+   toglie a **tutto** il minimo naturale, quindi in un'intestazione stretta anche una
+   crocetta si lascia comprimere. Misurato con la modale rientrata nello schermo: il
+   bottone finiva a 9px con dentro un'icona da 14, cioè la X veniva tagliata. A cedere
+   dev'essere il titolo, che è testo e sa andare a capo. */
+.dlgh .x{margin-left:auto;flex:none;color:var(--muted);display:flex}
 .dlgb{padding:13px;overflow:auto;display:flex;flex-direction:column;gap:15px;flex:1}
 .dlgf{padding:9px 13px;border-top:1px solid var(--line);display:flex;gap:7px;justify-content:flex-end;flex:none;background:var(--surface-2)}
 .dlgcol{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -383,7 +470,16 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .ctx-menu .mi.dgr{color:var(--stop)}
 .ctx-menu hr{margin:3px 2px;border-top-color:var(--line)}
 /* chip toccabili nella barra di stato */
-.tune{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line-2);border-radius:6px;padding:1px 5px 1px 6px;color:var(--ink);background:var(--surface)}
+/* `min-height` perché i chip sono alti **quanto il loro contenuto**, e non tutti hanno
+   lo stesso: uno con del testo è alto una riga (1.45em, la `line-height` del body),
+   uno con la sola icona è alto 11px. Finché avevano tutti la loro etichetta la cosa non
+   si vedeva; da telefono, dove la modalità resta la sola icona (`.lbl` nascosta), quel
+   chip veniva 4.7px più basso degli altri due e la fila sembrava sbilanciata.
+   La misura è legata alla riga di testo invece di essere un numero fisso: `1.45em` è la
+   riga alla dimensione del chip, `+4px` sono padding (1+1) e bordi (1+1) — che vanno
+   sommati perché `box-sizing` è `border-box`. Vale sempre, non solo sotto soglia: è
+   un'invariante («i chip della barra sono alti uguali»), non un rattoppo per il telefono. */
+.tune{display:inline-flex;align-items:center;gap:4px;min-height:calc(1.45em + 4px);border:1px solid var(--line-2);border-radius:6px;padding:1px 5px 1px 6px;color:var(--ink);background:var(--surface)}
 .tune svg.ic{width:11px;height:11px}
 .iconb{width:24px;height:24px;flex:none;color:var(--ink-2);display:grid;place-items:center;background:none;border:1px solid transparent;border-radius:7px;padding:0}
 /* elenco delle conversazioni da importare */

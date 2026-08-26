@@ -2,11 +2,31 @@
 // flusso SSE, comando, e coerenza fra ciò che è arrivato dal flusso e ciò che sta sul
 // disco. Le prove di sicurezza non costano quota; il turno finale costa pochissimo.
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { connect } from 'node:net'
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { startDaemon } from '../daemon/server.ts'
 import type { CanonicalEvent } from '../core/events.ts'
+
+// ─── la prova non scrive fra le conversazioni vere ──────────────────────────
+//
+// Prima questa prova girava sulla `STARK_HOME` vera, e ogni esecuzione lasciava due
+// chat fantasma nell'elenco dell'utente: la sessione-sandbox qui sotto, e un journal
+// orfano dalla verifica «una cartella inesistente non apre una sessione». Non era un
+// dettaglio estetico — erano conversazioni finte in mezzo a quelle vere, in un elenco
+// che serve a sapere cosa sta succedendo.
+//
+// L'ordine di queste righe è **obbligatorio**, non stilistico: `registry.ts` risolve
+// `STARK_HOME` una volta sola, al momento in cui il modulo viene valutato. Un `import`
+// statico di `startDaemon` verrebbe issato in cima al file dal motore ES, cioè
+// eseguito **prima** di questa assegnazione, e il registro leggerebbe l'ambiente
+// sbagliato. Per questo l'import è dinamico e sta dopo: è l'unico modo di far arrivare
+// la variabile in tempo senza cambiare `registry.ts`.
+const CASA = resolve(tmpdir(), 'stark-daemon-check-home')
+rmSync(CASA, { recursive: true, force: true })   // deterministica: niente resti del giro prima
+process.env['STARK_HOME'] = CASA
+
+const { startDaemon } = await import('../daemon/server.ts')
 
 /**
  * `fetch` non lascia falsificare l'header `Host`: lo standard lo vieta. È esattamente
@@ -26,8 +46,9 @@ function richiestaGrezza(porta: number, host: string, token: string): Promise<nu
   })
 }
 
-// Porta 0 e token usa e getta: una prova non deve litigare con il daemon vero, che
-// adesso ha una porta fissa e un token che sta su disco.
+// Porta 0, token usa e getta e casa in `/tmp`: una prova non deve litigare con il
+// daemon vero — che ha una porta fissa e un token su disco — né scrivere fra le sue
+// conversazioni.
 const daemon = await startDaemon({
   port: 0,
   token: 'prova'.padEnd(64, '0'),
@@ -79,15 +100,36 @@ check('un file che non c\'è → 404, non un\'eccezione',
   rivelaSconosciuto.status === 404 && corpoSconosciuto.ok === false,
   `${rivelaSconosciuto.status} ${JSON.stringify(corpoSconosciuto)}`)
 // Un file vero di questo repo: prova che il comando di sistema gira davvero sulla
-// macchina che sta eseguendo la verifica, non solo che il codice compila.
-const rivelaVero = await fetch(`${url}/api/reveal`, {
-  method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
-  body: JSON.stringify({ path: resolve('package.json') }),
-})
-const corpoVero = await rivelaVero.json() as { ok: boolean; error?: string }
-check('un file vero del repo si rivela sul serio',
-  rivelaVero.status === 200 && corpoVero.ok === true,
-  `${rivelaVero.status} ${JSON.stringify(corpoVero)}`)
+// macchina, non solo che il codice compila. Il pregio è reale — ed è anche il motivo
+// per cui **non** gira di default.
+//
+// Perché è dietro un flag (segnalato dall'utente, 26 agosto 2026: «ogni tanto mi si
+// apre la directory del progetto con package.json evidenziato»): riuscire, qui, vuol
+// dire **aprire una finestra di Esplora Risorse addosso a chi sta lavorando**. Non era
+// «ogni tanto» in modo misterioso: era ogni `npm run daemon`, compresi quelli lanciati
+// da un agent dentro STARK mentre l'utente stava facendo altro sullo stesso desktop.
+//
+// È lo stesso errore delle chat fantasma, in un altro vestito: una prova che tocca il
+// mondo vero invece del proprio. Lì scriveva nella `STARK_HOME` dell'utente, qui gli
+// ruba il fuoco delle finestre. La regola che ne esce vale per tutte e due: una prova
+// automatica non ha il permesso di farsi notare da chi non l'ha lanciata.
+//
+// Non è nascosta, è **spenta con la spiegazione** — come le voci non ancora fatte nelle
+// impostazioni. La riga qui sotto lo dice a schermo a ogni esecuzione.
+const VUOLE_FINESTRA = process.argv.includes('--reveal')
+if (VUOLE_FINESTRA) {
+  const rivelaVero = await fetch(`${url}/api/reveal`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ path: resolve('package.json') }),
+  })
+  const corpoVero = await rivelaVero.json() as { ok: boolean; error?: string }
+  check('un file vero del repo si rivela sul serio',
+    rivelaVero.status === 200 && corpoVero.ok === true,
+    `${rivelaVero.status} ${JSON.stringify(corpoVero)}`)
+} else {
+  console.log('· saltata: «un file vero si rivela sul serio» aprirebbe una finestra')
+  console.log('  di Esplora Risorse. Per farla davvero: npm run daemon -- --reveal\n')
+}
 
 // ─── F1: aprire un link con la sua app ──────────────────────────────────────
 //
@@ -130,12 +172,26 @@ const nata = await fetch(`${url}/api/sessions`, {
   method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
   body: JSON.stringify({ cwd: '/non/esiste/davvero' }),
 })
-check('una cartella inesistente non apre una sessione', !nata.ok, String(nata.status))
+// Il nome di prima — «una cartella inesistente non apre una sessione» — era **falso**,
+// ed è il genere di bugia che una prova verde nasconde meglio di nessuna prova. La
+// cartella inesistente una sessione la apriva eccome: journal creato, processo figlio
+// lanciato, fallimento in fondo alla catena. Solo la **risposta HTTP** era un errore,
+// ed era l'unica cosa che questa riga guardava. Adesso il rifiuto arriva al confine,
+// prima di aprire qualsiasi cosa, e il nome dice quello che succede davvero.
+check('una cartella inesistente è respinta con 400', nata.status === 400, String(nata.status))
+check('e il motivo dice qual è il problema, non incolpa la libc',
+  ((await nata.json()) as { error?: string }).error?.includes('/non/esiste/davvero') === true)
 // L'eccezione arrivava da un ciclo che gira per conto suo: senza aspettare un attimo
 // si guarderebbe il daemon prima che il colpo lo raggiunga.
 await new Promise(r => setTimeout(r, 1500))
 check('e il daemon resta in piedi',
   (await fetch(`${url}/api/sessions`, { headers: auth })).status === 200)
+// La parte che mancava del tutto, ed è quella che il bug aveva: un rifiuto non deve
+// lasciare **niente** dietro di sé. Prima ogni giro di questa prova depositava una chat
+// «no folder / stopped» nell'elenco vero dell'utente.
+check('e non lascia una conversazione fantasma nell\'elenco',
+  ((await (await fetch(`${url}/api/sessions`, { headers: auth })).json()) as
+    { sessions: unknown[] }).sessions.length === 0)
 
 // ─── sessione ───────────────────────────────────────────────────────────────
 

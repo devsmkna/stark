@@ -15,14 +15,13 @@
 // attenzione, un servizio alla volta, non passando uno schema arbitrario dal client.
 
 import { execFile } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
+// La whitelist qui sotto resta **qui**, non in `platform.ts`: quella difende una rotta
+// HTTP, cioè un input che arriva dalla rete. In `platform.ts` c'è solo il *come* si
+// apre qualcosa, che è conoscenza sull'ambiente e non un permesso da concedere.
+import { CWD_WINDOWS, WSL } from '../core/platform.ts'
 
 const run = promisify(execFile)
-
-const WSL = (() => {
-  try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false }
-})()
 
 /** Gli unici schemi che questa rotta sa aprire. Aggiungerne uno è una riga qui, non
  *  un permesso nuovo da concedere al client. */
@@ -83,7 +82,7 @@ export async function openApp(url: string, scheme: string): Promise<LaunchResult
       // passa gli argomenti a `execFile` uno per uno senza ricostruire una riga di
       // comando in stile Windows (gira su Linux, non su `win32`): è l'interop di
       // WSL a mettere le virgolette intorno a ciascuno, compreso quello vuoto.
-      await run('cmd.exe', ['/c', 'start', '', url], { cwd: '/mnt/c/Windows' })
+      await run('cmd.exe', ['/c', 'start', '', url], { cwd: CWD_WINDOWS })
       return { ok: true }
     }
     if (process.platform === 'darwin') {

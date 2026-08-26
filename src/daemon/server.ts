@@ -5,7 +5,7 @@
 // Node e nel browser, quindi non introduce dipendenze, e per giunta è la stessa forma
 // che usa OpenCode — il che risparmierà lavoro al secondo adapter invece di crearne.
 
-import { createReadStream } from 'node:fs'
+import { createReadStream, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard } from './security.ts'
 import { serveUi } from './static.ts'
@@ -193,6 +193,19 @@ async function route(
     if (method === 'POST' && path === '/api/sessions') {
       const body = await readJson<OpenSpec>(req)
       if (!body?.cwd) return send(res, 400, { error: 'cwd obbligatorio' })
+      // Che la cartella esista si controlla **qui**, prima di aprire qualunque cosa.
+      // Senza, si arrivava a far partire il processo figlio e a fallire là in fondo: e
+      // fallire là in fondo aveva due prezzi. Il primo è il messaggio, che veniva
+      // dall'SDK e incolpava la libc («il binario nativo non corrisponde a questo
+      // sistema, forse musl contro glibc») — una pista completamente sbagliata per chi
+      // ha solo sbagliato a scrivere un percorso. Il secondo è che a quel punto il
+      // journal era già nato, e restava lì: senza `session.created` non aveva `cwd`,
+      // quindi compariva nell'elenco come una chat «no folder / stopped» che nessuno
+      // aveva aperto. Un input non valido deve fermarsi al confine, non lasciare
+      // residui dentro.
+      if (!isDir(body.cwd)) {
+        return send(res, 400, { error: `la cartella non esiste: ${body.cwd}` })
+      }
       const id = await registry.open(body)
       return send(res, 201, { id, snapshot: registry.snapshot(id) })
     }
@@ -326,6 +339,15 @@ function listStream(req: IncomingMessage, res: ServerResponse, registry: Registr
 }
 
 // ─── utilità ────────────────────────────────────────────────────────────────
+
+/**
+ * `path` è una cartella che esiste? Un file normale non vale: `cwd` di un processo
+ * deve essere una directory, e sbagliare fra le due è un errore che si fa davvero
+ * (basta scegliere il file invece della cartella che lo contiene).
+ */
+function isDir(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
+}
 
 function send(res: ServerResponse, code: number, body: unknown): void {
   const s = JSON.stringify(body)

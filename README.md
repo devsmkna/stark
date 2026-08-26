@@ -86,6 +86,28 @@ senza flag. `tsc` resta necessario per il controllo dei tipi, che lo stripping *
 
 ```
 npm install
+npm run stark:install   # mette `stark` in /usr/local/bin — una volta sola
+stark                   # e da qui in poi, da qualunque cartella, è solo questo
+```
+
+`stark` senza altro vuol dire **«voglio usare STARK adesso»**: compila la UI se manca,
+accende il daemon se non c'è, e apre il browser sulla pagina già autenticata. È
+idempotente — se gira già non è un errore, è la condizione normale, e apre e basta.
+Chi lo scrive la mattina non deve ricordarsi se ieri sera l'ha lasciato acceso.
+
+| | |
+|---|---|
+| `stark` | accendi se serve e aprimi STARK |
+| `stark --no-open` | come sopra ma senza browser, per quando sei entrato da SSH |
+| `stark status` · `stark stop` · `stark token` | come i corrispondenti `npm run stark:*` |
+
+Il lanciatore è uno script di tre righe con dentro due percorsi assoluti: il codice resta
+quello del repo, quindi un `git pull` lo aggiorna da sé. Va rigenerato solo se sposti il
+repo — e lo dice il file stesso, in testa.
+
+A mano, senza installare niente, restano le due righe di prima:
+
+```
 npm run ui:build      # la UI è servita dal daemon, va compilata una volta
 npm run stark:start   # daemon staccato: sopravvive alla chiusura del terminale
 ```
@@ -100,6 +122,8 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 
 | | |
 |---|---|
+| `stark` | accende se serve e apre STARK. Il modo normale (vedi sopra) |
+| `npm run stark:install` | installa quel comando. Una volta per macchina |
 | `npm run stark:start` | lo avvia **staccato**: chiudere il terminale non lo tocca |
 | `npm run stark:status` | se è vivo, dove, e quante conversazioni ha |
 | `npm run stark:stop` | lo ferma con garbo: gli agent si chiudono e i journal restano coerenti |

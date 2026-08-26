@@ -1,23 +1,36 @@
 // Avvia il daemon, o lo guarda, o lo ferma.
 //
+//   stark                  (= stark up) accendi se serve e aprimi STARK — vedi sotto
 //   npm run stark          in primo piano, Ctrl-C lo ferma
 //   npm run stark:start    staccato: sopravvive alla chiusura del terminale
 //   npm run stark:status   dove sta, da quanto, quante conversazioni
 //   npm run stark:stop     lo ferma
+//   npm run stark:install  mette `stark` in /usr/local/bin
+//
+// Perché esiste `up` oltre a `start`: sono due domande diverse. `start` è «accendi il
+// daemon», e si arrabbia se ne trova già uno. `up` è «voglio usare STARK adesso», e
+// quindi è **idempotente**: se gira già non è un errore, è la condizione normale. Chi
+// scrive `stark` la mattina non sa e non deve sapere se ieri sera l'ha lasciato acceso.
 //
 // Perché staccato conta più di quanto sembri: quando il daemon muore, muoiono con lui
 // tutti i processi degli agent. Riaprire una conversazione rilegge tutto il contesto,
 // quindi **costa quota** (ADR-005). Chiudere per sbaglio la finestra del terminale era
 // il modo più facile di pagare quel prezzo senza aver deciso di pagarlo.
 
-import { spawn } from 'node:child_process'
-import { openSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, openSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { openInBrowser } from '../core/platform.ts'
 import { startDaemon, PORTA } from '../daemon/server.ts'
+import { uiIsBuilt } from '../daemon/static.ts'
 import { STARK_HOME } from '../daemon/registry.ts'
 import {
   clearPid, ensureHome, logPath, pidPath, readToken, runningPid, tokenPath, writePid, writeToken,
 } from '../daemon/identity.ts'
+
+/** La radice del repo: questo file sta in `src/cli/`, due livelli sotto. */
+const RADICE = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
 const comando = process.argv[2] ?? 'run'
 const porta = process.env['STARK_PORT'] ? Number(process.env['STARK_PORT']) : PORTA
@@ -50,6 +63,83 @@ function indirizzo(token: string): void {
   console.log(`\n  Apri STARK:  ${url}/?token=${token}\n`)
   console.log(`Il token sta nell'indirizzo una volta sola: al primo caricamento STARK lo`)
   console.log(`sposta in un cookie e lo toglie dalla barra degli indirizzi.`)
+}
+
+/**
+ * Mette un `stark` eseguibile in `/usr/local/bin`, così il comando esiste da qualunque
+ * cartella invece di richiedere `cd` nel repo più `npm run …`.
+ *
+ * È un lanciatore di tre righe, non una copia: dentro ci sono solo due percorsi
+ * assoluti, quindi il codice vero resta quello del repo e un `git pull` lo aggiorna da
+ * sé. In cambio va rigenerato se il repo si sposta — lo dice il file stesso, in testa.
+ *
+ * Perché `process.execPath` e non `env node`: questo è il Node che sta funzionando
+ * adesso, cioè quello con cui il progetto gira davvero (≥ 22.18, che serve per
+ * eseguire i `.ts` senza compilarli — ADR-007). `env node` prenderebbe quello che
+ * capita nel `PATH`, che con nvm cambia da shell a shell e in un lanciatore grafico
+ * spesso non c'è affatto.
+ */
+function installa(): void {
+  const dove = '/usr/local/bin/stark'
+  const script = [
+    '#!/bin/sh',
+    '# Generato da `npm run stark:install`. Rigeneralo se sposti il repo.',
+    `# repo: ${RADICE}`,
+    '',
+    '# Senza un verbo il default è `up`: accendi se serve e aprimi STARK. Non è il',
+    '# default del CLI, che resta `run` (primo piano) per non cambiare `npm run stark`.',
+    '#',
+    '# Il secondo caso è `stark --no-open`: un argomento c\'è, ma è un\'opzione, non un',
+    '# verbo. Senza questo controllo finiva al CLI come nome di comando — «comando',
+    '# sconosciuto: --no-open», che è vero e inutile.',
+    'case "${1-}" in',
+    '  ""|-*) set -- up "$@" ;;',
+    'esac',
+    '',
+    `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(resolve(RADICE, 'src/cli/stark.ts'))} "$@"`,
+    '',
+  ].join('\n')
+
+  try {
+    writeFileSync(dove, script)
+    chmodSync(dove, 0o755)
+  } catch (e) {
+    console.error(`Non sono riuscita a scrivere ${dove}: ${String((e as Error).message ?? e)}`)
+    console.error('Se non sei root, una via senza privilegi è mettere lo stesso lanciatore')
+    console.error('in ~/.local/bin (se è nel PATH), oppure un alias nel tuo ~/.bashrc:')
+    console.error(`  alias stark='${process.execPath} ${resolve(RADICE, 'src/cli/stark.ts')}'`)
+    process.exit(1)
+  }
+
+  console.log(`Fatto: ${dove}\n`)
+  console.log('Da qualunque cartella, adesso:')
+  console.log('  stark          accende se serve e apre STARK nel browser')
+  console.log('  stark status   come sta')
+  console.log('  stark stop     lo ferma')
+  console.log('  stark token    ristampa l\'indirizzo col token')
+}
+
+/**
+ * Accende il daemon staccato e aspetta che risponda. Restituisce il pid del figlio, o
+ * `null` se non ha risposto in tempo. Non controlla se ne gira già uno: quella domanda
+ * ha risposte diverse per `start` (è un errore) e per `up` (è la normalità), quindi la
+ * decisione resta a chi chiama.
+ */
+async function avviaStaccato(): Promise<number | null> {
+  // `detached` mette il figlio in una sessione sua: quando il terminale se ne va,
+  // il SIGHUP che uccide tutto ciò che gli appartiene non lo raggiunge.
+  ensureHome(STARK_HOME)
+  const log = openSync(logPath(STARK_HOME), 'a')
+  const figlio = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run'], {
+    detached: true,
+    stdio: ['ignore', log, log],
+    env: process.env,
+  })
+  // `unref` toglie il figlio dalla contabilità di questo processo, che altrimenti
+  // resterebbe vivo ad aspettarlo — cioè non si staccherebbe niente.
+  figlio.unref()
+  if (!await finche(risponde, true)) return null
+  return figlio.pid ?? 0
 }
 
 // ─── in primo piano ─────────────────────────────────────────────────────────
@@ -108,26 +198,68 @@ if (comando === 'run') {
     indirizzo(readToken(STARK_HOME))
     process.exit(0)
   }
-  // `detached` mette il figlio in una sessione sua: quando il terminale se ne va,
-  // il SIGHUP che uccide tutto ciò che gli appartiene non lo raggiunge.
-  ensureHome(STARK_HOME)
-  const log = openSync(logPath(STARK_HOME), 'a')
-  const figlio = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run'], {
-    detached: true,
-    stdio: ['ignore', log, log],
-    env: process.env,
-  })
-  // `unref` toglie il figlio dalla contabilità di questo processo, che altrimenti
-  // resterebbe vivo ad aspettarlo — cioè non si staccherebbe niente.
-  figlio.unref()
-
-  if (!await finche(risponde, true)) {
+  const pid = await avviaStaccato()
+  if (pid === null) {
     console.error(`STARK non ha risposto entro ${ATTESA_MS / 1000}s. Il perché sta in ${logPath(STARK_HOME)}`)
     process.exit(1)
   }
-  console.log(`STARK è partito staccato (pid ${figlio.pid}). Sopravvive a questo terminale.`)
+  console.log(`STARK è partito staccato (pid ${pid}). Sopravvive a questo terminale.`)
   indirizzo(readToken(STARK_HOME))
   console.log(`log in ${logPath(STARK_HOME)} · "npm run stark:stop" per fermarlo`)
+  process.exit(0)
+
+// ─── accendi e aprimi ───────────────────────────────────────────────────────
+
+} else if (comando === 'up') {
+  // La UI compilata è un artefatto locale e non sta in git: dopo un `git clone` o un
+  // `git pull` che tocca `ui/`, `ui/dist` può mancare o essere vecchia. Senza questo
+  // controllo il browser si aprirebbe su un 503 con scritto «esegui npm run ui:build»
+  // — cioè su un comando da digitare, che è esattamente la cosa che `up` esiste per
+  // togliere di mezzo. Costruirla qui costa qualche secondo una volta sola.
+  if (!uiIsBuilt()) {
+    console.log('La UI non è compilata: la compilo adesso (succede dopo un clone o un pull).')
+    const esito = spawnSync('npm', ['run', 'ui:build'], { cwd: RADICE, stdio: 'inherit' })
+    if (esito.status !== 0) {
+      console.error('\n`npm run ui:build` è fallito. Il daemon parte lo stesso, ma la pagina')
+      console.error('darebbe 503: senza la UI compilata c\'è solo l\'API.')
+      process.exit(1)
+    }
+  }
+
+  const gia = runningPid(STARK_HOME)
+  if (gia !== null) {
+    console.log(`STARK è già acceso (pid ${gia}).`)
+  } else {
+    const pid = await avviaStaccato()
+    if (pid === null) {
+      console.error(`STARK non ha risposto entro ${ATTESA_MS / 1000}s. Il perché sta in ${logPath(STARK_HOME)}`)
+      process.exit(1)
+    }
+    console.log(`STARK acceso (pid ${pid}). Sopravvive a questo terminale.`)
+  }
+
+  const token = readToken(STARK_HOME)
+  const completo = `${url}/?token=${token}`
+  // `--no-open` c'è per chi è entrato da SSH: là aprire un browser non ha senso (o apre
+  // una finestra su una macchina che nessuno sta guardando), ma accendere il daemon sì.
+  const soloAccendi = process.argv.includes('--no-open')
+  const aperto = soloAccendi ? null : await openInBrowser(completo)
+
+  // L'indirizzo si stampa **sempre**, anche quando il browser si è aperto: su WSL la
+  // finestra compare dall'altra parte — su Windows, non nel terminale che si sta
+  // guardando — e la riga da copiare deve essere lì comunque, non un ripiego da
+  // chiedere dopo aver visto che non è successo niente.
+  if (aperto?.ok) console.log(`\n  Aperto nel browser:  ${completo}\n`)
+  else {
+    console.log(`\n  Apri STARK:  ${completo}\n`)
+    if (aperto) console.log(`(il browser non si è aperto da qui: ${aperto.error})`)
+  }
+  process.exit(0)
+
+// ─── installa il comando ────────────────────────────────────────────────────
+
+} else if (comando === 'install') {
+  installa()
   process.exit(0)
 
 // ─── stato ──────────────────────────────────────────────────────────────────
@@ -189,6 +321,6 @@ if (comando === 'run') {
 
 } else {
   console.error(`comando sconosciuto: ${comando}`)
-  console.error('usa: run (default) · start · status · stop · token [--new]')
+  console.error('usa: run (default) · up · start · status · stop · token [--new] · install')
   process.exit(1)
 }

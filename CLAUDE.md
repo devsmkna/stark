@@ -112,6 +112,83 @@ WebP). Nel journal va il **riferimento**, non i byte: quello si rilegge tutto a 
 `stark:stop` lo governano, l'indirizzo è fisso e il token sta in `~/.stark/token`. Una scheda
 aperta si ricollega da sola dopo un riavvio.
 
+**E si accende scrivendo `stark`** (26 agosto 2026, chiesto dall'utente: «non voglio runnare
+il comando ogni volta»). `npm run stark:install` mette in `/usr/local/bin` un lanciatore di
+tre righe — due percorsi assoluti, il codice resta quello del repo, quindi `git pull` lo
+aggiorna da sé. Il verbo nuovo è **`up`**, e la ragione per cui non è `start` è che sono due
+domande diverse: `start` vuol dire «accendi il daemon» e si arrabbia se ne trova già uno; `up`
+vuol dire «voglio usare STARK adesso», quindi è **idempotente** — daemon già acceso non è un
+errore, è la condizione normale. Compila anche la UI se `ui/dist` manca (succede dopo un clone
+o un pull: è artefatto locale, non sta in git), perché altrimenti il browser si aprirebbe su un
+503 che dice «esegui npm run ui:build» — cioè su un comando da digitare, che è esattamente la
+cosa che `up` esiste per togliere di mezzo. `--no-open` accende senza browser, per chi entra da
+SSH. Il rilevamento WSL, che era la stessa costante copiata in `launch.ts` e `reveal.ts`, alla
+terza copia è finito in `core/platform.ts`: lì c'è il **come** si apre una cosa, mentre la
+whitelist degli schemi resta in `launch.ts`, perché quella difende una rotta HTTP.
+
+**Le chat fantasma non nascono più** (26 agosto 2026, segnalate dall'utente: «ogni tanto trovo
+una chat no-folder stopped e una stark-demon-check»). Erano due, con **due cause diverse**, e
+la seconda non riguardava solo le prove. La prima: `npm run daemon` girava sulla `STARK_HOME`
+vera, quindi ogni esecuzione lasciava la sua sessione-sandbox (`/tmp/stark-daemon-check`) in
+mezzo alle conversazioni dell'utente — adesso la prova ha una casa sua in `/tmp`. L'ordine
+degli import lì è **obbligatorio e non stilistico**: `registry.ts` risolve `STARK_HOME` una
+volta sola al load del modulo, e un `import` statico verrebbe issato in cima al file, cioè
+eseguito prima dell'assegnazione — per questo `startDaemon` si importa dinamicamente.
+La seconda, «no folder / stopped», era un **bug del daemon**, non delle prove: `open()` creava
+il journal *prima* di far partire il processo, e un'apertura fallita lo lasciava lì. Senza
+`session.created` — l'unico evento che porta il `cwd` — restava un file di tre righe che
+l'elenco mostrava come chat senza cartella (`ui/src/lib/view.ts:54`). Capitava quindi anche
+**aprendo dalla UI**, con una cartella cancellata nel frattempo o un `configDir` sbagliato.
+Corretto su due livelli: una `cwd` che non esiste è respinta con **400 al confine**
+(`server.ts`), prima di aprire qualunque cosa; e se un'apertura fallisce lo stesso per altri
+motivi, il journal mai nato viene rimosso, col motivo scritto in `daemon.log` prima di
+toglierlo. La guardia è `startFrom === 0 && !snapshot.cwd`, e la prima metà non è ridondante:
+su un **risveglio** fallito l'id è quello della conversazione vera e il file contiene tutta la
+sua storia — cancellarlo distruggerebbe ciò che si stava cercando di riaprire.
+**La casella restava alta quanto il prompt appena mandato** (26 agosto 2026, segnalato con uno
+screenshot: «perché è gigante?»). Dopo un invio la casella vuota restava alta fino a 160px —
+cinque volte i 34 di una riga — e ci restava finché non si ridigitava qualcosa.
+Non era l'auto-resize classico senza reset: il reset a `'auto'` c'era ed era giusto. Era il
+**momento**. `text` è `$state` legato con `bind:value`, e Svelte 5 non scrive nel DOM in modo
+sincrono: al ritorno da `text = ''` la textarea contiene ancora il testo di prima, quindi
+`grow()` misurava il prompt appena inviato e ne fissava l'altezza in `style.height`. Subito dopo
+Svelte svuotava il valore, ma l'altezza inline restava, senza più nessuno a rimisurarla. Fix:
+`regrow()`, che aspetta `tick()` prima di misurare. Il difetto era in tutti e tre i punti che
+assegnano `text` — svuotare, ripristinare dopo un rifiuto, completare uno slash — e si vedeva
+solo nel primo perché è l'unico in cui l'altezza sbagliata è *più grande* di quella giusta.
+Verificato **A/B nel browser vero**, non a occhio: stessa prova prima e dopo, 34px → 112px col
+testo → **112px da vuota** (bug) contro **34px** (corretto).
+Nello stesso giro è caduta un'ipotesi che sembrava ottima e non lo era: che lo `zoom` sul root
+falsasse `matchMedia`, creando un anello per cui una volta entrati sotto gli 860px non si
+tornava più indietro. Misurato con Playwright: `zoom` **riduce** il layout (viewport da 1000 a
+741px effettivi) ma **non tocca** `matchMedia`, che resta `false`. La verifica registrata qui
+sopra il 26 agosto era quindi corretta, e il latch non esiste. Vale la pena tenerne memoria
+perché era un'ipotesi *coerente con tutti i sintomi* e sbagliata: senza la misura si sarebbe
+«corretto» un bug inesistente, spostando una soglia che funziona.
+
+**E `npm run daemon` apriva Esplora Risorse addosso all'utente** (26 agosto 2026, segnalato:
+«ogni tanto mi si apre la directory del progetto con package.json evidenziato»). Non era «ogni
+tanto» in modo misterioso, ed era la stessa malattia delle chat fantasma in un altro vestito:
+la verifica «un file vero del repo si rivela sul serio» faceva `POST /api/reveal` su
+`resolve('package.json')` e **riusciva**, cioè apriva una finestra vera — compreso quando a
+lanciare la suite era un agent dentro STARK mentre l'utente stava facendo altro sullo stesso
+desktop. Il commento lo dichiarava come pregio («prova che il comando gira davvero sulla
+macchina»), e il pregio è reale: è il costo a non essere stato considerato.
+La regola che ne esce — **una prova automatica non ha il permesso di farsi notare da chi non
+l'ha lanciata** — nel file c'era già scritta a mano, ma solo per F1: «il lancio vero non è
+automatizzabile senza far comparire Notion sullo schermo di chi esegue `npm run daemon`». F3
+la violava. Ora la verifica è dietro `npm run daemon -- --reveal`, e di default è **spenta con
+la spiegazione stampata a schermo**, non nascosta — come le voci non ancora fatte nelle
+impostazioni. Senza il flag: **25** verifiche.
+
+Nello stesso giro, una prova che mentiva: «una cartella inesistente non apre una sessione» era
+**falsa** e verde da sempre — la sessione si apriva eccome (journal creato, processo lanciato),
+solo la risposta HTTP era un errore, ed era l'unica cosa che guardava. Il messaggio che
+l'utente vedeva veniva dall'SDK e incolpava la **libc** («musl contro glibc»), una pista
+completamente sbagliata per chi ha solo sbagliato un percorso. `npm run daemon` fa **25**
+verifiche (26 con `--reveal`): le due nuove controllano che il motivo dica qual è il problema
+e che non resti niente nell'elenco.
+
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
 quota — 71 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
@@ -270,6 +347,23 @@ solo-localhost se Tailscale non c'è. La difesa sull'indirizzo socket non cambia
 serve` si collega da `127.0.0.1`, quindi la connessione resta "da questa macchina" anche col
 telefono fuori casa. **Decisione presa con l'utente, non da soli**: aprire il perimetro oltre
 localhost è esplicitamente riservato a lui (vedi "Sicurezza" più sotto).
+**Anche il fisso è sulla tailnet** (26 agosto 2026): `deus-stark.tailaa7e75.ts.net`, accanto a
+`stark-portatile` e `iphone-11`. Tailscale va installato **dentro WSL**, non su Windows:
+`security.ts` invoca `tailscale` dal `PATH` di Linux e **non esiste un override via variabile
+d'ambiente**, quindi un'installazione solo-Windows lascerebbe il perimetro cieco. Il dubbio su
+WSL2 (serve `/dev/net/tun`, o la modalità userspace) è stato **verificato, non dedotto**:
+`tailscaled` parte come servizio systemd normale — `/etc/wsl.conf` ha già `systemd=true` — e
+configura il router in modalità kernel.
+Il passo che si dimentica è il **riavvio del daemon dopo l'installazione**:
+`detectTailnetHost()` gira **una volta sola**, alla costruzione del guard all'avvio. Installare
+Tailscale a daemon acceso lascia il perimetro con `tailnetHost = null`, e il telefono si becca
+un `403` che sembra un problema di token. Misurato prima di riavviare, per non dedurlo: stessa
+richiesta, stesso token, `Host: deus-stark…` → **403**, `Host: 127.0.0.1` → **200**.
+Lato telefono **non si configura niente**: la UI non è una PWA, non ha service worker né push
+(quelli stanno solo in `tools/sonda-telefono/`, che è un server a parte). È una scheda del
+browser su un URL, quindi cambiare macchina è cambiare segnalibro — e i due indirizzi
+convivono, perché i journal delle due macchine non si sincronizzano comunque.
+
 Trovati e sistemati nello stesso giro due debiti del perimetro: il motivo di un rifiuto
 (`{error:"vietato"}`) non veniva mai scritto nei log nonostante il commento lo promettesse —
 ora `console.error` lo fa davvero; e il cookie di sessione non aveva `Secure`, candidato
@@ -301,6 +395,186 @@ guardato prima) — «mode» capitava bene per posizione, «MCP» (290px) sconfi
 destra, «model» partiva a ~225px fuori schermo a sinistra. Misurato con coordinate esatte, non
 indovinato; corretto ancorando tutti e tre allo stesso punto fisso vicino al fondo sotto la
 soglia stretta, invece che al bottone che li apre.
+
+**La barra di stato da telefono si è sfoltita ancora** (26 agosto 2026, chiesto dal vivo mentre
+l'utente era già collegato dal telefono via Tailscale: «voglio solo: modalità, mcp, modello e
+contesto — solo la percentuale»). Delle cinque voci di prima (§ rifiniture del 26 agosto), sotto
+gli 860px sparisce anche il percorso: `.status .cwd` (separatore, icona cartella, percorso —
+raggruppati in `Status.svelte` in un solo figlio flex apposta per poterli nascondere con una
+regola sola) va a `display:none` sotto soglia. Resta leggibile il **nome** del progetto,
+nell'intestazione della conversazione sopra — a sparire è solo il percorso per esteso, non
+l'informazione di dove si è. La percentuale di contesto era già l'unica cosa mostrata di
+default (il conteggio a token compare solo nel pannellino al tocco): non c'era altro da
+togliere lì. Verificato dal vivo, non a occhio: screenshot Playwright a 390×844 sulla sessione
+reale, con lettura del DOM (`.cwd` → `display:none`) oltre che dell'immagine — due righe,
+`auto` `MCP 1` sopra, `claude-sonnet-5` `18% context` sotto.
+**E poi le due righe sono diventate una** (26 agosto 2026, subito dopo, sempre da telefono):
+resta `⚡ · MCP 1 · opus[1m] · 27%`. Andare a capo era la scelta giusta finché le voci
+restavano intere, ma spendeva una riga di schermo per informazione che si poteva **togliere**
+invece che impilare — quindi via anche le etichette che ripetono ciò che la forma già dice:
+il testo della modalità (l'icona *è* la modalità) e la parola «context» (il pannellino che si
+apre al tocco comincia con «Context window»). Una classe sola, `.lbl`, e una riga di CSS.
+Due trappole trovate misurando, non ragionando. **Svelte taglia lo spazio iniziale dentro un
+elemento**: `<span class="lbl"> context</span>` rendeva «27%context» attaccato su desktop — il
+bordo destro di «27%» e il sinistro dello span cadevano sullo stesso pixel (1353). Serve
+`&nbsp;`, che non è collassabile. E il nome del modello era un **nodo di testo nudo**: dentro un
+flex diventa un elemento anonimo, che nessuna regola CSS può raggiungere — avvolto in `.mname`
+per poterlo troncare con l'ellissi. Sotto stress (nome di modello lunghissimo, iniettato apposta)
+flex accorciava anche «MCP» in «MC», che non vuol dire niente: `.l .tune{flex:none}` fa cedere
+solo il modello. Con l'etichetta della modalità nascosta il bottone resterebbe **senza nome
+accessibile** (le icone sono `aria-hidden`), quindi porta un `aria-label` che dice quale
+modalità è attiva. Verificato a **320, 390, 430 e 1400px**: una riga sola (scarto verticale fra i
+centri: 0), niente fuori dal bordo in nessuno dei quattro, desktop invariato.
+
+**L'header della chat, stessa sera, stessa radice**: il titolo andava a capo su **tre righe** da
+telefono (header alto 91px invece di 42) e l'icona del bottone «files · commands» sembrava
+scentrata nel suo riquadro. Sembravano due difetti; erano **lo stesso**. Misurato: l'icona è
+sempre stata centrata *verticalmente* (5px sopra, 5 sotto) ma stava a **13.1px da sinistra e 2
+da destra** — non era l'allineamento, era il riquadro schiacciato. Il titolo, senza vincoli di
+larghezza, si prendeva tutto lo spazio e comprimeva il bottone finché il padding destro non
+spariva. Prova per confronto, non per ipotesi: la luna accanto — che ha già `flex:none` — era
+perfetta, 6.8px su tutti e quattro i lati. Due proprietà: `.bar .t` prende
+`min-width:0` + `overflow`/`text-overflow`/`white-space` (e `min-width:0` è la metà che si
+dimentica: un figlio flex non scende sotto la larghezza del proprio contenuto finché non glielo
+si permette, quindi senza di quello `text-overflow` non entra mai in gioco), e `.effbtn` prende
+`flex:none`, che è ciò che `.iconb` aveva già. Dopo: titolo **66px → 22px**, icona **13.1/13.1**.
+Il titolo intero è finito nel `title` del bottone, perché adesso la riga lo tronca e altrimenti
+non ci sarebbe più modo di leggerlo senza entrare in rinomina. Verificato a 320, 390, 430 e
+1400px; su desktop `sx=155` non è un difetto ma l'etichetta «N files · M commands» che lì viene
+mostrata prima dell'icona.
+
+**E i tre chip della barra erano di altezze diverse** — conseguenza diretta, e non prevista, di
+aver tolto l'etichetta alla modalità poche ore prima. Un `.tune` è alto **quanto il suo
+contenuto**: con del testo è alto una riga (1.45em), con la sola icona 11px. Misurato:
+modalità **19.53px** contro mcp e modello **24.25px**, cioè 4.7px di scarto, e la fila sembrava
+sbilanciata. Fix: `min-height:calc(1.45em + 4px)` su `.tune` — legato alla riga di testo invece
+che un numero fisso (`1.45em` è la riga alla dimensione del chip, `+4px` sono padding 1+1 e
+bordi 1+1, che vanno sommati perché `box-sizing` è `border-box`). Messo **senza media query**,
+di proposito: è un'invariante — «i chip della barra sono alti uguali» — non un rattoppo per il
+telefono, e così regge anche se un domani un altro chip perde la sua etichetta. Dopo: 24.97px
+tutti e tre a 320/390/430px, 18.5px tutti e tre a 1400px (stesso valore CSS, lo zoom ×1,35 dello
+schermo stretto spiega la differenza), scarto **0** ovunque.
+Vale la pena notare il filo che lega gli ultimi tre giri: togliere l'etichetta della modalità ha
+prodotto **due** difetti a valle — prima il bottone «files» schiacciato, poi i chip di altezze
+diverse — e nessuno dei due era visibile ragionando sul CSS. Si sono visti solo misurando i
+rettangoli veri nel browser.
+
+**E le tendine della barra si aprivano addosso ai bottoni** (26 agosto 2026, segnalato da
+telefono con screenshot). Il giro precedente le aveva sganciate dal proprio bottone —
+`position:fixed; bottom:12px` — perché ancorate al chip sconfinavano fuori schermo (§ rifiniture
+del 26 agosto). Risolveva quello e ne apriva un altro: a filo del fondo finestra la tendina
+copriva i chip che l'avevano aperta **e** la casella di scrittura, cioè si sceglieva un server
+MCP senza più vedere quale chip lo stava mostrando. Ora si ancorano al **blocco in basso**:
+`.dock` prende `position:relative` (non gli serve, fa da riferimento) e la tendina va a
+`bottom: calc(100% + 8px)` — finisce dove il blocco comincia, e a essere coperta è la
+conversazione, che scorre. Il passaggio non ovvio è il perché servano `.status{position:static}`
+e `.pop{position:static}` sotto soglia: `position:absolute` cerca il **primo** antenato
+posizionato, e quei due (entrambi `relative`, il secondo per l'ancoraggio su schermo largo)
+intercettavano prima di `.dock`. Neutralizzarli lì li salta senza toccare il caso largo.
+Misurato a 390px su tutte e tre le tendine: bordo inferiore **674.1** contro dock a **683.9** e
+casella a **746.9** — `copreLaCasella:false`, `copreIChip:false`, `dentroSchermo:true`, stesso
+bordo e stessa larghezza per tutte e tre. E a 1400px `ancoratoAlChip:true` per tutte e tre,
+cioè il desktop è rimasto ancorato al proprio bottone come prima.
+
+**E la modale «New chat» usciva dallo schermo** (26 agosto 2026, segnalato da telefono). Le
+modali dichiarano una larghezza **fissa e inline** (`NewChat.svelte:139` — 430px la chat nuova,
+560 l'import; 380 la conferma di eliminazione in `App.svelte`), e `.dlg` aveva `max-height` ma
+**non** `max-width`: mancava metà della regola. Misurato a 390px: la chat nuova veniva 580px e ne
+sfondava **95 per lato**, l'import 756 e ne sfondava **183** — «Cancel» e «Create» fuori schermo.
+Fix: `max-width:calc(100% - 26px)`, gli stessi 26px di `max-height` e di `.dlg.wide{inset:13px}`.
+Niente media query (un tetto in percentuale vale a ogni larghezza) e nessuna gara di specificità
+con lo stile inline, perché `width` e `max-width` sono proprietà **diverse** e la seconda limita
+la prima da qualunque parte arrivi. Su desktop la modale resta 430/560px, cioè le misure volute.
+Rientrata nello schermo, la larghezza minore ha fatto emergere due difetti a valle che prima non
+si vedevano — ed entrambi hanno la stessa causa: `.shell *{min-width:0}` (app.css:74) toglie a
+**tutto** il minimo naturale, quindi in un'intestazione stretta si comprime qualunque cosa non
+dica il contrario. Le linguette (`.switch`, che ha `overflow:hidden` per l'angolo arrotondato)
+non sfondavano: **sparivano**, e «Import» diventava «Impor»; poi, tolta la pressione da lì, la
+crocetta di chiusura finiva a 9px con dentro un'icona da 14. Entrambe risolte con `flex:none` —
+a cedere dev'essere il titolo, che è testo e sa andare a capo. Restava il caso iPhone SE: a 320px
+la parola «conversation» è da sola più larga della colonna rimasta, quindi `overflow-wrap:anywhere`
+sul titolo (`anywhere` e non `break-word`, perché solo il primo conta nel calcolo della larghezza
+minima — cioè è l'unico che lascia il riquadro stringersi davvero). Verificato a 320, 390, 430 e
+1400px su entrambe le linguette: `esceDalloSchermo:false` e **zero** elementi con testo tagliato.
+
+**Il prompt di un turno lungo resta appeso in cima** (26 agosto 2026, chiesto per desktop e
+telefono insieme). Un turno aperto è spesso più alto dello schermo, e la riga da cui lo si
+richiude è la **prima**: una volta scesi dentro bisognava risalire fino in cima per chiuderlo.
+Ora `.turn>.th` è `position:sticky;top:0`, e l'intestazione della chat sta **fuori** dallo
+scrollport (`.bar` è sorella di `.scroller`, non figlia), quindi `top:0` vuol dire già «sotto di
+lei» senza doverne conoscere l'altezza. Il pezzo che non si indovina è l'altro: `.turn` aveva
+`overflow:hidden`, e `hidden` fa dell'elemento un **contenitore di scorrimento** — `sticky` si
+aggancia al primo che trova salendo, quindi si sarebbe agganciato al turno, che non scorre mai,
+cioè non si sarebbe mosso. Cambiato in `overflow:clip`, che taglia identico sull'angolo
+arrotondato ma **non** è un contenitore di scorrimento. Il taglio serve ancora, ed è ciò che fa
+sparire il prompt appeso al momento giusto: quando il turno esce, il suo bordo se lo porta via e
+il prompt del turno dopo prende il posto senza sovrapporsi.
+Misurato con un turno vero più alto dello schermo, su **tutti e tre** i casi: desktop 1400px
+(turno 4577px, inizio 2289px sopra il bordo), mobile 390px (turno 1671px, inizio 1163px sopra) e
+**WebKit**, cioè il motore vero di Safari, che è quello che l'utente usa dal telefono (turno
+2162px, inizio 1654px sopra). Ovunque: prompt visibile, `maiSopraLHeader:true`, e `premibile`
+verificato con `elementFromPoint`, non dedotto dal fatto che sia disegnato lì.
+`overflow:clip` è supportato da entrambi i motori (`CSS.supports` interrogato dal vivo, non
+dedotto dalle tabelle di compatibilità): era l'unico rischio della scelta.
+Effetto collaterale della prova, e vale la pena saperlo: **WebKit su `http://` semplice non
+carica STARK**. Gli asset tornano 403 perché il cookie di sessione ha `Secure` e WebKit si
+rifiuta di conservarlo fuori da un contesto sicuro, mentre Chrome tratta `127.0.0.1` come tale.
+Dal telefono non si vede, perché lì si passa da `https://` via Tailscale — ma un Safari puntato
+direttamente al loopback resterebbe su una pagina vuota. Non toccato: `Secure` c'è per una
+ragione (vedi §Sicurezza), e il caso vero passa da HTTPS.
+
+**La conversazione smetteva di seguire il fondo proprio mentre l'agent scriveva** (26 agosto
+2026, chiesto «come WhatsApp o Telegram»). L'auto-scroll c'era già dal principio e sembrava
+giusto, ma la sua dipendenza guardava **solo l'ultimo turno**:
+`snap.turns[snap.turns.length - 1]`. Il turno che cresce però non è sempre l'ultimo — e il file
+lo sapeva già, scritto a mano sopra `isOpen`: «se mandi un messaggio mentre lavora ancora al
+precedente, quello nuovo si accoda e non ha ancora un blocco». Quell'intuizione era stata
+applicata a *quale turno aprire* e non qui. Con un prompt in coda l'ultimo turno è quello
+accodato — vuoto e fermo — quindi la misura restava zero, l'effetto non ripartiva mai e la
+pagina restava indietro **esattamente** quando serviva seguire. Sommare su tutti i turni toglie
+il caso speciale invece di inseguirlo, e costa un giro sui blocchi già in memoria (`length` di
+una stringa non la riconta).
+Provato **A/B su una sessione vera**, con due prompt ravvicinati per riprodurre la coda, in una
+finestra da 300px perché il contenuto la superasse davvero: senza il fix **817px** di ritardo,
+persistente; con il fix la serie dei divari è `[82, 0, 0, 0, 0]` — un solo lampo di un frame,
+quello in cui compare la riga del turno accodato, poi zero. La prima misura era stata invalidata
+da un artefatto mio (aprire i turni a mano fa crescere il contenuto senza che sia streaming):
+vale la pena ricordarlo, perché il numero sembrava confermare la tesi ed era rumore.
+Insieme, la via di ritorno: un **bottone freccia in giù** che compare solo quando si è risaliti a
+leggere — se ci fosse sempre non direbbe niente, mentre il fatto che appaia è già
+l'informazione. Sta fuori dallo scroller, in un contenitore alto **zero** appoggiato sopra il
+blocco di scrittura: galleggia senza rubare spazio e senza che nessuno debba sapere quanto è
+alto quel blocco, che cambia con la casella, gli allegati e i comandi slash. Premendolo torna in
+fondo **e** ricomincia a seguire: scendere e basta lascerebbe `stick` falso, quindi alla riga
+dopo si resterebbe di nuovo indietro. Verificato a 1400 e 390px: assente in fondo, presente dopo
+essere risaliti (a 10 e 13.5px sopra il blocco, dentro lo schermo, `premibile` con
+`elementFromPoint`), e assente di nuovo dopo il clic.
+
+**Una chat nuova apriva sempre su Sonnet, mentre la CLI nuda apre sull'Opus dell'account**
+(26 agosto 2026, chiesto dall'utente: «perché qui sembra mettermi sempre Sonnet?»). Causa
+unica: `registry.ts` aveva `'claude-sonnet-5'` cablato come modello di partenza quando nessuno
+ne chiede uno esplicito — cioè sempre, perché niente nella UI manda mai un `model` all'apertura
+(`NewChat.svelte` non lo chiede: modello e modalità si scelgono dalla barra sotto la casella,
+**dopo**). Non era una supposizione: verificato **due volte dal vivo**, prima con l'SDK nudo
+(uno script fuori da STARK, stessa `CLAUDE_CONFIG_DIR`) e poi col daemon vero isolato, che aprire
+una sessione senza passare `model` risolve **`claude-opus-5[1m]`** — il default reale
+dell'account, letto dalla voce `value:"default"` che l'SDK stesso restituisce in
+`list_models` (non un'invenzione di STARK: `resolveModel`/`modelChoices` in `sdk-options.ts` la
+leggevano già, per popolare la tendina "Default (recommended)" — semplicemente STARK non la
+usava mai come proprio fallback). Fix: il default passa da `'claude-sonnet-5'` a `'default'`,
+la stessa stringa-alias che l'SDK già riconosce — non un modello scelto da STARK al posto
+dell'account, ma la richiesta di lasciar decidere all'account, esattamente come fa la CLI nuda
+quando non le si dice `--model`.
+Trovato nello stesso giro un secondo bug con la stessa radice, più subdolo: **il risveglio non
+guardava il modello**. Il commento accanto (`registry.ts`, sulla preservazione dei server MCP:
+«risvegliare deve restituire la chat com'era») copriva l'MCP ma non il modello — una chat
+spostata su Opus o Fable, addormentata e risvegliata, tornava silenziosamente sul default, senza
+che niente lo dicesse. Ora il risveglio guarda prima `snapshot.model` (quello che il journal
+ricorda per quella chat) e solo se è vuoto — una chat mai partita — ricade sul default. Prova di
+questa parte fatta per lettura del codice (`reduce.ts`, `session.model` già esercitato dal vivo
+via `/model` in questa stessa conversazione), non da capo a fondo con un risveglio vero: quello
+richiede un turno reale sul journal di prova, e non l'ho speso. `npm run check` resta **80**,
+`npm run daemon` **25**.
 
 Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di

@@ -221,18 +221,37 @@
     if (snap.sessionId !== lastSession) { lastSession = snap.sessionId; stick = true }
   })
   $effect(() => {
-    // Letture che fanno da dipendenza: quanti turni, quanti blocchi nell'ultimo, e
-    // quanto testo — un `text.delta` cresce lo stesso blocco senza aggiungerne uno.
-    const ultimo = snap.turns[snap.turns.length - 1]
-    const misura = ultimo
-      ? ultimo.parts.reduce((n, p) => n + (p.kind === 'text' || p.kind === 'reasoning' ? p.text.length : 1), 0)
-      : 0
+    // Letture che fanno da dipendenza: quanti turni, e quanto contenuto c'è **in tutti**
+    // — un `text.delta` cresce lo stesso blocco senza aggiungerne uno, quindi contare i
+    // blocchi non basta e serve anche la lunghezza del testo.
+    //
+    // Su **tutti** i turni e non solo sull'ultimo, ed è la correzione di un bug vero:
+    // il turno che sta crescendo non è sempre l'ultimo. Se mandi un prompt mentre
+    // l'agent lavora ancora al precedente, quello nuovo si accoda **subito** come turno
+    // in fondo, vuoto e fermo (`queued`), mentre a scrivere resta quello prima. Guardando
+    // solo l'ultimo, la misura restava zero per tutto il tempo: la dipendenza non
+    // cambiava mai, l'effetto non ripartiva, e la conversazione smetteva di seguire il
+    // fondo **proprio mentre l'agent scriveva**. Che è il momento in cui serve.
+    // Il file sapeva già che «il turno attivo non è sempre l'ultimo» (vedi il commento
+    // sopra `isOpen`): quella conoscenza era stata applicata a quale turno aprire, non
+    // qui. Sommare su tutti costa un giro sui blocchi già in memoria — `length` di una
+    // stringa non la riconta — e toglie di mezzo il caso speciale invece di inseguirlo.
+    const misura = snap.turns.reduce((n, t) => n + t.parts.reduce(
+      (m, p) => m + (p.kind === 'text' || p.kind === 'reasoning' ? p.text.length : 1), 0), 0)
     void snap.turns.length; void misura
     if (stick && scrollerEl) {
       const el = scrollerEl
       requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
     }
   })
+
+  /** Riportarsi in fondo e ricominciare a seguire. Le due cose insieme: scendere e basta
+   *  lascerebbe `stick` falso, quindi la riga dopo si tornerebbe a restare indietro. */
+  function toFoot(): void {
+    if (!scrollerEl) return
+    stick = true
+    scrollerEl.scrollTo({ top: scrollerEl.scrollHeight, behavior: 'smooth' })
+  }
 
   const promptOf = (t: TurnView): string => promptText(t.prompt)
   /** Gli allegati il cui file non si trova più. Non è stato dell'app, è stato del disco. */
@@ -319,8 +338,12 @@
           if (e.key === 'Escape') renaming = false
         }} />
     {:else}
-      <!-- Rinominare non apre niente: il titolo diventa scrivibile dov'è. -->
-      <button class="t" ondblclick={startRename} title="Double-click to rename">{title}</button>
+      <!-- Rinominare non apre niente: il titolo diventa scrivibile dov'è.
+           Il titolo intero sta anche nel tooltip perché adesso la riga lo tronca coi
+           puntini: senza, un titolo lungo diventerebbe illeggibile per intero senza
+           entrare in modifica, cioè si perderebbe un'informazione per farne stare
+           un'altra. Così la riga resta una, e il testo pieno resta a un dito. -->
+      <button class="t" ondblclick={startRename} title="{title} — double-click to rename">{title}</button>
     {/if}
 
     <button class="iconb" title="Put to sleep — frees memory, not quota"
@@ -618,6 +641,23 @@
     {/if}
   </div>
 
+  <!-- La via di ritorno al fondo, quando si è risaliti a leggere.
+       Compare **solo** quando la conversazione ha smesso di seguire, cioè quando ce n'è
+       bisogno: un bottone che c'è sempre non direbbe niente, e qui il fatto che appaia è
+       già l'informazione — «da qui in giù c'è roba che non stai vedendo».
+       Sta fuori dallo scroller, in un contenitore alto **zero** appoggiato sopra il
+       blocco di scrittura: così galleggia sulla conversazione senza rubarle spazio e
+       senza che nessuno debba sapere quanto è alto il blocco sotto, che cambia con la
+       casella, gli allegati e i comandi slash. -->
+  <div class="tofoot">
+    {#if !stick}
+      <button class="downb" onclick={toFoot}
+        title="Jump to the newest" aria-label="Jump to the newest">
+        <Icon name="i-down" />
+      </button>
+    {/if}
+  </div>
+
   <Dock {store} {snap} />
 </div>
 
@@ -736,6 +776,23 @@
 
   /* `.conv` è una colonna flex con `gap: 8px`: il capitolo la interrompe, quindi se la
      rifà uguale dentro di sé — senza, i turni si incollerebbero fra loro. */
+  /* Alto zero e `flex:none`: in una colonna flex non occupa una riga propria, quindi
+     non sposta di un pixel né la conversazione né il blocco di scrittura. È solo il
+     riferimento da cui il bottone si stacca verso l'alto. */
+  .tofoot { position: relative; height: 0; flex: none; z-index: 4; }
+  .downb {
+    position: absolute; right: 16px; bottom: 10px;
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; cursor: pointer;
+    background: var(--surface); color: var(--ink-2);
+    border: 1px solid var(--line-2);
+    /* L'ombra non è decorazione: il bottone sta **sopra** del testo, e senza uno stacco
+       si leggerebbe come parte della conversazione invece che come un comando. */
+    box-shadow: 0 4px 14px rgba(16, 20, 32, .18);
+  }
+  .downb:hover { color: var(--ink); background: var(--surface-2); }
+  .downb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   .chapter { display: flex; flex-direction: column; gap: 8px; flex: none; }
   .chapter.past {
     padding-left: 12px; border-left: 2px solid var(--line);

@@ -93,7 +93,7 @@ allow*: il secondo scrive davvero una regola in `.claude/settings.local.json` de
 | `npm run ui:check` | tipi della UI. Obbligatorio: la trasformazione di Svelte non controlla niente |
 | `npm run typecheck` | tipi del motore |
 | `npm run check` | 78 verifiche sulla catena, costo zero di quota |
-| `npm run daemon` | 24 verifiche sul daemon vero: perimetro, flusso, sessione che non parte |
+| `npm run daemon` | 25 verifiche sul daemon vero: perimetro, flusso, sessione che non parte. Gira su una `STARK_HOME` in `/tmp`, non sulla tua. Con `-- --reveal` aggiunge quella che apre Esplora Risorse per davvero |
 | `npm run queue` | la fila dei prompt, dal vivo: due prompt ravvicinati restano due turni |
 
 ---

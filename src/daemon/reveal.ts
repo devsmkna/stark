@@ -17,21 +17,14 @@
 // solo un argomento.
 
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
+// `WSL` sta in `core/platform.ts`: era la stessa costante, con lo stesso commento,
+// anche in `launch.ts` e serviva a un terzo posto (il CLI, per aprire il browser).
+import { WSL } from '../core/platform.ts'
 
 const run = promisify(execFile)
-
-/**
- * WSL si riconosce dal kernel, non dal filesystem: sia il fisso (repo su `/mnt/…`,
- * DrvFs) sia il portatile (repo su ext4 nativo) sono comunque Windows sotto — è per
- * questo che serve un solo controllo qui, non uno per ciascuna macchina. Calcolato
- * una volta: il kernel sotto il daemon non cambia mentre gira.
- */
-const WSL = (() => {
-  try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false }
-})()
 
 export type RevealResult = { ok: true } | { ok: false; error: string }
 
