@@ -32,6 +32,7 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-007 — Stack tecnologico e persistenza (Node + TS, journal JSONL)
   - ADR-009 — Agent SDK ufficiale invece del protocollo a mano (supera in parte ADR-001)
   - ADR-010 — Con cosa si scrive la UI (Vite + Svelte 5; il daemon resta senza build)
+  - ADR-011 — Notifiche sul telefono via Web Push, e cosa esce dalla macchina
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -766,6 +767,9 @@ Decisioni già prese:
   stripping dei tipi non controlla nulla. Il sorgente resta compilabile
   (`rewriteRelativeImportExtensions`), quindi la scelta è reversibile con un comando.
   Il prerequisito Node è passato da ≥20 a ≥22.18: ADR-007 su Notion è già stato corretto.
+- le **notifiche sul telefono** passano dal Web Push mandato dal daemon (ADR-011): spente
+  finché non le accendi, e il costo detto dove si accendono — è l'unica cosa di STARK che
+  esce dalla macchina, perché su iOS non esiste un altro modo di avvisare a schermo spento.
 - UI in **Vite + Svelte 5** (ADR-010). Il daemon resta senza build: le due metà divergono di
   proposito, perché la misura di ADR-007 era stata presa su `tsc` che emette `dist/` e su Node
   che riparte, condizioni che nel browser non esistono.
