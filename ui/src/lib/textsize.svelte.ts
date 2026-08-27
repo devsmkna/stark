@@ -5,37 +5,54 @@
 // tutto in un colpo, ridisegna il layout invece di ingrandire un'immagine (a
 // differenza di `transform: scale`, che lascerebbe un vuoto attorno), ed è
 // supportato da tutti i motori che contano ormai.
-
-export type TextSize = 'sm' | 'md' | 'lg' | 'xl'
+//
+// Un'unica manopola per tutta l'app, non una per componente: lo zoom è sul
+// `documentElement`, quindi vale ovunque allo stesso modo — coerente col
+// principio che l'ha introdotta (§Text size in Settings).
 
 const KEY = 'stark.textsize'
-const ZOOM: Record<TextSize, string> = { sm: '90%', md: '100%', lg: '115%', xl: '130%' }
+export const MIN = 80
+export const MAX = 150
+export const STEP = 5
+const DEFAULT = 100
+
+/** Le vecchie quattro taglie fisse, mappate sul valore numerico che avevano già —
+ *  solo per non perdere la scelta di chi l'aveva salvata prima dello slider. */
+const LEGACY: Record<string, number> = { sm: 90, md: 100, lg: 115, xl: 130 }
 
 /**
  * Quanto in più sullo schermo stretto, sopra la percentuale scelta. Non è una
- * preferenza a parte: uno che su desktop tiene `sm` perché vuole vedere più roba
- * insieme, su un touch resta comunque più piccolo di chi tiene `lg` — si somma alla
+ * preferenza a parte: uno che su desktop tiene 90% perché vuole vedere più roba
+ * insieme, su un touch resta comunque più piccolo di chi tiene 130% — si somma alla
  * scelta, non la sostituisce. Il numero viene dal provarlo: sotto non cambiava
  * abbastanza da dirsi «adesso si tocca bene», sopra il testo cominciava a andare a
  * capo dove prima non lo faceva.
  */
 const STRETTO = 1.35
 
+function clamp(n: number): number {
+  const stepped = Math.round(n / STEP) * STEP
+  return Math.min(MAX, Math.max(MIN, stepped))
+}
+
 export class Sizer {
-  scelto = $state<TextSize>('md')
+  scelto = $state<number>(DEFAULT)
   #stretto = false
 
   constructor() {
     try {
       const v = localStorage.getItem(KEY)
-      if (v === 'sm' || v === 'md' || v === 'lg' || v === 'xl') this.scelto = v
-    } catch { /* modalità privata: si resta su «md» */ }
+      if (v !== null) {
+        const n = v in LEGACY ? (LEGACY[v] ?? DEFAULT) : Number.parseInt(v, 10)
+        if (Number.isFinite(n)) this.scelto = clamp(n)
+      }
+    } catch { /* modalità privata: si resta sul default */ }
     this.#apply()
   }
 
-  set(t: TextSize): void {
-    this.scelto = t
-    try { localStorage.setItem(KEY, t) } catch { /* vedi sopra */ }
+  set(n: number): void {
+    this.scelto = clamp(n)
+    try { localStorage.setItem(KEY, String(this.scelto)) } catch { /* vedi sopra */ }
     this.#apply()
   }
 
@@ -50,7 +67,6 @@ export class Sizer {
   }
 
   #apply(): void {
-    const base = Number.parseFloat(ZOOM[this.scelto])
-    document.documentElement.style.zoom = `${Math.round(base * (this.#stretto ? STRETTO : 1))}%`
+    document.documentElement.style.zoom = `${Math.round(this.scelto * (this.#stretto ? STRETTO : 1))}%`
   }
 }

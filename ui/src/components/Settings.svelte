@@ -13,7 +13,7 @@
   import type { Storage, SystemInfo } from '../lib/api.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
-  import type { TextSize } from '../lib/textsize.svelte.ts'
+  import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
   import type { FontFamily } from '../lib/fontfamily.svelte.ts'
   import { project } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -95,11 +95,6 @@
 
   const TEMI: { id: Theme; nome: string }[] = [
     { id: 'light', nome: 'Light' }, { id: 'dark', nome: 'Dark' }, { id: 'system', nome: 'System' },
-  ]
-
-  const TAGLIE: { id: TextSize; nome: string }[] = [
-    { id: 'sm', nome: 'Small' }, { id: 'md', nome: 'Default' },
-    { id: 'lg', nome: 'Large' }, { id: 'xl', nome: 'Extra large' },
   ]
 
   const FONT: { id: FontFamily; nome: string }[] = [
@@ -486,15 +481,10 @@
         </div>
 
         <div class="fgroup">
-          <div class="flabel">Text size</div>
-          <div class="chips">
-            {#each TAGLIE as t (t.id)}
-              <button class="chip" class:on={store.textSize.scelto === t.id}
-                onclick={() => store.textSize.set(t.id)}>
-                {#if store.textSize.scelto === t.id}<Icon name="i-check" />{/if}{t.nome}
-              </button>
-            {/each}
-          </div>
+          <div class="flabel">Text size — {store.textSize.scelto}%</div>
+          <input class="slider" type="range" min={TAGLIA_MIN} max={TAGLIA_MAX} step={TAGLIA_STEP}
+            value={store.textSize.scelto}
+            oninput={(e) => store.textSize.set(Number(e.currentTarget.value))} />
           <div class="hint">Everything scales together — the list, the conversation, the
           blocks — so nothing lines up wrong at a size STARK wasn't measured at by hand.
           Saved in <b>this browser</b>.</div>
