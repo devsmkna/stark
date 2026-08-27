@@ -240,6 +240,16 @@ export class Registry {
   }
 
   async open(spec: OpenSpec): Promise<string> {
+    // La cartella si controlla **qui**, non solo al confine HTTP.
+    //
+    // Ci stava già in `server.ts`, sulla rotta `POST /api/sessions`, e lì resta perché
+    // è quella che sa rispondere `400` con un motivo leggibile. Ma un secondo chiamante
+    // — un bot, una prova, un risveglio automatico — chiamerebbe questo metodo diretto
+    // e salterebbe il controllo, riaprendo il bug delle chat fantasma: senza
+    // `session.created` il journal resta un file di tre righe che l'elenco mostra come
+    // «chat senza cartella / stopped». Un invariante non si difende chiedendo a ogni
+    // chiamante di ricordarsene.
+    if (!isDir(spec.cwd)) throw new Error(`la cartella non esiste: ${spec.cwd}`)
     // Riprendere una conversazione riusa il suo id, così il journal continua invece di
     // biforcarsi. Un fork invece è una sessione nuova, e deve avere un journal nuovo.
     const id = spec.resume && !spec.resume.fork ? spec.resume.ref : randomUUID()
@@ -707,4 +717,9 @@ export class Registry {
       this.retire(id)
     }))
   }
+}
+
+/** La cartella c'è ed è una cartella. Un percorso che non si può leggere non lo è. */
+export function isDir(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
 }

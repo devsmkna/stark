@@ -10,10 +10,11 @@ import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard, type Perimetro } from './security.ts'
 import { serveUi, UI_DIR } from './static.ts'
-import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
+import { Registry, STARK_HOME, isDir, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
-import { Push, vigila, type Subscription } from './push.ts'
+import { Push, type Subscription } from './push.ts'
+import { vigila } from './chiamate.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -110,7 +111,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // spento nella scheda del browser non gira niente. Senza iscrizioni non fa nulla e
   // non costa nulla — vedi `push.ts`.
   const push = new Push(STARK_HOME, guard.perimetro)
-  if (push.disponibile) vigila(registry, push)
+  // Un osservatore solo, e i canali dentro: quando arriverà Telegram si aggiunge qui,
+  // non accanto — vedi `chiamate.ts`.
+  vigila(registry, [push])
 
   const server = createServer((req, res) => {
     void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push)
@@ -507,9 +510,6 @@ function listStream(req: IncomingMessage, res: ServerResponse, registry: Registr
  * deve essere una directory, e sbagliare fra le due è un errore che si fa davvero
  * (basta scegliere il file invece della cartella che lo contiene).
  */
-function isDir(path: string): boolean {
-  try { return statSync(path).isDirectory() } catch { return false }
-}
 
 function send(res: ServerResponse, code: number, body: unknown): void {
   const s = JSON.stringify(body)

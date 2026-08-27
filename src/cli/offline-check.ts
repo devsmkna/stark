@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
 import { callFor } from '../core/calls.ts'
-import { vigila, type Push, type PushPayload } from '../daemon/push.ts'
+import { vigila, type Canale } from '../daemon/chiamate.ts'
+import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
@@ -766,13 +767,21 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   // `never`. Qui non c'è niente da restringere.
   const svegliatori: Array<() => void> = []
   const sveglia = (): void => { for (const s of svegliatori) s() }
+  let silenzioso = false
   const finto = {
     list: () => [{ id: 's1', title: 'sistema il bug', state: stato, cwd: '/casa/progetto' }],
     watchAll: (f: () => void) => { svegliatori.push(f); return () => { svegliatori.length = 0 } },
+    settings: (): { projects: Record<string, { muted?: boolean }> } =>
+      ({ projects: silenzioso ? { '/casa/progetto': { muted: true } } : {} }),
   }
   const mandate: PushPayload[] = []
-  const spia = { manda: async (p: PushPayload) => { mandate.push(p) } } as unknown as Push
-  vigila(finto, spia)
+  const spia: Canale = { disponibile: true, manda: async (p: PushPayload) => { mandate.push(p) } }
+  // Un secondo canale, per provare che la decisione è **una** e i canali sono N: senza,
+  // due osservatori indipendenti potrebbero dire cose diverse sullo stesso cambio.
+  const altre: PushPayload[] = []
+  const spia2: Canale = { disponibile: true, manda: async (p: PushPayload) => { altre.push(p) } }
+  const spento: Canale = { disponibile: false, manda: async () => { throw new Error('non doveva essere chiamato') } }
+  vigila(finto, [spia, spia2, spento])
 
   stato = 'idle'
   sveglia()
@@ -794,6 +803,24 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   await new Promise(r => setTimeout(r, 400))
   check('§notifiche: stato invariato → nessuna seconda notifica', mandate.length === 1,
     `${mandate.length}`)
+  check('§notifiche: tutti i canali disponibili ricevono la stessa chiamata',
+    altre.length === 1 && altre[0]?.sessionId === mandate[0]?.sessionId)
+
+  // Un progetto silenziato taceva solo nella UI: il daemon mandava il push lo stesso.
+  // Cioè silenziare un progetto spegneva l'unica metà che si vedeva.
+  silenzioso = true
+  stato = 'busy'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  stato = 'idle'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  check('§notifiche: un progetto silenziato tace anche sul daemon', mandate.length === 1,
+    `${mandate.length}`)
+
+  // E riaccenderlo lo rimette a parlare senza riavviare niente: le impostazioni si
+  // rileggono a ogni giro, non si catturano all'avvio.
+  silenzioso = false
+  stato = 'busy'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  stato = 'idle'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  check('§notifiche: togliendo il silenzio torna a chiamare, senza riavvio',
+    mandate.length === 2, `${mandate.length}`)
 }
 
 // ─── Finder di sistema: pickFolderNative con un `exec` finto ────────────────

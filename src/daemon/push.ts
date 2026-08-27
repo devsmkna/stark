@@ -21,7 +21,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { CALL_HEAD, callFor, type Call } from '../core/calls.ts'
+import type { Call } from '../core/calls.ts'
 import { perimetro, type Perimetro } from './security.ts'
 
 /** Cosa il browser ci consegna quando si iscrive. La forma è quella dello standard. */
@@ -149,60 +149,7 @@ export class Push {
   }
 }
 
-/** Il minimo che serve da una riga dell'elenco: non si importa il registro per non
- *  legare le notifiche a com'è fatto lui. */
-type Riga = { id: string; title: string; state: string; cwd?: string }
 
-/**
- * Guarda l'elenco e manda il push quando una conversazione cambia stato in un modo che
- * merita di chiamarti. È la stessa regola del browser (`callFor` in `core/calls.ts`),
- * di proposito: due copie vorrebbero dire che un giorno il telefono suona e il
- * portatile no, e nessuno saprebbe quale dei due ha ragione.
- *
- * Perché qui e non nella UI: la UI può farlo solo mentre è aperta. Questo gira nel
- * daemon, quindi vale a schermo spento, con Safari chiuso, e persino con il telefono
- * in tasca dall'altra parte della città — che è l'unico caso in cui una notifica
- * serve davvero.
- */
-export function vigila(
-  registry: { list(): Riga[]; watchAll(f: () => void): () => void },
-  push: Push,
-): () => void {
-  // Lo stato di partenza si prende **prima** di iscriversi, e il primo giro non
-  // notifica niente: senza, riavviare il daemon manderebbe una raffica di «ha finito»
-  // per conversazioni ferme da ore. Lo stesso motivo per cui la UI ha `#greeted`.
-  let prima = new Map(registry.list().map(r => [r.id, r.state]))
-
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const guarda = (): void => {
-    timer = null
-    const righe = registry.list()
-    const dopo = new Map(righe.map(r => [r.id, r.state]))
-    for (const r of righe) {
-      const era = prima.get(r.id)
-      if (era === undefined || era === r.state) continue
-      const kind = callFor(era, r.state)
-      if (!kind) continue
-      void push.manda({
-        kind,
-        title: `${CALL_HEAD[kind]} · ${cartella(r.cwd)}`,
-        body: r.title,
-        sessionId: r.id,
-      })
-    }
-    prima = dopo
-  }
-
-  // Stessa attesa del flusso dell'elenco, e per la stessa ragione: un turno solo
-  // produce decine di eventi al secondo, e `list()` rilegge i journal da disco.
-  return registry.watchAll(() => { if (timer === null) timer = setTimeout(guarda, 250) })
-}
-
-/** Il nome del progetto: l'ultimo pezzo del percorso, come nell'elenco della UI. */
-function cartella(cwd?: string): string {
-  if (!cwd) return 'no folder'
-  return cwd.replace(/\/+$/, '').split('/').pop() || cwd
-}
 
 /**
  * Il `sub` della VAPID. Non è burocrazia: Apple **valida** che sia un indirizzo o un
