@@ -25,6 +25,8 @@
     "stark:token": "node src/cli/stark.ts token",
     "stark:install": "node src/cli/stark.ts install",
     "daemon": "node src/cli/daemon-check.ts",
+    "telegram": "node src/cli/telegram-check.ts",
+    "tunnel": "node src/cli/tunnel-check.ts",
     "diff": "node src/cli/diff-live-check.ts",
     "ui:dev": "vite",
     "ui:build": "vite build",
