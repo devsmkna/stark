@@ -892,6 +892,31 @@ Verificato a schermo su un journal costruito apposta: gruppo di operazioni → r
 nota con le tre vie. La spiegazione c'è sempre, il bottone solo a chat viva — cambiare modalità
 è un comando a un processo, e su una chat che dorme non c'è nessuno a riceverlo.
 
+**Il daemon moriva chiudendo il terminale, nonostante `detached`** (27 agosto 2026, segnalato
+dall'utente: «ho avviato stark da terminale, l'ho chiuso, e dopo qualche minuto la sessione si è
+interrotta»). Il vecchio commento prometteva la cosa sbagliata: `detached:true` chiama `setsid()`,
+che stacca dal **terminale** — e il SIGHUP infatti non arriva — ma systemd non traccia i processi
+per sessione, li traccia per **cgroup**, e un figlio eredita quello del padre. Un terminale vive
+dentro `session-N.scope`; alla chiusura logind ferma quello scope, e fermare uno scope vuol dire
+uccidere **tutto ciò che sta nel suo cgroup**, session leader o no.
+Riprodotto e misurato, non dedotto: daemon avviato dentro uno scope → cgroup
+`system.slice/….scope`, scope fermato → **morto**, porta chiusa. La fuga manuale non è
+praticabile: su WSL il cgroup radice è in **sola lettura**, quindi il processo non può
+spostarcisi da solo.
+Fix: `stark up` e `stark start` avviano il daemon come **servizio transiente** con
+`systemd-run` — nasce in `system.slice`, cioè fuori da qualunque sessione. Stesso A/B: scope
+fermato → **sopravvissuto**. È il meccanismo che systemd offre apposta, quindi si usa quello
+invece di inventarne uno. `--collect` perché un'unità fermata non resti a bloccare il proprio
+nome, e il nome porta un'impronta di `STARK_HOME` perché due daemon su case diverse devono
+convivere (come già fa `process.title`). Il log resta `daemon.log` e non il journal
+(`StandardOutput=append:`), perché `stark status` manda a leggere lì.
+L'ambiente va passato a mano (`--setenv`): un servizio transiente parte **pulito**, e senza
+`HOME` il registro cercherebbe i journal altrove, senza `CLAUDE_CONFIG_DIR` i figli non
+troverebbero le sessioni da riprendere. Se systemd non c'è o la chiamata fallisce si ripiega su
+`spawn(detached)`, che è ciò che c'era prima: su una macchina senza systemd non esiste nessuno
+scope da cui scappare, quindi lì era già giusto. Verificato anche il giro completo: `stark stop`
+ferma l'unità, `--collect` la rimuove, e un riavvio subito dopo riparte.
+
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
 chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
