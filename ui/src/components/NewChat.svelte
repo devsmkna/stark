@@ -27,6 +27,13 @@
   let chosen = $state<string | null>(null)
   let filter = $state('')
 
+  // ─── «Resume»: un id scritto a mano, niente da sfogliare ───────────────────
+  let resumeId = $state('')
+  const resumeReady = $derived(resumeId.trim().length > 0 && !store.working)
+  function startResume(): void {
+    if (resumeReady) void store.resumeById(resumeId.trim())
+  }
+
   // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
   let profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
   let profilePick = $state<string | null>(null)
@@ -127,7 +134,7 @@
     }
   }
 
-  function goto(tab: 'new' | 'import'): void {
+  function goto(tab: 'new' | 'import' | 'resume'): void {
     store.tab = tab
     store.refused = null
     // Si richiede aprendo la linguetta e non all'avvio: legge dei file da disco, e chi
@@ -158,16 +165,21 @@
 <div class="dlg" style="width:{store.tab === 'import' ? 560 : 430}px">
   <div class="dlgh">
     <div>
-      <div class="dt">{store.tab === 'new' ? 'New chat' : 'Import a conversation'}</div>
+      <div class="dt">
+        {store.tab === 'new' ? 'New chat'
+          : store.tab === 'import' ? 'Import a conversation'
+          : 'Resume a conversation'}
+      </div>
       <div class="ds">
-        {store.tab === 'new'
-          ? 'A folder is all it needs'
-          : 'Started in the terminal, on this machine'}
+        {store.tab === 'new' ? 'A folder is all it needs'
+          : store.tab === 'import' ? 'Started in the terminal, on this machine'
+          : 'If you already know its id'}
       </div>
     </div>
     <div class="switch" style="margin-left:auto">
       <button class:on={store.tab === 'new'} onclick={() => goto('new')}>New</button>
       <button class:on={store.tab === 'import'} onclick={() => goto('import')}>Import</button>
+      <button class:on={store.tab === 'resume'} onclick={() => goto('resume')}>Resume</button>
     </div>
     <button class="x" aria-label="Close" onclick={() => { store.dialog = null }}>
       <Icon name="i-x" />
@@ -270,7 +282,7 @@
       </button>
     </div>
 
-  {:else}
+  {:else if store.tab === 'import'}
     <div class="dlgb" style="gap:7px">
       <div class="chips" style="margin-bottom:2px">
         <span class="chip ro"><span class="lab">Agent</span>Claude Code</span>
@@ -342,6 +354,33 @@
       <button class="btn pri" disabled={!chosen || store.importing !== null}
         onclick={() => { if (chosen) void store.importChat(chosen) }}>
         {store.importing ? 'Importing…' : 'Import'}
+      </button>
+    </div>
+
+  {:else}
+    <div class="dlgb">
+      <div class="fgroup">
+        <div class="flabel">Session id</div>
+        <!-- Un campo solo: la cartella si legge dal trascritto trovato, non la si
+             sceglie qui — vedi docs/superpowers/specs/2026-08-27-resume-by-id-design.md. -->
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="field" autofocus bind:value={resumeId}
+          placeholder="c15a2fde-a535-4cdd-9764-b40cffaf2bf0"
+          onkeydown={e => { if (e.key === 'Enter') startResume() }} />
+        <div class="hint">Paste a Claude Code session id. STARK looks for it across every
+          profile on this machine, imports its history if it doesn't have it yet, and opens
+          it live — the same as <code>claude -r &lt;id&gt;</code>.</div>
+      </div>
+
+      {#if store.refused}
+        <div class="warn"><Icon name="i-warn" /><span>{store.refused}</span></div>
+      {/if}
+    </div>
+
+    <div class="dlgf">
+      <button class="btn" onclick={() => { store.dialog = null }}>Cancel</button>
+      <button class="btn pri" disabled={!resumeReady} onclick={startResume}>
+        {store.working ? 'Opening…' : 'Resume'}
       </button>
     </div>
   {/if}
