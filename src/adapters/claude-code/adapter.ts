@@ -92,10 +92,35 @@ export class ClaudeCodeAdapter implements AgentSession {
     // Le categorie diventano nomi di tool **qui**, che e' l'unico posto che li
     // conosce. Prima lo faceva `daemon/registry.ts` chiamando `askToolsFor()`, cioe'
     // il daemon sapeva che esistono `Bash` e `mcp__*`: la falla n.1 di ADR-012.
-    const ask = askToolsFor(this.opts.ask ?? [])
-    if (ask.length > 0) {
+    //
+    // `deny` viaggia sullo **stesso** hook, ed e' la ragione per cui la sola lettura
+    // dell'helper non costa nessuna superficie nuova dell'SDK: il meccanismo dei
+    // permessi c'e' gia', qui la risposta e' semplicemente fissata a «no». Misurato su
+    // un turno vero (`spike/helper-sola-lettura.ts`, 5/5): il modello prova, l'hook
+    // rifiuta, il file **non esiste sul disco**, e il modello lo dice invece di fingere.
+    //
+    // Il vietato vince sul chiesto: un tool in entrambi gli elenchi non deve aprire una
+    // card che poi non si potrebbe onorare comunque.
+    const vietati = new Set(askToolsFor(this.opts.deny ?? []))
+    const ask = askToolsFor(this.opts.ask ?? []).filter(t => !vietati.has(t))
+    if (ask.length > 0 || vietati.size > 0) {
       options.hooks = {
-        PreToolUse: ask.map(tool => ({
+        PreToolUse: [
+          ...[...vietati].map(tool => ({
+            matcher: tool,
+            hooks: [async () => ({
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse' as const,
+                permissionDecision: 'deny' as const,
+                // Il motivo lo legge **il modello**, non l'utente: e' cio' che gli fa
+                // cambiare strada invece di ritentare in cerchio. Dice cos'e' la
+                // sessione, non «vietato» e basta.
+                permissionDecisionReason:
+                  'Questa e\' una chat di sola lettura: puoi leggere, non modificare niente.',
+              },
+            })],
+          })),
+          ...ask.map(tool => ({
           matcher: tool,
           hooks: [async (input: Record<string, unknown>) => {
             const verdict = await this.decide(
@@ -128,7 +153,8 @@ export class ClaudeCodeAdapter implements AgentSession {
               },
             }
           }],
-        })),
+          })),
+        ],
       } as Options['hooks']
     }
     const q = query({ prompt: this.input.stream(), options })

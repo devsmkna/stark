@@ -11,6 +11,7 @@
 // tirano di piu' stanno scritte dove tirano, non qui in cima.
 
 import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import {
   optionsFrom,
   type AdapterHooks, type AgentSession, type PromptImage, type SessionSpec,
@@ -636,3 +637,29 @@ export const modiNoti = async (): Promise<ModeChoice[]> =>
   AGENTI_NOTI.map(a => ({ mode: a.nome, label: a.nome, available: true, note: a.descrizione }))
 
 export { modelloDa }
+
+/**
+ * I modelli di OpenCode senza aprire una conversazione.
+ *
+ * Costa meno che su Claude Code, ed e' una differenza strutturale dei due backend, non
+ * un caso: qui il server e' **condiviso**, quindi se una chat OpenCode e' gia' aperta
+ * la domanda non fa partire proprio niente. Su Claude Code, che spawna un processo per
+ * conversazione, elencare i modelli vuol dire per forza accenderne uno in piu'.
+ *
+ * `tmpdir()` come cartella perche' il client ne vuole una e i modelli non dipendono da
+ * quale sia: sono i **provider autenticati** della macchina.
+ */
+export async function catalogoModelli(): Promise<ModelChoice[]> {
+  const c = await clientPer(tmpdir())
+  try {
+    return await elencoModelli(c)
+  } catch {
+    // Server che non parte, chiave assente: chi sta sopra mostrera' l'agent senza
+    // modelli e lo dira'. Non e' un guasto di chi ha aperto il menu.
+    return []
+  } finally {
+    // Sempre, anche in errore: `lascia()` e' un contatore, e un giro non restituito
+    // terrebbe in vita il server per sempre.
+    lascia()
+  }
+}

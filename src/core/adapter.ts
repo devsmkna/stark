@@ -101,6 +101,32 @@ export type SessionSpec = {
    */
   ask?: PermissionCategory[]
   /**
+   * Cosa questa conversazione **non puo' fare**, qualunque cosa decida il modello.
+   *
+   * E' il gemello di `ask`, e vale la stessa disciplina: categorie canoniche, mai nomi
+   * di tool. La differenza non e' di grado ma di natura — `ask` sospende e chiede a
+   * qualcuno, `deny` risponde di no da solo. Serve dove **non c'e' nessuno a cui
+   * chiedere**: l'helper (§17) sta in un pannello largo un sesto di schermo, dove una
+   * card di permesso non ci sta, e un permesso che chiede senza avere dove rispondere
+   * non e' cauto — e' una chat piantata.
+   *
+   * Chi la implementa deve renderla **impossibile**, non sconsigliata: la prova che
+   * conta e' che il file non esista sul disco, non che il turno finisca.
+   * Un agent che non sa farlo lo dichiara non implementando `deny` in
+   * `Capabilities`, e chi sta sopra glielo dice invece di prometterlo.
+   */
+  deny?: PermissionCategory[]
+  /**
+   * Questa conversazione non deve lasciare niente su disco.
+   *
+   * Il registro lo traduce in **dove finiscono le righe** (un array invece di un file),
+   * non in un percorso alternativo che salta il journal: le invarianti del §4 valgono
+   * anche qui, ed e' quello che permette alla UI di disegnarla con lo stesso riduttore
+   * di tutte le altre. L'adapter, per conto suo, non ha niente da fare di diverso —
+   * sta qui perche' e' un fatto **della sessione**, e chi la apre deve poterlo dire.
+   */
+  ephemeral?: boolean
+  /**
    * Il profilo: dove vivono credenziali e conversazioni di quell'agent. Su Claude Code
    * è una `CLAUDE_CONFIG_DIR`; su un altro agent sarà un'altra cosa — l'indirizzo di
    * un server, un file di configurazione. Qui è una stringa **opaca**, e opaca deve
@@ -324,6 +350,37 @@ export interface AgentBackend {
    * stava altrove rispetto al profilo chiesto — cioe' quando e' un fatto nuovo.
    */
   locateConversation?(sessionId: string, profile?: string): { ref: string; profile?: string } | undefined
+  /**
+   * Tutti i modelli che questo agent puo' usare, **senza aprire una conversazione**.
+   *
+   * `modes()` risponde a priori perche' le modalita' un agent le sa per costruzione;
+   * i modelli no — dipendono dall'account, dai provider autenticati, dal piano. Quindi
+   * questa puo' costare: un handshake per Claude Code (che non consuma quota, e' solo
+   * la stretta di mano), una domanda al server condiviso per OpenCode. Chi la chiama
+   * dovrebbe tenersi la risposta invece di rifarla a ogni apertura di menu.
+   *
+   * Esiste per il selettore dell'helper (§17), che deve poter offrire i modelli di
+   * **tutti** gli agent della macchina, compresi quelli su cui in quel momento non sta
+   * girando niente. Senza, si potrebbero elencare solo i modelli dell'agent gia' avviato
+   * — cioe' si potrebbe cambiare modello ma non agent, che e' meta' della domanda.
+   */
+  catalogue?(profile?: string): Promise<ModelChoice[]>
+  /**
+   * Questo agent sa rendere `SessionSpec.deny` **impossibile**, non solo sconsigliato?
+   *
+   * Va **dichiarato**, e l'assenza vale «no»: e' l'unico verso sicuro. Un adapter che
+   * ignora `deny` senza dirlo farebbe promettere a chi sta sopra una sola lettura che
+   * non c'e', e il modo in cui lo si scoprirebbe e' un file modificato.
+   *
+   * Su Claude Code e' `true` ed e' misurato, non dedotto (`spike/helper-sola-lettura.ts`,
+   * 5/5): l'hook `PreToolUse` risponde `deny` e il file non compare sul disco. Su
+   * OpenCode e' assente perche' `spec.deny` non e' ancora letto dall'adapter: esistono
+   * due strade tipizzate (un ruleset per sessione, un agent `readonly` coi tool spenti)
+   * e nessuna delle due e' stata misurata — e in questo progetto «e' nei tipi» non e'
+   * mai bastato (`session.wait` di OpenCode e' tipizzato e il server risponde «not
+   * available yet»).
+   */
+  canDeny?: boolean
   /** Cosa dire nel pannello di diagnostica: versioni, eseguibile, profili. */
   diagnostics?(profile?: string): Promise<unknown>
   /** Prepara in anticipo ciò che la diagnostica costa: si chiama all'avvio. */

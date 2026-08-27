@@ -5,7 +5,7 @@
 // Node e nel browser, quindi non introduce dipendenze, e per giunta è la stessa forma
 // che usa OpenCode — il che risparmierà lavoro al secondo adapter invece di crearne.
 
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard, type Perimetro } from './security.ts'
@@ -19,7 +19,7 @@ import { Telegram } from './telegram/index.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { agentiDisponibili, backendFor } from '../adapters/index.ts'
+import { agentiDisponibili, backendFor, catalogoCompleto } from '../adapters/index.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 import type { MemoryOutcome } from '../core/adapter.ts'
@@ -395,6 +395,48 @@ async function route(
       })
     }
 
+    // ─── l'helper (§17) ──────────────────────────────────────────────────────
+    //
+    // Tre rotte e non una dentro `/api/sessions`, perche' l'helper **non e' una
+    // sessione dell'elenco**: non ha un progetto, non si risveglia, non si rinomina, e
+    // ce n'e' uno solo. Passarlo dalla rotta delle chat vere vorrebbe dire aggiungere
+    // a quella una manciata di casi speciali che valgono per un solo chiamante.
+
+    /** Tutti i modelli guidabili sulla macchina, per agent. Costa un handshake per
+     *  agent la prima volta (misurato: ~1,6s Claude Code, ~1,5s OpenCode) e poi e'
+     *  in cache: chi apre il menu due volte non lo paga due volte. */
+    if (method === 'GET' && path === '/api/models') {
+      return send(res, 200, { agents: await catalogoCompleto() })
+    }
+
+    if (method === 'POST' && path === '/api/helper') {
+      const body = await readJson<{ agent?: string; model?: string }>(req)
+      try {
+        const id = await registry.openHelper({
+          // Una cartella **sua**, non quella della chat che si sta guardando: l'helper
+          // e' un'istanza a parte, e ereditare il progetto lo renderebbe una seconda
+          // chat di quel progetto. Sta sotto `STARK_HOME` e non in `/tmp` perche' un
+          // `/tmp` ripulito a meta' sessione farebbe fallire l'apertura successiva con
+          // un errore che non c'entra niente con quello che l'utente stava facendo.
+          cwd: helperDir(),
+          ...(body?.agent ? { agent: body.agent } : {}),
+          ...(body?.model ? { model: body.model } : {}),
+          // Sola lettura, e non per prudenza: in un pannello largo un sesto di schermo
+          // non c'e' posto per una card di permesso, e un permesso che chiede senza
+          // avere dove rispondere non e' cauto — e' una chat piantata.
+          deny: ['shell', 'edit', 'net', 'agents', 'external'],
+        })
+        return send(res, 201, { id, snapshot: registry.snapshot(id) })
+      } catch (e) {
+        return send(res, 400, { error: (e as Error).message })
+      }
+    }
+
+    if (method === 'DELETE' && path === '/api/helper') {
+      await registry.closeHelper()
+      return send(res, 200, { ok: true })
+    }
+
     if (method === 'POST' && path === '/api/sessions') {
       const body = await readJson<OpenSpec>(req)
       if (!body?.cwd) return send(res, 400, { error: 'cwd obbligatorio' })
@@ -617,6 +659,21 @@ async function readJson<T>(req: IncomingMessage, max = 4 * 1024 * 1024): Promise
   }
   if (chunks.length === 0) return null
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T } catch { return null }
+}
+
+/**
+ * La cartella in cui gira l'helper.
+ *
+ * Esiste ed e' vuota, e va bene cosi': l'helper e' in sola lettura, quindi non ci
+ * scrivera' niente, e non e' li' per lavorare su un progetto. Serve perche' una
+ * sessione **deve** avere una cartella di lavoro — e perche' `open()` rifiuta al
+ * confine una `cwd` che non esiste (400), che e' la difesa messa il 26 agosto contro
+ * le chat fantasma e che vale anche qui.
+ */
+function helperDir(): string {
+  const d = resolve(STARK_HOME, 'helper')
+  mkdirSync(d, { recursive: true })
+  return d
 }
 
 function closeServer(server: Server): Promise<void> {

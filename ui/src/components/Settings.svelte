@@ -328,7 +328,7 @@
                   <!-- Stessa precedenza della barra: `reason` dice perché una voce è
                        spenta e viene prima; `note` è la descrizione dell'agent; e
                        `MODE_BLURB` resta il ripiego per chi non ne dichiara nessuna. -->
-                  <span class="mn">{m.label ?? m.mode}<span class="sub"
+                  <span class="mtxt">{m.label ?? m.mode}<span class="sub"
                     >{m.reason ?? m.note ?? MODE_BLURB[m.mode] ?? ''}</span></span>
                   {#if !m.available}<span class="tag">unavailable</span>
                   {:else if scelta}<Icon name="i-check" style="color:var(--accent)" />{/if}
@@ -910,8 +910,13 @@
      righe (nome e descrizione) e centrarla la lascerebbe a metà fra le due, cioè
      accanto a niente. Stessa ragione per `align-items: flex-start` qui sopra. */
   .modes .mi :global(svg.ic) { flex: none; margin-top: 1.5px; }
-  .modes .mn { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .modes .mtxt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .modes .mi .sub { font-size: 10px; line-height: 1.4; }
+  /* `.mtxt` e non `.mn`, che in `app.css` è già la riga **tolta** di un diff, colore
+     `--del` compreso: la classe esisteva, la regola vinceva, e i nomi delle modalità
+     venivano rosso-salmone. Misurato leggendo il colore calcolato, non guardando lo
+     screenshot — è la stessa collisione di `.row` con la riga di un tool, che era
+     costata i pannelli affiancati. */
   /* La spunta va spinta a destra da qui e non da uno stile inline come nella barra:
      la riga finisce col nome, e senza questo la spunta resterebbe appiccicata a lui. */
   .modes .mi > :global(svg.ic:last-child) { margin-left: auto; margin-top: 2.5px; }

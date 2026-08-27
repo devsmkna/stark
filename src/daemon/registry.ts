@@ -14,7 +14,7 @@ import type {
   AgentSession, ConversationInfo, PermissionAnswer, PlanAnswer, QuestionAnswer,
 } from '../core/adapter.ts'
 import { activity, type Activity } from '../core/activity.ts'
-import { Journal, RawLog } from '../core/journal.ts'
+import { Journal, MemoryJournal, RawLog, type EventSink } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
@@ -35,6 +35,19 @@ export type OpenSpec = {
    * a tradurre è l'adapter, che è l'unico a conoscere quei nomi.
    */
   ask?: PermissionCategory[]
+  /**
+   * Cosa questa chat **non puo' fare**, categorie canoniche. Passa dritto all'adapter,
+   * che le rende impossibili: qui non si interpreta, si inoltra.
+   */
+  deny?: PermissionCategory[]
+  /**
+   * Non lasciare niente su disco: le righe restano in memoria e muoiono col daemon.
+   *
+   * Non e' un ramo che salta il journal — e' lo **stesso** percorso con un deposito
+   * diverso (`MemoryJournal`). Vale l'invariante del §4 come per tutte le altre, ed e'
+   * cio' che permette alla UI di disegnarla con lo stesso riduttore.
+   */
+  ephemeral?: boolean
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
   /**
@@ -102,7 +115,9 @@ type Pending =
 type Live = {
   id: string
   adapter: AgentSession
-  journal: Journal
+  journal: EventSink
+  /** Non sta su disco: va tenuta fuori da elenco, ricerca e notifiche. */
+  ephemeral: boolean
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
   pending: Map<string, Pending>
@@ -310,14 +325,25 @@ export class Registry {
     const id = spec.resume && !spec.resume.fork ? spec.resume.ref : randomUUID()
     if (this.live.has(id)) return id
 
-    const journal = new Journal(resolve(SESSIONS, `${id}.jsonl`), id)
-    const raw = new RawLog(resolve(SESSIONS, `${id}.raw.jsonl`))
-    const snapshot = reduce(Journal.read(journal.path), id)
+    // L'unica differenza fra una chat vera e una effimera e' **dove finiscono le
+    // righe**. Tutto il resto di questa funzione non sa quale delle due sta aprendo, ed
+    // e' voluto: due rami separati diventerebbero due comportamenti diversi al primo
+    // caso al bordo che si aggiunge solo a uno dei due.
+    const effimera = spec.ephemeral === true
+    const journal: EventSink = effimera
+      ? new MemoryJournal(id)
+      : new Journal(resolve(SESSIONS, `${id}.jsonl`), id)
+    // Il raw nativo e' materiale di diagnosi di una conversazione che si potra'
+    // riguardare: di una che non esistera' piu' non c'e' niente da diagnosticare, e
+    // scriverlo sarebbe l'unica traccia lasciata da una chat che ha promesso di non
+    // lasciarne.
+    const raw = effimera ? null : new RawLog(resolve(SESSIONS, `${id}.raw.jsonl`))
+    const snapshot = effimera ? reduce([], id) : reduce(Journal.read(journal.path), id)
     const pending = new Map<string, Pending>()
     const watchers = new Set<(e: CanonicalEvent) => void>()
     const startFrom = journal.lastSeq
 
-    const entry: Live = { id, adapter: null as never, journal, snapshot, watchers, pending }
+    const entry: Live = { id, adapter: null as never, journal, ephemeral: effimera, snapshot, watchers, pending }
 
     // Risvegliare deve restituire la chat com'era, strumenti compresi: una sessione
     // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
@@ -364,9 +390,16 @@ export class Registry {
       // Chi apre con categorie esplicite sa cosa sta facendo (le prove lo fanno);
       // tutti gli altri prendono la tabella, che è il pannello dei permessi.
       ...(ask.length ? { ask } : {}),
+      // I divieti non hanno una tabella e non ereditano niente dalle impostazioni: li
+      // chiede chi apre, e sono per **questa** chat. L'unico a chiederli oggi e'
+      // l'helper, che non ha dove mostrare una card di permesso.
+      ...(spec.deny?.length ? { deny: spec.deny } : {}),
       ...(mcp.length ? { mcp } : {}),
+      ...(effimera ? { ephemeral: true } : {}),
     }, {
-      onRaw: m => raw.write(JSON.stringify(m)),
+      // Su una effimera non si passa proprio: senza `onRaw` l'adapter non serializza
+      // in JSON ogni messaggio nativo per poi buttarlo via.
+      ...(raw ? { onRaw: (m: unknown) => raw.write(JSON.stringify(m)) } : {}),
       onPayload: p => {
         const e = journal.append(p)      // prima il disco
         applyTo(snapshot, e)
@@ -420,7 +453,10 @@ export class Registry {
       // conversazione vera e il file contiene tutta la sua storia: cancellarlo perché
       // la ripresa non è partita distruggerebbe esattamente ciò che si stava cercando
       // di riaprire.
-      const maiNata = startFrom === 0 && !snapshot.cwd
+      // Su una effimera non c'e' nessun file da togliere: la memoria se n'e' gia'
+      // andata con `journal.close()`, e `journal.path` e' la stringa vuota — passarla
+      // a `rmSync` sarebbe una cancellazione su un percorso che non e' un percorso.
+      const maiNata = !effimera && startFrom === 0 && !snapshot.cwd
       if (maiNata) {
         // Il motivo non si perde: va nel log del daemon **prima** di togliere il file,
         // che era l'unico posto in cui l'errore restava scritto.
@@ -519,6 +555,11 @@ export class Registry {
       for (const id of this.letti.keys()) if (!visti.has(id)) this.letti.delete(id)
     }
     for (const [id, l] of this.live) {
+      // L'helper (§17) non compare: non e' un lavoro, e' una domanda al volo. Basta
+      // questa riga perche' resti fuori anche dalle **notifiche** e dal bot Telegram,
+      // che guardano l'elenco e non le vive — se no il telefono suonerebbe ogni volta
+      // che l'helper finisce di rispondere.
+      if (l.ephemeral) continue
       const s = l.snapshot
       const doing = activity(s)
       rows.set(id, {
@@ -561,7 +602,12 @@ export class Registry {
     }
     // Le vive dopo: il loro snapshot in memoria è più avanti di qualunque cosa il
     // disco possa dire, perché il journal lo scrive lo stesso oggetto.
-    for (const [id, l] of this.live) snapshots.set(id, l.snapshot)
+    for (const [id, l] of this.live) {
+      // Fuori anche da qui: un risultato che porta a una conversazione che non esiste
+      // piu' e' peggio di nessun risultato — e l'helper non e' li' per essere ritrovato.
+      if (l.ephemeral) continue
+      snapshots.set(id, l.snapshot)
+    }
 
     for (const [id, snap] of snapshots) {
       const matches = searchSnapshot(snap, q, limit)
@@ -696,6 +742,12 @@ export class Registry {
 
   /** Rilettura dal journal: è la stessa cosa che fa un risveglio. */
   events(id: string, from = 0): CanonicalEvent[] {
+    // Una effimera non ha un file da rileggere: la coda ce l'ha in memoria, e la
+    // domanda e' la stessa — «cosa mi sono perso da `from` in poi». Senza questa
+    // riga un flusso caduto e riagganciato tornerebbe vuoto, cioe' la conversazione
+    // sparirebbe dallo schermo pur essendo ancora viva.
+    const l = this.live.get(id)
+    if (l?.ephemeral) return (l.journal as MemoryJournal).from(from)
     const path = resolve(SESSIONS, `${id}.jsonl`)
     return Journal.read(path).filter(e => e.seq > from)
   }
@@ -766,6 +818,38 @@ export class Registry {
    * non c'è un cestino, e non è recuperabile. Se sta girando la si chiude prima,
    * altrimenti l'adapter continuerebbe a scrivere su un file che non esiste più.
    */
+  /**
+   * L'helper: una chat che non lascia niente, e ce n'e' **una sola** (§17).
+   *
+   * L'unicita' non e' una limitazione ma il modo in cui «muore col ricaricamento della
+   * pagina» diventa un fatto invece di una speranza. Un browser che si ricarica non
+   * puo' avvisare in modo affidabile (`beforeunload` non e' una promessa), e la sua
+   * memoria dell'id se n'e' andata comunque: la prima cosa che fa riaprendo il pannello
+   * e' chiederne uno nuovo, e quella richiesta porta via il vecchio. Nessun ciclo di
+   * vita da indovinare, nessun orfano che resta acceso a consumare un processo.
+   */
+  async openHelper(spec: Omit<OpenSpec, 'ephemeral'>): Promise<string> {
+    await this.closeHelper()
+    const id = await this.open({ ...spec, ephemeral: true })
+    this.helperId = id
+    return id
+  }
+
+  /** Chiude quello vivo, se c'e'. Idempotente. */
+  async closeHelper(): Promise<void> {
+    const id = this.helperId
+    this.helperId = null
+    if (!id || !this.live.has(id)) return
+    await this.command(id, { c: 'session.close' })
+  }
+
+  /** Qual e' l'helper vivo. `null` se nessuno lo ha ancora aperto. */
+  get helper(): string | null {
+    return this.helperId && this.live.has(this.helperId) ? this.helperId : null
+  }
+
+  private helperId: string | null = null
+
   async remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const path = resolve(SESSIONS, `${id}.jsonl`)
     const l = this.live.get(id)

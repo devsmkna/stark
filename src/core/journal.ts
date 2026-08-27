@@ -9,7 +9,28 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { dirname } from 'node:path'
 import { MODEL_VERSION, type CanonicalEvent, type Payload } from './events.ts'
 
-export class Journal {
+/**
+ * Cio' che il registro chiede a un journal, e nient'altro.
+ *
+ * Esiste perche' l'helper (§17) e' una chat che **non deve lasciare niente**: nessun
+ * file, nessuna riga nell'elenco, niente da ritrovare al riavvio. Il modo sbagliato di
+ * ottenerlo sarebbe un secondo ramo in `open()` che salta il journal — due percorsi che
+ * col tempo divergono, ed e' esattamente cio' che questo progetto evita altrove
+ * (`optionsFrom` condivisa fra adapter e UI, `applyTo` condivisa fra daemon e browser).
+ *
+ * Quindi il percorso resta **uno**: cambia solo dove finiscono le righe. Su disco per
+ * una conversazione vera, in un array per l'helper.
+ */
+export interface EventSink {
+  readonly sessionId: string
+  /** Dove sta su disco. Vuoto per chi non sta su disco: chi lo legge deve saperlo. */
+  readonly path: string
+  readonly lastSeq: number
+  append(payload: Payload, ts?: number): CanonicalEvent
+  close(): void
+}
+
+export class Journal implements EventSink {
   readonly path: string
   readonly sessionId: string
   private seq = 0
@@ -143,4 +164,57 @@ export class RawLog {
     mkdirSync(dirname(path), { recursive: true })
   }
   write(line: string): void { appendFileSync(this.path, line + '\n') }
+}
+
+/**
+ * Un journal che non tocca il disco: le righe restano in un array e muoiono col
+ * processo.
+ *
+ * E' la meta' «non lasciare niente» dell'helper. Le invarianti del §13 valgono lo
+ * stesso e non per gentilezza: `seq` senza buchi e nell'ordine dei fatti e' cio' che
+ * fa funzionare `applyTo`, quindi la UI dell'helper ricostruisce lo stato con lo
+ * **stesso** riduttore di tutte le altre chat. A mancare e' solo la rilettura, che
+ * per una cosa che non sopravvive al processo non ha un significato.
+ *
+ * `path` e' la stringa vuota, e non un percorso finto: un percorso finto invita
+ * qualcuno a scriverci: `existsSync` su di esso direbbe `false` e sembrerebbe un file
+ * cancellato invece di «non c'e' nessun file, per scelta».
+ */
+export class MemoryJournal implements EventSink {
+  readonly sessionId: string
+  readonly path = ''
+  private seq = 0
+  private chiuso = false
+  /** Tenuti per poter riagganciare un flusso che cade: e' la stessa domanda a cui
+   *  risponde `Journal.readFrom`, con lo stesso significato di `seq`. */
+  private readonly righe: CanonicalEvent[] = []
+
+  constructor(sessionId: string) { this.sessionId = sessionId }
+
+  get lastSeq(): number { return this.seq }
+
+  append(payload: Payload, ts = Date.now()): CanonicalEvent {
+    if (this.chiuso) throw new Error('journal chiuso')
+    const event: CanonicalEvent = {
+      v: MODEL_VERSION,
+      seq: ++this.seq,
+      ts,
+      sessionId: this.sessionId,
+      payload,
+    }
+    this.righe.push(event)
+    return event
+  }
+
+  /** Da `seq` in poi, per chi si riaggancia dopo una caduta del flusso. */
+  from(seq: number): CanonicalEvent[] {
+    return this.righe.filter(e => e.seq > seq)
+  }
+
+  close(): void {
+    this.chiuso = true
+    // Le righe se ne vanno **adesso**, non quando il garbage collector se ne accorge:
+    // sono il testo di una conversazione, e «temporanea» deve voler dire qualcosa.
+    this.righe.length = 0
+  }
 }
