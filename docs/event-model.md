@@ -1053,6 +1053,46 @@ somigliano: `planQuota` (la banda «quota esaurita» non ha dove attaccarsi su O
 spiegazione**, mai nascosto: Principio 5), e `turnEnd` — cioè se «il turno è finito» è un fatto
 annunciato o una deduzione del client.
 
+### Cosa ha trovato l'adapter, una volta scritto (27 agosto 2026)
+
+L'adapter minimo esiste e gira: `npm run opencode`, 14/14 dal vivo attraverso il daemon, più
+una conversazione guidata nel browser vero (`tools/prova-opencode-ui.mjs`) — agent scelto in
+«New chat», modello cambiato dalla barra, prompt mandato, risposta a schermo.
+
+**Il contratto del §1 non è stato toccato.** È il risultato che ADR-012 cercava, e va detto per
+esteso: il daemon apre una chat passando `agent: 'opencode'` e non sa nient'altro; dentro,
+`host.ts` tiene un server condiviso con N conversazioni mentre Claude Code spawna un processo
+per conversazione, e chi chiude una sessione non sa quale delle due cose ha fatto.
+
+**Dove il secondo adapter fa MENO lavoro del primo**, che è l'osservazione meno attesa: la fila
+FIFO dei prompt è nel protocollo (`delivery: 'queue'`) invece di essere costruita sopra, e
+«consenti sempre» è una parola (`reply: 'always'`) invece di una regola da scrivere in un file.
+
+**Tre difetti che solo il secondo agent poteva far emergere**, tutti trovati guardando e non
+leggendo:
+
+1. **Il menu dei modelli non aveva un tetto.** `max-height`/`overflow-y` esistevano **solo**
+   nella media query del telefono. Con gli otto modelli di Claude Code non si notava; con i
+   **61** di OpenCode le voci in fondo finiscono sopra il bordo superiore e non si possono
+   premere (misurato: Playwright rifiuta il clic, «element is outside of the viewport»). Il tetto
+   è ora un'invariante, senza media query: un menu non può essere più alto dello schermo.
+2. **La barra mostrava una modalità che l'adapter aveva appena dichiarato inesistente.** Il
+   default del daemon è `auto`, OpenCode non ce l'ha, e `session.mode` la annunciava lo stesso.
+   Ora si declassa a `default` **dicendolo** — lo stesso comportamento che Claude Code ha con un
+   modello che non regge auto mode.
+3. **`'default'` è vocabolario di Claude Code**, ed è la sesta falla del confine. Lì è un alias
+   vero che l'SDK risolve; su OpenCode non vuol dire niente, e una chat nata così restava sulla
+   scelta del server — che su questa macchina è `big-pickle`, **giù a monte**, cioè una chat
+   nata rotta senza via d'uscita. Ora l'adapter chiede a OpenCode quale modello userebbe e lo
+   dichiara, che è l'analogo esatto del `resolveModel` di Claude Code.
+
+**E uno che resta aperto, registrato invece che aggirato:** nella tendina dei modelli tutte e 61
+le voci portano l'avviso «*No auto mode — this chat would fall back and ask for everything*».
+Su Claude Code è un'informazione vera e utile; su OpenCode l'auto mode **non esiste come
+concetto**, quindi quell'avviso è rumore su ogni riga. Non si corregge con un campo in più:
+si corregge con ADR-014, quando la barra mostrerà ciò che l'agent dichiara invece di sei parole
+che conosce a memoria.
+
 ### Perché non ACP
 
 Valutato a fondo il 27 agosto, e scartato **come modello canonico** — non come trasporto futuro.

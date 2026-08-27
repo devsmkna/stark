@@ -16,7 +16,7 @@ import { Push, vigila, type Subscription } from './push.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { backendFor } from '../adapters/index.ts'
+import { agentiDisponibili, backendFor } from '../adapters/index.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 import type { MemoryOutcome } from '../core/adapter.ts'
@@ -289,6 +289,10 @@ async function route(
         home: STARK_HOME,
         listening: 'localhost only',
         agent: await backendFor().diagnostics?.(configDir),
+        // Quali agent questa macchina sa guidare. La UI ne fa una scelta **solo se ce
+        // n'è più di uno**: una tendina con una voce sola è un ostacolo, non una scelta
+        // (stessa regola del profilo in «New chat»).
+        agents: await agentiDisponibili(),
       })
     }
 

@@ -15,7 +15,7 @@ import type {
   AdapterHooks, AgentSession, PromptImage, SessionSpec,
 } from '../../core/adapter.ts'
 import type {
-  Capabilities, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
+  Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
 } from '../../core/events.ts'
 import { clientPer, lascia } from './host.ts'
 import { modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
@@ -53,6 +53,7 @@ export class OpenCodeAdapter implements AgentSession {
   private client: Client | null = null
   private sessionId = ''
   private modello: string
+  private modelli: ModelChoice[] = []
   private modo: PermissionMode
   private ac = new AbortController()
   private flusso: Promise<void> | null = null
@@ -74,6 +75,19 @@ export class OpenCodeAdapter implements AgentSession {
     this.client = await clientPer(this.spec.cwd)
     this.preso = true
     const c = this.client
+
+    // `'default'` vuol dire «decidi tu», non «un modello scelto da STARK» — e' la
+    // stessa correzione fatta il 26 agosto per Claude Code, dove un
+    // `'claude-sonnet-5'` cablato apriva ogni chat sul modello sbagliato. Qui pero'
+    // `'default'` e' una **parola di Claude Code**: l'SDK di Anthropic la riconosce
+    // come alias, OpenCode no. Quindi si chiede a lui quale userebbe, e si dice quale
+    // e': una barra di stato che scrive «default» non dice niente, e se quel modello e'
+    // giu' a monte non c'e' nemmeno modo di capire perche'.
+    this.modelli = await elencoModelli(c)
+    if (!refModello(this.modello)) {
+      const suo = await defaultSuo(c)
+      if (suo) this.modello = suo
+    }
 
     // Riprendere non ricostruisce niente: la conversazione e' una riga nel database di
     // OpenCode, e il server e' gia' in piedi. E' la differenza con `--resume` di Claude
@@ -109,7 +123,25 @@ export class OpenCodeAdapter implements AgentSession {
       tools: await elencoTool(c),
       commands: await elencoComandi(c),
       modes: await elencoModi(c),
+      // Senza questo elenco la barra di stato non offre niente da scegliere, e una
+      // chat che nasce su un modello rotto resta rotta senza via d'uscita. Misurato:
+      // il default dichiarato da OpenCode Zen su questa macchina e' `big-pickle`, che
+      // e' giu' a monte da giorni.
+      models: this.modelli,
     })
+    // Non si dichiara la modalita' **chiesta** ma quella in cui si e' davvero.
+    // `elencoModi` qui sopra dichiara `auto`, `acceptEdits`, `dontAsk` e
+    // `bypassPermissions` NON disponibili, e il default del daemon e' `auto`: senza
+    // questo declassamento la barra mostrerebbe una modalita' che lo stesso adapter ha
+    // appena detto di non avere. E' lo stesso comportamento che Claude Code ha con un
+    // modello che non regge auto mode — riparte in Manual e lo dice.
+    if (!AGENT_DI[this.modo] && this.modo !== 'default') {
+      this.emit({
+        k: 'notice', level: 'info',
+        text: `OpenCode non ha la modalità «${this.modo}»: questa chat parte in «default» (ADR-014)`,
+      })
+      this.modo = 'default'
+    }
     this.emit({ k: 'session.mode', mode: this.modo })
     this.emit({ k: 'session.state', state: 'idle' })
   }
@@ -283,13 +315,19 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
-    this.modo = mode
     const agent = AGENT_DI[mode]
+    if (!agent && mode !== 'default') {
+      // Il CLI non lo consente, quindi STARK non finge di averlo fatto: dice perche'.
+      // La voce nella tendina e' gia' marcata non disponibile con la ragione — questo
+      // ramo copre chi ci arriva da un'altra strada (un comando, un risveglio).
+      this.emit({
+        k: 'notice', level: 'warn',
+        text: `OpenCode non ha la modalità «${mode}»: resta «${this.modo}»`,
+      })
+      return
+    }
+    this.modo = mode
     if (agent) await this.client?.v2.session.switchAgent({ sessionID: this.sessionId, agent })
-    // Si dichiara la modalita' **chiesta**, non quella ottenuta, e per una sola volta e'
-    // giusto cosi': su OpenCode `auto` e `dontAsk` non hanno un agent corrispondente, e
-    // tacere lascerebbe la barra su un valore vecchio. La riga onesta la scrivera'
-    // ADR-014, quando la barra mostrera' cio' che l'agent dichiara di avere.
     this.emit({ k: 'session.mode', mode })
   }
 
@@ -388,6 +426,46 @@ function capacita(): Capabilities {
     fileBrowser: false,
     pty: true,             // il server espone i PTY, STARK non li usa ancora
   }
+}
+
+/**
+ * I modelli fra cui questa sessione puo' scegliere.
+ *
+ * Si leggono dai **provider autenticati** (`config.providers`), non dal catalogo
+ * generale: `v2.model.list` ne torna **7.326** — e' l'elenco di models.dev, cioe' tutti
+ * i modelli esistenti al mondo, non quelli che questa macchina puo' davvero usare.
+ * Offrirli tutti sarebbe una tendina inservibile piena di voci che danno 401.
+ */
+async function elencoModelli(c: Client): Promise<ModelChoice[]> {
+  try {
+    const v = dato(await c.config.providers()) as {
+      providers?: Array<{ id?: string; models?: Record<string, Record<string, unknown>> }>
+    } | undefined
+    const out: ModelChoice[] = []
+    for (const p of v?.providers ?? []) {
+      for (const [mid, m] of Object.entries(p.models ?? {})) {
+        const limit = (m['limit'] ?? {}) as Record<string, unknown>
+        out.push({
+          id: `${p.id}/${mid}`,
+          ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
+          // Nessun classificatore su OpenCode: nessun modello «regge auto mode», e
+          // dirlo per tutti e' piu' onesto che lasciare il campo a caso.
+          autoMode: false,
+          contextWindow: typeof limit['context'] === 'number' ? limit['context'] : 0,
+        })
+      }
+    }
+    return out
+  } catch { return [] }
+}
+
+/** Quale modello userebbe OpenCode se non gliene si dice nessuno. */
+async function defaultSuo(c: Client): Promise<string | null> {
+  try {
+    const v = dato(await c.config.providers()) as { default?: Record<string, string> } | undefined
+    const [prov, mid] = Object.entries(v?.default ?? {})[0] ?? []
+    return prov && mid ? `${prov}/${mid}` : null
+  } catch { return null }
 }
 
 async function elencoTool(c: Client): Promise<string[]> {

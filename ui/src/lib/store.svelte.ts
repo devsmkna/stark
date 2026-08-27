@@ -507,7 +507,7 @@ export class Store {
    * come fatto del progetto, così la prossima chat sulla stessa cartella lo eredita senza
    * chiederlo di nuovo — «il profilo è deciso» vuol dire deciso da qui in poi.
    */
-  async newChat(cwd: string, opts: { model?: string; profile?: string } = {}): Promise<void> {
+  async newChat(cwd: string, opts: { model?: string; profile?: string; agent?: string } = {}): Promise<void> {
     this.working = true
     this.refused = null
     try {
@@ -521,6 +521,11 @@ export class Store {
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
         ...(profile ? { profile } : {}),
+        // L'agent NON si ricorda per progetto come il profilo: due chat sulla stessa
+        // cartella con due agent diversi sono una cosa che si vuole (è il modo in cui
+        // si confrontano), mentre due profili Claude sulla stessa cartella erano una
+        // fonte di confusione. Sono due domande diverse, e si rispondono diversamente.
+        ...(opts.agent ? { agent: opts.agent } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
         void this.setProject(cwd, { profile: opts.profile })

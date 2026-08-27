@@ -48,7 +48,9 @@ const check = (nome: string, ok: boolean, extra = '') => {
 console.log('# il daemon apre una chat OpenCode senza sapere cosa sia\n')
 const apertura = await j('/api/sessions', {
   method: 'POST',
-  body: JSON.stringify({ cwd: CASA, agent: 'opencode', model: MODELLO }),
+  // **Senza** modello, di proposito: cosi' si prova anche che l'adapter risolva il
+  // «decidi tu» chiedendolo a OpenCode invece di lasciare la barra su «default».
+  body: JSON.stringify({ cwd: CASA, agent: 'opencode' }),
 })
 check('POST /api/sessions con agent: opencode', apertura.stato === 201,
   `HTTP ${apertura.stato}`)
@@ -68,6 +70,9 @@ const cap = (snap['capabilities'] ?? {}) as Record<string, unknown>
 check('lo stato arriva a idle', snap['state'] === 'idle', String(snap['state']))
 check('dichiara di NON avere auto mode', cap['autoMode'] === false)
 check('dichiara di avere il revert', cap['revert'] === true)
+check('«decidi tu» diventa il modello vero che OpenCode userebbe',
+  typeof snap['model'] === 'string' && String(snap['model']).includes('/'),
+  String(snap['model']))
 check('il ref di ripresa e\' quello di OpenCode', String(snap['resumeRef'] ?? '').startsWith('ses'),
   String(snap['resumeRef']))
 const modi = (snap['modes'] ?? []) as Array<Record<string, unknown>>
@@ -75,6 +80,24 @@ const spente = modi.filter(m => m['available'] === false)
 check('le modalita\' che non esistono sono spente CON la ragione',
   spente.length === 4 && spente.every(m => typeof m['reason'] === 'string' && String(m['reason']).length > 0),
   `${spente.length} spente`)
+
+// ─── i modelli offerti, e cambiarne uno ─────────────────────────────────────
+const modelli = (snap['models'] ?? []) as Array<Record<string, unknown>>
+check('la barra ha dei modelli veri fra cui scegliere', modelli.length > 0,
+  `${modelli.length} modelli`)
+check('e sono quelli dei provider autenticati, non il catalogo del mondo',
+  modelli.length > 0 && modelli.length < 500, `${modelli.length}`)
+// Senza questa la chat nasce su cio' che OpenCode sceglie da se' — che su questa
+// macchina e' `big-pickle`, giu' a monte — e non c'e' via d'uscita.
+await j(`/api/sessions/${id}/command`, {
+  method: 'POST',
+  body: JSON.stringify({ c: 'session.setModel', model: MODELLO }),
+})
+await new Promise(r => setTimeout(r, 800))
+const dopoModello = await j(`/api/sessions/${id}`)
+const snapM = (dopoModello.corpo as Record<string, unknown>)['snapshot'] as Record<string, unknown>
+check('cambiare modello a caldo si vede nello snapshot', snapM['model'] === MODELLO,
+  String(snapM['model']))
 
 // ─── il turno (dipende dal modello, quindi si ritenta) ──────────────────────
 console.log('\n# un turno vero')

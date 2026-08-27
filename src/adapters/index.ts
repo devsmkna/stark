@@ -12,6 +12,7 @@
 // e lo stato in un SQLite suo. Chi sta sopra non vede la differenza — che era
 // esattamente la domanda di ADR-012.
 
+import { spawn } from 'node:child_process'
 import type { AgentBackend, AdapterHooks, SessionSpec } from '../core/adapter.ts'
 import { ClaudeCodeAdapter } from './claude-code/adapter.ts'
 import { isRecent, listTranscripts } from './claude-code/catalogue.ts'
@@ -44,6 +45,25 @@ export const claudeCode: AgentBackend = {
 export const openCode: AgentBackend = {
   id: 'opencode',
   open: (spec: SessionSpec, hooks: AdapterHooks) => new OpenCodeAdapter(spec, hooks),
+  // L'SDK avvia `opencode` dal PATH (via `cross-spawn`), quindi la domanda «c'e'?» e'
+  // esattamente «il binario si risolve?». Si guarda una volta e si ricorda: e' un fatto
+  // della macchina, e chiederlo a ogni apertura dell'elenco costerebbe uno spawn.
+  available: async () => {
+    if (ocPresente === null) ocPresente = await risolve('opencode')
+    return ocPresente
+  },
+}
+
+let ocPresente: boolean | null = null
+
+/** Il comando esiste nel PATH? `--version` e non `which`: funziona anche con un alias
+ *  o un wrapper, che e' come `opencode` viene installato di solito. */
+function risolve(cmd: string): Promise<boolean> {
+  return new Promise(res => {
+    const p = spawn(cmd, ['--version'], { stdio: 'ignore' })
+    p.on('error', () => res(false))
+    p.on('exit', code => res(code === 0))
+  })
 }
 
 const BACKENDS: Record<string, AgentBackend> = {
@@ -70,3 +90,11 @@ export function backendFor(agent: string = DEFAULT_AGENT): AgentBackend {
 }
 
 export const agentIds = (): string[] => Object.keys(BACKENDS)
+
+/** Gli agent di questa macchina, con chi c'e' davvero. */
+export async function agentiDisponibili(): Promise<Array<{ id: string; available: boolean }>> {
+  return Promise.all(agentIds().map(async id => ({
+    id,
+    available: (await BACKENDS[id]?.available?.()) ?? true,
+  })))
+}

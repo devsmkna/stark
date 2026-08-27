@@ -47,6 +47,8 @@ export type OpenSpec = {
    * d'ambiente di Claude Code, arrivato fin quassù attraverso il confine del §1.
    */
   profile?: string
+  /** Con quale agent. Omesso: quello di default del daemon. */
+  agent?: string
 }
 
 /** Una conversazione nata nel terminale, come la elenca il daemon. */
@@ -94,6 +96,8 @@ export type SystemInfo = {
     configDir: string
     profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
   }
+  /** Gli agent che questa macchina sa guidare, e chi c'è davvero installato. */
+  agents?: { id: string; available: boolean }[]
 }
 
 export type LinkStatus = 'connecting' | 'live' | 'lost'

@@ -30,18 +30,35 @@
   // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
   let profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
   let profilePick = $state<string | null>(null)
+  // ─── e con quale agent, stessa regola ─────────────────────────────────────
+  // Compare solo se la macchina ne ha più di uno *installato*: una tendina con una
+  // voce sola è un ostacolo, non una scelta. Chi non ha OpenCode non vede niente di
+  // nuovo, ed è il comportamento giusto — non c'è niente da spiegargli.
+  let agents = $state<NonNullable<SystemInfo['agents']> | null>(null)
+  let agentPick = $state<string | null>(null)
   $effect(() => {
     if (store.tab === 'new' && profiles === null) {
       void store.api.system().then(
-        s => { profiles = s.agent.profiles },
-        () => { profiles = [] },
+        s => { profiles = s.agent.profiles; agents = (s.agents ?? []).filter(a => a.available) },
+        () => { profiles = []; agents = [] },
       )
     }
   })
+  const showAgents = $derived((agents?.length ?? 0) > 1)
+  const effectiveAgent = $derived(agentPick ?? agents?.[0]?.id ?? null)
+  const AGENT_NOMI: Record<string, string> = {
+    'claude-code': 'Claude Code',
+    opencode: 'OpenCode',
+  }
   // Assente vuol dire «non ancora deciso per questa cartella»: se STARK la conosce
   // già e ha un profilo salvato, non si chiede di nuovo — è deciso.
   const savedProfile = $derived(store.project(cwd.trim()).profile)
-  const showProfiles = $derived(cwd.trim().length > 0 && !savedProfile && (profiles?.length ?? 0) > 1)
+  // Il profilo è una cosa **di Claude Code** (`CLAUDE_CONFIG_DIR`): chiederlo per un
+  // agent che non ce l'ha sarebbe una domanda senza risposta possibile.
+  const showProfiles = $derived(
+    cwd.trim().length > 0 && !savedProfile && (profiles?.length ?? 0) > 1
+    && (effectiveAgent === null || effectiveAgent === 'claude-code'),
+  )
   const effectiveProfile = $derived(
     profilePick ?? profiles?.find(p => p.current)?.path ?? profiles?.[0]?.path ?? null,
   )
@@ -104,7 +121,10 @@
 
   function start(): void {
     if (ready) {
-      void store.newChat(cwd.trim(), showProfiles && effectiveProfile ? { profile: effectiveProfile } : {})
+      void store.newChat(cwd.trim(), {
+        ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
+        ...(showAgents && effectiveAgent ? { agent: effectiveAgent } : {}),
+      })
     }
   }
 
@@ -159,10 +179,21 @@
     <div class="dlgb">
       <div class="fgroup">
         <div class="flabel">Agent</div>
-        <div class="inst on"><span class="rd"></span><span class="nm">Claude Code</span>
-          <span class="where"><Icon name="i-monitor" /> this machine</span></div>
-        <div class="hint">One adapter in the MVP (ADR-004). A second agent is not hidden —
-          it is not written yet.</div>
+        {#if showAgents}
+          {#each agents ?? [] as a (a.id)}
+            <button type="button" class="inst instbtn" class:on={effectiveAgent === a.id}
+              onclick={() => { agentPick = a.id }}>
+              <span class="rd"></span>
+              <span class="nm">{AGENT_NOMI[a.id] ?? a.id}</span>
+            </button>
+          {/each}
+        {:else}
+          <!-- Un agent solo non è una scelta: si dice qual è e basta. È lo stesso posto
+               in cui, fino ad ADR-012, c'era scritto «un solo adapter nell'MVP». -->
+          <div class="inst on"><span class="rd"></span>
+            <span class="nm">{AGENT_NOMI[agents?.[0]?.id ?? ''] ?? 'Claude Code'}</span>
+            <span class="where"><Icon name="i-monitor" /> this machine</span></div>
+        {/if}
       </div>
 
       <div class="fgroup">

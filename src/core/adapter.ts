@@ -224,6 +224,16 @@ export interface AgentBackend {
   /** Il nome che finisce in `session.created.agent`. */
   readonly id: string
   open(spec: SessionSpec, hooks: AdapterHooks): AgentSession
+  /**
+   * C'e', su questa macchina?
+   *
+   * Non e' una capacita' della sessione ma dell'**installazione**: Claude Code arriva
+   * con l'SDK, OpenCode e' un binario che puo' non esserci. Senza questa domanda la UI
+   * offrirebbe una voce che fallisce al clic — e il Principio 5 dice che cio' che non
+   * si puo' fare va mostrato **spento con la spiegazione**, non nascosto e nemmeno
+   * offerto per finta. Chi non la implementa c'e' sempre.
+   */
+  available?(): Promise<boolean>
   /** Le conversazioni nate nel terminale di quell'agent, da poter importare. */
   listConversations?(profile?: string, limit?: number): Promise<ConversationInfo[]>
   /** Da quanto una conversazione dev'essere ferma perché *non* sia in corso altrove. */

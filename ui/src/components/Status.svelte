@@ -494,7 +494,16 @@
 
   .pop { position: relative; display: inline-flex; }
   /* Le tendine si aprono verso l'alto: sotto non c'è niente, la barra è l'ultima riga. */
-  .pop .menu { position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 7; }
+  /* Il tetto NON è una rifinitura per il telefono: è un'invariante — un menu non può
+     essere più alto dello schermo. Fino ad oggi non si notava perché Claude Code offre
+     otto modelli; OpenCode ne offre **61**, e senza questo le voci in fondo finiscono
+     sopra il bordo superiore e non si possono premere (misurato: Playwright rifiuta il
+     clic, «element is outside of the viewport»). È il secondo agent che fa emergere un
+     difetto della UI, non dell'adapter. */
+  .pop .menu {
+    position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 7;
+    max-height: min(60vh, 420px); overflow-y: auto;
+  }
   .r .pop .menu { left: auto; right: 0; }
   /* Misurato dal vivo a 390px: ancorarsi al PROPRIO bottone — stretto quanto la sua
      etichetta — funziona solo se il popup ci sta dentro allo spazio che resta da lì
