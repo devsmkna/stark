@@ -436,6 +436,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .chip{display:flex;align-items:center;gap:5px;border:1px solid var(--line-2);border-radius:7px;padding:3.5px 8px;font-size:10.5px;color:var(--ink);background:var(--surface)}
 .chip .lab{color:var(--muted)}
 .chip.ro{border-style:dashed;color:var(--muted)}
+.slider{width:100%;accent-color:var(--accent)}
 .menu{position:relative;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);box-shadow:0 8px 28px rgba(16,20,32,.16);padding:4px;display:flex;flex-direction:column;gap:1px;width:250px}
 .mi{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;font-size:10.5px;color:var(--ink)}
 .mi.on{background:var(--accent-soft)}

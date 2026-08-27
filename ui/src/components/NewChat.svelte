@@ -27,6 +27,13 @@
   let chosen = $state<string | null>(null)
   let filter = $state('')
 
+  // ─── «Resume»: un id scritto a mano, niente da sfogliare ───────────────────
+  let resumeId = $state('')
+  const resumeReady = $derived(resumeId.trim().length > 0 && !store.working)
+  function startResume(): void {
+    if (resumeReady) void store.resumeById(resumeId.trim())
+  }
+
   // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
   let profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
   let profilePick = $state<string | null>(null)
@@ -36,14 +43,42 @@
   // nuovo, ed è il comportamento giusto — non c'è niente da spiegargli.
   let agents = $state<NonNullable<SystemInfo['agents']> | null>(null)
   let agentPick = $state<string | null>(null)
+
+  // Il Finder nativo: parte `false` finché `/api/system` non risponde, quindi il
+  // bottone nasce disabilitato — coerente col resto di STARK, che non mostra mai una
+  // possibilità come attiva prima di averla verificata.
+  let nativePicker = $state(false)
+  let nativeBusy = $state(false)
+
+  // Un solo effetto per una sola domanda: profili, agent e Finder arrivano tutti
+  // dalla stessa risposta di `/api/system`.
   $effect(() => {
     if (store.tab === 'new' && profiles === null) {
       void store.api.system().then(
-        s => { profiles = s.agent.profiles; agents = (s.agents ?? []).filter(a => a.available) },
-        () => { profiles = []; agents = [] },
+        s => {
+          profiles = s.agent.profiles
+          agents = (s.agents ?? []).filter(a => a.available)
+          nativePicker = s.nativeFolderPicker
+        },
+        () => { profiles = []; agents = []; nativePicker = false },
       )
     }
   })
+
+  /** Il dialogo blocca la risposta HTTP finché l'utente non sceglie o annulla: può
+   *  durare secondi o minuti, da qui `nativeBusy` invece di un fallimento apparente. */
+  async function browseNative(): Promise<void> {
+    nativeBusy = true
+    try {
+      const r = await store.api.browseNative()
+      if (r.ok) cwd = r.path
+    } catch {
+      // silenzioso, come da spec: annullo o fallimento non mostrano errori
+    } finally {
+      nativeBusy = false
+    }
+  }
+
   const showAgents = $derived((agents?.length ?? 0) > 1)
   const effectiveAgent = $derived(agentPick ?? agents?.[0]?.id ?? null)
   const AGENT_NOMI: Record<string, string> = {
@@ -128,7 +163,7 @@
     }
   }
 
-  function goto(tab: 'new' | 'import'): void {
+  function goto(tab: 'new' | 'import' | 'resume'): void {
     store.tab = tab
     store.refused = null
     // Si richiede aprendo la linguetta e non all'avvio: legge dei file da disco, e chi
@@ -159,16 +194,21 @@
 <div class="dlg" style="width:{store.tab === 'import' ? 560 : 430}px">
   <div class="dlgh">
     <div>
-      <div class="dt">{store.tab === 'new' ? 'New chat' : 'Import a conversation'}</div>
+      <div class="dt">
+        {store.tab === 'new' ? 'New chat'
+          : store.tab === 'import' ? 'Import a conversation'
+          : 'Resume a conversation'}
+      </div>
       <div class="ds">
-        {store.tab === 'new'
-          ? 'A folder is all it needs'
-          : 'Started in the terminal, on this machine'}
+        {store.tab === 'new' ? 'A folder is all it needs'
+          : store.tab === 'import' ? 'Started in the terminal, on this machine'
+          : 'If you already know its id'}
       </div>
     </div>
     <div class="switch" style="margin-left:auto">
       <button class:on={store.tab === 'new'} onclick={() => goto('new')}>New</button>
       <button class:on={store.tab === 'import'} onclick={() => goto('import')}>Import</button>
+      <button class:on={store.tab === 'resume'} onclick={() => goto('resume')}>Resume</button>
     </div>
     <button class="x" aria-label="Close" onclick={() => { store.dialog = null }}>
       <Icon name="i-x" />
@@ -203,6 +243,11 @@
           <input class="field" autofocus bind:value={cwd} placeholder="/root/DevsMachna/stark"
             onkeydown={e => { if (e.key === 'Enter') start() }} />
           <button class="btn" type="button" onclick={openBrowse}>Open path…</button>
+          <button class="btn finder" type="button" disabled={!nativePicker || nativeBusy}
+            title={nativePicker ? 'Browse with the system Finder' : 'Not available on this machine (no native folder picker found)'}
+            onclick={() => void browseNative()}>
+            <Icon name="i-reveal" />{nativeBusy ? 'Waiting…' : 'Finder…'}
+          </button>
         </div>
 
         {#if browsing}
@@ -243,7 +288,7 @@
             </div>
           {/if}
           <div class="hint">The folder decides the project and its colour. Type the full path,
-            or <b>Open path…</b> to browse the machine.</div>
+            <b>Open path…</b> to browse the machine, or <b>Finder…</b> for the native picker.</div>
         {/if}
       </div>
 
@@ -277,7 +322,7 @@
       </button>
     </div>
 
-  {:else}
+  {:else if store.tab === 'import'}
     <div class="dlgb" style="gap:7px">
       <div class="chips" style="margin-bottom:2px">
         <span class="chip ro"><span class="lab">Agent</span>Claude Code</span>
@@ -351,6 +396,33 @@
         {store.importing ? 'Importing…' : 'Import'}
       </button>
     </div>
+
+  {:else}
+    <div class="dlgb">
+      <div class="fgroup">
+        <div class="flabel">Session id</div>
+        <!-- Un campo solo: la cartella si legge dal trascritto trovato, non la si
+             sceglie qui — vedi docs/superpowers/specs/2026-08-27-resume-by-id-design.md. -->
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="field" autofocus bind:value={resumeId}
+          placeholder="c15a2fde-a535-4cdd-9764-b40cffaf2bf0"
+          onkeydown={e => { if (e.key === 'Enter') startResume() }} />
+        <div class="hint">Paste a Claude Code session id. STARK looks for it across every
+          profile on this machine, imports its history if it doesn't have it yet, and opens
+          it live — the same as <code>claude -r &lt;id&gt;</code>.</div>
+      </div>
+
+      {#if store.refused}
+        <div class="warn"><Icon name="i-warn" /><span>{store.refused}</span></div>
+      {/if}
+    </div>
+
+    <div class="dlgf">
+      <button class="btn" onclick={() => { store.dialog = null }}>Cancel</button>
+      <button class="btn pri" disabled={!resumeReady} onclick={startResume}>
+        {store.working ? 'Opening…' : 'Resume'}
+      </button>
+    </div>
   {/if}
 </div>
 
@@ -368,6 +440,11 @@
   .pathrow { display: flex; gap: 6px; }
   .pathrow .field { flex: 1; }
   .pathrow .btn { flex: none; white-space: nowrap; }
+  /* Icona + etichetta corta invece del testo per esteso: "Open path…" resta più
+     largo di natura (nome+verbo), "Finder…" con l'icona di i-reveal basta a
+     riconoscerlo senza allargare la riga quanto "Browse (system Finder)…". */
+  .pathrow .btn.finder { display: inline-flex; align-items: center; gap: 5px; }
+  .pathrow .btn.finder :global(svg.ic) { width: 12px; height: 12px; }
 
   /* Il browser di cartelle: stesso posto della casella che sostituisce, non un
      dialogo sopra il dialogo — aprirne un secondo sopra il primo per scegliere

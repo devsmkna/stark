@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process'
 import type { AgentBackend, AdapterHooks, SessionSpec } from '../core/adapter.ts'
 import type { ModeChoice } from '../core/events.ts'
 import { ClaudeCodeAdapter } from './claude-code/adapter.ts'
-import { isRecent, listTranscripts } from './claude-code/catalogue.ts'
+import { findTranscript, isRecent, listTranscripts } from './claude-code/catalogue.ts'
 import { importTranscript } from './claude-code/import.ts'
 import { allineaMemoria } from './claude-code/memoria.ts'
 import { diagnostics, warmDiagnostics } from './claude-code/profiles.ts'
@@ -30,6 +30,7 @@ export const claudeCode: AgentBackend = {
   listConversations: listTranscripts,
   isRecent,
   importConversation: importTranscript,
+  locateConversation: findTranscript,
   diagnostics,
   warmDiagnostics,
   setCommandDescriptions: allineaMemoria,

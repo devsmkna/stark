@@ -309,6 +309,21 @@ export interface AgentBackend {
   /** Da quanto una conversazione dev'essere ferma perché *non* sia in corso altrove. */
   isRecent?(info: ConversationInfo, now?: number): boolean
   importConversation?(path: string): { events: ImportedEvent[]; stats: ImportStats }
+  /**
+   * Dove sta una conversazione **di cui si conosce solo l'id**.
+   *
+   * Non e' `listConversations` con un filtro sopra, ed e' la ragione per cui esiste:
+   * quella elenca le piu' recenti — un limite pensato per una schermata da sfogliare —
+   * mentre un id scritto a mano puo' essere vecchio quanto si vuole. E cerca in
+   * **tutti** i profili della macchina, non solo in quello con cui e' partito il
+   * daemon: un id puo' appartenere a un profilo diverso.
+   *
+   * Il `ref` che torna e' **opaco** e si ripassa a `importConversation` senza
+   * guardarci dentro: per Claude Code e' il percorso del trascritto, e il registro non
+   * deve sapere che i trascritti sono file. `profile` c'e' solo se la conversazione
+   * stava altrove rispetto al profilo chiesto — cioe' quando e' un fatto nuovo.
+   */
+  locateConversation?(sessionId: string, profile?: string): { ref: string; profile?: string } | undefined
   /** Cosa dire nel pannello di diagnostica: versioni, eseguibile, profili. */
   diagnostics?(profile?: string): Promise<unknown>
   /** Prepara in anticipo ciò che la diagnostica costa: si chiama all'avvio. */

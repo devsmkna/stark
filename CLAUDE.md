@@ -196,8 +196,10 @@ e che non resti niente nell'elenco.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 143 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
-`npm run slice` apre una sessione vera.
+quota — 211 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel
+browser; `npm run slice` apre una sessione vera; `npm run telegram` prova il bot contro un
+finto `api.telegram.org` (zero quota); `npm run tunnel -- https://…` misura se un tunnel
+strozza il flusso.
 
 Per **guardare** la UI invece di descriverla:
 `node tools/shot.mjs <url> <fuori.png> [selettore ...]` la fotografa senza spendere quota, e i
@@ -1263,6 +1265,155 @@ solo silenzio. Leggere il nome vero costa dieci secondi; indovinarlo costa un gi
 `npm run check` 143 → **171**, `npm run daemon` 38, `npm run opencode` **16**.
 
 Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
+**Il Finder di sistema per "New chat"** (27 agosto 2026, chiesto dall'utente dopo aver
+visto lo screenshot del browser manuale: «non è conveniente»). Accanto — non al posto —
+del tree che elenca le sottocartelle una alla volta, un bottone apre il selettore
+nativo della macchina del daemon: `System.Windows.Forms.FolderBrowserDialog` via
+PowerShell su WSL, `choose folder` via `osascript` su macOS, `zenity
+--file-selection --directory` su Linux nativo — stessa forma a tre rami di
+`reveal.ts`, con la stessa onestà sulla verifica: WSL, macOS e Linux nativo scritti
+seguendo lo stesso pattern a tre rami di `reveal.ts`; nessuno dei tre è stato ancora
+provato con un click reale su un dialogo nativo — l'implementazione è passata da
+subagent, che non possono pilotare un dialogo di sistema. Il click dal vivo resta da
+fare dall'utente, su qualunque macchina scelga per primo.
+Parte sempre dalla home del processo, mai dalla cartella già scritta nella casella —
+scelta esplicita, non un dimenticato: il tree manuale resta la via per navigare da
+dove si era, questa è la via per partire da capo col Finder che si conosce già.
+`nativeFolderPickerAvailable()` si ricalcola **a ogni richiesta** invece che una sola
+volta all'avvio — la stessa lezione già scritta per il rilevamento Tailscale, qui
+applicata prima di ripeterla: un `execFile` in più costa pochissimo, una cache
+sbagliata per tutta la vita del processo costerebbe un bottone spento senza motivo
+dopo aver installato `zenity` a daemon acceso.
+Annullare il dialogo, o non avere il comando giusto in `PATH`, tornano identici
+(`{ok:false}`, silenzioso): non è un errore da mostrare, è "resta dove eri".
+`npm run check` sale a **109** (i tre test di `pickFolderNative` aggiunti in revisione
+finale, con un `exec` finto invece di un dialogo vero), `npm run daemon` resta **35**.
+
+**Le chat si affiancano** (27 agosto 2026). N conversazioni aperte insieme nella stessa
+pagina, in pannelli ridimensionabili: si trascina una riga dell'elenco sul **bordo** di un
+pannello e quello si divide nella direzione del bordo, o sul **centro** e la chat prende il
+posto di quella che c'era. Ogni pannello è una conversazione intera — barra, flusso, casella
+di scrittura, barra di stato — non una vista in sola lettura.
+
+Tre decisioni che hanno deciso il resto. La prima: **un clic non apre un pannello**. Cliccare
+una riga fa quello che ha sempre fatto, cioè sostituire la chat che stai guardando; ad
+aggiungere un riquadro è il trascinamento, che è un gesto che si fa apposta. La seconda: **una
+chat non può stare in due pannelli** — trascinare una già aperta la *sposta*, non la duplica —
+se no ci sarebbero due sottoscrizioni SSE sulla stessa sessione, cioè due copie dello stesso
+snapshot che possono divergere. La terza: sotto gli 860px il layout è **ignorato del tutto**,
+non rimpicciolito (§8 di `ui-schermate.md`); resta salvato però, quindi tornando su uno schermo
+largo i pannelli si ritrovano dov'erano — verificato ridimensionando la finestra avanti e
+indietro, non dedotto.
+
+L'albero della disposizione è **puro** (`ui/src/lib/layout.ts`, niente Svelte né DOM):
+`splitLeaf`, `closeLeaf`, `replaceLeaf`, `resizeSplit`, `reconcile`. È lì che sta la parte che
+si sbaglia davvero — dove finisce una foglia nuova, cosa collassa quando una sparisce — e lì si
+prova con `node` puro: `npm run layout:check`, **22** verifiche. Sta in `tools/` e non in
+`src/cli/` perché il `tsconfig.json` della radice ha `rootDir: src`, e un file lì che importa da
+`ui/` farebbe smettere di compilare `npm run build`.
+
+Nello Store `snap`/`link`/`view` **non sono più campi**: sono accessori sul pannello a fuoco.
+Il piano prevedeva di tenerli accanto ai pannelli durante la migrazione; due stati paralleli
+però possono divergere, e così invece tutto ciò che parla della «chat aperta» — Dock, Status,
+la barra laterale — non ha dovuto imparare niente di nuovo. Il layout vive nel **browser**
+(`localStorage['stark.layout']`), come il tema e la dimensione del testo: «tengo tre chat
+affiancate su questo schermo» è del dispositivo, non del progetto. Dentro finiscono solo id,
+mai snapshot — quelli si rileggono dal daemon, e salvarli vorrebbe dire mostrare al
+ricaricamento una conversazione ferma a ieri.
+
+Nessuna **intestazione di pannello** in più, contro il disegno iniziale: titolo e passaggio
+conversazione/effetti stanno già nella barra di `Conversation`/`Effects`, e una seconda riga
+sopra li avrebbe ripetuti rubando altezza a *ogni* pannello. Il `×` entra in quella barra con
+una prop `onClose`, che con un pannello solo non c'è — a una chat a schermo intero non si
+aggiunge niente.
+
+**Quattro difetti trovati misurando dal vivo, nessuno visibile leggendo il codice.** Il primo è
+il più istruttivo: `class="split {node.dir}"` produce `class="split row"`, e `app.css` ha già
+una `.row` globale — la riga di un tool. I pannelli ereditavano il suo `align-items:center` e
+restavano alti quanto il contenuto (245px su 900), col suo fondo e il suo bordo. Da lì
+`d-row`/`d-col`, e il divisore rinominato `.hdl`. Il secondo: con **una** chat sola `App` non
+montava `Workspace`, quindi non esisteva nessuna zona di rilascio — da un pannello non si
+sarebbe mai potuti arrivare a due. Il terzo: la persistenza non funzionava **mai**, perché
+l'indirizzo veniva onorato prima del layout salvato, e una scheda già aperta ha sempre un
+indirizzo `/chat/<id>`; adesso prima si rimettono i pannelli, poi la chat dell'indirizzo va a
+fuoco fra loro. Il quarto: `reconcile()` uniformava le proporzioni anche quando non cadeva
+nessuna foglia, cioè a ogni avvio — i divisori tornavano in mezzo e il ridimensionamento non si
+ricordava; ora si conservano e si rinormalizzano, in `reconcile` e in `closeLeaf`.
+
+Verificato dal vivo con Playwright su un daemon di prova con journal sintetici (costo zero di
+quota: tre conversazioni finte, nessun turno vero), a 1400 e 390px, leggendo i rettangoli veri
+oltre agli screenshot: split orizzontale (594+594×900), split verticale annidato dentro il
+destro (tre pannelli, 890/297/297 dopo il ridimensionamento), divisore trascinato e
+**ricaricamento** che restituisce le stesse identiche larghezze, chiusura che collassa il
+genitore rimasto con un figlio solo, e a 390px `.split`, `.pane`, `.hdl` e `×` **tutti a zero**
+col layout salvato intatto. `npm run check` resta **109**, `npm run layout:check` è nuovo a
+**22**, `svelte-check` 0 errori su 107 file.
+**Si arriva da fuori casa senza Tailscale, e si guida da Telegram** (27 agosto 2026,
+chiesti dall'utente: «vorrei collegarmi anche fuori casa senza Tailscale, o integrare
+cose come Telegram — come fa happy.engineering»).
+
+Il perimetro ora si **dichiara**: `STARK_PUBLIC_HOST` si somma a Tailscale invece di
+sostituirlo, e senza niente il default resta byte per byte quello di prima. Il dettaglio
+e il perché stanno in §Sicurezza; la macchina attorno (tunnel `ssh -R`, Traefik, mTLS, e
+le tre trappole che costano di più) in `docs/fuori-casa.md`. `npm run tunnel` misura se
+il tunnel strozza il flusso, a costo zero di quota: guarda **quando** arrivano i pezzi,
+non quanti, usando i battiti da 15 secondi invece di un prompt — perché un proxy che
+bufferizza li consegna tutti, solo tutti insieme alla fine, e contarli non distingue un
+flusso vivo da uno morto.
+
+**Il bot Telegram guida una sessione per intero**: si scrive e quello che mandi diventa
+un prompt, si leggono le risposte, si risponde ai permessi e alle domande con una
+tastiera, si cambia modello e modalità, si apre e si rinomina. Sta **dentro** il daemon
+(`src/daemon/telegram/`) perché un processo separato sarebbe un secondo detentore di
+`~/.stark/token` e dovrebbe rifare parser SSE, riconnessione e `applyTo`. Nessuna
+dipendenza: Telegram non pubblica un SDK Node, quindi l'ufficiale **è** l'HTTP Bot API —
+`grammy`/`telegraf` sarebbero un intermediario non ufficiale davanti a un'API ufficiale
+che è sei endpoint JSON. Long polling e non webhook, e non per comodità: un webhook
+vorrebbe una connessione **entrante**, cioè proprio ciò che `security.ts` esiste per non
+dover fare. Per questo il bot funziona da fuori casa **senza** l'accesso remoto: sono due
+lavori indipendenti.
+Il costo è dichiarato dove si accende: quel testo passa **per intero dai server di
+Telegram**, cifrato in transito ma **non** da capo a fondo — è la prima cosa in STARK a
+non esserlo, e più di quanto esce col Web Push. Il bot è spento di default, e spento vuol
+dire **assente**: senza token il ciclo non apre nessuna connessione.
+Il perimetro prima della potenza: chat privata soltanto, `chat_id` nell'elenco, mittente
+uguale alla chat. **A uno sconosciuto non si risponde niente** — un «non sei autorizzato»
+confermerebbe che dietro quel bot c'è uno STARK vivo e direbbe quando la macchina è
+accesa. L'accoppiamento (codice di 8 caratteri, solo l'hash su disco, 5 minuti, uso
+singolo, 3 tentativi, confronto a tempo costante) esiste perché il `chat_id` non è una
+cosa che l'utente conosce, e chiederglielo obbligherebbe il bot a rispondere a un
+estraneo.
+**Il difetto più istruttivo di tutto il giro**, trovato scrivendo la prova e non
+leggendo il codice: il bot teneva un proprio `SessionSnapshot` e ci applicava sopra gli
+eventi con `applyTo` — ma per una sessione **viva** `registry.snapshot()` restituisce
+*l'oggetto interno del registro*, quello che il daemon aggiorna e la UI legge. La seconda
+applicazione lo corrompeva: ogni delta contato due volte, ogni `turn.started` che apriva
+un turno gemello, e il disegno che guardava il gemello vuoto mentre le parti finivano
+nell'altro. Ora il bot **rilegge** lo snapshot al momento di disegnare e il `subscribe`
+è solo un segnale: un `applyTo` solo, quello del registro. L'invariante §4 non si è
+allentata, si è stretta.
+Un altro che vale la pena ricordare: i bottoni di un permesso **non spariscono al
+click**, spariscono quando `permission.replied` torna dal flusso — che è la stessa cosa
+che li fa sparire quando hai risposto **dal browser**. La verità sono gli eventi, mai il
+click, e senza questo si risponderebbe due volte alla stessa richiesta.
+Nello stesso giro `vigila` esce da `push.ts` e diventa `chiamate.ts` con un elenco di
+`Canale`: **una** decisione (`callFor`, che sta in `core/` esattamente per questo) e N
+canali. Due osservatori indipendenti avrebbero due mappe e due debounce, e basta uno
+scarto di 250 ms perché Telegram dica «ha finito» e il push no. Nell'estrazione è caduto
+un bug che c'era già: **un progetto silenziato taceva solo nella UI**, mentre il daemon
+mandava il push lo stesso. E `isDir` si è spostata da `server.ts` dentro
+`registry.open()`, dove nessun chiamante può saltarla.
+`npm run check` **133**, `npm run daemon` **52**, nuovo `npm run telegram` **54** contro
+un finto `api.telegram.org` (whitelist, accoppiamento, un turno che diventa un messaggio
+solo, permessi, domande, 429, 409, e che il bot token non torni mai indietro).
+Resta non fatto e dichiarato: mandare **foto** come allegati di un prompt; e la prova a
+mano dal telefono, che è l'unica che può dire come Telegram iOS mostra un messaggio
+modificato venti volte in un turno — l'incognita più grossa, col ripiego già progettato
+(`stream: 'a fine parte'`) se fosse insopportabile.
+
+Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
+risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
+chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
 cambiato quello vecchio. Restano i divieti veri (`deny`), e sul filone telefono la durata
 della credenziale (§5) e la seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora
@@ -1373,6 +1524,27 @@ Decisioni già prese:
 - **l'append-only del journal è una cosa da usare, non solo da rispettare**: chi rilegge un
   file che cresce in coda deve leggere la coda. Vale per l'elenco (da 619 ms a 0,13) e vale
   per chiunque altro dovrà rileggere un journal a ripetizione.
+- le chat si **affiancano** in pannelli ridimensionabili, aperti trascinando una riga
+  dell'elenco sul bordo (divide) o sul centro (sostituisce) di un pannello. Un clic
+  semplice continua a **sostituire** la chat a fuoco: aggiungere un riquadro è un gesto
+  che si fa apposta. Una chat sta in un pannello solo — trascinarne una già aperta la
+  sposta. Il layout sta nel browser, non sul daemon: è del dispositivo. Sotto gli 860px
+  è ignorato, non rimpicciolito, e resta salvato per quando lo schermo torna largo.
+- il **perimetro si allarga dichiarandolo** (`STARK_PUBLIC_HOST`), non facendo mentire un
+  proxy su `Host` e `Origin`: quella strada sposterebbe il perimetro in un file di
+  configurazione dove nessuno lo cerca e dove si rompe in silenzio. È una variabile
+  d'ambiente e non un'impostazione perché `settings.json` si scrive via `PUT
+  /api/settings`, e il perimetro non deve essere modificabile dalla superficie che
+  protegge.
+- il trasporto per l'accesso da fuori è un **VPS proprio** con Traefik, non un tunnel
+  Cloudflare: Cloudflare termina il TLS, quindi vedrebbe tutto in chiaro **e** potrebbe
+  scrivere verso un processo root. Costo accettato in cambio: il VPS entra nella TCB.
+  (Cloudflare Tunnel sarebbe gratis — Zero Trust è libero fino a 50 utenti — quindi la
+  scelta non è economica.)
+- **Telegram è un secondo modo di guidare STARK**, non un terzo canale di notifiche: per
+  questo ha una sezione sua nelle impostazioni e non un gruppo dentro Notifications.
+  Costo dichiarato dove si accende: è la prima cosa in STARK che esce dalla macchina
+  **non** cifrata da capo a fondo.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
@@ -1490,3 +1662,35 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
 STARK esegue comandi arbitrari **come root**. Quindi: ascolto su localhost per default,
 autenticazione obbligatoria per qualunque esposizione oltre localhost, apertura sulla LAN
 sempre come scelta esplicita dell'utente e mai come default.
+
+**Il perimetro si allarga dichiarandolo** (27 agosto 2026). Prima l'unico modo di far
+passare un hostname non-locale era che `tailscale status --json` lo dicesse: chi non usa
+Tailscale non aveva una strada. Ora c'è `STARK_PUBLIC_HOST`, che **somma** a Tailscale
+invece di sostituirlo. È una variabile d'ambiente e non un'impostazione per una ragione
+che decide da sola: `settings.json` si scrive via `PUT /api/settings`, cioè da una
+richiesta HTTP — e il perimetro non deve essere modificabile dalla superficie che
+protegge. L'alternativa scartata era far **mentire il proxy** (riscrivere `Host:
+127.0.0.1`, cancellare `Origin`): sposta il perimetro in un file di configurazione dove
+nessuno lo cerca, rende `/api/system` incapace di dire la verità, e si rompe in silenzio
+la prima volta che qualcuno tocca quel file.
+Quello che **non** si tocca, e il codice dice perché: `isLocal()` sull'indirizzo socket
+(ogni tunnel serio si ricollega dal loopback, e resta l'unica rete se l'ascolto finisse
+su `0.0.0.0`); `server.listen(port, '127.0.0.1')`; e `X-Forwarded-Proto`/`Forwarded`/
+`X-Forwarded-For`, che li scrive il client — dedurne `https` renderebbe la difesa
+sull'`Origin` teatro. Il confronto degli host è per **uguaglianza**, mai per suffisso:
+c'è una verifica apposta, perché `stark.dominio.it.attaccante.com` è il bug canonico di
+una lista di nomi. Niente wildcard, e le voci scartate si **stampano** all'avvio.
+Il costo si dice in quattro posti: log d'avvio, `/api/system` (che prima rispondeva
+`localhost only` come stringa fissa, cioè **mentiva già** con Tailscale acceso), Settings
+→ System, e `stark status`. Non è un interruttore nella UI: si accende sulla macchina e
+ha effetto al riavvio, perché il perimetro si legge una volta sola.
+Ricaduta corretta nello stesso giro: `soggetto()` in `push.ts` chiamava
+`detectTailnetHost()` per conto proprio — secondo `execFileSync` all'avvio e due verità
+che potevano differire. Ora il perimetro glielo passa il guard, ed è stato **visto
+fallire prima di essere corretto**: con `publicHosts` passata per parametro, il push
+stampava «nessun hostname pubblico» mentre il perimetro ne aveva uno.
+Come si mette in piedi la macchina attorno (tunnel `ssh -R`, Traefik, mTLS, e le tre
+trappole che costano di più): `docs/fuori-casa.md`. Come si verifica che il tunnel non
+strozzi il flusso: `npm run tunnel`, a costo zero di quota — misura **quando** arrivano
+i pezzi, non quanti, perché un proxy che bufferizza li consegna tutti, solo tutti
+insieme alla fine.

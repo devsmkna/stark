@@ -59,6 +59,11 @@ export function serveUi(req: IncomingMessage, res: ServerResponse, token: string
     // Gli asset hanno l'impronta nel nome, quindi si possono tenere per sempre.
     // La pagina no: cambia a ogni build e deve essere richiesta ogni volta.
     'cache-control': isPage ? 'no-store' : 'public, max-age=31536000, immutable',
+    // Il primo caricamento porta il token in query string (`/?token=…`, ed è così che
+    // funziona l'icona sulla schermata Home: iOS congela `start_url`). Senza questo,
+    // un link cliccato da dentro STARK se lo porterebbe dietro nel `Referer` fino a un
+    // sito qualunque. Su loopback era teorico; con un dominio pubblico non lo è più.
+    'referrer-policy': 'no-referrer',
   }
   if (isPage) {
     // `Secure` mancava. Su `http://127.0.0.1` non serviva: il browser tratta il

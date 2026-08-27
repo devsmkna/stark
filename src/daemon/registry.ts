@@ -295,6 +295,16 @@ export class Registry {
   }
 
   async open(spec: OpenSpec): Promise<string> {
+    // La cartella si controlla **qui**, non solo al confine HTTP.
+    //
+    // Ci stava già in `server.ts`, sulla rotta `POST /api/sessions`, e lì resta perché
+    // è quella che sa rispondere `400` con un motivo leggibile. Ma un secondo chiamante
+    // — un bot, una prova, un risveglio automatico — chiamerebbe questo metodo diretto
+    // e salterebbe il controllo, riaprendo il bug delle chat fantasma: senza
+    // `session.created` il journal resta un file di tre righe che l'elenco mostra come
+    // «chat senza cartella / stopped». Un invariante non si difende chiedendo a ogni
+    // chiamante di ricordarsene.
+    if (!isDir(spec.cwd)) throw new Error(`la cartella non esiste: ${spec.cwd}`)
     // Riprendere una conversazione riusa il suo id, così il journal continua invece di
     // biforcarsi. Un fork invece è una sessione nuova, e deve avere un journal nuovo.
     const id = spec.resume && !spec.resume.fork ? spec.resume.ref : randomUUID()
@@ -593,12 +603,12 @@ export class Registry {
    * risveglia, quindi importare e poter riprendere sono la stessa cosa fatta una volta.
    * Un journal già presente non si tocca — reimportare sopra raddoppierebbe la storia.
    */
-  async importSession(sessionId: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  async importSession(sessionId: string):
+    Promise<{ ok: true; id: string; profile?: string } | { ok: false; error: string }> {
     const b = backendFor()
-    const found = ((await b.listConversations?.(this.defaults.profile)) ?? [])
-      .find(t => t.sessionId === sessionId)
-    if (!found?.path) return { ok: false, error: 'trascritto non trovato su questa macchina' }
-    if (!b.importConversation) return { ok: false, error: 'questo agent non ha conversazioni da importare' }
+    if (!b.locateConversation || !b.importConversation) {
+      return { ok: false, error: 'questo agent non ha conversazioni da importare' }
+    }
 
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
     const journal = new Journal(dest, sessionId)
@@ -606,8 +616,24 @@ export class Registry {
       journal.close()
       return { ok: false, error: 'già importata' }
     }
+
+    // Si cerca per **id**, non dentro l'elenco delle importabili — quello sono le più
+    // recenti, un limite pensato per una schermata da sfogliare, e un id scritto a
+    // mano può essere vecchio quanto si vuole. Dove guardare, e in quali profili, lo
+    // sa l'agent: il `ref` che torna è **opaco** (per Claude Code è il percorso del
+    // trascritto) e da qui non si guarda dentro.
+    const trovata = b.locateConversation(sessionId, this.defaults.profile)
+    if (!trovata) {
+      // Nessun residuo: il journal appena creato e mai scritto se ne va, se no
+      // resterebbe una chat senza `cwd` in mezzo a quelle vere — stessa disciplina
+      // di `open()`, e stessa ragione.
+      journal.close()
+      rmSync(dest, { force: true })
+      return { ok: false, error: 'trascritto non trovato su questa macchina' }
+    }
+
     try {
-      const { events } = b.importConversation(found.path)
+      const { events } = b.importConversation(trovata.ref)
       // `session.resumeRef` per primo: senza, il journal saprebbe dire cosa è successo
       // ma non come tornarci, e la conversazione importata resterebbe da guardare e
       // basta. L'ora è quella del primo fatto, non di adesso: una conversazione di due
@@ -618,7 +644,7 @@ export class Registry {
       journal.close()
     }
     this.bump()
-    return { ok: true, id: sessionId }
+    return { ok: true, id: sessionId, ...(trovata.profile ? { profile: trovata.profile } : {}) }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -879,4 +905,9 @@ export class Registry {
       this.retire(id)
     }))
   }
+}
+
+/** La cartella c'è ed è una cartella. Un percorso che non si può leggere non lo è. */
+export function isDir(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
 }

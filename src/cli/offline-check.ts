@@ -6,12 +6,13 @@
 // specifica marca come trappole, così che se un domani smettono di essere gestiti il
 // test lo dica invece di scoprirlo la UI.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
 import { callFor } from '../core/calls.ts'
-import { vigila, type Push, type PushPayload } from '../daemon/push.ts'
+import { vigila, type Canale } from '../daemon/chiamate.ts'
+import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
@@ -22,6 +23,7 @@ import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.t
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
+import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
@@ -1057,13 +1059,21 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   // `never`. Qui non c'è niente da restringere.
   const svegliatori: Array<() => void> = []
   const sveglia = (): void => { for (const s of svegliatori) s() }
+  let silenzioso = false
   const finto = {
     list: () => [{ id: 's1', title: 'sistema il bug', state: stato, cwd: '/casa/progetto' }],
     watchAll: (f: () => void) => { svegliatori.push(f); return () => { svegliatori.length = 0 } },
+    settings: (): { projects: Record<string, { muted?: boolean }> } =>
+      ({ projects: silenzioso ? { '/casa/progetto': { muted: true } } : {} }),
   }
   const mandate: PushPayload[] = []
-  const spia = { manda: async (p: PushPayload) => { mandate.push(p) } } as unknown as Push
-  vigila(finto, spia)
+  const spia: Canale = { disponibile: true, manda: async (p: PushPayload) => { mandate.push(p) } }
+  // Un secondo canale, per provare che la decisione è **una** e i canali sono N: senza,
+  // due osservatori indipendenti potrebbero dire cose diverse sullo stesso cambio.
+  const altre: PushPayload[] = []
+  const spia2: Canale = { disponibile: true, manda: async (p: PushPayload) => { altre.push(p) } }
+  const spento: Canale = { disponibile: false, manda: async () => { throw new Error('non doveva essere chiamato') } }
+  vigila(finto, [spia, spia2, spento])
 
   stato = 'idle'
   sveglia()
@@ -1085,6 +1095,226 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   await new Promise(r => setTimeout(r, 400))
   check('§notifiche: stato invariato → nessuna seconda notifica', mandate.length === 1,
     `${mandate.length}`)
+  check('§notifiche: tutti i canali disponibili ricevono la stessa chiamata',
+    altre.length === 1 && altre[0]?.sessionId === mandate[0]?.sessionId)
+
+  // Un progetto silenziato taceva solo nella UI: il daemon mandava il push lo stesso.
+  // Cioè silenziare un progetto spegneva l'unica metà che si vedeva.
+  silenzioso = true
+  stato = 'busy'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  stato = 'idle'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  check('§notifiche: un progetto silenziato tace anche sul daemon', mandate.length === 1,
+    `${mandate.length}`)
+
+  // E riaccenderlo lo rimette a parlare senza riavviare niente: le impostazioni si
+  // rileggono a ogni giro, non si catturano all'avvio.
+  silenzioso = false
+  stato = 'busy'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  stato = 'idle'; sveglia(); await new Promise(r => setTimeout(r, 400))
+  check('§notifiche: togliendo il silenzio torna a chiamare, senza riavvio',
+    mandate.length === 2, `${mandate.length}`)
+}
+
+// ─── Telegram: il testo, che è la parte che si può provare senza un bot ────
+//
+// Perdere un messaggio su questo canale vuol dire perdere una risposta dell'agent, e il
+// modo in cui si perde è un `400 Bad Request` per dell'HTML che Telegram non accetta.
+// Quindi si prova qui, dove costa zero.
+{
+  const { aHtml, escapa, spezza, TETTO } = await import('../daemon/telegram/testo.ts')
+
+  check('§telegram: i tre caratteri di HTML si escapano',
+    escapa('a & b < c > d') === 'a &amp; b &lt; c &gt; d', escapa('a & b < c > d'))
+  // Il caso vero: l'agent scrive del codice dentro una frase, e quel `<` non deve
+  // diventare un tag — Telegram rifiuterebbe il messaggio intero.
+  check('§telegram: un `<` dell\'agent non diventa un tag',
+    !/<div/.test(aHtml('usa <div> qui')), aHtml('usa <div> qui'))
+
+  const conFence = aHtml('prima\n```ts\nconst a = 1 < 2\n```\ndopo')
+  check('§telegram: un fence diventa <pre><code class="language-ts">',
+    conFence.includes('<pre><code class="language-ts">') && conFence.includes('1 &lt; 2'), conFence)
+  check('§telegram: il testo attorno al fence resta',
+    conFence.startsWith('prima') && conFence.endsWith('dopo'), conFence)
+
+  // L'agent tronca i blocchi quando finisce lo spazio: un fence lasciato aperto deve
+  // chiudersi da sé, o l'HTML è rotto e il messaggio non parte.
+  const troncato = aHtml('ecco:\n```js\nconst a = 1')
+  check('§telegram: un fence non chiuso non produce HTML rotto',
+    (troncato.match(/<pre>/g) ?? []).length === (troncato.match(/<\/pre>/g) ?? []).length, troncato)
+
+  check('§telegram: il code inline diventa <code>',
+    aHtml('scrivi `npm run check` ora').includes('<code>npm run check</code>'))
+  // Dentro un blocco di codice un backtick è un carattere, non sintassi.
+  check('§telegram: dentro un fence il backtick non apre niente',
+    !aHtml('```\nuse `x` here\n```').includes('<code>x</code>'))
+
+  // Il taglio si conta **dopo** l'escape: `&amp;` sono cinque caratteri, non uno.
+  {
+    const lungo = 'a & b\n'.repeat(2000)
+    const pezzi = spezza(aHtml(lungo))
+    check('§telegram: nessun pezzo supera il tetto di Telegram',
+      pezzi.every(p => p.length <= TETTO), pezzi.map(p => p.length).join(','))
+    check('§telegram: spezzare non perde testo',
+      pezzi.join('').replace(/\n/g, '') === aHtml(lungo).replace(/\n/g, ''))
+  }
+  // Un blocco di codice più lungo del tetto: si chiude e si riapre. Perdere
+  // l'evidenziazione è meglio che perdere il messaggio.
+  {
+    const pezzi = spezza(aHtml('```\n' + 'riga di codice\n'.repeat(500) + '```'))
+    const bilanciati = pezzi.every(p =>
+      (p.match(/<pre>/g) ?? []).length === (p.match(/<\/pre>/g) ?? []).length)
+    check('§telegram: un fence più lungo del tetto resta bilanciato in ogni pezzo',
+      pezzi.length > 1 && bilanciati, `${pezzi.length} pezzi`)
+  }
+  check('§telegram: un testo corto resta un pezzo solo', spezza('ciao').length === 1)
+}
+
+// ─── Telegram: come si legge un turno ──────────────────────────────────────
+{
+  const { turno } = await import('../daemon/telegram/render.ts')
+  const { reduce: red } = await import('../core/reduce.ts')
+  const ev = (payload: unknown, seq: number): CanonicalEvent =>
+    ({ v: 1, seq, ts: 1000 + seq, sessionId: 'x', payload } as CanonicalEvent)
+
+  const snap = red([
+    ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'sistema il diff' }] }, 1),
+    ev({ k: 'tool.started', callId: 'c1', name: 'Read' }, 2),
+    ev({ k: 'tool.input.ended', callId: 'c1', input: {}, summary: 'src/core/diff.ts', intent: 'leggo come si fanno gli hunk' }, 3),
+    ev({ k: 'tool.ended', callId: 'c1', ok: true, output: '…' }, 4),
+    ev({ k: 'tool.started', callId: 'c2', name: 'Bash' }, 5),
+    ev({ k: 'tool.input.ended', callId: 'c2', input: {}, summary: 'grep -rn "hunk" src/' }, 6),
+    ev({ k: 'text.started', partId: 'p' }, 7),
+    ev({ k: 'text.delta', partId: 'p', delta: 'ecco cosa ho trovato' }, 8),
+  ], 'x')
+  const t = snap.turns[0]!
+  const reso = turno(t)
+
+  // Quando l'agent ha scritto **perché**, è quello a fare da riga: «cerco chi lo usa»
+  // invece di `grep -rn …`. Il comando resta, in monospace, ma non è ciò che si legge
+  // scorrendo. È la stessa scelta della UI (F2).
+  check('§telegram: la motivazione dell\'agent fa da riga, il riassunto le sta accanto',
+    reso.includes('leggo come si fanno gli hunk') && reso.includes('<code>src/core/diff.ts</code>'), reso)
+  check('§telegram: senza motivazione resta il riassunto da solo',
+    reso.includes('grep -rn') && !reso.includes('<code>grep'), reso)
+  check('§telegram: un tool ancora aperto si distingue da uno finito',
+    reso.includes('⏳ grep') && reso.includes('· leggo'), reso)
+  check('§telegram: il prompt sta in testa e la risposta in coda',
+    reso.startsWith('▶ <b>sistema il diff</b>') && reso.trimEnd().endsWith('ecco cosa ho trovato'), reso)
+
+  const finito = red([
+    ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'ciao' }] }, 1),
+    ev({ k: 'turn.ended', turnId: 't', reason: 'aborted', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 2),
+  ], 'x').turns[0]!
+  check('§telegram: un turno fermato dall\'utente non si legge come un errore',
+    turno(finito).startsWith('⏹'), turno(finito))
+
+  // Il testo deve essere **stabile**: se non cambia non si manda niente, e quello è ciò
+  // che tiene il bot dentro i limiti di Telegram.
+  check('§telegram: la resa è stabile a parità di stato', turno(t) === reso)
+
+  // Venti tool non fanno venti righe: le ultime otto, e il resto si conta.
+  {
+    const molti = []
+    let seq = 1
+    molti.push(ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'tanto' }] }, seq++))
+    for (let i = 0; i < 20; i++) {
+      molti.push(ev({ k: 'tool.started', callId: `c${i}`, name: 'Read' }, seq++))
+      molti.push(ev({ k: 'tool.input.ended', callId: `c${i}`, input: {}, summary: `file${i}.ts` }, seq++))
+    }
+    const reso2 = turno(red(molti, 'x').turns[0]!)
+    check('§telegram: venti operazioni diventano otto righe più un conteggio',
+      reso2.includes('+12 prima') && reso2.includes('file19.ts') && !reso2.includes('file7.ts'), reso2)
+  }
+}
+
+// ─── Finder di sistema: pickFolderNative con un `exec` finto ────────────────
+//
+// `pickFolderNative` non apre mai un dialogo vero qui: il seam d'iniezione (il
+// parametro `exec`, di default `run`) esiste apposta per poterla provare senza un
+// processo reale né un dialogo di sistema — vedi la revisione finale del piano.
+{
+  type FakeExec = Parameters<typeof pickFolderNative>[0]
+  const ok = (async () => ({ stdout: '/percorso/scelto\n', stderr: '' })) as unknown as FakeExec
+  const cancelled = (async () => ({ stdout: '', stderr: '' })) as unknown as FakeExec
+  const boom = (async () => { throw new Error('comando non trovato') }) as unknown as FakeExec
+
+  const rOk = await pickFolderNative(ok)
+  check('§browse: pickFolderNative — successo restituisce il percorso scelto',
+    rOk.ok === true && rOk.path === '/percorso/scelto', JSON.stringify(rOk))
+
+  const rCancelled = await pickFolderNative(cancelled)
+  check('§browse: pickFolderNative — annullo (stdout vuoto) restituisce ok:false',
+    rCancelled.ok === false, JSON.stringify(rCancelled))
+
+  let threw = false
+  let rBoom: Awaited<ReturnType<typeof pickFolderNative>> | undefined
+  try {
+    rBoom = await pickFolderNative(boom)
+  } catch {
+    threw = true
+  }
+  check('§browse: pickFolderNative — comando assente/errore non risale, torna ok:false',
+    !threw && rBoom?.ok === false, JSON.stringify({ threw, rBoom }))
+}
+
+// ─── §resume: importSession cerca per nome file, in tutti i profili ─────────
+//
+// Due profili Claude finti sullo stesso filesystem temporaneo, con dentro un
+// trascritto ciascuno. `HOME` va spostata perché `listProfiles` elenca le cartelle
+// `~/.claude*` della casa dell'utente: senza, i profili finti non esisterebbero per
+// lei. E `STARK_HOME` va assegnata **prima** di importare `registry.ts`, che la
+// risolve una volta sola al load del modulo — per questo l'import è dinamico, non
+// statico (un `import` statico verrebbe issato in cima al file, cioè eseguito prima
+// dell'assegnazione: la stessa trappola già documentata per `npm run daemon`).
+{
+  const casaPrima = process.env['HOME']
+  const starkPrima = process.env['STARK_HOME']
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-resume-'))
+  const starkHome = resolve(casa, '.stark')
+  process.env['HOME'] = casa
+  process.env['STARK_HOME'] = starkHome
+
+  /** Un profilo Claude finto con dentro un trascritto minimo ma vero. */
+  const profiloFinto = (nome: string, sessionId: string, cwd: string): string => {
+    const root = resolve(casa, nome)
+    const proj = resolve(root, 'projects', '-tmp-proj')
+    mkdirSync(proj, { recursive: true })
+    writeFileSync(resolve(proj, `${sessionId}.jsonl`), JSON.stringify({
+      type: 'user', uuid: 'u1', timestamp: '2024-01-02T03:04:05.000Z', cwd,
+      message: { role: 'user', content: [{ type: 'text', text: 'ciao' }] },
+    }) + '\n')
+    return root
+  }
+
+  const ID_DEFAULT = '11111111-1111-4111-8111-111111111111'
+  const ID_ALTRO = '22222222-2222-4222-8222-222222222222'
+  const ID_ASSENTE = '33333333-3333-4333-8333-333333333333'
+  const dirDefault = profiloFinto('.claude', ID_DEFAULT, '/tmp/proj-default')
+  const dirAltro = profiloFinto('.claude-altro', ID_ALTRO, '/tmp/proj-altro')
+
+  const { Registry } = await import('../daemon/registry.ts')
+  const reg = new Registry({ profile: dirDefault })
+
+  const rDefault = await reg.importSession(ID_DEFAULT)
+  check('§resume: trova un trascritto per id anche fuori dai 60 più recenti',
+    rDefault.ok === true && rDefault.id === ID_DEFAULT && rDefault.profile === undefined,
+    JSON.stringify(rDefault))
+
+  const rAltro = await reg.importSession(ID_ALTRO)
+  check('§resume: cerca anche in un profilo diverso da quello di default',
+    rAltro.ok === true && rAltro.profile === dirAltro,
+    JSON.stringify({ rAltro, atteso: dirAltro }))
+
+  const rAssente = await reg.importSession(ID_ASSENTE)
+  const orfano = resolve(starkHome, 'sessioni', `${ID_ASSENTE}.jsonl`)
+  check('§resume: un id assente in ogni profilo torna errore chiaro, nessun journal orfano',
+    rAssente.ok === false && /non trovato/.test((rAssente as { error: string }).error)
+      && !existsSync(orfano),
+    JSON.stringify({ rAssente, orfano: existsSync(orfano) }))
+
+  if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
+  if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
+  rmSync(casa, { recursive: true, force: true })
 }
 
 // ─── §5: la modalità la decide il CLI, non solo noi ─────────────────────────

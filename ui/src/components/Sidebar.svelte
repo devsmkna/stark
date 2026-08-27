@@ -294,6 +294,13 @@
               class:on={row.id === store.selected}
               class:zz={section.g === 'Sleeping'}
               onclick={() => void store.select(row.id)}
+              draggable="true"
+              ondragstart={e => {
+                e.dataTransfer?.setData('text/stark-chat-id', row.id)
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+                store.draggingChat = row.id
+              }}
+              ondragend={() => { store.draggingChat = null }}
               oncontextmenu={e => openMenu(e, row)}
             >
               <div style="flex:1;text-align:left">

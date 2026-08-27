@@ -36,6 +36,10 @@ export type SessionRow = {
 /** Le sottocartelle di un percorso, per il dialogo «apri path» di New chat. */
 export type BrowseResult = { path: string; parent: string | null; dirs: string[]; error?: string }
 
+/** L'esito del Finder di sistema: `ok:false` copre sia l'annullo sia un errore — la
+ *  UI li tratta identici (silenzioso), quindi non c'è bisogno di distinguerli qui. */
+export type NativePickResult = { ok: true; path: string } | { ok: false }
+
 export type OpenSpec = {
   cwd: string
   model?: string
@@ -89,6 +93,19 @@ export type Storage = {
   bytes: number
 }
 
+/** Perché è spento, quando lo è: mai «non funziona» senza il motivo. */
+export type BotStato =
+  | { fase: 'spento' }
+  | { fase: 'in-ascolto' }
+  | { fase: 'errore'; motivo: string }
+
+export type TelegramInfo = {
+  hasToken: boolean
+  username?: string
+  stato: BotStato
+  chats?: { chatId: number; nome: string; da: number }[]
+}
+
 export type SystemInfo = {
   url: string
   port: number
@@ -108,6 +125,13 @@ export type SystemInfo = {
     id: string; available: boolean
     modes: { mode: string; label?: string; available: boolean; reason?: string; note?: string }[]
   }[]
+  /** Chi può parlare col daemon oltre a questa macchina. `open: false` è il default:
+   *  aprire il perimetro si fa sulla macchina (`STARK_PUBLIC_HOST`, o Tailscale), e ha
+   *  effetto al riavvio del daemon — quindi non è un interruttore che sta qui. */
+  perimeter: { open: boolean; hosts: { host: string; source: 'tailscale' | 'env' }[] }
+  /** Il Finder nativo è disponibile su QUESTA esecuzione del daemon, ricalcolato a
+   *  ogni richiesta — non è una proprietà stabile della macchina. */
+  nativeFolderPicker: boolean
 }
 
 export type LinkStatus = 'connecting' | 'live' | 'lost'
@@ -204,6 +228,34 @@ export class Api {
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
 
+  // ── Telegram ────────────────────────────────────────────────────────────────
+  //
+  // Il bot token si manda e basta: non torna mai indietro. Chi ce l'ha può mettersi in
+  // ascolto al posto di questo STARK e **leggere** tutto quello che manda — non guidare,
+  // perché il suo chat_id non è nell'elenco, ma leggere è già la conversazione.
+  telegram(): Promise<TelegramInfo> { return this.json('/api/telegram') }
+  setTelegramToken(token: string): Promise<{ stato: BotStato; username?: string }> {
+    return this.json('/api/telegram', { method: 'PUT', body: JSON.stringify({ token }) })
+  }
+  forgetTelegram(): Promise<{ ok: boolean }> {
+    return this.json('/api/telegram', { method: 'DELETE' })
+  }
+  pairTelegram(): Promise<{ code: string; scade: number; username?: string }> {
+    return this.json('/api/telegram/pair', { method: 'POST' })
+  }
+  unpairTelegram(chatId: number): Promise<{ ok: boolean }> {
+    return this.json(`/api/telegram/chats/${chatId}`, { method: 'DELETE' })
+  }
+  testTelegram(): Promise<{ ok: boolean; chats: number }> {
+    return this.json('/api/telegram/test', { method: 'POST' })
+  }
+
+  /** Apre il Finder di sistema sulla macchina del daemon. Annullo o fallimento
+   *  tornano `{ok:false}`: non è un'eccezione, la UI resta ferma senza avvisi. */
+  browseNative(): Promise<NativePickResult> {
+    return this.json('/api/browse-native', { method: 'POST' })
+  }
+
   /** F3: apre il gestore di file della macchina su `path`. Un rifiuto (file sparito
    *  dal disco, gestore che non parte) è una frase da mostrare, non un'eccezione. */
   async reveal(path: string): Promise<Ack> {
@@ -272,7 +324,7 @@ export class Api {
     return this.json('/api/importable')
   }
 
-  async doImport(sessionId: string): Promise<Ack & { id?: string }> {
+  async doImport(sessionId: string): Promise<Ack & { id?: string; profile?: string }> {
     const res = await fetch('/api/importable', {
       method: 'POST',
       headers: { ...this.auth, 'content-type': 'application/json' },

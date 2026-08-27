@@ -21,8 +21,8 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { CALL_HEAD, callFor, type Call } from '../core/calls.ts'
-import { detectTailnetHost } from './security.ts'
+import type { Call } from '../core/calls.ts'
+import { perimetro, type Perimetro } from './security.ts'
 
 /** Cosa il browser ci consegna quando si iscrive. La forma è quella dello standard. */
 export type Subscription = {
@@ -62,7 +62,13 @@ export class Push {
   #path: string
   #stato: Stato
 
-  constructor(home: string) {
+  /**
+   * Il perimetro arriva da fuori, dal guard: è **la stessa** decisione, e chiederlo
+   * qui una seconda volta significherebbe rileggere l'ambiente e ottenere una risposta
+   * diversa da quella che il daemon sta davvero applicando (succede appena qualcuno
+   * passa `publicHosts` per parametro, com'è giusto che facciano le prove).
+   */
+  constructor(home: string, perim: Perimetro = perimetro()) {
     this.#path = resolve(home, 'push.json')
     this.disponibile = webpush !== null
 
@@ -79,7 +85,7 @@ export class Push {
       this.#salva()
     }
     if (webpush && this.#stato.vapid.publicKey) {
-      webpush.setVapidDetails(soggetto(), this.#stato.vapid.publicKey, this.#stato.vapid.privateKey)
+      webpush.setVapidDetails(soggetto(perim), this.#stato.vapid.publicKey, this.#stato.vapid.privateKey)
     }
   }
 
@@ -143,60 +149,7 @@ export class Push {
   }
 }
 
-/** Il minimo che serve da una riga dell'elenco: non si importa il registro per non
- *  legare le notifiche a com'è fatto lui. */
-type Riga = { id: string; title: string; state: string; cwd?: string }
 
-/**
- * Guarda l'elenco e manda il push quando una conversazione cambia stato in un modo che
- * merita di chiamarti. È la stessa regola del browser (`callFor` in `core/calls.ts`),
- * di proposito: due copie vorrebbero dire che un giorno il telefono suona e il
- * portatile no, e nessuno saprebbe quale dei due ha ragione.
- *
- * Perché qui e non nella UI: la UI può farlo solo mentre è aperta. Questo gira nel
- * daemon, quindi vale a schermo spento, con Safari chiuso, e persino con il telefono
- * in tasca dall'altra parte della città — che è l'unico caso in cui una notifica
- * serve davvero.
- */
-export function vigila(
-  registry: { list(): Riga[]; watchAll(f: () => void): () => void },
-  push: Push,
-): () => void {
-  // Lo stato di partenza si prende **prima** di iscriversi, e il primo giro non
-  // notifica niente: senza, riavviare il daemon manderebbe una raffica di «ha finito»
-  // per conversazioni ferme da ore. Lo stesso motivo per cui la UI ha `#greeted`.
-  let prima = new Map(registry.list().map(r => [r.id, r.state]))
-
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const guarda = (): void => {
-    timer = null
-    const righe = registry.list()
-    const dopo = new Map(righe.map(r => [r.id, r.state]))
-    for (const r of righe) {
-      const era = prima.get(r.id)
-      if (era === undefined || era === r.state) continue
-      const kind = callFor(era, r.state)
-      if (!kind) continue
-      void push.manda({
-        kind,
-        title: `${CALL_HEAD[kind]} · ${cartella(r.cwd)}`,
-        body: r.title,
-        sessionId: r.id,
-      })
-    }
-    prima = dopo
-  }
-
-  // Stessa attesa del flusso dell'elenco, e per la stessa ragione: un turno solo
-  // produce decine di eventi al secondo, e `list()` rilegge i journal da disco.
-  return registry.watchAll(() => { if (timer === null) timer = setTimeout(guarda, 250) })
-}
-
-/** Il nome del progetto: l'ultimo pezzo del percorso, come nell'elenco della UI. */
-function cartella(cwd?: string): string {
-  if (!cwd) return 'no folder'
-  return cwd.replace(/\/+$/, '').split('/').pop() || cwd
-}
 
 /**
  * Il `sub` della VAPID. Non è burocrazia: Apple **valida** che sia un indirizzo o un
@@ -206,13 +159,18 @@ function cartella(cwd?: string): string {
  * si ripiega su un `mailto:` e lo si dice, perché in quel caso il telefono non è
  * comunque raggiungibile da fuori casa.
  */
-function soggetto(): string {
+export function soggetto(p: Perimetro = perimetro()): string {
   const env = process.env['STARK_VAPID_SUBJECT']
   if (env) return env
-  const host = detectTailnetHost()
-  if (host) return `https://${host}`
-  console.error('[push] nessun hostname Tailscale: uso un mailto: di ripiego per il `sub` della VAPID.\n'
+  // Il primo host del perimetro, quale che sia la fonte. Se è quello dichiarato con
+  // `STARK_PUBLIC_HOST` è pure **il** dominio da cui la PWA è servita, quindi è la
+  // risposta più corretta possibile alla domanda «chi manda questa notifica».
+  const primo = p.ammessi[0]
+  if (primo) return `https://${primo.host}`
+  console.error('[push] nessun hostname pubblico: uso un mailto: di ripiego per il `sub` della VAPID.\n'
     + '       Se le notifiche non arrivano sull\'iPhone è quasi certamente questo — imposta\n'
-    + '       STARK_VAPID_SUBJECT=mailto:tuo@indirizzo, oppure accendi Tailscale.')
+    + '       STARK_VAPID_SUBJECT=mailto:tuo@indirizzo, oppure dichiara il nome pubblico\n'
+    + '       in STARK_PUBLIC_HOST (o accendi Tailscale).')
   return 'mailto:stark@localhost'
 }
+
