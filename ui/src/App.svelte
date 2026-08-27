@@ -84,9 +84,10 @@
         </div>
       </div>
     {:else if store.snap && store.view === 'effects'}
-      <Effects {store} snap={store.snap} />
+      <Effects {store} snap={store.snap} id={store.selected ?? ''} setView={v => store.show(v)} />
     {:else if store.snap}
-      <Conversation {store} snap={store.snap} link={store.link} />
+      <Conversation {store} snap={store.snap} link={store.link}
+        id={store.selected ?? ''} setView={v => store.show(v)} />
     {:else if store.selected}
       <div class="mid">Opening…</div>
     {:else if store.loaded && store.rows.length === 0}
