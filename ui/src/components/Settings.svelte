@@ -10,7 +10,7 @@
   // perché cambiano cosa fa l'agent e devono valere da qualunque browser; il tema e i
   // suoni restano nel browser, perché sono del dispositivo.
   import Icon from './Icon.svelte'
-  import type { Storage, SystemInfo } from '../lib/api.ts'
+  import type { Storage, SystemInfo, TelegramInfo } from '../lib/api.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
@@ -20,7 +20,7 @@
 
   let { store }: { store: Store } = $props()
 
-  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'appearance' | 'storage' | 'system'
+  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'telegram' | 'appearance' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
    *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
@@ -32,6 +32,11 @@
     { id: 'agent', nome: 'Agent', icona: 'i-brain' },
     { id: 'projects', nome: 'Projects', icona: 'i-folder' },
     { id: 'notifications', nome: 'Notifications', icona: 'i-bell' },
+    // Sezione sua, non un gruppo dentro Notifications: il bot non è un canale di
+    // notifiche, è un **secondo modo di guidare STARK**, e metterlo lì direbbe una
+    // cosa falsa. Dentro Notifications resta una riga che porta qui, perché è dove
+    // uno lo cerca.
+    { id: 'telegram', nome: 'Telegram', icona: 'i-plane' },
     { id: 'appearance', nome: 'Appearance', icona: 'i-palette' },
     { id: 'storage', nome: 'Storage', icona: 'i-disk' },
     { id: 'system', nome: 'System', icona: 'i-monitor' },
@@ -119,7 +124,62 @@
     if ((sez === 'system' || sez === 'projects') && !system) {
       void store.api.system().then(s => { system = s }, e => { errore = String(e.message ?? e) })
     }
+    // Anche Notifications, perché lì c'è la riga che dice se il bot è acceso: senza
+    // questa, quella riga direbbe «off» a un bot in ascolto finché non apri la sezione.
+    if ((sez === 'telegram' || sez === 'notifications') && !tg) void ricaricaTg()
   })
+
+  // ─── Telegram ─────────────────────────────────────────────────────────────
+
+  let tg = $state<TelegramInfo | null>(null)
+  let bozzaToken = $state('')
+  let salvando = $state(false)
+  let provato = $state(false)
+  let codice = $state('')
+  let restano = $state(0)
+  let orologio: ReturnType<typeof setInterval> | null = null
+
+  const ricaricaTg = async (): Promise<void> => {
+    try { tg = await store.api.telegram() } catch (e) { errore = String((e as Error).message ?? e) }
+  }
+  const salvaTg = async (): Promise<void> => {
+    salvando = true
+    // Si ricarica dal daemon invece di fidarsi della risposta: `getMe` è già stata
+    // chiamata di là, quindi qui si vede subito se il token era falso — che è il motivo
+    // per cui questo campo non risponde «salvato» e basta.
+    try { await store.api.setTelegramToken(bozzaToken.trim()); bozzaToken = ''; await ricaricaTg() }
+    catch (e) { errore = String((e as Error).message ?? e) }
+    finally { salvando = false }
+  }
+  const scordaTg = async (): Promise<void> => {
+    try { await store.api.forgetTelegram(); codice = ''; await ricaricaTg() }
+    catch (e) { errore = String((e as Error).message ?? e) }
+  }
+  const provaTg = async (): Promise<void> => {
+    try { await store.api.testTelegram(); provato = true; setTimeout(() => { provato = false }, 2000) }
+    catch (e) { errore = String((e as Error).message ?? e) }
+  }
+  const staccaTg = async (chatId: number): Promise<void> => {
+    try { await store.api.unpairTelegram(chatId); await ricaricaTg() }
+    catch (e) { errore = String((e as Error).message ?? e) }
+  }
+  const accoppiaTg = async (): Promise<void> => {
+    try {
+      const r = await store.api.pairTelegram()
+      codice = r.code
+      // Il conto alla rovescia è l'unico orologio al secondo di tutta la UI, e vive solo
+      // mentre il codice esiste: cinque minuti sono lunghi da guardare senza sapere
+      // quanto ne resta, e un codice scaduto senza dirlo sembra un codice sbagliato.
+      if (orologio) clearInterval(orologio)
+      const aggiorna = (): void => {
+        restano = Math.max(0, Math.round((r.scade - Date.now()) / 1000))
+        if (restano === 0) { codice = ''; if (orologio) clearInterval(orologio); orologio = null; void ricaricaTg() }
+      }
+      aggiorna()
+      orologio = setInterval(aggiorna, 1000)
+    } catch (e) { errore = String((e as Error).message ?? e) }
+  }
+  $effect(() => () => { if (orologio) clearInterval(orologio) })
 
   const mb = (n: number): string =>
     n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`
@@ -454,11 +514,96 @@
           browser: it is a fact about the project.</div>
         </div>
 
+        <div class="fgroup">
+          <div class="flabel">Somewhere else entirely</div>
+          <div class="nrow" style="cursor:pointer" onclick={() => { sez = 'telegram'; dentro = true }}
+            role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') { sez = 'telegram'; dentro = true } }}>
+            <div><div class="nn">Telegram</div><div class="nd">not just being told — writing back</div></div>
+            <span class="rt" style="color:var(--accent);font-weight:600">
+              {tg?.stato.fase === 'in-ascolto' ? `on · ${tg.chats?.length ?? 0} phones` : 'off'} →</span>
+          </div>
+          <div class="hint">A Telegram bot is a <b>second way to drive STARK</b>, not a third
+          channel for these notifications — which is why it has its own section. It costs more
+          privacy than push does, and that section says exactly how much.</div>
+        </div>
+
         <div class="notice">
           <Icon name="i-bell" />
           <span><b>The dot in the list is not a notification.</b> It only works if you are already
           looking at STARK, and the whole point of these is being able to look somewhere else.</span>
         </div>
+
+      <!-- ─── Telegram ────────────────────────────────────────────────── -->
+      {:else if sez === 'telegram'}
+        <div class="fgroup">
+          <div class="flabel">Bot</div>
+          {#if tg?.hasToken}
+            <div class="kv">
+              <span class="k2">Bot</span><span class="v2">@{tg.username ?? '…'}</span>
+              <span class="k2">Status</span>
+              <span class="v2">{tg.stato.fase === 'in-ascolto' ? 'listening'
+                : tg.stato.fase === 'errore' ? tg.stato.motivo : 'off'}</span>
+            </div>
+            <div class="nrow">
+              <div><div class="nn">Send a test</div><div class="nd">to every paired phone</div></div>
+              <span class="rt"><button class="btn" disabled={tg.stato.fase !== 'in-ascolto'}
+                onclick={() => void provaTg()}>{provato ? 'Sent' : 'Send'}</button></span>
+            </div>
+            <div class="nrow">
+              <div><div class="nn">Forget this bot</div><div class="nd">token and paired phones, all of it</div></div>
+              <span class="rt"><button class="btn" onclick={() => void scordaTg()}>Forget</button></span>
+            </div>
+          {:else}
+            <div class="hint">Make a bot with <b>@BotFather</b> on Telegram — <code>/newbot</code>,
+            pick a name — and paste the token it gives you. It stays on this machine, in
+            <code>~/.stark/telegram.json</code> with <code>0600</code>.</div>
+            <div class="nrow">
+              <input class="field" style="flex:1;min-width:0" type="password"
+                placeholder="123456:AA…" bind:value={bozzaToken}
+                onkeydown={(e) => { if (e.key === 'Enter' && bozzaToken.trim()) void salvaTg() }} />
+              <span class="rt"><button class="btn" disabled={!bozzaToken.trim() || salvando}
+                onclick={() => void salvaTg()}>{salvando ? 'Checking…' : 'Save'}</button></span>
+            </div>
+          {/if}
+          {#if tg?.stato.fase === 'errore'}
+            <div class="notice"><Icon name="i-plane" /><span>{tg.stato.motivo}</span></div>
+          {/if}
+        </div>
+
+        {#if tg?.hasToken}
+          <div class="fgroup">
+            <div class="flabel">Paired phones</div>
+            {#if (tg.chats?.length ?? 0) === 0}
+              <div class="hint">None yet. A bot answers anyone who knows its name, so STARK
+              answers <b>nobody</b> until you pair a phone here.</div>
+            {:else}
+              {#each tg.chats ?? [] as c}
+                <div class="nrow">
+                  <div><div class="nn">{c.nome}</div>
+                    <div class="nd">paired {new Date(c.da).toLocaleDateString()}</div></div>
+                  <span class="rt"><button class="btn" onclick={() => void staccaTg(c.chatId)}>Revoke</button></span>
+                </div>
+              {/each}
+            {/if}
+            <div class="nrow">
+              <div><div class="nn">Pair a phone</div><div class="nd">a code, good for five minutes</div></div>
+              <span class="rt"><button class="btn" disabled={tg.stato.fase !== 'in-ascolto'}
+                onclick={() => void accoppiaTg()}>Pair</button></span>
+            </div>
+            {#if codice}
+              <div class="notice"><Icon name="i-plane" />
+                <span>Open <b>t.me/{tg.username}</b> on your phone and send
+                <code>/start {codice}</code>. It expires in {restano}s, and works once.</span></div>
+            {/if}
+          </div>
+        {/if}
+
+        <div class="hint"><b>What this costs, plainly.</b> What you write to the bot and what the
+        agent answers go <b>through Telegram's servers, in full</b>. They are encrypted in
+        transit, but <b>not</b> end to end: a bot chat is not a Secret Chat, and Telegram can read
+        it. That is more than the push notifications above, where an encrypted title travels that
+        not even Apple can open. It is the price of being able to <b>drive</b> from outside
+        instead of only being told — and it is off until you turn it on.</div>
 
       <!-- ─── Appearance ──────────────────────────────────────────────── -->
       {:else if sez === 'appearance'}

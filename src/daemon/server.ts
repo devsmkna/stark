@@ -15,6 +15,7 @@ import { reveal } from './reveal.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
+import { Telegram } from './telegram/index.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -111,12 +112,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // spento nella scheda del browser non gira niente. Senza iscrizioni non fa nulla e
   // non costa nulla — vedi `push.ts`.
   const push = new Push(STARK_HOME, guard.perimetro)
-  // Un osservatore solo, e i canali dentro: quando arriverà Telegram si aggiunge qui,
-  // non accanto — vedi `chiamate.ts`.
-  vigila(registry, [push])
+  // Il secondo canale, e il primo che serve anche a *guidare*. Spento vuol dire assente:
+  // senza un bot token `avvia()` non apre nessuna connessione. Vedi `telegram/index.ts`.
+  const telegram = new Telegram(STARK_HOME, registry)
+  void telegram.avvia()
+
+  // Un osservatore solo, e i canali dentro — vedi `chiamate.ts`.
+  vigila(registry, [push, telegram])
 
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push)
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telegram)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -142,7 +147,7 @@ async function route(
   guard: ReturnType<typeof createGuard>, registry: Registry, token: string,
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
-  port: () => number, configDir?: string, push?: Push,
+  port: () => number, configDir?: string, push?: Push, telegram?: Telegram,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -205,6 +210,56 @@ async function route(
         body: 'Se leggi questo, le notifiche sul telefono funzionano.', sessionId: '',
       })
       return send(res, 200, { ok: true, iscritti: push.quanti })
+    }
+
+    // ── Telegram ─────────────────────────────────────────────────────────────
+    //
+    // Il bot token **non torna mai indietro**: chi ce l'ha può mettersi in ascolto al
+    // posto di questo STARK e leggere tutto quello che manda. Si scrive, non si rilegge.
+    if (method === 'GET' && path === '/api/telegram') {
+      if (!telegram) return send(res, 200, { hasToken: false, stato: { fase: 'spento' } })
+      return send(res, 200, {
+        hasToken: telegram.haToken,
+        username: telegram.username,
+        stato: telegram.situazione,
+        chats: telegram.accoppiate,
+      })
+    }
+    if (method === 'PUT' && path === '/api/telegram') {
+      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
+      const b = await readJson<{ token?: string }>(req)
+      if (!b?.token?.trim()) return send(res, 400, { error: 'token obbligatorio' })
+      // Risponde con quello che è successo davvero — `getMe` è già stata chiamata —
+      // invece di un `ok` che rimanderebbe a scoprire un token sbagliato la prima volta
+      // che serviva. Stessa idea del «Send a test» delle notifiche.
+      const stato = await telegram.imposta(b.token.trim())
+      return send(res, 200, { stato, username: telegram.username })
+    }
+    if (method === 'DELETE' && path === '/api/telegram') {
+      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
+      await telegram.dimentica()
+      return send(res, 200, { ok: true })
+    }
+    if (method === 'POST' && path === '/api/telegram/pair') {
+      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
+      if (!telegram.disponibile) return send(res, 409, { error: 'il bot non è in ascolto' })
+      return send(res, 200, { ...telegram.creaCodice(), username: telegram.username })
+    }
+    if (method === 'POST' && path === '/api/telegram/test') {
+      if (!telegram?.disponibile) return send(res, 503, { error: 'il bot non è in ascolto' })
+      await telegram.manda({
+        kind: 'done', title: 'STARK · prova',
+        body: 'Se leggi questo, il bot è collegato a questa macchina.', sessionId: '',
+      })
+      return send(res, 200, { ok: true, chats: telegram.accoppiate.length })
+    }
+    {
+      const m = /^\/api\/telegram\/chats\/(-?\d+)$/.exec(path)
+      if (m && method === 'DELETE') {
+        if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
+        telegram.revoca(Number(m[1]))
+        return send(res, 200, { ok: true })
+      }
     }
 
     if (method === 'GET' && path === '/api/sessions') {

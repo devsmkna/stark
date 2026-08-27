@@ -823,6 +823,60 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
     mandate.length === 2, `${mandate.length}`)
 }
 
+// ─── Telegram: il testo, che è la parte che si può provare senza un bot ────
+//
+// Perdere un messaggio su questo canale vuol dire perdere una risposta dell'agent, e il
+// modo in cui si perde è un `400 Bad Request` per dell'HTML che Telegram non accetta.
+// Quindi si prova qui, dove costa zero.
+{
+  const { aHtml, escapa, spezza, TETTO } = await import('../daemon/telegram/testo.ts')
+
+  check('§telegram: i tre caratteri di HTML si escapano',
+    escapa('a & b < c > d') === 'a &amp; b &lt; c &gt; d', escapa('a & b < c > d'))
+  // Il caso vero: l'agent scrive del codice dentro una frase, e quel `<` non deve
+  // diventare un tag — Telegram rifiuterebbe il messaggio intero.
+  check('§telegram: un `<` dell\'agent non diventa un tag',
+    !/<div/.test(aHtml('usa <div> qui')), aHtml('usa <div> qui'))
+
+  const conFence = aHtml('prima\n```ts\nconst a = 1 < 2\n```\ndopo')
+  check('§telegram: un fence diventa <pre><code class="language-ts">',
+    conFence.includes('<pre><code class="language-ts">') && conFence.includes('1 &lt; 2'), conFence)
+  check('§telegram: il testo attorno al fence resta',
+    conFence.startsWith('prima') && conFence.endsWith('dopo'), conFence)
+
+  // L'agent tronca i blocchi quando finisce lo spazio: un fence lasciato aperto deve
+  // chiudersi da sé, o l'HTML è rotto e il messaggio non parte.
+  const troncato = aHtml('ecco:\n```js\nconst a = 1')
+  check('§telegram: un fence non chiuso non produce HTML rotto',
+    (troncato.match(/<pre>/g) ?? []).length === (troncato.match(/<\/pre>/g) ?? []).length, troncato)
+
+  check('§telegram: il code inline diventa <code>',
+    aHtml('scrivi `npm run check` ora').includes('<code>npm run check</code>'))
+  // Dentro un blocco di codice un backtick è un carattere, non sintassi.
+  check('§telegram: dentro un fence il backtick non apre niente',
+    !aHtml('```\nuse `x` here\n```').includes('<code>x</code>'))
+
+  // Il taglio si conta **dopo** l'escape: `&amp;` sono cinque caratteri, non uno.
+  {
+    const lungo = 'a & b\n'.repeat(2000)
+    const pezzi = spezza(aHtml(lungo))
+    check('§telegram: nessun pezzo supera il tetto di Telegram',
+      pezzi.every(p => p.length <= TETTO), pezzi.map(p => p.length).join(','))
+    check('§telegram: spezzare non perde testo',
+      pezzi.join('').replace(/\n/g, '') === aHtml(lungo).replace(/\n/g, ''))
+  }
+  // Un blocco di codice più lungo del tetto: si chiude e si riapre. Perdere
+  // l'evidenziazione è meglio che perdere il messaggio.
+  {
+    const pezzi = spezza(aHtml('```\n' + 'riga di codice\n'.repeat(500) + '```'))
+    const bilanciati = pezzi.every(p =>
+      (p.match(/<pre>/g) ?? []).length === (p.match(/<\/pre>/g) ?? []).length)
+    check('§telegram: un fence più lungo del tetto resta bilanciato in ogni pezzo',
+      pezzi.length > 1 && bilanciati, `${pezzi.length} pezzi`)
+  }
+  check('§telegram: un testo corto resta un pezzo solo', spezza('ciao').length === 1)
+}
+
 // ─── Finder di sistema: pickFolderNative con un `exec` finto ────────────────
 //
 // `pickFolderNative` non apre mai un dialogo vero qui: il seam d'iniezione (il
