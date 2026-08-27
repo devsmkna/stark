@@ -990,6 +990,86 @@ Tre cose che OpenCode ha e Claude Code no, già coperte da `Capabilities`:
 `session.next.tool.progress`, `session.next.revert.staged|committed|cleared`, e le domande
 `question.v2.asked`. Nessuna richiede di cambiare la forma del modello: sono eventi in più.
 
+### La prova di carico vera — sonda P21, 27 agosto 2026
+
+Quanto sopra è stato letto in uno spec. ADR-012 esiste perché **leggere uno spec non è farci
+passare dei dati**, e questa è la parte scritta dopo averceli fatti passare: `opencode serve`
+1.17.20 su una cartella di prova, `nemotron-3-ultra-free`, quattro giri, con un turno che legge un
+file, ne scrive uno nuovo e lancia un comando. La sonda è `spike/opencode/p21-tool-permesso.mjs`
+e non traduce niente di proposito: cattura i payload grezzi su un JSONL, così il confronto si
+rifà a costo zero invece di ribruciare un giro ogni volta che ci si accorge di non aver guardato
+un campo.
+
+**Dove il modello regge, regge per la ragione giusta.** `text.*`, `reasoning.*`, `step.*` e
+`permission.*` corrispondono nome per nome, e il payload di un permesso è quasi il nostro:
+`{ id, sessionID, action, resources, save, source }` contro
+`{ requestId, action, resources, savable }`. Non è una coincidenza — è §14 che li aveva presi da
+qui. Il modello tiene dove è stato disegnato **su OpenCode**, e si piega dove è stato disegnato
+su Claude Code. È esattamente l'informazione per cui la prova esisteva.
+
+**1. Lo spec dichiara `properties`, il filo manda `data`.** Ogni evento sul canale SSE ha la forma
+`{ id, type, durable?, location, data }`; gli schemi `Event*` di `GET /doc` dicono `properties`.
+Costato un giro intero: il permesso *era arrivato*, la sonda non lo riconosceva e non lo
+concedeva mai. Sta scritto dentro la sonda perché è il genere di errore che si paga due volte.
+
+**2. `file.edited` e `session.diff` non arrivano.** La riga della tabella qui sopra è corretta a
+tavolino e **falsa sul campo**: una `write` che ha creato davvero un file (verificato su disco)
+non ha prodotto nessuno dei due, in nessun giro. L'effetto c'è, ma **dentro il risultato del
+tool** — `tool.success.structured = { operation:"write", target, resource, existed:false }` —
+e **senza hunks**. Il diff su OpenCode si **chiede** (`GET /session/{sessionID}/diff`), non
+arriva.
+Conseguenza concreta: la schermata Effetti poggia su `file.edited` con `hunks`, che Claude Code
+regala dentro il risultato del tool. Su OpenCode quegli hunks l'adapter deve **costruirseli**.
+Non è un difetto del livello canonico — `file.edited` con gli hunks *è* il fatto che l'utente
+vuole vedere — è un costo dell'adapter, e va messo in conto adesso invece che scoprirlo a
+schermata già scritta.
+
+**3. `turn.ended` non ha una controparte, e `session.idle` non si è mai visto.** Lo schema
+`EventSessionIdle` esiste (`type: "session.idle"`), ma su quattro giri — compreso quello finito
+bene, con il testo conclusivo e il tool riuscito — **non è mai arrivato**. Quello che c'è è
+`session.next.step.ended` con `finish` (`"tool-calls"` quando il turno prosegue). Quindi in
+OpenCode «il turno è finito» è una **deduzione del client**, non un fatto annunciato, mentre in
+Claude Code è annunciato. Il modello canonico è qui più ricco di uno dei due agent, e va bene
+così: `turn.ended` è la cosa che la UI deve sapere, e produrlo è mestiere dell'adapter. Resta da
+capire **a quale condizione** dedurlo senza sbagliare — un `finish` diverso da `tool-calls` è il
+candidato, ma non è ancora misurato su abbastanza casi.
+
+**4. La coppia `tool.input.ended` si compone da due eventi.** `session.next.tool.input.ended`
+porta solo `text`, cioè il grezzo accumulato; l'input **parsato** sta in
+`session.next.tool.called` (`{ tool, input, provider }`). E l'esito non è un flag: sono due
+eventi distinti, `tool.success` e `tool.failed`, contro il nostro `tool.ended { ok }`. Nessuno
+dei due è sbagliato e la traduzione è meccanica — vale la pena notarlo solo perché la tabella
+sopra faceva sembrare la corrispondenza 1:1 e non lo è.
+
+**5. OpenCode numera già gli eventi.** `durable: { aggregateID, seq, version }`, cioè un
+progressivo **per sessione**, che è la stessa cosa che §4 fa assegnare a STARK. Non è un
+conflitto oggi, ma è la prima volta che si vede un agent con un ordinamento proprio, e per un
+journal append-only che deve poter riprendere (§13) quel numero è più autorevole del nostro.
+
+**6. Ogni evento porta `location.directory`.** Un solo `opencode serve` serve più cartelle: il
+flusso è globale e va filtrato. STARK ha una sessione per processo, quindi il modello non cambia
+— ma l'adapter deve filtrare, e dimenticarsene vorrebbe dire mescolare due progetti.
+
+**7. `todo.updated` esiste, e corregge una conclusione di ieri.** §16.10 registra che `TodoWrite`
+non è fra i 32 tool di Claude Code 2.1.241, il che è vero. Da lì era stato concluso troppo: che
+la checklist fosse un ricordo di una TUI che non c'è più. OpenCode ha `todo.updated` con
+`{ sessionID, todos }`, una chiave di permesso `todowrite` e `GET /session/{sessionID}/todo`.
+Quindi non è un residuo: è **un concetto di dominio che il modello canonico non ha**. È la prima
+cosa che la prova di carico ha trovato mancante, ed è mancante per il motivo previsto da ADR-012
+— il modello ha seguito un agent solo.
+
+**8. `session.next.retried` è un fatto che l'utente non vede.** `{ attempt, error }`. Su Claude
+Code il ritentativo lo fa l'SDK sotto e non affiora, quindi STARK non ha mai avuto motivo di
+modellarlo. Un turno che riprova tre volte e uno che parte al primo colpo sono la stessa cosa
+sullo schermo, e non sono la stessa cosa.
+
+**Cosa NON si è potuto misurare.** La chiave OpenCode Zen di questa macchina può usare **un solo
+modello** (`nemotron-3-ultra-free`): il catalogo ne elenca 29 a chiunque, gli altri rispondono
+`401 Model … is not supported`. E quel modello si rompe spesso a metà turno («Invalid
+opencode/openai-compatible-chat stream event»), il che ha reso necessario spezzare la prova in
+scenari corti. Restano quindi non visti dal vivo: `question.v2.asked`, il `revert`, la
+compattazione, il cambio di agent, `tool.progress`. Sono nello spec, non nei dati.
+
 ### Una premessa di ADR-006 è risultata sbagliata
 
 ADR-006 dava per scontato che l'allowlist auto-alimentata fosse **specifica di Claude Code** e
@@ -1069,6 +1149,11 @@ cui `Capabilities` dovrà lavorare davvero.
    suo `system:init` (verificato leggendo la cattura nativa di una sessione vera, non i tipi).
    Il canale con cui il CLI racconta oggi un lavoro in corso è quello del §7. Se un domani il
    tool tornasse, va rifatta la verifica — non dedotta dal ricordo.
+   **Corretto il 27 agosto dalla sonda P21** (§15): quanto sopra è vero *di Claude Code
+   2.1.241*, e da lì era stato concluso troppo — che la checklist fosse un ricordo di una TUI
+   che non c'è più. OpenCode ha `todo.updated`, la chiave di permesso `todowrite` e
+   `GET /session/{sessionID}/todo`. È un concetto di **dominio** che il modello canonico non
+   ha, non un residuo: la domanda giusta non è «il tool esiste?» ma «il fatto esiste?».
 
 ---
 
