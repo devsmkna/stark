@@ -17,6 +17,7 @@ import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
+import { passeggero } from '../adapters/opencode/adapter.ts'
 import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
@@ -925,6 +926,18 @@ check('diff: forma unificata, numeri di riga coerenti',
   check('OpenCode: la checklist si traduce, e una voce senza testo si scarta',
     td[0]?.k === 'todo.updated' && td[0].todos.length === 1
     && td[0].todos[0]?.priority === 'high', JSON.stringify(td))
+
+  // Cosa si ritenta e cosa no. La riga che conta e' l'ultima: una chiave che non
+  // abilita un modello non cambia idea riprovando, e insistere li' farebbe aspettare
+  // l'utente tre volte nascondendogli l'unica cosa da leggere.
+  check('OpenCode: un 503 «Endpoint is unavailable» e\' passeggero, si riprova',
+    passeggero('Provider request failed with HTTP 503: Endpoint is unavailable.'))
+  check('OpenCode: anche un rate limit e un timeout',
+    passeggero('Rate limit exceeded') && passeggero('HTTP 429') && passeggero('request timeout'))
+  check('OpenCode: «Model X is not supported» NON si ritenta',
+    !passeggero('Provider request failed with HTTP 401: Model kimi-k2.5-free is not supported'))
+  check('OpenCode: e nemmeno un errore che non dice niente di passeggero',
+    !passeggero('Invalid opencode/openai-compatible-chat stream event'))
 
   check('OpenCode: il modello si scrive `provider/id`',
     modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')

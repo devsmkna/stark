@@ -23,6 +23,28 @@ import { modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.t
 
 type Client = Awaited<ReturnType<typeof clientPer>>
 
+/** Quante volte STARK riprova da se'. Tre come il terminale, misurato nel suo log. */
+const RITENTATIVI = 3
+
+/**
+ * L'errore puo' passare da solo?
+ *
+ * Si guarda il **testo**, e va detto perche' e' brutto: `step.failed` porta
+ * `error.message` e non un codice, quindi non c'e' un campo pulito da confrontare.
+ * L'alternativa — ritentare su tutto — farebbe aspettare l'utente tre volte per una
+ * chiave sbagliata, che e' l'unica cosa che dovrebbe invece leggere subito.
+ */
+export function passeggero(motivo: string): boolean {
+  const m = motivo.toLowerCase()
+  // `not supported` e `401` NON entrano: una chiave che non abilita un modello non
+  // cambia idea riprovando.
+  if (m.includes('not supported') || m.includes('401') || m.includes('unauthor')) return false
+  return /\b(429|500|502|503|504)\b/.test(m)
+    || m.includes('unavailable') || m.includes('overload')
+    || m.includes('rate limit') || m.includes('timeout')
+    || m.includes('temporarily')
+}
+
 /** Il modello nella forma che OpenCode vuole: `providerID/id`, o solo `id`. */
 function refModello(model: string): { providerID: string; id: string } | undefined {
   if (!model || model === 'default') return undefined
@@ -64,6 +86,11 @@ export class OpenCodeAdapter implements AgentSession {
   private preso = false
   /** Chi aspetta che il turno finisca (`settled`). */
   private attese: Array<() => void> = []
+  /** L'ultimo prompt mandato, per poterlo rimandare se lo step fallisce di striscio. */
+  private ultimoPrompt: { text: string; files?: unknown[] } | null = null
+  private tentativi = 0
+  /** Lo Stop dell'utente: da li' in poi non si ritenta piu' niente. */
+  private fermato = false
 
   constructor(spec: SessionSpec, hooks: AdapterHooks) {
     this.spec = spec
@@ -174,11 +201,58 @@ export class OpenCodeAdapter implements AgentSession {
     // risposta**, e il traduttore e' una funzione pura di proposito.
     if (e.type === 'permission.v2.asked') { await this.unPermesso(d); return }
     if (e.type === 'question.v2.asked') { await this.unaDomanda(d); return }
+    if (e.type === 'session.next.step.failed' && await this.forseRitenta(d)) return
 
     for (const p of this.tr.translate(e)) {
       this.emit(p)
       if (p.k === 'turn.ended') this.sveglia()
     }
+  }
+
+  /**
+   * Uno step fallito per una ragione **passeggera**: si riprova.
+   *
+   * ─── Perche' questo esiste, misurato il 27 agosto 2026 ────────────────────
+   *
+   * Segnalazione dell'utente: «big-pickle risponde dal terminale, non capisco perche'
+   * qui no». Aveva ragione, e la causa non e' il modello — sono due strade diverse
+   * dentro OpenCode, viste nel suo log:
+   *
+   *   dal terminale   `stream error ... Endpoint is unavailable` x3, poi la risposta
+   *   dalla rotta v2  `LLM.Error: RequestExecutor.execute: ... HTTP 503`, una volta
+   *
+   * La prima ritenta, la seconda no — e la storia della sessione non contiene un solo
+   * `session.next.retried`. Su un modello instabile il terminale insiste e STARK
+   * mollava al primo colpo: cioe' STARK poteva **meno** del CLI, che e' la cosa che non
+   * deve mai succedere (Principio 5).
+   *
+   * Quindi ritenta STARK, e **lo dice**: `session.retried` e' l'evento modellato lo
+   * stesso giorno, e la riga nel flusso spiega la pausa invece di lasciarla misteriosa.
+   *
+   * Non si ritenta su tutto. Un 401 «modello non supportato» o una chiave sbagliata non
+   * migliorano riprovando: insistere li' vorrebbe dire far aspettare l'utente per
+   * niente e nascondergli l'unica cosa che deve leggere.
+   */
+  private async forseRitenta(d: Record<string, unknown>): Promise<boolean> {
+    const err = (d['error'] ?? {}) as Record<string, unknown>
+    const motivo = String(err['message'] ?? '')
+    if (!this.ultimoPrompt || this.fermato) return false
+    if (this.tentativi >= RITENTATIVI) return false
+    if (!passeggero(motivo)) return false
+
+    this.tentativi++
+    this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })
+    // Un po' di attesa crescente: riprovare nello stesso istante ha buone probabilita'
+    // di trovare l'altro capo ancora giu'.
+    await new Promise(r => setTimeout(r, 1500 * this.tentativi))
+    if (this.fermato) return false
+    await this.client?.v2.session.prompt({
+      sessionID: this.sessionId,
+      ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
+      prompt: this.ultimoPrompt,
+      delivery: 'queue',
+    } as never).catch(() => { /* il prossimo `step.failed` chiudera' il turno */ })
+    return true
   }
 
   private async unPermesso(d: Record<string, unknown>): Promise<void> {
@@ -282,6 +356,19 @@ export class OpenCodeAdapter implements AgentSession {
     this.emit({ k: 'turn.started', turnId, prompt: parti })
     this.emit({ k: 'session.state', state: 'busy' })
 
+    // Si tiene da parte per poterlo **rimandare**: la rotta v2 non ritenta da se' su un
+    // errore passeggero del provider, e senza questo STARK mollerebbe dove il terminale
+    // insiste (vedi `forseRitenta`). I contatori ripartono a ogni prompt nuovo.
+    const invio = {
+      text,
+      ...(images.length
+        ? { files: images.map(i => ({ mime: i.mediaType, url: `data:${i.mediaType};base64,${i.data}`, ...(i.name ? { filename: i.name } : {}) })) }
+        : {}),
+    }
+    this.ultimoPrompt = invio
+    this.tentativi = 0
+    this.fermato = false
+
     // `delivery: 'queue'` — la fila FIFO **e' del protocollo**, non da costruire. Su
     // Claude Code STARK ha dovuto scriversela sopra (consegna uno alla volta, a
     // sessione ferma) perche' il CLI fondeva in un turno solo i prompt consegnati
@@ -290,12 +377,7 @@ export class OpenCodeAdapter implements AgentSession {
     void this.client?.v2.session.prompt({
       sessionID: this.sessionId,
       ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
-      prompt: {
-        text,
-        ...(images.length
-          ? { files: images.map(i => ({ mime: i.mediaType, url: `data:${i.mediaType};base64,${i.data}`, ...(i.name ? { filename: i.name } : {}) })) }
-          : {}),
-      },
+      prompt: invio,
       delivery: 'queue',
     } as never).catch((err: unknown) => {
       this.emit({ k: 'session.error', message: String(err), fatal: false })
@@ -306,6 +388,9 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
+    // Chi preme il quadrato rosso non vuole che STARK riprovi mezzo secondo dopo.
+    this.fermato = true
+    this.ultimoPrompt = null
     // «Idle interruption is a no-op», dice la rotta: fermare una sessione ferma non e'
     // un errore. Quindi non serve guardare prima se sta lavorando.
     await this.client?.v2.session.interrupt({ sessionID: this.sessionId })
