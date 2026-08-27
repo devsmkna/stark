@@ -418,6 +418,56 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .pjrow:last-child{border-bottom:0}
 .pjrow .pjn{flex:1;min-width:0}
 .pjrow .pjp{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
+
+/* ─── l'helper: la chat di lato, un sesto di schermo ───────────────────────────
+   Le misure sono quelle vere. 186px dentro un mock largo 1124 e' esattamente un
+   sesto, cioe' quello che si vede su una finestra di quella larghezza: la colonna
+   e' stretta sul serio, e va guardata stretta invece che immaginata. */
+.helper{width:186px;flex:none;display:flex;flex-direction:column;background:var(--surface);border-left:1px solid var(--line-2)}
+.hbar{display:flex;align-items:center;gap:6px;padding:8px 9px;border-bottom:1px solid var(--line);flex:none}
+.hbar .ic{width:13px;height:13px;color:var(--muted);flex:none}
+.hbar .t{font-weight:600;font-size:11.5px;flex:1;min-width:0}
+.hbar .hb{color:var(--muted);display:flex;padding:1px}
+.hconv{flex:1;padding:9px;display:flex;flex-direction:column;gap:8px;font-size:11px}
+/* Il blu vuol dire «qui parli tu», come nel resto di STARK. */
+.hq{background:var(--user-bg);border-radius:7px 7px 7px 2px;padding:5px 7px;color:var(--ink);align-self:flex-start}
+.ha{color:var(--ink-2);line-height:1.5}
+.ha b{color:var(--ink)}
+.ha code{font-size:.85em;padding:0 3px}
+/* Un tool che ha letto qualcosa: una riga sola. In sola lettura sono gli unici che ci sono. */
+.htool{display:flex;align-items:center;gap:5px;font-size:9.5px;color:var(--muted);font-family:var(--mono)}
+.htool .ic{width:11px;height:11px;flex:none}
+.htool span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdock{border-top:1px solid var(--line);flex:none;position:relative}
+.hinput{margin:7px 8px 5px;border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;color:var(--muted);font-size:10.5px}
+.hstatus{display:flex;align-items:center;gap:5px;padding:0 8px 7px;font-size:9.5px}
+.hstatus .tune{padding:1px 4px;gap:3px;font-size:9.5px;min-height:calc(1.45em + 4px)}
+.hstatus .tune .ic{width:10px;height:10px;color:var(--muted)}
+.hstatus .mdl{flex:1;min-width:0;justify-content:space-between}
+/* `read-only` non e un comando: e un fatto, e non deve avere il vestito di un chip
+   premibile. Niente bordo, niente fondo: solo il segno e la parola, in muted. */
+.hstatus .ro{display:inline-flex;align-items:center;gap:3px;color:var(--muted);flex:none}
+.hstatus .ro .ic{width:10px;height:10px}
+.hstatus .mdl .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Il menu e' piu' largo del pannello e sfora a sinistra, sopra la conversazione:
+   `anthropic/claude-sonnet-5` dentro 186px non si leggerebbe, e un elenco di modelli
+   troncati non e' un elenco di modelli. */
+.hpop{position:absolute;right:6px;bottom:calc(100% + 6px);width:290px;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;box-shadow:0 8px 28px rgba(16,20,32,.18);padding:4px;z-index:6}
+.hpop .pg{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:7px 8px 3px;display:flex;align-items:center;gap:6px}
+.hpop .pg .cnt{font-weight:500;letter-spacing:0;text-transform:none;opacity:.75}
+.hpop .mi{display:flex;align-items:center;gap:7px;padding:4px 8px;border-radius:6px;font-size:10.5px;color:var(--ink)}
+.hpop .mi .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hpop .mi.on{background:var(--accent-soft);font-weight:600}
+.hpop .mi .tick{color:var(--accent);display:flex}
+.hpop .mi .tick .ic{width:11px;height:11px}
+.hpop .mi.dim{color:var(--muted);font-style:italic}
+/* Spento con la ragione, mai nascosto: e' la regola del progetto, non una cortesia. */
+.hpop .mi.off{color:var(--muted)}
+.hpop .mi.off .why{font-size:9.5px;color:var(--muted);opacity:.85;flex:none}
+.hpop .mi.off .ic{width:11px;height:11px;color:var(--muted);flex:none}
+/* Il bordo che si trascina. 3px invisibili, il cursore dice che si puo'. */
+.hgrip{position:absolute;left:-2px;top:0;bottom:0;width:5px;cursor:col-resize}
+.helper{position:relative}
 </style>
 
 <svg style="display:none" aria-hidden="true">
@@ -1066,6 +1116,198 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       <i>cosa ha fatto</i>. Un file toccato due volte compare una volta nella prima, due nella seconda.</div>
       <div><b>Il comando fallito</b> nel flusso scorre via e l&rsquo;agent si corregge da solo. Qui resta,
       e si conta.</div>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- l'helper -->
+  <section class="sec" id="helper">
+    <p class="eyebrow">Aggiunta del 27 agosto 2026</p>
+    <h2>L&rsquo;helper: la domanda che ti viene sul momento</h2>
+    <p>Una chat di lato, larga <b>un sesto</b>, che non &egrave; un lavoro. Serve alla domanda che
+    arriva mentre ne stai seguendo un altro &mdash; <i>cos&rsquo;&egrave; un cgroup</i>, <i>questa regex cosa
+    fa</i> &mdash; e che oggi costringe ad aprire una chat vera, che finisce nell&rsquo;elenco e ci resta.</p>
+    <p>Tre cose la rendono un&rsquo;altra cosa dalle chat, non una chat piccola: <b>non compare
+    nell&rsquo;elenco</b> e non ha un progetto; <b>&egrave; di sola lettura</b>, quindi non pu&ograve; scrivere n&eacute;
+    lanciare comandi; e <b>non lascia niente</b> &mdash; vive in memoria, e chiudendo STARK non
+    &egrave; mai esistita.</p>
+
+    <div class="eyebrow" style="margin-top:24px">Chiuso &mdash; un&rsquo;icona nella barra, e nient&rsquo;altro</div>
+    <div class="mock" style="height:150px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Il daemon muore col terminale</div><div class="meta">14:12 <span class="sst working">working</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; systemd-run --user</span></div></div></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="bar">
+          <div class="t">Il daemon muore col terminale</div>
+          <button class="effbtn"><b>3</b> files &middot; <b>18</b> commands <svg class="ic"><use href="#i-bars"/></svg></button>
+          <span class="iconb"><svg class="ic"><use href="#i-chat"/></svg></span>
+          <span class="iconb"><svg class="ic"><use href="#i-moon"/></svg></span>
+        </div>
+        <div class="conv" style="padding:12px">
+          <div style="color:var(--muted);font-size:11px">&hellip; la conversazione, larga come sempre &hellip;</div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px"><div>L&rsquo;icona sta <b>nella barra della chat</b>, accanto
+    alla luna, non nell&rsquo;elenco a sinistra: apre qualcosa che compare a destra, e un comando che
+    apre una cosa dovrebbe stare dalla parte in cui quella cosa arriva.</div></div>
+
+    <div class="eyebrow" style="margin-top:30px">Aperto &mdash; un sesto, a destra di tutto</div>
+    <div class="mock" style="height:430px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Il daemon muore col terminale</div><div class="meta">14:12 <span class="sst working">working</span></div><div class="act"><svg class="ic"><use href="#i-term"/></svg><span>Bash &middot; systemd-run --user</span></div></div></div>
+          <div class="gstate">Sleeping</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-pay)"></i> api-pagamenti</div>
+          <div class="sit zz"><div style="flex:1"><div class="ttl">Retry failed payments</div><div class="meta">09:31 <span class="sst sleeping">sleeping</span></div></div></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="bar">
+          <div class="t">Il daemon muore col terminale</div>
+          <button class="effbtn"><b>3</b> files &middot; <b>18</b> commands <svg class="ic"><use href="#i-bars"/></svg></button>
+          <span class="iconb" style="background:var(--accent-soft);color:var(--accent);border-color:transparent"><svg class="ic"><use href="#i-chat"/></svg></span>
+          <span class="iconb"><svg class="ic"><use href="#i-moon"/></svg></span>
+        </div>
+        <div class="conv" style="padding:12px;gap:8px">
+          <div class="turn"><div class="th"><span class="cx">&#9662;</span><span class="tm">14:09</span><span class="q">perch&eacute; il daemon muore se chiudo il terminale?</span></div></div>
+          <div style="color:var(--ink-2);font-size:11px;line-height:1.55"><b>Riprodotto.</b> <code>detached:true</code> chiama <code>setsid()</code>, che stacca dal <b>terminale</b> &mdash; e infatti il SIGHUP non arriva. Ma systemd non traccia i processi per sessione: li traccia per <b>cgroup</b>, e un figlio eredita quello del padre&hellip;</div>
+          <div class="doing" style="padding:8px 0"><span class="spin"></span><div class="txt">systemd-run --user --collect --unit=stark-9f2c</div><div class="el">4s</div></div>
+        </div>
+      </div>
+      <div class="helper">
+        <span class="hgrip"></span>
+        <div class="hbar">
+          <svg class="ic"><use href="#i-chat"/></svg>
+          <div class="t">Helper</div>
+          <span class="hb" title="Ricomincia"><svg class="ic"><use href="#i-trash"/></svg></span>
+          <span class="hb" title="Chiudi"><svg class="ic"><use href="#i-x"/></svg></span>
+        </div>
+        <div class="scroller hconv">
+          <div class="hq">cgroup in due righe?</div>
+          <div class="ha">Un raggruppamento di processi a cui il kernel applica limiti e contabilit&agrave;. Chi ci sta dentro lo eredita dal padre, e ci resta finch&eacute; qualcuno non lo sposta.</div>
+          <div class="hq">e su WSL posso spostarmici da solo?</div>
+          <div class="htool"><svg class="ic"><use href="#i-doc"/></svg><span>Read &middot; /proc/self/cgroup</span></div>
+          <div class="ha">No: l&agrave; il cgroup radice &egrave; montato in <b>sola lettura</b>, quindi un processo non pu&ograve; scriversi in un altro gruppo. Serve che a metterlo l&igrave; sia chi lo crea.</div>
+          <div class="hq">grazie</div>
+        </div>
+        <div class="hdock">
+          <div class="hinput">Ask something&hellip;<span class="caret"></span></div>
+          <div class="hstatus">
+            <span class="ro"><svg class="ic"><use href="#i-shield"/></svg>read-only</span>
+            <span class="tune mdl"><span class="nm">opus[1m]</span><svg class="ic"><use href="#i-down"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px"><div>I comandi stanno <b>in basso</b>, come ovunque in
+    STARK: la casella, e sotto due sole voci &mdash; lo scudo che dice <b>sola lettura</b> e il modello.
+    Il resto della barra di stato non c&rsquo;&egrave;, perch&eacute; l&rsquo;helper non ha una cartella da mostrare, non
+    ha server MCP e non ha una modalit&agrave; da cambiare.</div></div>
+    <div class="note" style="margin-top:8px"><div>La riga di un tool compare lo stesso &mdash;
+    <code>Read &middot; /proc/self/cgroup</code> &mdash; perch&eacute; leggere lo pu&ograve; fare, e sapere <b>su cosa</b> ha
+    guardato &egrave; met&agrave; della risposta. Una riga sola: qui non c&rsquo;&egrave; spazio per aprirla, e non c&rsquo;&egrave;
+    niente da approvare.</div></div>
+
+    <div class="eyebrow" style="margin-top:30px">Il modello: tutti gli agent della macchina, in un elenco solo</div>
+    <div class="mock" style="height:430px">
+      <div class="side">
+        <div class="sidetop"><div class="nm">STARK</div><span class="bell"><svg class="ic"><use href="#i-bell"/></svg></span><span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span></div>
+        <div class="scroller" style="flex:1">
+          <div class="gstate">Working</div>
+          <div class="gproj"><i class="dotk" style="background:var(--p-stark)"></i> stark</div>
+          <div class="sit on"><div style="flex:1"><div class="ttl">Il daemon muore col terminale</div><div class="meta">14:12 <span class="sst working">working</span></div></div></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="bar">
+          <div class="t">Il daemon muore col terminale</div>
+          <span class="iconb" style="background:var(--accent-soft);color:var(--accent);border-color:transparent"><svg class="ic"><use href="#i-chat"/></svg></span>
+          <span class="iconb"><svg class="ic"><use href="#i-moon"/></svg></span>
+        </div>
+        <div class="conv" style="padding:12px">
+          <div style="color:var(--muted);font-size:11px">&hellip; la conversazione resta dov&rsquo;&egrave; &hellip;</div>
+        </div>
+      </div>
+      <div class="helper">
+        <span class="hgrip"></span>
+        <div class="hbar">
+          <svg class="ic"><use href="#i-chat"/></svg>
+          <div class="t">Helper</div>
+          <span class="hb"><svg class="ic"><use href="#i-trash"/></svg></span>
+          <span class="hb"><svg class="ic"><use href="#i-x"/></svg></span>
+        </div>
+        <div class="scroller hconv">
+          <div class="hq">cgroup in due righe?</div>
+          <div class="ha">Un raggruppamento di processi a cui il kernel applica limiti e contabilit&agrave;&hellip;</div>
+        </div>
+        <div class="hdock">
+          <div class="hpop">
+            <div class="pg">Claude Code</div>
+            <div class="mi on"><span class="nm">Default (recommended)</span><span class="tick"><svg class="ic"><use href="#i-check"/></svg></span></div>
+            <div class="mi"><span class="nm">claude-opus-5[1m]</span></div>
+            <div class="mi"><span class="nm">claude-sonnet-5</span></div>
+            <div class="pg">OpenCode <span class="cnt">61 modelli</span></div>
+            <div class="mi"><span class="nm">anthropic/claude-sonnet-5</span></div>
+            <div class="mi"><span class="nm">openai/gpt-5.2-codex</span></div>
+            <div class="mi dim"><span class="nm">&hellip; e altri 59</span></div>
+            <div class="pg">Non ancora</div>
+            <div class="mi off"><svg class="ic"><use href="#i-block"/></svg><span class="nm">Codex</span><span class="why">nessun adapter</span></div>
+            <div class="mi off"><svg class="ic"><use href="#i-block"/></svg><span class="nm">Gemini CLI</span><span class="why">nessun adapter</span></div>
+          </div>
+          <div class="hinput">Ask something&hellip;<span class="caret"></span></div>
+          <div class="hstatus">
+            <span class="ro"><svg class="ic"><use href="#i-shield"/></svg>read-only</span>
+            <span class="tune mdl" style="background:var(--accent-soft);border-color:var(--accent)"><span class="nm">opus[1m]</span><svg class="ic"><use href="#i-down"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px"><div>Il menu &egrave; <b>pi&ugrave; largo del pannello</b> e sfora a
+    sinistra, sopra la conversazione: <code>anthropic/claude-sonnet-5</code> dentro 186px non si
+    legge, e un elenco di modelli troncati non &egrave; un elenco di modelli.</div></div>
+    <div class="note" style="margin-top:8px"><div><b>Codex e Gemini ci sono, spenti, con la ragione
+    vera.</b> Non &laquo;in arrivo&raquo;: <i>nessun adapter</i>. Sono gli unici due agent che il progetto
+    nomina e non sa guidare, e nasconderli farebbe sembrare l&rsquo;elenco completo quando non lo &egrave;
+    &mdash; che &egrave; la sola cosa che l&rsquo;interfaccia non ha il permesso di fare.</div></div>
+
+    <div class="two" style="margin-top:26px">
+      <div class="vbox">
+        <h3><span class="dotk" style="background:var(--done)"></span> Cosa fa, e perch&eacute; cos&igrave;</h3>
+        <ul>
+          <li><b>Un sesto di default, e il bordo si trascina.</b> La misura resta sul dispositivo,
+          come il tema e i suoni: quanto &egrave; largo il monitor non &egrave; un fatto del progetto</li>
+          <li><b>Sola lettura</b> &mdash; pu&ograve; leggere i file, non scrivere e non lanciare comandi.
+          Non &egrave; prudenza: in un sesto di schermo non c&rsquo;&egrave; posto per una card di permesso, e un
+          permesso che chiede senza avere dove rispondere pianta la chat</li>
+          <li><b>Non lascia niente</b> &mdash; nessun journal, nessuna riga nell&rsquo;elenco. Il cestino in
+          cima ricomincia da capo, e ricaricare la pagina fa la stessa cosa</li>
+          <li><b>Su schermo stretto prende tutto lo schermo</b>, come le impostazioni: un sesto di
+          un telefono non &egrave; una chat, &egrave; una colonna di sillabe</li>
+        </ul>
+      </div>
+      <div class="vbox">
+        <h3><span class="dotk" style="background:var(--muted)"></span> Cosa &egrave; stato scartato</h3>
+        <ul>
+          <li><b>Riusare la conversazione vera dentro il pannello</b> &mdash; sono 1796 righe
+          costruite attorno alla chat <i>selezionata</i>: in 186px non sarebbe un riuso, sarebbe un
+          rifacimento con due sorgenti di verit&agrave;</li>
+          <li><b>Tool completi</b> &mdash; vorrebbe dire portarci dentro permessi, piano e stop. A
+          quel punto non &egrave; un helper, &egrave; una seconda chat stretta</li>
+          <li><b>Pi&ugrave; di una conversazione helper</b> &mdash; le linguette erano gi&agrave; state scartate per
+          l&rsquo;elenco, e qui varrebbe lo stesso: se ti serve tenerla, non era una domanda al volo</li>
+        </ul>
+      </div>
     </div>
   </section>
 
