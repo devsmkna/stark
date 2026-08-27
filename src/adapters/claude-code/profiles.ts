@@ -66,9 +66,21 @@ function bundledExecutable(): string | undefined {
   return undefined
 }
 
+/**
+ * Dove Claude Code tiene la sua configurazione: quello che ci viene detto, altrimenti
+ * `CLAUDE_CONFIG_DIR`, altrimenti `~/.claude`. È la stessa catena che segue il CLI, ed
+ * era scritta due volte qui dentro — alla terza (la memoria globale, dove STARK scrive
+ * la regola sulle descrizioni) è diventata una funzione, per la stessa ragione per cui
+ * lo è diventato il rilevamento di WSL: tre copie di una scelta sono tre posti in cui
+ * può divergere.
+ */
+export function configDirOf(configDir?: string): string {
+  return resolve(configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? resolve(homedir(), '.claude'))
+}
+
 /** I profili sono le cartelle `~/.claude*` che contengono davvero una configurazione. */
 export function listProfiles(configDir?: string): Profile[] {
-  const attuale = resolve(configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? resolve(homedir(), '.claude'))
+  const attuale = configDirOf(configDir)
   const casa = homedir()
   const candidati = new Set<string>([attuale])
   try {
@@ -169,7 +181,7 @@ export async function diagnostics(configDir?: string): Promise<Diagnostics> {
     ...(cli ? { cli } : {}),
     ...(executable ? { executable } : {}),
     bundled: executable !== undefined,
-    configDir: resolve(configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? resolve(homedir(), '.claude')),
+    configDir: configDirOf(configDir),
     profiles: listProfiles(configDir),
   }
 }

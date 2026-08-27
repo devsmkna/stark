@@ -125,6 +125,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 /* una riga ciascuna: la descrizione di una skill e' un paragrafo intero */
 .slash .line,.slash .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .slash .hint2{color:var(--muted);font-size:10.5px;font-family:var(--mono)}
+/* la citazione di un file con `@`: stesso menu, riga di un rigo solo */
+.slash .mi.at{display:flex;align-items:center;gap:7px}
+.slash .mi.at .ic{width:12px;height:12px;flex:none;color:var(--muted)}
+.slash .mi.at .line{display:flex;align-items:baseline;gap:6px;min-width:0}
+.slash .mi.at .hint2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .caret{display:inline-block;width:1px;height:12px;background:var(--ink);vertical-align:-2px;margin-left:1px}
 /* gli allegati in attesa di partire, sopra la casella */
 .allegati{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
@@ -769,6 +774,20 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
           </div>
         </div>
       </div>
+      <div>
+        <div class="eyebrow">Quando scrivi <code>@</code></div>
+        <div class="mock" style="display:block;margin-top:6px;overflow:visible">
+          <div class="dock" style="border-top:0">
+            <div class="slash">
+              <div class="mi at on"><svg class="ic"><use href="#i-folder"/></svg><span class="txt"><span class="line"><b>lib/</b> <span class="hint2">ui/src/</span></span></span></div>
+              <div class="mi at"><svg class="ic"><use href="#i-doc"/></svg><span class="txt"><span class="line"><b>api.ts</b> <span class="hint2">ui/src/lib/</span></span></span></div>
+              <div class="mi at"><svg class="ic"><use href="#i-doc"/></svg><span class="txt"><span class="line"><b>view.ts</b> <span class="hint2">ui/src/lib/</span></span></span></div>
+              <div class="mi at"><svg class="ic"><use href="#i-doc"/></svg><span class="txt"><span class="line"><b>store.svelte.ts</b> <span class="hint2">ui/src/lib/</span></span></span></div>
+            </div>
+            <div class="input"><span style="color:var(--ink)">guarda @ui/src/li</span><span class="caret"></span></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <p style="margin-top:16px">Le <b>due sulle domande</b> sono nuove. Una richiesta
@@ -791,7 +810,15 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
       l&rsquo;agent la ripone dopo. Non &egrave; un annulla, ed &egrave; scritto nel riquadro <b>prima</b> di premere
       Send &mdash; scoprirlo dopo sarebbe una sorpresa a spese di chi risponde.</div>
     </div>
-    <p style="margin-top:16px">Anche l&rsquo;<b>ultima</b> &egrave; nuova. I comandi slash esistono da sempre nel CLI, e da
+    <p style="margin-top:16px">Le <b>ultime due</b> sono la stessa idea, e la seconda &egrave; nuova del
+    26 agosto: si preme <code>@</code> e compaiono i <b>file del progetto</b>. La ricerca non &egrave;
+    nostra &mdash; &egrave; quella del terminale, <code>.gitignore</code> compreso &mdash; e il filtro non lo fa
+    il browser: si manda quello che hai digitato e si mostra ci&ograve; che torna. Le cartelle si
+    riconoscono dall&rsquo;icona e dalla barra finale, e sceglierne una <b>non chiude</b> la citazione:
+    si scende dentro e si continua a scrivere l&igrave;. E <code>@</code> non &egrave; decorazione &mdash; il CLI
+    espande la citazione da s&eacute; e mette il file nel contesto, quindi citarne tre costa tre letture
+    in meno.</p>
+    <p style="margin-top:16px">Anche l&rsquo;<b>altra</b> &egrave; nuova. I comandi slash esistono da sempre nel CLI, e da
     STARK non si potevano n&eacute; vedere n&eacute; scrivere: la sessione ne offre <b>quarantotto</b>, e non ne
     usciva nessuno. Ora la casella li propone appena scrivi <code>/</code>, filtrandoli mentre digiti;
     &uarr;&darr; per scegliere, Tab o Invio per completare, Esc per chiudere.</p>

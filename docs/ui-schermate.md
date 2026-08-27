@@ -627,6 +627,32 @@ mentre si digita: ↑↓ per scegliere, Tab o Invio per completare, Esc per chiu
 - **quelli legati al terminale restano in elenco** con l'etichetta. Il CLI li ha; e se li si
   manda lo stesso, a dire che lì non funzionano è l'agent, non noi.
 
+### Citare un file con `@`
+
+Deciso implementando il 26 agosto 2026, chiesto dall'utente. Si preme `@` e compare lo stesso
+menu dei comandi slash, con i file del progetto; scrivendo si filtra; ↑↓ per scegliere, Tab o
+Invio per citare, Esc per chiudere. Nella casella resta `@percorso/del/file.ts`.
+
+- **la ricerca non è nostra**: è `file_suggestions` del canale di controllo, cioè *la stessa*
+  che il terminale mostra. Rifarla in casa avrebbe voluto dire decidere da soli cosa ignorare
+  (`.git`, `node_modules`, il `.gitignore`, i binari) e divergere dal CLI al primo
+  aggiornamento. Il filtro quindi **non lo fa il browser**: si manda quello che si è digitato e
+  si mostra ciò che torna.
+- **`@` non è decorazione, è un'istruzione**: il CLI espande la citazione da sé e mette il file
+  nel contesto — verificato, e non dedotto dal fatto che il terminale lo faccia (una parola
+  nascosta in un file citato è tornata nella risposta **senza** che l'agent aprisse un tool per
+  leggerlo). Citare tre file costa quindi tre letture in meno.
+- **una cartella non chiude la citazione**: la si sceglie, si scende dentro e il menu resta
+  aperto — niente spazio dopo. Un file invece è la risposta, e lo spazio serve a continuare la
+  frase. Le cartelle si riconoscono dall'icona e dalla barra finale; una cartella **vuota** non
+  compare, ed è il CLI a decidere così.
+- **si cita in mezzo a una frase**, non solo in cima come per `/`: quello che conta è il pezzo
+  subito prima del cursore, e dopo aver scelto il cursore torna dov'era invece di saltare in
+  fondo. Una `@` attaccata a una parola — un indirizzo email — non apre niente.
+- **i primi ~1,5 secondi di una chat nuova il menu è vuoto**, perché il CLI sta ancora
+  costruendo il suo indice. Non è aggirabile scaldandolo prima (provato e misurato: nessun
+  guadagno). Si ritenta una volta, e la lettera successiva lo riempie.
+
 ### Gli strumenti esterni, chat per chat
 
 Deciso implementando il 24 agosto 2026. Il chip **MCP** nella barra apre l'elenco dei server che
@@ -677,17 +703,88 @@ alto nella chat aperta, perché è l'unica delle tre che si fa spesso e a chat a
 
 ## 7. Le impostazioni
 
-Riquadro quasi a tutto schermo sopra l'app, con sei sezioni. Ognuna risponde a una domanda
+Riquadro quasi a tutto schermo sopra l'app, con sette sezioni. Ognuna risponde a una domanda
 diversa, e sono queste:
 
 | | |
 |---|---|
 | **Permissions** | la tabella qui sotto |
+| **Agent** | come lavora, non di cosa ci si fida: oggi una voce sola, le **descrizioni dei comandi** |
 | **Projects** | ciò che appartiene al progetto e non all'app: il colore e il **profilo di Claude** |
 | **Notifications** | come si viene chiamati quando si guarda altrove |
 | **Appearance** | il tema |
 | **Storage** | dove stanno i journal, quanto pesano, come si cancellano |
 | **System** | indirizzo e token di STARK, la diagnostica dell'agent, i profili trovati |
+
+### Quota esaurita, e azioni fermate dal classificatore
+
+Deciso implementando il 27 agosto 2026, per chiudere la Fase 1. Sono le due sole schermate in
+cui STARK, prima, **taceva su un fatto**: entrambe hanno a che fare con qualcosa che si ferma
+senza che nessuno lo abbia chiesto.
+
+**La quota finita è dell'elenco, non della chat.** Una banda sopra l'elenco quando almeno una
+conversazione è ferma per limite raggiunto: quante sono, e fino a quando.
+
+- **sta lì e non dentro una chat** perché la quota è del *piano*: quando finisce si fermano
+  tutte insieme, e scoprirlo entrando in una per volta non è una risposta. È l'unico guasto di
+  STARK che non appartiene a nessuna riga in particolare.
+- **solo l'ora esatta, niente conto alla rovescia.** Fra le due formulazioni è l'orario a
+  decidere («rimando a domani?»), e la durata avrebbe richiesto un orologio al secondo —
+  esattamente quello che è stato tolto dall'elenco il 26 agosto perché era calcolo per niente.
+- **si spegne da sola.** Le chat fermate dalla quota non ricevono più eventi, quindi senza
+  niente che rilegga l'orologio la banda resterebbe per ore dopo il reset. C'è **una sveglia
+  sola**, all'istante del reset, non un intervallo.
+- **si riparte dal limite più lontano**, non dal più vicino: uscire dalla finestra da 5 ore
+  mentre la settimanale è ancora chiusa vuol dire ricascarci un istante dopo, e dire l'ora più
+  vicina sarebbe una promessa che non si mantiene.
+- **solo «limite raggiunto», mai «ci sei quasi»**: quell'avviso ha già il suo posto nel
+  pannellino della barra di stato, insieme a quanto ne resta. Un allarme che compare anche
+  quando si può ancora lavorare diventa arredamento.
+
+**Un'azione fermata dal classificatore non è un fallimento.** La riga lo diceva già —
+`Blocked · stopped for safety`, con la sua icona, invece di un errore rosso — ma finiva lì, e
+non c'era niente da premere: un blocco **non è** una richiesta di permesso, quindi non sale
+nessuna card dal basso. Adesso, aprendo la riga, si legge cosa si può fare.
+
+- **le tre vie d'uscita sono quelle del CLI, non nostre.** Sono le stesse che Claude Code scrive
+  al modello quando blocca: prova un'altra strada; leggere file e cercare **non** passano dal
+  classificatore e funzionano comunque; torna a questa cosa più tardi. Le ripetiamo all'utente
+  perché il modello le legge e lui no.
+- **non c'è un «consenti questa e riprova»**, ed è una scelta. Il CLI non lo offre, e ignora
+  apposta le voci di `permissions.allow` che aggirerebbero il classificatore (verificato nel
+  binario). Metterlo qui sarebbe STARK che fa **di più** del CLI proprio su una difesa: il
+  Principio 5 dice che non dobbiamo poter *meno*, non che dobbiamo scavalcare.
+- **la via vera è cambiare modalità**, e il bottone la offre lì: passare la chat a «ask me»
+  toglie la decisione al classificatore e la dà a te. Dice anche che vale **da adesso in poi**,
+  quindi quella cosa va richiesta di nuovo — scoprirlo dopo sarebbe una sorpresa.
+- **la spiegazione c'è sempre, il bottone no.** Cambiare modalità è un comando a un processo:
+  su una chat che dorme non c'è nessuno a riceverlo. Il *perché* quell'azione non è avvenuta
+  resta invece la domanda che ci si fa rileggendo un lavoro mesi dopo.
+
+### Le descrizioni dei comandi
+
+Deciso implementando il 27 agosto 2026, chiesto dall'utente. **Accesa di default.** Con la voce
+accesa la riga di un tool dice *perché* è stato lanciato — «Find where the default model is
+decided» invece di `grep -rn "claude-sonnet" src/` — perché l'agent scrive una `description` che
+prima non scriveva sempre.
+
+- **la voce non cambia niente dentro STARK**: scrive una regola nel `CLAUDE.md` **globale
+  dell'agent**, cioè in `<CLAUDE_CONFIG_DIR>/CLAUDE.md`. Non c'è un'opzione dell'SDK da
+  accendere — quel campo lo scrive il modello, e l'unico modo di chiederglielo è dirglielo dove
+  lo rilegge sempre. Conseguenza che va detta e sta scritta nel pannello: la regola vale
+  **anche fuori da STARK**, nel terminale.
+- **il file è dell'utente, quindi si tocca solo il proprio pezzo**: il blocco sta fra due
+  commenti Markdown, e spegnere la voce toglie *esattamente* quello. Se il file resta vuoto
+  perché conteneva solo quello, sparisce; se conteneva altro, l'altro resta identico.
+- **il percorso è scritto nel pannello**, perché è l'unica cosa che dal browser non si può
+  dedurre — e se quel file non è scrivibile lo si dice, invece di lasciare una spunta accesa
+  sopra un file che non è cambiato.
+- **si riallinea anche all'avvio del daemon**, non solo quando si tocca l'interruttore: fra
+  un'accensione e l'altra quel file può essere stato cambiato a mano. Senza quel giro la spunta
+  direbbe una cosa e il file un'altra.
+- **perché serve una regola scritta e non l'abitudine**: misurato su una sessione vera, la
+  percentuale di comandi con motivazione è passata da ~100% a **0 su 27** subito dopo un
+  `/clear`. L'abitudine viveva negli esempi in contesto; il file di memoria no.
 
 ### Il profilo di Claude è del progetto, non dell'app
 

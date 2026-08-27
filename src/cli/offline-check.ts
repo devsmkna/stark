@@ -6,7 +6,7 @@
 // specifica marca come trappole, così che se un domani smettono di essere gestiti il
 // test lo dica invece di scoprirlo la UI.
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
@@ -16,6 +16,8 @@ import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { intentOf } from '../adapters/claude-code/summary.ts'
+import { allineaMemoria, INIZIO_REGOLA } from '../daemon/memoria.ts'
+import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal } from '../core/journal.ts'
@@ -212,6 +214,99 @@ const eventiNormale = trSintetico.handle({
 })
 check('§7: un messaggio assistant vero resta ignorato, non duplica lo streaming',
   eventiNormale.length === 0, JSON.stringify(eventiNormale))
+
+// ─── quando la quota ferma davvero ──────────────────────────────────────────
+//
+// La schermata di quota esaurita esiste per un fatto che nessun'altra parte di STARK
+// ha: il limite non è della conversazione, è del piano — quando finisce si fermano
+// tutte le chat insieme, e su chat ferme non arriva più nessun evento. Da lì i due
+// casi al bordo che si provano qui, perché sono quelli che a schermo non si vedono.
+{
+  const ORA = 1_800_000_000_000
+  const q = (status: string, resetsAt: number) => ({ status, resetsAt })
+
+  check('quota: `rejected` ferma', quotaFerma(q('rejected', ORA + 3600_000), ORA))
+  check('quota: «ci sei quasi» NON ferma — quell\'avviso sta nel pannellino',
+    !quotaFerma(q('allowed_warning', ORA + 3600_000), ORA))
+  check('quota: «passa» non ferma', !quotaFerma(q('allowed', 0), ORA))
+  check('quota: niente stato, niente allarme', !quotaFerma(undefined, ORA))
+  // Il caso che ha motivato la funzione: un journal vecchio riletto all'avvio.
+  check('quota: un reset GIÀ PASSATO non ferma più — l\'avviso si toglie da sé',
+    !quotaFerma(q('rejected', ORA - 60_000), ORA))
+  check('quota: reset sconosciuto (0) si crede allo stato, non si scarta',
+    quotaFerma(q('rejected', 0), ORA))
+
+  // Si riparte dal più LONTANO: uscire dalla finestra da 5 ore mentre la settimanale
+  // è ancora finita vuol dire ricascarci un istante dopo.
+  check('quota: si riparte dal reset più lontano, non dal più vicino',
+    quandoRiparte([q('rejected', ORA + 3600_000), q('rejected', ORA + 86_400_000)], ORA)
+      === ORA + 86_400_000)
+  check('quota: chi non ci ferma non sposta l\'orario',
+    quandoRiparte([q('rejected', ORA + 3600_000), q('allowed_warning', ORA + 86_400_000)], ORA)
+      === ORA + 3600_000)
+  check('quota: se nessuno ferma, nessun orario da dire',
+    quandoRiparte([q('allowed', ORA + 999)], ORA) === 0)
+}
+
+// ─── la regola nella memoria globale dell'agent ─────────────────────────────
+//
+// È l'unico pezzo di STARK che scrive in un file **dell'utente** fuori da ~/.stark,
+// quindi quello che va provato non è tanto «sa aggiungere il testo» (facile) quanto
+// «non tocca niente di quello che non ha messo lui» — sia togliendolo, sia
+// rimettendolo, sia su un file che non esiste ancora.
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-memoria-'))
+  const file = resolve(casa, 'CLAUDE.md')
+  const MIO = '# Le mie preferenze\n\nScrivi sempre in italiano.\n'
+
+  allineaMemoria(casa, true)
+  const nato = readFileSync(file, 'utf8')
+  check('memoria: accesa su una cartella vuota crea il file con la regola',
+    nato.includes('description') && nato.includes('stark:descrizione-comandi'))
+
+  allineaMemoria(casa, false)
+  check('memoria: spenta la toglie, e non lascia dietro un file vuoto',
+    !existsSync(file))
+
+  // Il caso che conta: un file che l'utente ha già scritto.
+  writeFileSync(file, MIO)
+  allineaMemoria(casa, true)
+  const misto = readFileSync(file, 'utf8')
+  check('memoria: la regola si aggiunge IN FONDO a quello che c\'era',
+    misto.startsWith(MIO.trim()) && misto.indexOf('# Le mie preferenze') < misto.indexOf(INIZIO_REGOLA))
+  allineaMemoria(casa, false)
+  check('memoria: spegnendola resta ESATTAMENTE quello che aveva scritto l\'utente',
+    readFileSync(file, 'utf8') === MIO, JSON.stringify(readFileSync(file, 'utf8')))
+
+  // Idempotenza: gira all'avvio del daemon e a ogni salvataggio, quindi «già come
+  // deve essere» dev'essere un non-evento — e soprattutto non deve accumulare copie.
+  writeFileSync(file, MIO)
+  allineaMemoria(casa, true)
+  const uno = readFileSync(file, 'utf8')
+  const ancora = allineaMemoria(casa, true)
+  check('memoria: riaccenderla dieci volte non aggiunge dieci copie',
+    readFileSync(file, 'utf8') === uno && !ancora.cambiato)
+  check('memoria: e quando non c\'è niente da fare lo dice, invece di riscrivere',
+    ancora.cambiato === false && ancora.presente === true)
+
+  // Testo dell'utente DOPO il blocco: è il caso in cui una rimozione fatta male
+  // mangia la riga successiva, e non si vede finché non capita a qualcuno.
+  writeFileSync(file, `${uno.trim()}\n\n## Una cosa scritta dopo\n`)
+  allineaMemoria(casa, false)
+  const dopo = readFileSync(file, 'utf8')
+  check('memoria: togliendola sopravvive anche ciò che stava DOPO il blocco',
+    dopo.includes('# Le mie preferenze') && dopo.includes('## Una cosa scritta dopo')
+      && !dopo.includes('stark:descrizione-comandi'), JSON.stringify(dopo))
+
+  // Un blocco lasciato a metà da un'interruzione: non è un caso di scuola, è cosa
+  // resta se il processo muore fra due scritture o se qualcuno modifica il file.
+  writeFileSync(file, `${MIO}\n${INIZIO_REGOLA}\nqualcosa a metà\n`)
+  allineaMemoria(casa, false)
+  check('memoria: un blocco senza chiusura non fa cancellare il resto del file',
+    readFileSync(file, 'utf8').includes('# Le mie preferenze'))
+
+  rmSync(casa, { recursive: true, force: true })
+}
 
 // F2: la motivazione che l'agent scrive in `description` arriva fino allo snapshot,
 // distinta dal soggetto — e senza scomparire quando l'azione viene poi bloccata dal

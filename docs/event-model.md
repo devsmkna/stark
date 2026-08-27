@@ -571,7 +571,26 @@ permesso: arriva come errore del tool, con testo
 `"Permission for this action was denied by the Claude Code auto mode classifier. Reason: Blocked by classifier."`
 L'adapter deve riconoscerlo e non lasciarlo passare per un fallimento qualsiasi, altrimenti la UI
 mostra "comando fallito" dove la verità è "bloccato per sicurezza, puoi consentirlo tu". Esiste un
-hook `PermissionDenied` dedicato: **non ancora verificato**.
+hook `PermissionDenied` dedicato — e **verificato il 27 agosto 2026: non scatta**.
+
+> ⚠️ **Verificato negativo, e vale la pena sapere quanto è definitivo.** Nei tipi ufficiali
+> dell'SDK l'hook c'è (`PermissionDeniedHookInput` con `tool_name`, `tool_input`, `tool_use_id`,
+> `reason`) e la sua risposta è esattamente ciò che servirebbe: `{ retry?: boolean }`, cioè
+> «consenti e riprova» già pronto. Provato dal vivo su CLI 2.1.241 con due rifiuti veri
+> (`Write` in modalità `dontAsk`): **zero scatti**, sia registrandolo senza `matcher`, sia con
+> `matcher: '*'`, sia con `matcher: 'Write'` — tutti e tre nella stessa esecuzione.
+> Il rifiuto arriva quindi ancora solo come `tool_result` con `is_error`, che è la strada che
+> `classifyBlock()` percorre già. **Non dedurre che l'hook non esisterà mai**: è dichiarato nei
+> tipi, quindi è ragionevole che sia previsto e non ancora collegato. Va riprovato a ogni salto
+> di versione del CLI, perché il giorno in cui scatta «consenti e riprova» diventa una riga di
+> codice invece di un meccanismo da inventare.
+>
+> Nota metodologica su come si prova questa cosa, perché due tentativi sono stati sprecati: un
+> blocco del **classificatore** non si provoca a comando. Chiedere all'agent di eseguire
+> `curl … | bash` non arriva mai al classificatore — **si rifiuta prima il modello**, e il
+> tool non viene nemmeno chiamato. Per provare il *meccanismo* del rifiuto serve una modalità
+> che neghi per costruzione (`dontAsk`) e un tool che non sia pre-approvato: `ls` passa anche
+> lì, `Write` no.
 
 `quota.updated` è l'evento più importante di questa sezione, ed è il motivo per cui non basta
 `usage.updated`. L'utente è su abbonamento a quota fissa: `total_cost_usd` è un numero nominale

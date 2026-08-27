@@ -38,9 +38,21 @@ export type Settings = {
   permissions: CategoryRules
   /** Per cartella di lavoro, che è l'unica identità stabile che un progetto ha. */
   projects: Record<string, ProjectSettings>
+  /**
+   * Se l'agent deve scrivere **perché** lancia un comando, non solo cosa.
+   *
+   * Non è una preferenza di STARK su STARK: è una regola che finisce nel `CLAUDE.md`
+   * globale dell'agent (vedi `memoria.ts`), quindi vale anche fuori da qui — nel
+   * terminale, in un altro strumento, ovunque quel file venga letto. Accesa di
+   * default perché la riga di un tool senza motivazione mostra solo il comando, e su
+   * un `grep` di trenta caratteri quello non dice niente a chi sta guardando.
+   */
+  toolDescriptions: boolean
 }
 
-export const DEFAULTS: Settings = { permissions: { ...CATEGORY_DEFAULTS }, projects: {} }
+export const DEFAULTS: Settings = {
+  permissions: { ...CATEGORY_DEFAULTS }, projects: {}, toolDescriptions: true,
+}
 
 const FILE = 'settings.json'
 
@@ -59,6 +71,9 @@ export function readSettings(home: string): Settings {
     return {
       permissions: sanePermissions(raw.permissions),
       projects: saneProjects(raw.projects),
+      // `!== false` e non `?? true`: un file scritto prima che questa voce esistesse
+      // non ce l'ha, e per quel file la risposta giusta è il default, cioè accesa.
+      toolDescriptions: raw.toolDescriptions !== false,
     }
   } catch {
     return { ...DEFAULTS, projects: {} }
@@ -70,6 +85,7 @@ export function writeSettings(home: string, s: Settings): Settings {
   const pulito: Settings = {
     permissions: sanePermissions(s.permissions),
     projects: saneProjects(s.projects),
+    toolDescriptions: s.toolDescriptions !== false,
   }
   writeFileSync(resolve(home, FILE), `${JSON.stringify(pulito, null, 2)}\n`)
   return pulito

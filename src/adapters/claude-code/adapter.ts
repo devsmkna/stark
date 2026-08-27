@@ -212,6 +212,57 @@ export class ClaudeCodeAdapter {
     this.emit({ k: 'context.usage', usage })
   }
 
+  // ─── i file del progetto, per le citazioni con `@` ────────────────────────
+
+  /**
+   * I file che somigliano a quello che stai scrivendo dopo una `@`.
+   *
+   * Non è una ricerca nostra: è `file_suggestions` del canale di controllo, cioè
+   * **la stessa** che il terminale mostra («the same fuzzy-matched results the TUI
+   * shows», dai tipi ufficiali dell'SDK). Rifarla in casa avrebbe voluto dire
+   * decidere da soli cosa ignorare (`.git`, `node_modules`, `.gitignore`, i file
+   * binari) e divergere dal CLI al primo aggiornamento — vedi ADR-009: l'SDK
+   * sostituisce il trasporto, non la traduzione, e questa è trasporto.
+   *
+   * Il pezzo scomodo, e va detto in chiaro: l'SDK dichiara la richiesta nei tipi
+   * (`SDKControlFileSuggestionsRequest`) ma **non** la espone come metodo del `Query`,
+   * come fa invece per `getContextUsage()`. Si passa quindi dal `request()` generico,
+   * che nel `.d.ts` non c'è. Perciò la stessa cautela di `refreshQuota()`: si guarda
+   * se il metodo c'è invece di fidarsi del tipo, e una versione che lo togliesse non
+   * è un guasto — il menu semplicemente non si apre, e la casella resta una casella.
+   *
+   * Verificato dal vivo prima di scriverlo (26 agosto 2026, costo zero di quota:
+   * è una domanda sul filesystem, non un turno): risponde in **2-3ms** a regime,
+   * torna anche le cartelle (col `/` finale) e con query vuota le voci della radice.
+   *
+   * Il fatto scomodo, misurato e non aggirato: per i primi **~1,5s** dopo l'apertura
+   * di una chat il CLI sta ancora costruendo il suo indice e risponde «nessun file» a
+   * qualunque ricerca — mentre la query vuota funziona subito, perché quella è una
+   * lettura della cartella e non una ricerca. Un riscaldamento all'avvio sembrava la
+   * cura ovvia ed è stato scritto, misurato e **tolto**: A/B su due giri per parte,
+   * 1531/1565ms senza contro 2738/1563ms con, cioè nessun guadagno. L'indice se lo
+   * costruisce da sé e non si lascia anticipare. A coprire quella finestra è quindi
+   * l'unica cosa che funziona davvero, cioè ritentare una volta: sta nella UI, che è
+   * il posto dove si sa che l'utente sta ancora digitando.
+   */
+  async fileSuggestions(query: string): Promise<string[]> {
+    const q = this.q as unknown as Record<string, unknown> | null
+    const request = q?.['request']
+    if (typeof request !== 'function') return []
+    try {
+      const r = await (request as (x: unknown) => Promise<unknown>).call(q, {
+        subtype: 'file_suggestions', query,
+      }) as { response?: { suggestions?: { path?: unknown }[] } }
+      return (r?.response?.suggestions ?? [])
+        .map(s => s?.path)
+        .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    } catch {
+      // Una domanda sui file non deve poter rompere la chat: senza risposta il menu
+      // non si apre, che è esattamente ciò che succede quando non c'è niente da dire.
+      return []
+    }
+  }
+
   // ─── comandi slash ────────────────────────────────────────────────────────
 
   /** L'ultima lista scritta nel journal, per non riscriverla identica. */

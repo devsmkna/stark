@@ -7,25 +7,77 @@
   import Logo from './Logo.svelte'
   import type { SessionRow } from '../lib/api.ts'
   import {
-    ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, since,
+    ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, stamp,
   } from '../lib/view.ts'
+  import { quandoRiparte, quotaFerma } from '$core/quota.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
 
-  // L'orologio che fa avanzare «da quanto». Batte sempre, e l'effetto non legge NIENTE
-  // di reattivo di proposito: legarlo alle righe — per battere piano quando non c'è
-  // niente di vivo — rifà l'intervallo a ogni aggiornamento dell'elenco, e durante un
-  // turno chiacchierone gli aggiornamenti arrivano più spesso di un secondo. Il tempo
-  // si fermerebbe proprio mentre qualcosa succede. Un `setInterval` al secondo su una
-  // decina di righe non costa niente; le stringhe che non cambiano non toccano il DOM.
-  let now = $state(Date.now())
+  const palette = $derived(colours(store.rows, store.settings?.projects ?? {}))
+
+  // ─── quota finita ─────────────────────────────────────────────────────────
+  //
+  // La quota è del **piano**, non della conversazione: quando finisce non si ferma la
+  // chat su cui stavi, si fermano tutte quelle di quel profilo insieme. È l'unico
+  // guasto di STARK che non appartiene a nessuna riga in particolare, e per questo
+  // l'unico che ha diritto a una banda sopra l'elenco invece che a un segno dentro una
+  // chat: entrare in una per scoprire perché si è fermata l'altra non è una risposta.
+  //
+  // `rejected` e non `allowed_warning`: l'avviso «ci sei quasi» sta già nel pannellino
+  // della barra di stato, dove c'è anche quanto ne resta. Qui si dice solo ciò che
+  // toglie la possibilità di lavorare, se no la banda diventa arredamento.
+  /**
+   * L'orologio che serve qui non batte: si sveglia **una volta**, al momento del
+   * reset. Un limite scaduto letto da un journal vecchio mostrerebbe un allarme
+   * finito, e senza niente che lo rilegga resterebbe lì — su chat ferme non arrivano
+   * eventi, quindi l'elenco non si aggiorna da solo proprio nel caso che conta.
+   */
+  let adesso = $state(Date.now())
+
+  // La regola sta in `core/quota.ts`, dove si prova senza mettere in scena una quota
+  // esaurita in un browser: il caso al bordo (un limite già ripartito, letto da un
+  // journal vecchio) si sbaglia leggendo, non guardando.
+  const ferme = $derived(store.rows.filter(r => quotaFerma(r.quota, adesso)))
+
+  /**
+   * Il reset più lontano fra quelli che ci fermano: se la finestra da 5 ore e quella
+   * settimanale sono finite insieme, ripartire dalla prima non serve a niente. Dire
+   * l'ora più vicina sarebbe una promessa che non si mantiene.
+   */
+  const riparte = $derived(quandoRiparte(ferme.map(r => r.quota), adesso))
+  // Solo l'ora esatta, niente «fra 2h 14m»: il conto alla rovescia richiederebbe un
+  // orologio al secondo, che è precisamente quello che è stato tolto dall'elenco il 26
+  // agosto perché era calcolo per niente. E delle due formulazioni è questa a decidere
+  // — «conviene rimandare a domani?» si risponde con un orario, non con una durata.
+  // Il pannellino della barra di stato continua a darle entrambe, dove lo spazio c'è.
+
+  /**
+   * Su quale profilo. Si dice **solo se la macchina ne usa più d'uno**: con un profilo
+   * solo è rumore — sarebbe l'unica risposta possibile — mentre con due è la differenza
+   * fra «è finita tutta» e «è finita quella di lavoro, quella personale va».
+   */
+  // Una sveglia sola, all'istante del reset più vicino fra quelli che ci fermano.
+  // Non è un intervallo: scatta una volta, e se nel frattempo arriva un'altra chat
+  // ferma l'effetto si rifà e la riprogramma.
   $effect(() => {
-    const t = setInterval(() => { now = Date.now() }, 1000)
-    return () => clearInterval(t)
+    const prossimo = Math.min(...store.rows
+      .filter(r => quotaFerma(r.quota, adesso) && r.quota!.resetsAt > 0)
+      .map(r => r.quota!.resetsAt))
+    if (!Number.isFinite(prossimo)) return
+    // `+1000`: svegliarsi all'istante esatto rischia di rileggere un orologio che non
+    // è ancora passato oltre, e di non far scattare niente.
+    const t = setTimeout(() => { adesso = Date.now() }, prossimo - adesso + 1000)
+    return () => clearTimeout(t)
   })
 
-  const palette = $derived(colours(store.rows, store.settings?.projects ?? {}))
+  const profili = $derived.by(() => {
+    const p = store.settings?.projects ?? {}
+    const tutti = new Set(Object.values(p).map(x => x.profile).filter(Boolean))
+    if (tutti.size < 2) return []
+    const nostri = new Set(ferme.map(r => (r.cwd ? p[r.cwd]?.profile : undefined)).filter(Boolean))
+    return [...nostri] as string[]
+  })
 
   const tree = $derived(
     ORDER.map(g => {
@@ -84,6 +136,20 @@
     </button>
   </div>
 
+  {#if ferme.length > 0}
+    <div class="quotaout" role="status">
+      <Icon name="i-warn" />
+      <div>
+        <div class="qt">Quota reached</div>
+        <div class="qs">
+          {ferme.length === 1 ? 'One chat is' : `${ferme.length} chats are`} stopped until
+          {#if riparte}<b>{stamp(riparte)}</b>{:else}the limit resets{/if}
+          {#if profili.length > 0}<br />on {profili.map(p => p.replace(/^.*\//, '')).join(', ')}{/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <div class="scroller" style="flex:1;padding-bottom:6px">
     {#each tree as section (section.g)}
       <div class="gstate">{section.g}</div>
@@ -115,9 +181,6 @@
                 <div class="meta">
                   {hhmm(row.lastTs)}
                   <span class="sst {label(row.state)}">{label(row.state)}</span>
-                  <!-- Da quanto sta così, che non è l'ora dell'ultima riga scritta:
-                       è quello che distingue un lavoro che procede da uno piantato. -->
-                  {#if row.since}<span class="el">· {since(row.since, now)}</span>{/if}
                 </div>
                 <!-- Cosa sta facendo adesso. Solo sulle righe vive: chi ha finito, chi
                      dorme e chi è stato fermato non sta facendo niente, e una riga in

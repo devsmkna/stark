@@ -119,6 +119,20 @@
   }
 
   function key(e: KeyboardEvent): void {
+    // Col menu delle citazioni aperto vale la stessa regola dei comandi: i tasti
+    // guidano l'elenco, non la casella. Sta prima perché i due menu non possono
+    // essere aperti insieme (uno vuole `/` in cima, l'altro `@` prima del cursore),
+    // ma se un domani lo fossero, mandare mezzo percorso è l'errore peggiore.
+    if (files.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); sceltoAt = (sceltoAt + 1) % files.length; return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); sceltoAt = (sceltoAt - 1 + files.length) % files.length; return }
+      if (e.key === 'Escape') { e.preventDefault(); chiusoAt = true; return }
+      if ((e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey && !e.isComposing) {
+        e.preventDefault()
+        void citaFile(files[sceltoAt]!)
+        return
+      }
+    }
     // Col menu dei comandi aperto i tasti vogliono dire un'altra cosa: Invio completa
     // invece di mandare. Mandare "/comp" a metà è l'errore che il menu esiste per
     // evitare, quindi qui viene prima di tutto il resto.
@@ -183,6 +197,125 @@
     text = `/${c.name}${c.argumentHint ? ' ' : ''}`
     box?.focus()
     void regrow()
+  }
+
+  // ─── le citazioni con `@` ─────────────────────────────────────────────────
+  //
+  // Stessa forma dei comandi slash — si preme `@`, compare un elenco, si filtra
+  // scrivendo — ma con una differenza che decide tutta l'implementazione: i comandi
+  // STARK ce li ha già in mano (`snap.slashCommands`, arrivati con l'handshake),
+  // mentre i file no. Il filtro quindi **non lo fa il browser**: si chiede al CLI,
+  // che risponde con la stessa ricerca del terminale.
+  //
+  // E `@` non sta in cima al testo come `/`: si cita un file **in mezzo** a una
+  // frase. Quindi il pezzo da guardare non è tutta la casella ma quello che sta
+  // subito prima del cursore, e serve saperlo — da qui `caret`.
+
+  /** Dov'è il cursore. Il DOM lo sa, Svelte no: va letto quando può essere cambiato. */
+  let caret = $state(0)
+  function segnaCaret(e: Event): void {
+    caret = (e.currentTarget as HTMLTextAreaElement).selectionStart ?? 0
+  }
+  /** Chiuso con Esc: si riapre scrivendo, non appena si torna sulla casella. */
+  let chiusoAt = $state(false)
+  let sceltoAt = $state(0)
+  let files = $state<string[]>([])
+
+  /**
+   * La citazione che si sta scrivendo: dalla `@` al cursore, se in mezzo non ci sono
+   * spazi. La `@` deve stare a inizio riga o dopo uno spazio — senza quella
+   * condizione ogni indirizzo email scritto in un prompt aprirebbe il menu.
+   */
+  const cita = $derived.by(() => {
+    if (chiusoAt || !store.live) return null
+    const m = /(?:^|\s)@([^\s]*)$/.exec(text.slice(0, caret))
+    return m ? { start: caret - m[1]!.length - 1, q: m[1]! } : null
+  })
+
+  // Si chiede al daemon a ogni tasto, e non c'è debounce: misurato, il CLI risponde
+  // in 2-3ms a regime perché l'indice ce l'ha già in memoria (l'unica lenta è la
+  // prima, ~1,4s, ed è per questo che l'adapter la scalda all'avvio della chat).
+  // Un'attesa artificiale qui si vedrebbe eccome: si sta scrivendo.
+  //
+  // `giro` è la guardia contro il sorpasso: due risposte possono tornare in ordine
+  // diverso da come sono partite, e senza questo controllo l'elenco potrebbe finire
+  // per mostrare i risultati di due lettere fa.
+  let giro = 0
+  $effect(() => {
+    const c = cita
+    // `++giro` anche quando non c'è più niente da cercare, e non è una riga di troppo:
+    // senza, una risposta partita un istante prima resta valida e **riapre** il menu
+    // subito dopo che l'hai chiuso scegliendo un file. Visto succedere, non temuto:
+    // scelto `view.ts`, la citazione era completa e l'elenco tornava su da solo.
+    if (!c) { giro++; files = []; return }
+    const mio = ++giro
+    void store.files(c.q).then(async r => {
+      if (mio !== giro) return
+      // Un solo ritentativo, e solo su una risposta vuota a una ricerca vera: nei
+      // primi ~1,8s di una chat il CLI sta ancora costruendo l'indice dei file e
+      // risponde «niente» a qualunque cosa (misurato — è suo, non nostro). Senza
+      // questo, chi apre una chat e scrive subito `@src` resta a mani vuote finché
+      // non tocca un altro tasto. Con la query vuota no: lì «niente» è una risposta.
+      if (r.length === 0 && c.q !== '') {
+        await new Promise(res => setTimeout(res, 400))
+        if (mio !== giro) return
+        r = await store.files(c.q)
+        if (mio !== giro) return
+      }
+      files = r
+    })
+  })
+
+  // La riga scelta torna in cima a ogni cambio di filtro, come per gli slash.
+  $effect(() => { void cita?.q; sceltoAt = 0 })
+
+  /**
+   * La riga scelta con le frecce deve restare visibile.
+   *
+   * I due menu scorrono (`max-height:210px`), e il tasto giù cambia la selezione senza
+   * che il riquadro segua: misurato prima di scriverlo — nove frecce in giù, riga a
+   * 783px con il riquadro che finisce a 742, cioè scelta fuori schermo mentre le
+   * frecce continuavano a funzionare. Vale per **entrambi** i menu, e quello dei
+   * comandi ce l'aveva da sempre: ne mostra fino a 40 e ne fa vedere sette.
+   *
+   * `block:'nearest'` e non `'center'`: scorrere di quel tanto che serve non sposta
+   * niente quando la riga è già visibile, mentre centrarla farebbe saltare l'elenco
+   * a ogni freccia.
+   */
+  function seguiScelta(menu: HTMLElement | null): void {
+    menu?.querySelector('.mi.on')?.scrollIntoView({ block: 'nearest' })
+  }
+  let menuFile = $state<HTMLElement | null>(null)
+  let menuCmd = $state<HTMLElement | null>(null)
+  $effect(() => { void sceltoAt; void files; seguiScelta(menuFile) })
+  $effect(() => { void scelto; void comandi; seguiScelta(menuCmd) })
+
+  /** Il nome del file, che è quello che si sta cercando; il resto è dove sta. */
+  function pezzi(p: string): { dir: string; nome: string; cartella: boolean } {
+    const cartella = p.endsWith('/')
+    const netto = cartella ? p.slice(0, -1) : p
+    const i = netto.lastIndexOf('/')
+    return { dir: i < 0 ? '' : netto.slice(0, i + 1), nome: netto.slice(i + 1), cartella }
+  }
+
+  async function citaFile(p: string): Promise<void> {
+    const c = cita
+    if (!c) return
+    // Una cartella non è una destinazione: si è appena scesi di un livello e si
+    // continua a scrivere lì dentro, quindi niente spazio dopo e il menu resta
+    // aperto. Un file invece è la risposta, e lo spazio serve a scrivere il seguito.
+    const coda = p.endsWith('/') ? '' : ' '
+    const prima = `@${p}${coda}`
+    text = text.slice(0, c.start) + prima + text.slice(caret)
+    const pos = c.start + prima.length
+    await tick()
+    // Il cursore va rimesso a mano: dopo un'assegnazione a `text` il browser lo
+    // sposta in fondo, e se lo si lasciasse lì citare un file in mezzo a una frase
+    // ributterebbe a scrivere alla fine.
+    box?.focus()
+    box?.setSelectionRange(pos, pos)
+    caret = pos
+    grow()
   }
 
   /**
@@ -265,11 +398,32 @@
     </div>
   {/if}
 
+  {#if files.length > 0}
+    <!-- Stesso vestito del menu dei comandi (`.slash`): sono due risposte alla stessa
+         domanda — «cosa posso scrivere qui» — e farle sembrare due cose diverse
+         costringerebbe a impararle due volte. -->
+    <div class="slash" bind:this={menuFile} role="listbox" tabindex="-1" aria-label="Project files">
+      {#each files as p, i (p)}
+        {@const f = pezzi(p)}
+        <button class="mi at" class:on={i === sceltoAt} role="option" aria-selected={i === sceltoAt}
+          onmousedown={e => { e.preventDefault(); void citaFile(p) }}>
+          <Icon name={f.cartella ? 'i-folder' : 'i-doc'} />
+          <span class="txt">
+            <span class="line">
+              <b>{f.nome}{f.cartella ? '/' : ''}</b>
+              {#if f.dir}<span class="hint2">{f.dir}</span>{/if}
+            </span>
+          </span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if comandi.length > 0}
     <!-- Sopra la casella e non sotto: sotto finirebbe fuori dalla finestra, e
          soprattutto il posto dove si guarda mentre si scrive è appena sopra ciò che
          si scrive. -->
-    <div class="slash" role="listbox" tabindex="-1" aria-label="Slash commands">
+    <div class="slash" bind:this={menuCmd} role="listbox" tabindex="-1" aria-label="Slash commands">
       {#each comandi as c, i (c.name)}
         <button class="mi" class:on={i === scelto} role="option" aria-selected={i === scelto}
           onmousedown={e => { e.preventDefault(); completa(c) }}>
@@ -320,8 +474,12 @@
         onpaste={incolla}
         bind:this={box}
         bind:value={text}
-        oninput={() => { chiuso = false; grow() }}
+        oninput={e => { chiuso = false; chiusoAt = false; segnaCaret(e); grow() }}
         onkeydown={key}
+        onkeyup={segnaCaret}
+        onclick={segnaCaret}
+        onselect={segnaCaret}
+        onblur={() => { files = [] }}
         rows="1"
         placeholder="Message the agent…"
       ></textarea>
@@ -396,6 +554,18 @@
   .slash .mi.on { background: var(--accent-soft); }
   .slash .mi:hover:not(.on) { background: var(--surface-2); }
   .slash .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* La riga di un file: l'icona dice subito se è una cartella o un file, che è la
+     differenza che cambia cosa succede premendo Invio (si scende dentro, oppure si
+     ha finito). Il nome in grassetto e il percorso spento perché a cercare si cerca
+     il nome — la cartella serve a distinguere due file che si chiamano uguale. */
+  .slash .mi.at { display: flex; align-items: center; gap: 7px; }
+  .slash .mi.at :global(svg) { width: 12px; height: 12px; flex: none; color: var(--muted); }
+  .slash .mi.at .txt { min-width: 0; }
+  .slash .mi.at .line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  /* Il percorso cede per primo: di un file lungo si vuole vedere il nome, e la
+     cartella tagliata resta comunque leggibile da sinistra. */
+  .slash .mi.at .hint2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Gli allegati in attesa di partire, sopra la casella. */
   .allegati { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

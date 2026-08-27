@@ -14,7 +14,7 @@ import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
-  type ImportableRow, type LinkStatus, type SessionRow, type Settings,
+  type ImportableRow, type LinkStatus, type Memoria, type SessionRow, type Settings,
 } from './api.ts'
 import { Notifier } from './notify.svelte.ts'
 import { CALL_HEAD, callFor, type Call } from '$core/calls.ts'
@@ -248,8 +248,9 @@ export class Store {
   /** Apre una chat. `indirizzo: false` quando è l'indirizzo ad aver aperto lei. */
   async loadSettings(): Promise<void> {
     try {
-      const { settings } = await this.api.settings()
+      const { settings, memoria } = await this.api.settings()
       this.settings = settings
+      if (memoria) this.memoria = memoria
     } catch { /* il daemon dirà di suo che non risponde */ }
   }
 
@@ -258,12 +259,21 @@ export class Store {
    * che non riconosce, e mostrare quello che speravi di aver impostato invece di quello
    * che è impostato è il modo in cui un pannello di opzioni comincia a mentire.
    */
+  /** Dove sta il `CLAUDE.md` dell'agent, e se STARK è riuscito a scriverlo. Lo dice il
+   *  daemon dopo un salvataggio: quale file sia non è deducibile dal browser. */
+  memoria = $state<Memoria | null>(null)
+
   async saveSettings(next: Settings): Promise<void> {
     const prima = this.settings
     this.settings = next          // subito, perché un interruttore deve muoversi quando lo tocchi
     try {
-      const { settings } = await this.api.saveSettings(next)
+      const { settings, memoria } = await this.api.saveSettings(next)
       this.settings = settings
+      if (memoria) this.memoria = memoria
+      // Un file di memoria che non si lascia scrivere non è un salvataggio fallito —
+      // le impostazioni sono su disco — ma va detto, se no la spunta resterebbe accesa
+      // sopra un file che non è cambiato.
+      if (memoria?.error) this.refused = `Settings saved, but ${memoria.path} could not be written: ${memoria.error}`
     } catch (e) {
       this.settings = prima
       this.refused = (e as Error).message
@@ -384,6 +394,17 @@ export class Store {
     const id = this.selected
     if (!id || !this.live) return
     try { await this.api.command(id, { c: 'session.refreshContext' }) } catch { /* restano i vecchi */ }
+  }
+
+  /**
+   * I file del progetto, per le citazioni con `@`. Della chat **selezionata**: `@` è
+   * una cosa che si scrive in una casella, e quella casella appartiene a una chat
+   * sola — chiedere «i file del progetto» senza dire quale non vorrebbe dire niente.
+   */
+  async files(q: string): Promise<string[]> {
+    const id = this.selected
+    if (!id || !this.live) return []
+    return this.api.files(id, q)
   }
 
   /**

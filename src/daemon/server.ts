@@ -17,6 +17,7 @@ import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
 import { diagnostics, warmDiagnostics } from '../adapters/claude-code/profiles.ts'
+import { allineaMemoria } from './memoria.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 
@@ -64,6 +65,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
   warmDiagnostics()
+
+  // La regola sulle descrizioni dei comandi va riallineata **all'avvio**, non solo
+  // quando si tocca l'impostazione: il `CLAUDE.md` globale è un file dell'utente, e
+  // fra un'accensione e l'altra può averlo modificato a mano, cambiato profilo, o
+  // ripristinato da un backup. Senza questo giro, la spunta direbbe una cosa e il
+  // file un'altra — cioè l'impostazione mentirebbe.
+  {
+    const configDir = opts.configDir ?? process.env['CLAUDE_CONFIG_DIR']
+    const esito = allineaMemoria(configDir, registry.settings().toolDescriptions)
+    if (esito.error) console.error('memoria globale non scrivibile:', esito.path, esito.error)
+    else if (esito.cambiato) console.log('memoria globale allineata:', esito.path)
+  }
 
   // Le notifiche sul telefono. Vive nel daemon e non nella pagina perché è **l'unico**
   // posto da cui si può avvisare un telefono che non ti sta guardando: a schermo
@@ -189,7 +202,11 @@ async function route(
 
     // ─── le impostazioni, che non sono di una sessione ma della macchina ─────
     if (method === 'GET' && path === '/api/settings') {
-      return send(res, 200, { settings: registry.settings() })
+      // Anche in lettura, e non solo dopo un salvataggio: *quale* file di memoria si
+      // sta guardando è la cosa che il browser non può sapere da sé, e la sezione
+      // Agent lo mostra prima ancora che l'utente tocchi l'interruttore.
+      const s = registry.settings()
+      return send(res, 200, { settings: s, memoria: allineaMemoria(configDir, s.toolDescriptions) })
     }
     if (method === 'PUT' && path === '/api/settings') {
       const body = await readJson<Settings>(req)
@@ -197,7 +214,13 @@ async function route(
       // Si risponde con ciò che è stato **davvero** scritto, non con ciò che è
       // arrivato: il registro butta via quello che non riconosce, e la UI deve
       // mostrare lo stato vero invece di quello che sperava di aver impostato.
-      return send(res, 200, { settings: registry.saveSettings(body) })
+      const salvate = registry.saveSettings(body)
+      // Il file dell'agent segue la spunta subito, non al prossimo riavvio: una
+      // preferenza che ha effetto «più tardi» è una preferenza che sembra rotta.
+      const memoria = allineaMemoria(configDir, salvate.toolDescriptions)
+      // L'esito torna al client perché è l'unica cosa che l'utente non può dedurre:
+      // *quale* file è stato toccato, e se non si è potuto scriverlo.
+      return send(res, 200, { settings: salvate, memoria })
     }
     if (method === 'GET' && path === '/api/browse') {
       return send(res, 200, registry.browse(url.searchParams.get('path') ?? undefined))
@@ -288,6 +311,16 @@ async function route(
       if (method === 'GET' && sub === '') {
         const s = registry.snapshot(id)
         return s ? send(res, 200, { snapshot: s }) : send(res, 404, { error: 'sconosciuta' })
+      }
+      // Le citazioni con `@`: i file del progetto che somigliano a quello che si sta
+      // scrivendo. GET e non `/command`, perché qui serve una **risposta** — il canale
+      // dei comandi torna `{ok}`, che è giusto per «fai» e inutile per «dimmi».
+      if (method === 'GET' && sub === '/files') {
+        const q = url.searchParams.get('q') ?? ''
+        // Un tetto sulla domanda, non solo sulla risposta: la stringa arriva dal
+        // browser e finisce in un processo figlio, e non c'è nessuna query di 500
+        // caratteri che sia una domanda vera.
+        return send(res, 200, { files: await registry.fileSuggestions(id, q.slice(0, 200)) })
       }
       if (method === 'GET' && sub === '/events') {
         const from = Number(url.searchParams.get('from') ?? 0)

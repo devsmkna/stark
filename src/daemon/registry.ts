@@ -62,6 +62,16 @@ export type SessionRow = {
    */
   doing?: Activity
   live: boolean
+  /**
+   * Il semaforo della quota, **solo quando non è verde**.
+   *
+   * Sta sulla riga e non solo dentro la chat perché la quota non è della
+   * conversazione: è del piano. Quando finisce si fermano tutte le chat di quel
+   * profilo insieme, e l'unico posto da cui si può dire *prima* di entrare in una di
+   * esse è l'elenco. Assente vuol dire «passa», che è il caso normale: un avviso che
+   * c'è sempre non è un avviso.
+   */
+  quota?: { status: string; kind: string; resetsAt: number; usingOverage: boolean }
 }
 
 /** Una conversazione della CLI come la vede la UI, con ciò che il registro sa in più. */
@@ -369,6 +379,13 @@ export class Registry {
           since: state === s.state ? s.stateSince : s.lastTs,
           live: false,
           ...(s.cwd ? { cwd: s.cwd } : {}), ...(s.model ? { model: s.model } : {}),
+          // Anche sulle righe lette dal journal, non solo su quelle vive: dopo un
+          // riavvio del daemon le chat fermate dalla quota sono esattamente quelle
+          // che non hanno più un processo, cioè proprio quelle che sparirebbero
+          // dall'avviso se lo si legasse alle vive. Che il limite sia nel frattempo
+          // ripartito lo decide chi guarda l'orologio, cioè la UI: qui si riporta
+          // l'ultima cosa vera che il journal sa.
+          ...(s.quota && s.quota.status !== 'allowed' ? { quota: s.quota } : {}),
         })
       }
     }
@@ -380,6 +397,7 @@ export class Registry {
         turns: s.turns.length,
         lastSeq: s.lastSeq, lastTs: s.lastTs, since: s.stateSince, live: true,
         ...(doing ? { doing } : {}),
+        ...(s.quota && s.quota.status !== 'allowed' ? { quota: s.quota } : {}),
         ...(s.cwd ? { cwd: s.cwd } : {}),
         ...(s.model ? { model: s.model } : {}),
       })
@@ -495,6 +513,22 @@ export class Registry {
     if (l) return l.snapshot
     const path = resolve(SESSIONS, `${id}.jsonl`)
     return existsSync(path) ? reduce(Journal.read(path), id) : null
+  }
+
+  /**
+   * I file del progetto che somigliano a quello che si sta scrivendo dopo una `@`.
+   *
+   * Passa dall'adapter perché è il CLI a rispondere, ed è **il CLI a sapere quale
+   * cartella è**: il client manda solo l'id della chat e quello che hai digitato, mai
+   * un percorso. Non è pignoleria — una rotta che accettasse un percorso dal browser
+   * sarebbe «elenca qualunque cartella di questa macchina», che è un primitivo più
+   * grosso di quello che serve, e comodo da usare per altro.
+   *
+   * Una chat che dorme non ha un CLI dietro a cui chiedere: si risponde con l'elenco
+   * vuoto, e il menu non si apre. È lo stesso motivo per cui la casella lì non c'è.
+   */
+  async fileSuggestions(id: string, query: string): Promise<string[]> {
+    return (await this.live.get(id)?.adapter.fileSuggestions(query)) ?? []
   }
 
   /**

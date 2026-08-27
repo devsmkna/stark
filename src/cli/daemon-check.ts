@@ -2,7 +2,7 @@
 // flusso SSE, comando, e coerenza fra ciò che è arrivato dal flusso e ciò che sta sul
 // disco. Le prove di sicurezza non costano quota; il turno finale costa pochissimo.
 
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -205,6 +205,41 @@ const aperta = await fetch(`${url}/api/sessions`, {
 })
 const { id } = await aperta.json() as { id: string }
 check('sessione aperta', aperta.status === 201 && !!id, String(aperta.status))
+
+// ─── le citazioni con `@` ───────────────────────────────────────────────────
+//
+// Non costano quota: `file_suggestions` è una domanda sul filesystem, non un turno.
+// L'attesa invece è vera e va rispettata invece di aggirata — il CLI ci mette ~1,5s
+// dall'apertura a saper rispondere a una ricerca (misurato). Si ritenta per un tempo
+// dichiarato: se scade, la prova **fallisce**, non passa in silenzio.
+writeFileSync(resolve(SANDBOX, 'ricordami.txt'), 'niente di interessante\n')
+// Con un file dentro, e non per scrupolo: una cartella **vuota** il CLI non la
+// suggerisce affatto (verificato — la prova era rossa proprio così). È coerente con
+// cosa serve a un `@`, cioè arrivare a del contenuto, ma non si indovina.
+mkdirSync(resolve(SANDBOX, 'sottocartella'), { recursive: true })
+writeFileSync(resolve(SANDBOX, 'sottocartella', 'dentro.txt'), 'ci sono\n')
+const cerca = async (q: string): Promise<string[]> => {
+  const r = await fetch(`${url}/api/sessions/${id}/files?q=${encodeURIComponent(q)}`, { headers: auth })
+  return (await r.json() as { files: string[] }).files
+}
+let trovati: string[] = []
+for (let i = 0; i < 30 && trovati.length === 0; i++) {
+  trovati = await cerca('ricorda')
+  if (trovati.length === 0) await new Promise(r => setTimeout(r, 200))
+}
+check('`@` trova un file del progetto', trovati.includes('ricordami.txt'), JSON.stringify(trovati))
+check('e anche una cartella, che si riconosce dalla barra finale',
+  (await cerca('sottocart')).some(f => f.endsWith('/')))
+check('quello che non c\'è torna vuoto, non un errore',
+  (await cerca('zzz-non-esiste-zzz')).length === 0)
+check('la ricerca dei file è dietro il token come tutto il resto',
+  (await fetch(`${url}/api/sessions/${id}/files?q=x`)).status === 403)
+// Una chat senza processo dietro non ha nessuno a cui chiedere. Deve rispondere
+// «niente» invece di rompersi: è lo stesso caso di una chat che dorme, dove il menu
+// semplicemente non si apre.
+check('una sessione che non esiste torna vuoto, non un\'eccezione',
+  (await (await fetch(`${url}/api/sessions/${'0'.repeat(36)}/files?q=x`,
+    { headers: auth })).json() as { files?: string[] }).files?.length === 0)
 
 // ─── flusso ─────────────────────────────────────────────────────────────────
 

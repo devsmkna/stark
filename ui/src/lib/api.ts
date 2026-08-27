@@ -25,6 +25,9 @@ export type SessionRow = {
   /** Cosa sta facendo adesso. C'è solo sulle righe vive: vedi il daemon. */
   doing?: Activity
   live: boolean
+  /** Il semaforo della quota, solo quando non è verde. Sta sulla riga perché la quota
+   *  è del piano, non della chat: quando finisce le ferma tutte insieme. */
+  quota?: { status: string; kind: string; resetsAt: number; usingOverage: boolean }
 }
 
 /** Le sottocartelle di un percorso, per il dialogo «apri path» di New chat. */
@@ -57,7 +60,13 @@ export type ImportableRow = {
 export type Settings = {
   permissions: Record<string, 'allow' | 'ask'>
   projects: Record<string, { colour?: number; muted?: boolean; profile?: string }>
+  /** Se l'agent deve scrivere **perché** lancia un comando. Vive nel `CLAUDE.md`
+   *  globale dell'agent, quindi vale anche fuori da STARK. */
+  toolDescriptions: boolean
 }
+
+/** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */
+export type Memoria = { path: string; presente: boolean; cambiato: boolean; error?: string }
 
 export type Storage = {
   home: string
@@ -155,9 +164,9 @@ export class Api {
     return this.json('/api/sessions')
   }
 
-  settings(): Promise<{ settings: Settings }> { return this.json('/api/settings') }
+  settings(): Promise<{ settings: Settings; memoria?: Memoria }> { return this.json('/api/settings') }
 
-  saveSettings(s: Settings): Promise<{ settings: Settings }> {
+  saveSettings(s: Settings): Promise<{ settings: Settings; memoria?: Memoria }> {
     return this.json('/api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -206,6 +215,20 @@ export class Api {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(spec),
     })
+  }
+
+  /**
+   * I file del progetto che somigliano a quello che si sta scrivendo dopo una `@`.
+   * A rispondere è il CLI (è la stessa ricerca del terminale), quindi il filtro non
+   * lo fa il browser: si manda quello che l'utente ha digitato e si mostra ciò che
+   * torna. Una risposta che non arriva vale «nessun file», non un errore a schermo:
+   * si sta digitando, e un avviso in mezzo a una parola è peggio di un menu che tace.
+   */
+  async files(id: string, q: string): Promise<string[]> {
+    try {
+      const r = await this.json<{ files: string[] }>(`/api/sessions/${id}/files?q=${encodeURIComponent(q)}`)
+      return r.files
+    } catch { return [] }
   }
 
   importable(): Promise<{ sessions: ImportableRow[] }> {

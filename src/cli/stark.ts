@@ -18,6 +18,7 @@
 // il modo più facile di pagare quel prezzo senza aver deciso di pagarlo.
 
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { chmodSync, openSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -120,15 +121,87 @@ function installa(): void {
 }
 
 /**
- * Accende il daemon staccato e aspetta che risponda. Restituisce il pid del figlio, o
- * `null` se non ha risposto in tempo. Non controlla se ne gira già uno: quella domanda
- * ha risposte diverse per `start` (è un errore) e per `up` (è la normalità), quindi la
- * decisione resta a chi chiama.
+ * Le variabili che il daemon legge davvero, nella forma che vuole `systemd-run`.
+ *
+ * Vanno passate a mano perché un servizio transiente parte con un ambiente **pulito**:
+ * senza `HOME` il registro cercherebbe i journal nel posto sbagliato, e senza
+ * `CLAUDE_CONFIG_DIR` i processi figli non troverebbero le sessioni da riprendere —
+ * che è il modo in cui questa cosa si rompe sembrando rotta senza motivo (§Vincoli).
+ *
+ * Diventano visibili in `systemctl show`, e va detto: non è un'esposizione nuova,
+ * perché lo stesso ambiente si legge già da `/proc/<pid>/environ`, e in entrambi i casi
+ * serve essere root — cioè chi ha già avviato il daemon.
+ */
+function ambiente(): string[] {
+  const fuori: string[] = []
+  for (const k of ['STARK_HOME', 'STARK_PORT', 'STARK_MODEL', 'STARK_TOKEN',
+    'CLAUDE_CONFIG_DIR', 'PATH', 'HOME']) {
+    const v = process.env[k]
+    if (v) fuori.push('--setenv', `${k}=${v}`)
+  }
+  return fuori
+}
+
+/**
+ * Avvia il daemon come **servizio transiente di systemd**, se si può.
+ *
+ * Perché non basta `spawn(detached)` — e questo è stato riprodotto, non dedotto
+ * (27 agosto 2026, segnalato dall'utente: «ho avviato stark da terminale, l'ho chiuso, e
+ * dopo qualche minuto la sessione si è interrotta»).
+ *
+ * `detached: true` chiama `setsid()`, che stacca il processo dal **terminale**: il
+ * SIGHUP della chiusura non lo raggiunge, ed è quello che il vecchio commento qui
+ * prometteva. Ma systemd non traccia i processi per sessione: li traccia per **cgroup**,
+ * e un figlio eredita quello del padre. Un terminale vive dentro
+ * `session-N.scope`; alla chiusura logind ferma quello scope, e fermare uno scope
+ * significa **uccidere tutto ciò che sta nel suo cgroup** — session leader o no.
+ * Misurato: daemon avviato dentro uno scope → `0::/system.slice/…scope`, scope fermato
+ * → daemon **morto**, porta chiusa. E la via manuale non c'è: su WSL il cgroup radice è
+ * in sola lettura, quindi il processo non può uscirsene da solo.
+ *
+ * Un servizio transiente invece nasce in `system.slice`, cioè **fuori** da qualunque
+ * sessione: stessa prova, scope fermato → daemon vivo. È il meccanismo che systemd
+ * offre apposta per questo, quindi si usa quello invece di inventarne uno (§«se esiste
+ * qualcosa di ufficiale e già pronto»).
+ *
+ * `--collect` perché un'unità fermata non resti in giro a bloccare il proprio nome; il
+ * nome porta un'impronta di `STARK_HOME` perché due daemon su case diverse — quello
+ * vero e uno di prova — devono poter convivere, come già fa `process.title`.
+ * Il log resta `daemon.log` e non il journal: `stark status` manda a leggere lì, e
+ * spostarlo vorrebbe dire cambiare la risposta a «perché non è partito».
+ */
+function avviaConSystemd(): boolean {
+  const impronta = createHash('sha1').update(STARK_HOME).digest('hex').slice(0, 8)
+  const log = logPath(STARK_HOME)
+  const r = spawnSync('systemd-run', [
+    '--unit', `stark-${impronta}`,
+    '--description', `STARK — ${STARK_HOME}`,
+    '--collect', '--quiet',
+    `--property=StandardOutput=append:${log}`,
+    `--property=StandardError=append:${log}`,
+    ...ambiente(),
+    process.execPath, fileURLToPath(import.meta.url), 'run',
+  ], { stdio: 'ignore' })
+  return r.status === 0
+}
+
+/**
+ * Accende il daemon staccato e aspetta che risponda. Restituisce il pid, o `null` se non
+ * ha risposto in tempo. Non controlla se ne gira già uno: quella domanda ha risposte
+ * diverse per `start` (è un errore) e per `up` (è la normalità), quindi resta a chi chiama.
  */
 async function avviaStaccato(): Promise<number | null> {
-  // `detached` mette il figlio in una sessione sua: quando il terminale se ne va,
-  // il SIGHUP che uccide tutto ciò che gli appartiene non lo raggiunge.
   ensureHome(STARK_HOME)
+
+  // Prima la via che sopravvive davvero alla chiusura del terminale. Se systemd non
+  // c'è, o non siamo root, o la chiamata fallisce per qualunque motivo, si ripiega su
+  // `spawn(detached)`: è quello che c'era prima, e su una macchina senza systemd non
+  // c'è nessuno scope da cui scappare — quindi lì funzionava ed è ancora giusto.
+  if (avviaConSystemd()) {
+    if (!await finche(risponde, true)) return null
+    return runningPid(STARK_HOME) ?? 0
+  }
+
   const log = openSync(logPath(STARK_HOME), 'a')
   const figlio = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run'], {
     detached: true,

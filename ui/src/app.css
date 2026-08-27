@@ -123,7 +123,6 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .sit .meta{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
 .sit .sst{font-weight:600}
 /* da quanto sta in quello stato: e cio che distingue un lavoro che procede da uno piantato */
-.sit .el{opacity:.85}
 /* cosa sta facendo adesso: solo sulle righe vive, dove la domanda esiste */
 .sit .act{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);margin-top:2px}
 .sit .act span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -141,6 +140,21 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 /* una riga ciascuna: la descrizione di una skill e' un paragrafo intero */
 .slash .line,.slash .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .slash .hint2{color:var(--muted);font-size:10.5px;font-family:var(--mono)}
+/* La banda della quota finita: sopra l'elenco, non dentro una riga. Rossa come lo
+   Stop e non gialla come un avviso, perché non dice «attento» ma «adesso non si
+   lavora» — ed è l'unico stato di STARK in cui premere qualunque cosa non serve. */
+.quotaout{display:flex;gap:8px;align-items:flex-start;margin:8px 10px 2px;padding:8px 10px;border:1px solid var(--stop);border-radius:9px;background:color-mix(in srgb,var(--stop) 9%,transparent);flex:none}
+.quotaout svg{width:13px;height:13px;flex:none;color:var(--stop);margin-top:1px}
+.quotaout .qt{font-weight:650;font-size:11px;color:var(--stop)}
+.quotaout .qs{font-size:10.5px;color:var(--ink-2);line-height:1.4}
+/* Quello che si può fare quando il classificatore ha fermato un'azione. Non è un
+   errore (niente rosso) e non è una domanda (niente giallo d'attesa): è una nota, e
+   sta dentro il blocco aperto perché la riga chiusa deve restare una riga. */
+.blocknote{margin:6px 0 2px;padding:9px 11px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface-2);font-size:11px;color:var(--ink-2)}
+.blocknote .bn1{font-weight:600;color:var(--ink);margin-bottom:5px}
+.blocknote ul{margin:0 0 7px;padding-left:16px}
+.blocknote li{margin:2px 0}
+.blocknote .bn2{margin-bottom:7px}
 .sit.zz{opacity:.55}
 .sidefoot{padding:8px 12px;border-top:1px solid var(--line);color:var(--muted);display:flex;gap:7px;align-items:center;flex:none}
 .sidefoot.on{background:var(--surface-3);color:var(--ink);font-weight:600}

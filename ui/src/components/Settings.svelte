@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Le impostazioni: un riquadro quasi a tutto schermo, sei sezioni.
+  // Le impostazioni: un riquadro quasi a tutto schermo, sette sezioni.
   //
   // La regola che le tiene insieme: **ogni voce dice la verità su cosa fa**. Dove STARK
   // non sa ancora fare una cosa, la voce resta in elenco spenta e con scritto perché
@@ -20,7 +20,7 @@
 
   let { store }: { store: Store } = $props()
 
-  type Sezione = 'permissions' | 'projects' | 'notifications' | 'appearance' | 'storage' | 'system'
+  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'appearance' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
    *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
@@ -29,6 +29,7 @@
 
   const SEZIONI: { id: Sezione; nome: string; icona: string }[] = [
     { id: 'permissions', nome: 'Permissions', icona: 'i-shield' },
+    { id: 'agent', nome: 'Agent', icona: 'i-brain' },
     { id: 'projects', nome: 'Projects', icona: 'i-folder' },
     { id: 'notifications', nome: 'Notifications', icona: 'i-bell' },
     { id: 'appearance', nome: 'Appearance', icona: 'i-palette' },
@@ -53,6 +54,14 @@
     const s = store.settings
     if (!s) return
     await store.saveSettings({ ...s, permissions: { ...s.permissions, [id]: v } })
+  }
+
+  // ─── l'agent ──────────────────────────────────────────────────────────────
+
+  async function setDesc(v: boolean): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    await store.saveSettings({ ...s, toolDescriptions: v })
   }
 
   // ─── progetti ─────────────────────────────────────────────────────────────
@@ -208,6 +217,44 @@
             <span class="chip" style="color:var(--muted)">Not built yet — STARK has no deny rules,
             so a hard boundary here would be a promise it cannot keep</span>
           </div>
+        </div>
+
+      <!-- ─── Agent ──────────────────────────────────────────────────── -->
+      {:else if sez === 'agent'}
+        <div class="fgroup">
+          <div class="flabel">How the agent works</div>
+          <div>
+            <div class="prow">
+              <div>
+                <div class="pn">Command descriptions</div>
+                <div class="pd">write <i>why</i> a command runs, not just what</div>
+              </div>
+              <span class="seg">
+                <button class:on={store.settings.toolDescriptions !== false}
+                  onclick={() => void setDesc(true)}>on</button>
+                <button class:on={store.settings.toolDescriptions === false}
+                  onclick={() => void setDesc(false)}>off</button>
+              </span>
+            </div>
+          </div>
+          <div class="hint">Without it a tool row shows only the command — and
+          <code>grep -rn "claude-sonnet" src/</code> tells you nothing about what the agent was
+          looking for. With it, that row reads «Find where the default model is decided».</div>
+          <!-- Dire dove si va a scrivere non è un dettaglio tecnico: è l'unica cosa che
+               l'utente non può dedurre da solo, ed è un file **suo**. -->
+          <div class="notice">
+            <Icon name="i-doc" />
+            <span><b>This writes a rule into the agent's own memory.</b> STARK adds a marked block
+            to <code>{store.memoria?.path ?? 'CLAUDE.md'}</code> and removes exactly that block when
+            you switch it off — the rest of the file is never touched. Because the rule lives there
+            and not here, it also applies outside STARK, in the terminal.</span>
+          </div>
+          {#if store.memoria?.error}
+            <div class="notice">
+              <Icon name="i-warn" />
+              <span><b>That file could not be written.</b> {store.memoria.error}</span>
+            </div>
+          {/if}
         </div>
 
       <!-- ─── Projects ────────────────────────────────────────────────── -->
@@ -588,6 +635,15 @@
   .sn, .seg button, .x, .lnk { color: inherit; }
   .sn { width: 100%; text-align: left; padding: 5px 8px; }
   .seg button { padding: 2.5px 9px; font-size: 10px; }
+  /* La voce scelta si deve **vedere**. `.seg button{background:none;color:inherit}` qui
+     sopra è scoped, quindi più specifico di `.seg button.on` in app.css, e se lo
+     mangiava: da quando esiste il pannello dei permessi la scelta si distingueva solo
+     per il grassetto, che a 10px non è una differenza — l'interruttore sembrava spento
+     in entrambe le posizioni. Trovato aggiungendo la voce «Command descriptions»,
+     misurando il colore di sfondo invece di guardarlo: `rgba(0,0,0,0)` su tutti e due i
+     bottoni, in tutte e due le sezioni. È la stessa malattia del menu dei comandi in
+     Dock.svelte, e la cura è la stessa: ridichiarare qui, dove lo scoped vale. */
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
   .chip { padding: 3.5px 8px; }
   .tog[disabled] { opacity: .4; cursor: default; }
   .lnk { color: var(--accent); font-weight: 600; font-family: var(--sans); font-size: 10px; }

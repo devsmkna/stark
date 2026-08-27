@@ -75,7 +75,8 @@ e scuro. Tutte le schermate sono disegnate in `docs/ui-anteprima.html`.
 **E ti chiama quando guardi altrove** (24 agosto 2026): notifica di sistema e suono per *ti
 aspetta*, *ha finito*, *si è fermata da sola*, con la campanella in cima all'elenco come
 interruttore; e la riga dell'elenco dice **cosa sta facendo adesso e da quanto sta così**.
-Provato dal vivo, notifica compresa.
+Provato dal vivo, notifica compresa. (Il «da quanto» è stato **tolto** il 26 agosto su richiesta
+dell'utente — vedi più sotto: resta il «cosa sta facendo».)
 
 **Gli strumenti esterni si scelgono per chat**: il chip MCP nella barra di stato elenca i server
 della macchina e li accende uno per uno, spenti di default, con la scelta che torna col
@@ -751,7 +752,151 @@ Verificato dopo la ristrutturazione che lo **sticky regga ancora** (era il risch
 cambio): agganciato a 390 e 1400px, fascia scoperta sopra **0**, `maiSopraLHeader`, e il nuovo
 bottone premibile con `elementFromPoint` anche mentre il prompt è appeso.
 
-Passo corrente: **da decidere**. Restano i divieti veri (`deny`), le due misure di quota mai
+**Dalla riga dell'elenco sparisce «da quanto»** (26 agosto 2026, chiesto dall'utente: «sono
+informazioni e calcolo inutile»). La riga diceva `23:13 · working · 2m`; ora si ferma a
+`23:13 · working`. Il pezzo che valeva la pena togliere non era il testo ma quello che stava
+dietro: un `setInterval` da **un secondo** con `now` in `$state`, esistito solo per far
+avanzare quella stringa — e siccome `now` è letto dentro il `{#each}` delle righe, ogni tick
+invalidava l'elenco intero, anche a schermo fermo e con tutte le chat che dormono. Il commento
+accanto lo giustificava («una decina di righe non costa niente»), e non era sbagliato: era il
+**valore** dall'altra parte della bilancia a non reggere, non il costo. Via anche
+`.sit .el{opacity:.85}` in `app.css`, rimasta senza padrone (l'altra `.el`, quella di `.doing`,
+è di un'altra cosa e resta).
+Non toccato di proposito: il campo `since` **resta** e continua a ordinare le righe dentro il
+gruppo — è la ragione per cui non si ordina per `lastTs`, ed è ancora valida. Smettere di
+mostrarlo non è smettere di usarlo. Verificato nella UI vera, non a occhio: screenshot sul
+daemon di produzione dopo `ui:build`.
+
+**Si cita un file con `@`** (26 agosto 2026, chiesto dall'utente: «poter citare i file presenti
+all'interno del progetto con @, come il menu degli slash command»). Si preme `@`, compare lo
+stesso menu dei comandi, e scrivendo si filtra.
+
+La cosa che ha deciso tutto il resto è stata **non scriverla**. `file_suggestions` esiste già
+nel canale di controllo del CLI — «the same fuzzy-matched results the TUI shows», dai tipi
+ufficiali — quindi la ricerca è quella del terminale, `.gitignore` compreso, e non una nostra
+imitazione che divergerebbe al primo aggiornamento (la regola di ADR-009 applicata a un caso
+nuovo). Il pezzo scomodo, detto in chiaro nel codice: l'SDK **dichiara** la richiesta nei tipi
+ma non la espone come metodo del `Query`, a differenza di `getContextUsage()`. Si passa dal
+`request()` generico, che nel `.d.ts` non c'è — quindi la stessa cautela di `refreshQuota()`:
+si guarda se il metodo c'è invece di fidarsi del tipo, e una versione che lo togliesse non è un
+guasto (il menu non si apre, la casella resta una casella).
+
+Due fatti misurati prima di scrivere una riga, entrambi a **costo zero di quota** (sono domande
+sul filesystem, non turni). Il primo: `@` non è decorazione — il CLI **espande** la citazione da
+sé anche via stream-json, verificato nascondendo una parola in un file e chiedendola con
+`@file`; è tornata nella risposta **senza** che l'agent aprisse un tool per leggerlo. Citare tre
+file costa quindi tre letture in meno, ed è il motivo per cui si inserisce `@percorso` e non il
+percorso nudo. Il secondo: per i primi **~1,5s** dopo l'apertura di una chat il CLI sta ancora
+costruendo il suo indice e risponde «nessun file» a qualunque ricerca — mentre la query vuota
+funziona subito, perché quella è una lettura della cartella e non una ricerca.
+Su quel secondo fatto ho scritto la cura ovvia — un riscaldamento all'avvio — e poi l'ho
+**tolta**, perché l'A/B diceva che non serviva: 1531/1565ms senza contro 2738/1563ms con.
+L'indice se lo costruisce da sé e non si lascia anticipare. A coprire la finestra fredda resta
+un solo ritentativo dalla UI, che è il posto dove si sa che l'utente sta ancora digitando.
+Vale la pena ricordare anche una misura **buttata**: il primo A/B dava 3513 contro 1785 e
+sembrava confermare il riscaldamento, ma l'orologio di WSL era saltato durante la prova
+(`sessione aperta a +-86ms`, un tempo negativo). Rifatta con `performance.now()`, il risultato
+si è rovesciato.
+
+Tre difetti trovati **guidando la UI vera**, nessuno dei quali si vedeva leggendo il codice.
+Scegliendo un file il menu **si riapriva da solo**: quando la citazione finisce l'effetto
+svuotava l'elenco ma non invalidava le risposte già in volo, e quella partita un istante prima
+tornava buona un attimo dopo (`giro++` anche sul ramo che chiude). La riga scelta con le frecce
+**usciva dal riquadro**: misurato, nona freccia a 783px con il riquadro che finisce a 742 —
+e non era un difetto del menu nuovo, ce l'aveva **anche quello dei comandi**, che ne mostra
+fino a 40 e ne fa vedere sette. Corretto per entrambi con `scrollIntoView({block:'nearest'})`.
+E una cartella **vuota** il CLI non la suggerisce affatto: l'ha scoperto una prova rossa, non
+un ragionamento.
+Verificato dal vivo su una sessione vera a 1400 e 390px: filtro che stringe mentre si scrive
+(11 righe → 1), Invio che cita, cartella che scende dentro senza chiudere, Esc, citazione in
+mezzo a una frase col cursore che torna al punto giusto, e un indirizzo email che **non** apre
+niente. `npm run daemon` passa a **30**.
+
+**Le descrizioni dei comandi si accendono da un interruttore** (27 agosto 2026, chiesto
+dall'utente dopo aver notato che sparivano). Impostazioni → **Agent** → «Command
+descriptions», accesa di default. La sezione è nuova, la settima: sta accanto a Permissions
+perché sono le due che cambiano cosa fa l'agent, ma risponde a un'altra domanda — quella dice
+*di cosa mi fido*, questa *come lavora*.
+
+Il punto che decide tutto: **non c'è un'opzione dell'SDK da accendere**. Quel campo lo scrive il
+modello, quindi l'unico modo di chiederglielo è dirglielo dove lo rilegge sempre — cioè nel
+`CLAUDE.md` **globale dell'agent**, `<CLAUDE_CONFIG_DIR>/CLAUDE.md`. Da qui la conseguenza che
+sta scritta nel pannello invece che scoperta dopo: la regola vale **anche fuori da STARK**, nel
+terminale. È anche l'unica cosa in STARK che scrive in un file **dell'utente** fuori da
+`~/.stark`, e per questo `memoria.ts` ha una regola sola: non riscrivere mai quel file, toccare
+solo il blocco fra i due delimitatori. Spegnendo si toglie *esattamente* quello; se il file
+resta vuoto sparisce (vuoto vuol dire che non c'è niente da perdere, quindi non serve sapere
+chi l'aveva creato), se conteneva altro l'altro resta identico. Otto verifiche nuove provano
+proprio questo — testo dell'utente prima **e dopo** il blocco, riaccensioni ripetute che non
+accumulano copie, e un blocco lasciato a metà che non fa cancellare il resto.
+Si riallinea anche **all'avvio del daemon**, non solo al salvataggio: fra un'accensione e
+l'altra quel file può essere stato cambiato a mano, e senza quel giro la spunta direbbe una
+cosa e il file un'altra.
+
+Nello stesso giro, un difetto **che c'era già da giorni** e che si è visto solo aggiungendo la
+voce nuova: nel pannello delle impostazioni la posizione scelta di un interruttore a due vie era
+**invisibile**. `.seg button{background:none;color:inherit}` in `Settings.svelte` è scoped,
+quindi più specifico di `.seg button.on` in `app.css`, e se lo mangiava: restava solo il
+grassetto, che a 10px non è una differenza. Valeva anche per i permessi, cioè per l'unica
+tabella di quel pannello che cambia cosa fa l'agent. Misurato invece che guardato —
+`rgba(0,0,0,0)` su entrambi i bottoni, in entrambe le sezioni — ed è la stessa malattia già
+documentata per il menu dei comandi in `Dock.svelte`. Dopo: `rgb(233,237,254)` sulla voce
+scelta, in tutte e due.
+Provato dal vivo premendo l'interruttore nella UI vera: «off» ha tolto il file dal profilo
+reale, «on» l'ha rimesso. `npm run check` passa a **97**.
+Nello stesso giro `configDirOf()` in `profiles.ts`: la catena
+`configDir ?? CLAUDE_CONFIG_DIR ?? ~/.claude` era scritta due volte, e la terza copia (la
+memoria globale) l'ha resa una funzione — stessa ragione di `core/platform.ts`.
+
+**Le due schermate che chiudono l'MVP** (27 agosto 2026, dopo aver riletto insieme all'utente
+cosa mancasse davvero). Erano le due sole in cui STARK **taceva su un fatto**, ed entrambe
+riguardano qualcosa che si ferma senza che nessuno l'abbia chiesto.
+
+**Quota esaurita.** Una banda sopra l'elenco: quante chat sono ferme e fino a quando. Sta lì e
+non dentro una chat perché la quota è del **piano** — quando finisce si fermano tutte insieme, e
+scoprirlo entrando in una per volta non è una risposta. Tre scelte non ovvie: **niente conto
+alla rovescia**, solo l'ora esatta (la durata avrebbe richiesto l'orologio al secondo appena
+tolto dall'elenco, e fra le due è l'orario a decidere); **una sveglia sola** all'istante del
+reset invece di un intervallo, perché le chat ferme non ricevono più eventi e senza quella la
+banda resterebbe per ore dopo che il limite è ripartito; e si riparte dal reset **più lontano**,
+non dal più vicino — uscire dalla finestra da 5 ore mentre la settimanale è ancora chiusa vuol
+dire ricascarci un istante dopo. La regola sta in `core/quota.ts` e non nel componente perché il
+caso al bordo (un limite già scaduto, letto da un journal vecchio) si sbaglia **leggendo**, non
+guardando: nove verifiche, e non serve mettere in scena una quota finita in un browser.
+
+**Azione fermata dal classificatore.** La riga lo diceva già bene (`Blocked · stopped for
+safety`, non un errore rosso), ma finiva lì: un blocco **non è** una richiesta di permesso,
+quindi non sale nessuna card e non c'è niente da premere. Ora, aprendola, si legge cosa fare.
+Il lavoro vero è stato **scoprire cosa fa il CLI**, che è la domanda che ha posto l'utente
+(«claude come si comporta in quel caso?») e che ha ribaltato la mia proposta:
+
+- l'SDK **dichiara** un hook `PermissionDenied` la cui risposta è esattamente
+  `{ retry?: boolean }` — «consenti e riprova» già pronto. **Provato: non scatta.** Due rifiuti
+  veri su CLI 2.1.241, hook registrato in tre modi nella stessa esecuzione (senza `matcher`,
+  `'*'`, `'Write'`): zero. Chiude una domanda che `docs/event-model.md` teneva aperta, e va
+  riprovata a ogni salto di versione.
+- il CLI, quando blocca, dice **al modello**: prova un'altra strada, il sola-lettura passa
+  comunque, torna dopo. All'utente non offre nessun bypass per azione — e **ignora apposta** le
+  voci di `permissions.allow` che aggirerebbero il classificatore (letto nel binario). Non è una
+  dimenticanza: è una difesa.
+- quindi STARK ripete all'utente le stesse tre vie (il modello le legge, lui no) e offre
+  l'unica leva vera, **cambiare modalità**. Un «consenti questa e riprova» sarebbe stato STARK
+  che fa *di più* del CLI proprio su una difesa: il Principio 5 dice che non dobbiamo poter
+  **meno**, non che dobbiamo scavalcare.
+
+Due trappole di metodo, registrate perché hanno bruciato tre tentativi: un blocco del
+classificatore **non si provoca a comando** — chiedere `curl … | bash` non ci arriva nemmeno,
+si rifiuta prima il modello; e in `dontAsk` `ls` passa lo stesso perché è pre-approvato, serve
+una scrittura. Per provare il *meccanismo* di un rifiuto serve `dontAsk` + `Write`.
+Verificato a schermo su un journal costruito apposta: gruppo di operazioni → riga bloccata →
+nota con le tre vie. La spiegazione c'è sempre, il bottone solo a chat viva — cambiare modalità
+è un comando a un processo, e su una chat che dorme non c'è nessuno a riceverlo.
+
+Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
+risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
+chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
+ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
+cambiato quello vecchio. Restano i divieti veri (`deny`), le due misure di quota mai
 fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
 sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
 
@@ -792,10 +937,18 @@ Decisioni già prese:
 - avviare un lavoro e importarne uno dal terminale stanno nello **stesso riquadro, dietro due
   linguette**: una tendina sul `+` si apre solo se sai già che c'è qualcosa da scegliere, e la
   seconda porta va vista per essere usata.
-- la riga dell'elenco dice **da quanto sta in quello stato**, non da quando ha scritto
-  l'ultima riga: su un lavoro che procede coincidono, su uno piantato no — ed è il caso in cui
-  si vuole saperlo. «Cosa sta facendo adesso» invece compare **solo sulle righe vive**: su una
-  sessione senza processo dietro sarebbe falsa, perché il suo journal è rimasto aperto a metà.
+- ~~la riga dell'elenco dice **da quanto sta in quello stato**~~ — **rovesciata il 26 agosto
+  2026 su richiesta dell'utente**: «da quanto» non si mostra più. La premessa era che
+  distinguesse un lavoro che procede da uno piantato; a dirlo però è già **«cosa sta facendo
+  adesso»**, che sulle righe vive c'è, e per una chat ferma il «da quanto» è un numero che
+  cambia ogni secondo senza che nessuno lo guardi. `since` **resta** nel modello e continua a
+  **ordinare** dentro il gruppo (vedi la voce qui sotto): a sparire è solo il fatto che si
+  vedesse. Dettaglio non ovvio del costo: la stringa la faceva avanzare un `setInterval` da un
+  secondo con `now` in `$state`, quindi ogni tick invalidava **tutte** le righe dell'elenco.
+  Tolta la riga, l'orologio non serve più a nessuno ed è andato via con lei — l'elenco si
+  ridisegna solo quando cambia qualcosa davvero.
+- «Cosa sta facendo adesso» compare **solo sulle righe vive**: su una sessione senza processo
+  dietro sarebbe falsa, perché il suo journal è rimasto aperto a metà.
 - le notifiche si spengono e si accendono da **una campanella sola**, non per chat: il permesso
   del browser si può chiedere solo dentro un gesto, e il **suono non ne ha bisogno** — perciò
   un permesso negato non toglie il comando, lo spiega.
@@ -808,6 +961,13 @@ Decisioni già prese:
   portatile» non è un fatto del progetto.
 - il pannello dei permessi mostra **sei categorie, non nomi di tool**: la traduzione in `Bash` e
   `mcp__*` sta nell'adapter, che è l'unico a conoscerli (§1).
+- le **descrizioni dei comandi** sono un'impostazione (Agent → «Command descriptions»,
+  accesa di default) che **non vive in STARK**: scrive una regola nel `CLAUDE.md` globale
+  dell'agent, perché quel campo lo scrive il modello e non esiste un'opzione dell'SDK. Vale
+  quindi anche nel terminale, e il pannello lo dice invece di lasciarlo scoprire.
+- i **file si citano con `@`** dalla stessa casella, e la ricerca è quella del CLI
+  (`file_suggestions`), non una nostra: il filtro lo fa lui, noi mostriamo. `@` viene
+  **espanso dal CLI**, quindi citare un file è più economico che farglielo aprire.
 - i **comandi slash** si completano dalla casella, con argomenti e alias. Quelli legati al
   terminale restano in elenco con l'etichetta: il CLI li ha, e a dire che lì non funzionano è
   l'agent — non STARK a indovinarlo.

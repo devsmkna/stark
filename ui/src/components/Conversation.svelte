@@ -444,6 +444,43 @@
             <div class="bblabel">Output</div>{part.output}
           {/if}
         </div>
+        <!-- Un'azione fermata dal classificatore non è un fallimento, ed è l'unico
+             punto di STARK in cui l'utente resterebbe senza sapere cosa fare: il
+             blocco non è una richiesta di permesso, quindi non c'è niente da premere
+             e nessuna card che salga dal basso.
+             Le tre vie d'uscita sono **quelle del CLI**, non nostre — le stesse che
+             il CLI scrive al modello: prova un'altra strada, il sola-lettura passa
+             comunque, torna dopo. Le ripetiamo a te perché il modello le legge e tu
+             no, e la GUI esiste per non farti indovinare cosa sta succedendo.
+             Quello che NON c'è, di proposito: un «consenti questa e riprova». Il CLI
+             non lo offre, e ignora apposta le voci di `permissions.allow` che
+             aggirerebbero il classificatore — quindi metterlo qui sarebbe STARK che
+             fa di più del CLI proprio su una difesa. La via vera è cambiare
+             modalità, ed è quella che il bottone offre. -->
+        {#if part.blocked === 'classifier'}
+          <div class="blocknote">
+            <div class="bn1">Auto mode stopped this. It is not a failure, and not a question for you.</div>
+            <ul>
+              <li>The agent can try another way — that is what it was told to do.</li>
+              <li>Reading files and searching still work: they never go through the classifier.</li>
+              <li>You can come back to this later.</li>
+            </ul>
+            <!-- La spiegazione vale sempre, il bottone no: cambiare modalità è un comando
+                 a un processo, e su una chat che dorme non c'è nessuno a riceverlo. Su
+                 una conversazione riletta dal journal resta comunque giusto sapere
+                 **perché** quell'azione non è avvenuta — è la domanda che ci si fa
+                 rileggendo, mesi dopo, un lavoro che si era fermato. -->
+            {#if store.live}
+              <div class="bn2">
+                To decide these yourself instead of leaving them to auto mode, switch this chat to
+                <b>ask me</b>. It applies from now on, so you will need to ask again for this one.
+              </div>
+              <button class="btn" onclick={() => void store.setMode('default')}>
+                Switch to «ask me»
+              </button>
+            {/if}
+          </div>
+        {/if}
       {/if}
 
       <!-- I file toccati da questa chiamata, dove sono stati toccati. Lo stesso file
