@@ -964,6 +964,110 @@ Vincoli di lancio, dallo spike:
 
 ---
 
+## 14-bis. Adapter OpenCode: mappatura e disegno
+
+Scritto il 27 agosto 2026 dopo le sonde P21/P22/P23, cioè **su dati misurati** e non sullo spec.
+Decisioni prese con l'utente: si parla all'SDK ufficiale (ADR-013), `PermissionMode` si
+generalizza in opzioni di sessione, ed entrano tre fatti nuovi nel modello.
+
+### La differenza che non è nella tabella: il modello di processo
+
+| | Claude Code | OpenCode |
+|---|---|---|
+| processo | **uno per conversazione** (l'SDK lo spawna) | **uno per macchina**, N conversazioni dentro |
+| dove vive lo stato | il nostro journal JSONL | SQLite dell'agent, `event(aggregate_id, seq, type, data)` |
+| riprendere | `--resume`, che **rilegge il contesto** | riusare l'id: non c'è niente da ricostruire |
+| costo del risveglio | quota (mitigata dalla cache, misurato P16) | **zero**: nessun contesto da rileggere |
+
+Il contratto del §1 (`AgentBackend.open(spec, hooks) → AgentSession`) **regge senza modifiche**,
+e questo è il primo risultato del secondo adapter: il backend di OpenCode tiene un server
+condiviso e ne ricava N sessioni, quello di Claude Code spawna un processo per sessione. Chi sta
+sopra non vede la differenza. Era esattamente la domanda per cui ADR-012 esiste.
+
+Ne segue però una conseguenza su ADR-005: la premessa «risvegliare costa quota» è **vera di
+Claude Code, non del dominio**. Su OpenCode lo Sleep libera solo l'attenzione di STARK.
+
+### Il contratto, metodo per metodo
+
+| `AgentSession` | OpenCode | nota |
+|---|---|---|
+| `start()` | `createOpencodeServer()` + `v2.session.create()` | il server è condiviso, la sessione no |
+| `prompt(text, images)` | `v2.session.prompt({ prompt: { text, files } })` | `delivery: 'steer' \| 'queue'` — **la fila FIFO è nel protocollo**, non da costruire |
+| `interrupt()` | `v2.session.interrupt()` | «idle interruption is a no-op» |
+| `setModel()` | `v2.session.switchModel()` | |
+| `setMode()` | `v2.session.switchAgent()` | **non è la stessa cosa**: vedi sotto |
+| `setMcp(nome, on)` | `mcp.connect/disconnect({ name, directory })` | ⚠️ **per cartella, non per conversazione** |
+| `refreshQuota()` | — | ⚠️ **non esiste**: chiave propria, costo per step |
+| `refreshContext()` | evento `session.next.context.updated` | qui si **riceve**, là si **chiede** |
+| `fileSuggestions()` | `v2.fs.find()` | |
+| `settled()` | `v2.session.wait()` | ⚠️ **dichiarato, non implementato** |
+| `sleep()` / `close()` | smettere di guardare | non c'è un processo da fermare |
+
+| Evento canonico | Sorgente OpenCode |
+|---|---|
+| `turn.started` | `session.next.prompt.admitted` + `session.next.prompted` |
+| `turn.ended` | ⚠️ **nessuna sorgente**: `session.idle` mai visto in otto giri, `wait` non implementato. Si **deduce** da `step.ended.finish ≠ 'tool-calls'` |
+| `step.started` / `step.ended` | `session.next.step.started` / `.ended` (`finish`, `cost`, `tokens`, `snapshot`, `files`) |
+| `text.*` / `reasoning.*` | `session.next.text.*` / `.reasoning.*` — nome per nome |
+| `tool.started` | `session.next.tool.input.started` |
+| `tool.input.delta` | `session.next.tool.input.delta` |
+| `tool.input.ended` | `session.next.tool.input.ended` (grezzo) **+** `session.next.tool.called` (parsato) |
+| `tool.ended` | `session.next.tool.success` / `.failed` — due eventi, non un flag |
+| `file.edited` | **chiesto**: `GET /session/{id}/diff` → `FileDiff.patch` (git), guidato da `step.ended.files` |
+| `command.executed` | `session.next.shell.started` / `.ended`, più il risultato del tool `bash` |
+| `permission.asked` / `.replied` | `permission.v2.asked` / `.replied` — quasi identici ai nostri |
+| `question.asked` | `question.v2.asked` (non visto dal vivo: modello troppo debole) |
+| `context.compacted` | `session.next.compaction.started/delta/ended`, con `reason: 'auto' \| 'manual'` |
+| `usage.updated` | `step.ended.cost` + `.tokens` |
+| `quota.*` | **assente per costruzione** |
+
+### Cosa cambia nel modello canonico
+
+**1. `PermissionMode` diventa «opzioni di sessione».** Oggi `'default' | 'acceptEdits' | 'plan' |
+'auto' | 'dontAsk' | 'bypassPermissions'` è vocabolario di Claude Code **dentro `core/events.ts`**
+— la quinta falla del confine, e l'unica che sta nel modello e non nel daemon. OpenCode non ha
+modalità: ha **agenti** (`build`, `plan`), ciascuno con modello e ruleset di permessi propri.
+La forma giusta è che **l'agent dichiari i suoi selettori** e la barra di stato li disegni senza
+conoscerli. Due indizi indipendenti che sia quella: ACP c'è arrivato da solo
+(`session/set_config_option`, categorie `mode`/`model`/`thought_level`) e STARK è già a metà
+strada (`ModelChoice[]` / `ModeChoice[]` viaggiano già in `session.created`). Non è una
+riscrittura: è finire una cosa cominciata.
+
+**2. Entrano tre fatti nuovi**, tutti dietro `Capabilities` — dichiarati, non presunti:
+
+- **`todo.*`** — la checklist. Verificata due volte oggi: Claude Code 2.1.241 **non** ce l'ha a
+  runtime, OpenCode sì (evento, rotta, chiave di permesso). Entra come capacità, e dove non c'è
+  la UI non la mostra.
+- **`session.retried`** — `{ attempt, error }`. Un turno che riprova tre volte e uno che parte al
+  primo colpo oggi sono identici a schermo, e non sono la stessa cosa. Su Claude Code lo fa
+  l'SDK sotto e non affiora: capacità a `false`, non un buco.
+- **`revert.*`** — annullare le modifiche. **Costo dichiarato in anticipo, perché è il più caro
+  dei tre**: non è un evento da tradurre, è una schermata da disegnare (quali confini, cosa si
+  annulla, cosa succede alla conversazione dopo). OpenCode ha snapshot veri (un git interno) e un
+  revert a tre tempi `stage`/`commit`/`clear` con i patch per file; Claude Code ha
+  `enableFileCheckpointing`, mai usato. Scelta dell'utente, presa sapendo che è la più lunga.
+
+**3. Tre capacità nuove da dichiarare**, che sono i punti in cui i due agent **non** si
+somigliano: `planQuota` (la banda «quota esaurita» non ha dove attaccarsi su OpenCode),
+`mcpPerSession` (là è per cartella — e la UI dovrà mostrare il chip **spento con la
+spiegazione**, mai nascosto: Principio 5), e `turnEnd` — cioè se «il turno è finito» è un fatto
+annunciato o una deduzione del client.
+
+### Perché non ACP
+
+Valutato a fondo il 27 agosto, e scartato **come modello canonico** — non come trasporto futuro.
+ACP è parlato da 39 agent, OpenCode nativamente e Claude Code tramite un adapter ufficiale. Ma
+quell'adapter ufficiale, scritto da chi conosce ACP meglio di chiunque, ha dovuto aggiungere
+**sei estensioni proprietarie** per esprimere Claude Code — fra cui una intera per quota e rate
+limit, e una da 13 KB solo per la presentazione dei permessi. E ACP dichiara la quota del piano
+**fuori scope** per iscritto. L'elenco di ciò che ACP non ha — quota, categorie del contesto,
+compattazione, `/clear`, fila FIFO, classificatore, revert, sotto-agent annidati, MCP a caldo,
+ricerca file del CLI — non è casuale: sono **una per una** le cose aggiunte a STARK dopo aver
+misurato che il CLI le faceva e la GUI no. Un protocollo che deve valere per 39 agent si ferma
+al minimo comune denominatore, e il Principio 5 dice che STARK non può fermarsi lì.
+Resta buono come **terzo adapter**, un domani: dietro lo stesso contratto del §1, comprerebbe
+Codex, Gemini, Copilot e altri 35 al prezzo di uno. Vedi ADR-013.
+
 ## 15. Controprova OpenCode
 
 Verifica a tavolino contro i 94 schemi `Event*` di OpenCode 1.17.20, come previsto da ADR-004.
@@ -1103,6 +1207,56 @@ sessione vera (`vertical-slice`, `resume-check`, `queue-check`, `takeover-check`
 chiaro cos'è un profilo nominando `CLAUDE_CONFIG_DIR` (in `Settings.svelte` e
 `NewChat.svelte`): quel testo è corretto oggi e diventerà falso il giorno in cui la
 stessa schermata dovrà descrivere il profilo di un altro agent.
+
+### Secondo giro: l'SDK ufficiale, e due correzioni a quanto sopra — P22/P23
+
+La P21 aveva parlato al server con `fetch`. Sbagliato per la regola del progetto: **esiste un
+SDK ufficiale**, `@opencode-ai/sdk`, versionato **appaiato al CLI** (1.17.20 ↔ 1.17.20) — lo
+stesso schema di `@anthropic-ai/claude-agent-sdk` ↔ Claude Code. Espone `createOpencodeServer()`,
+cioè sa avviare il processo da sé: l'analogo di `query()`. La P22 gira tutta su di lui.
+
+**Correzione 1 — gli hunks ci sono.** Sopra è scritto che su OpenCode l'adapter deve
+costruirsi il diff. Falso, e la P22 lo mostra: `FileDiff = { path, status, additions,
+deletions, patch }` con `patch` in **formato git**, e `session.next.step.ended` porta
+`snapshot?: string` e `files?: string[]` — cioè lo step dichiara a quale istantanea e quali file
+ha toccato. Quello che cambia rispetto a Claude Code non è la disponibilità ma **la porta**: là
+il diff arriva dentro il risultato del tool, qui si **chiede** (`GET /session/{id}/diff`, o via
+`RevertState`). Costo per l'adapter: una chiamata per step, non una ricostruzione.
+
+**Correzione 2 — «i tipi non sono i fatti», per la terza volta in un giorno.** §16.10 dice che
+`TodoWrite` non è fra i tool di Claude Code 2.1.241. Cercando la controprova è saltato fuori che
+l'SDK **dichiara** `TodoWriteInput/Output` *e* una famiglia `TaskCreate/TaskUpdate/TaskList/
+TaskGet/TaskStop`. Sembrava la smentita; non lo è. Letta la lista **runtime** di una sessione
+vera (60 tool, MCP compresi) ci sono `Task`, `TaskOutput`, `TaskStop` — il lanciatore di
+sotto-agent — e **non** `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`. Quindi §16.10 regge,
+e ci si aggiunge la regola che l'ha salvata: **un tipo dichiarato in un `.d.ts` non è un tool
+attivo**. È la stessa lezione dell'hook `PermissionDenied` (dichiarato, mai chiamato) e di
+`session.wait` di OpenCode (nei tipi dell'SDK, e il server risponde «not available yet»). Tre
+volte, tre agent diversi, stessa forma: **la fonte di verità è l'handshake, non lo schema.**
+
+**Cosa la P22 ha misurato che regge** (21 chiamate su 23): `session.create/prompt/interrupt/
+switchModel/switchAgent/compact/context/history/messages`, `revert.stage/commit/clear`,
+`session.diff`, `session.todo`, `fs.find`, `permission.saved.list`, `agent.list`, `command.list`,
+`skill.list`, `model.list` (**7.326** modelli), `experimental.capabilities.get`.
+
+**E quello che non c'è, misurato:**
+
+- **`session.wait` è dichiarato e non implementato**: «Session wait is not available yet».
+  Quindi la fine del turno, che già non ha un evento (`session.idle` mai visto in otto giri),
+  non ha nemmeno una chiamata: **l'adapter la deve dedurre**.
+- **`v2.session.context` non dice quanto è pieno il contesto**: torna **i messaggi** dopo
+  l'ultima compattazione. Il consumo arriva invece come evento — `session.next.context.updated`
+  — cioè OpenCode lo **spinge** mentre Claude Code lo fa **chiedere** (`getContextUsage()`).
+- **Gli MCP non sono per conversazione**: `mcp.connect/disconnect` prende `{ name, directory }`,
+  **non** un `sessionID`. Su Claude Code «gli strumenti esterni si scelgono per chat» è la
+  funzione che ha chiuso l'ultimo divario col CLI; su OpenCode, alla lettera, non è esprimibile.
+
+**La P23 è fallita, e il fallimento è il dato.** Quattro scene per i fatti che solo il modello può
+produrre (todo, domanda, sotto-agent, edit vero): con l'unico modello disponibile
+(`nemotron-3-ultra-free`) tre su quattro non partono e la quarta usa `glob` invece di lavorare.
+Restano **non misurati dal vivo**: `todo.updated`, `question.v2.*`, il sotto-agent, e un
+`file.edited` da un edit vero. Sono nello spec e nei tipi — cioè esattamente il genere di
+certezza che le due correzioni qui sopra insegnano a non prendere per buona.
 
 **Cosa NON si è potuto misurare.** La chiave OpenCode Zen di questa macchina può usare **un solo
 modello** (`nemotron-3-ultra-free`): il catalogo ne elenca 29 a chiunque, gli altri rispondono
