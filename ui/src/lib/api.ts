@@ -251,7 +251,7 @@ export class Api {
     return this.json('/api/importable')
   }
 
-  async doImport(sessionId: string): Promise<Ack & { id?: string }> {
+  async doImport(sessionId: string): Promise<Ack & { id?: string; configDir?: string }> {
     const res = await fetch('/api/importable', {
       method: 'POST',
       headers: { ...this.auth, 'content-type': 'application/json' },

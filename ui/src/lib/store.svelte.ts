@@ -49,7 +49,7 @@ export type Dialog =
  * perché la seconda porta va **vista** per essere usata: chi non sa che esiste non la
  * cerca in una tendina.
  */
-export type NewTab = 'new' | 'import'
+export type NewTab = 'new' | 'import' | 'resume'
 
 /** Il menu del tasto destro su una riga dell'elenco. */
 export type ContextMenu = { id: string; x: number; y: number } | null
@@ -519,6 +519,48 @@ export class Store {
       const id = row.id
       this.selected = null
       await this.select(id)
+    } catch (e) {
+      this.refused = (e as Error).message
+    } finally {
+      this.working = false
+    }
+  }
+
+  /**
+   * Riprende una chat per id, anche se STARK non l'ha mai vista: la importa (se serve)
+   * e la apre live con `resume`. Stesso meccanismo di `wake()`, ma senza partire da una
+   * riga dell'elenco — l'unica cosa che si ha è l'id scritto a mano.
+   */
+  async resumeById(id: string): Promise<void> {
+    const clean = id.trim()
+    if (!clean) return
+    this.working = true
+    this.refused = null
+    try {
+      const esito = await this.api.doImport(clean)
+      let cwd: string | undefined
+      if (esito.ok) {
+        cwd = (await this.api.snapshot(clean)).snapshot.cwd
+      } else {
+        // «Già importata» non è un fallimento vero: l'id è già una chat di STARK, si
+        // prova comunque a leggerla. Se non esiste affatto, l'errore dell'import
+        // (che dice PERCHÉ — non trovata in nessun profilo) è quello giusto da mostrare.
+        try { cwd = (await this.api.snapshot(clean)).snapshot.cwd } catch {
+          this.refused = esito.error ?? 'refused'
+          return
+        }
+      }
+      if (!cwd) { this.refused = 'this conversation has no folder to resume in'; return }
+      // Il profilo trovato durante l'import (se diverso dal default) diventa il fatto
+      // del progetto, come la prima chat di una cartella nuova in `newChat()`.
+      if (esito.ok && esito.configDir && this.project(cwd).profile !== esito.configDir) {
+        void this.setProject(cwd, { profile: esito.configDir })
+      }
+      const profile = (esito.ok ? esito.configDir : undefined) ?? this.project(cwd).profile
+      await this.api.open({ cwd, resume: { ref: clean }, ...(profile ? { configDir: profile } : {}) })
+      this.dialog = null
+      this.selected = null
+      await this.select(clean)
     } catch (e) {
       this.refused = (e as Error).message
     } finally {
