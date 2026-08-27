@@ -77,6 +77,30 @@ check('token giusto → 200', (await fetch(`${url}/api/sessions`, { headers: aut
 check('Origin nostro → 200',
   (await fetch(`${url}/api/sessions`, { headers: { ...auth, origin: url } })).status === 200)
 
+// ─── Finder di sistema: native-browse ───────────────────────────────────────
+//
+// Il modulo si prova in isolamento, senza aprire nessun dialogo vero: un vero click
+// su `FolderBrowserDialog`/`choose folder`/`zenity` bloccherebbe questo script in
+// attesa di un umano, che è esattamente il difetto che la regola di `--reveal` (più
+// sotto) esiste per evitare — qui però non c'è nemmeno un flag che lo sblocca, perché
+// un `explorer.exe /select,` ritorna subito (fire-and-forget), un dialogo di scelta
+// cartella no: bloccherebbe fino alla chiusura manuale.
+const { commandExists, nativeFolderPickerAvailable } = await import('../daemon/native-browse.ts')
+check('commandExists: un comando reale (`ls`) c\'è', await commandExists('ls'))
+check('commandExists: un comando inventato non c\'è',
+  !(await commandExists('comando-che-non-esiste-davvero-xyz123')))
+{
+  // L'attesa è coerente con la piattaforma vera che sta eseguendo la prova, qualunque
+  // essa sia — non si assume WSL: si ricalcola cosa ci si aspetta con la stessa logica
+  // del modulo sotto test, per restare vero su qualunque macchina di sviluppo.
+  const { WSL } = await import('../core/platform.ts')
+  const atteso = WSL ? await commandExists('powershell.exe')
+    : process.platform === 'darwin' ? true
+    : await commandExists('zenity')
+  check('nativeFolderPickerAvailable coerente con la piattaforma corrente',
+    (await nativeFolderPickerAvailable()) === atteso)
+}
+
 // ─── F3: arrivare a un file citato in chat ──────────────────────────────────
 //
 // Costa zero quota: è una rotta di sistema, non un turno. Sta dietro le stesse
