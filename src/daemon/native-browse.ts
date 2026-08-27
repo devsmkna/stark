@@ -44,13 +44,15 @@ export async function nativeFolderPickerAvailable(): Promise<boolean> {
  * esplicita (vedi la spec). Annullo, comando assente o qualunque errore tornano
  * `{ ok: false }`, mai un'eccezione: un annullo non è un fallimento del daemon.
  */
-export async function pickFolderNative(): Promise<NativePickResult> {
+export async function pickFolderNative(
+  exec: typeof run = run,
+): Promise<NativePickResult> {
   try {
     if (WSL) {
       // `wslpath -w` traduce la home (sia sotto `/mnt/`, DrvFs, sia nativa ext4) nel
       // percorso Windows che `FolderBrowserDialog` sa capire — stessa funzione già
       // usata al contrario in `reveal.ts`.
-      const { stdout: winHome } = await run('wslpath', ['-w', homedir()])
+      const { stdout: winHome } = await exec('wslpath', ['-w', homedir()])
       // `-STA`: `FolderBrowserDialog` è un dialogo WinForms e richiede un thread STA,
       // altrimenti PowerShell lancia un'eccezione COM prima di mostrare qualunque cosa.
       const script = [
@@ -59,10 +61,10 @@ export async function pickFolderNative(): Promise<NativePickResult> {
         `$f.SelectedPath = '${winHome.trim().replace(/'/g, "''")}'`,
         'if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }',
       ].join('\n')
-      const { stdout } = await run('powershell.exe', ['-NoProfile', '-STA', '-Command', script])
+      const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command', script])
       const win = stdout.trim()
       if (!win) return { ok: false } // annullato: nessuna riga in output
-      const { stdout: posix } = await run('wslpath', ['-u', win])
+      const { stdout: posix } = await exec('wslpath', ['-u', win])
       return { ok: true, path: posix.trim() }
     }
     if (process.platform === 'darwin') {
@@ -70,17 +72,18 @@ export async function pickFolderNative(): Promise<NativePickResult> {
       // pilotare un dialogo nativo di macOS): la sintassi segue la documentazione
       // AppleScript. Annullare fa uscire `osascript` con codice diverso da zero,
       // quindi `execFile` rigetta la promise — catturato sotto come annullo.
-      const { stdout } = await run('osascript', ['-e',
+      const { stdout } = await exec('osascript', ['-e',
         'POSIX path of (choose folder with prompt "Seleziona una cartella" default location (path to home folder))'])
       const path = stdout.trim()
       return path ? { ok: true, path } : { ok: false }
     }
     // Linux nativo: non verificato dal vivo (nessuna delle macchine di sviluppo lo è).
     // Annullo → `zenity` esce con codice 1 → `execFile` rigetta → catturato sotto.
-    const { stdout } = await run('zenity', ['--file-selection', '--directory', `--filename=${homedir()}/`])
+    const { stdout } = await exec('zenity', ['--file-selection', '--directory', `--filename=${homedir()}/`])
     const path = stdout.trim()
     return path ? { ok: true, path } : { ok: false }
-  } catch {
+  } catch (e) {
+    console.error('[native-browse] pickFolderNative:', e)
     return { ok: false }
   }
 }

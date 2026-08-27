@@ -956,8 +956,11 @@ del tree che elenca le sottocartelle una alla volta, un bottone apre il selettor
 nativo della macchina del daemon: `System.Windows.Forms.FolderBrowserDialog` via
 PowerShell su WSL, `choose folder` via `osascript` su macOS, `zenity
 --file-selection --directory` su Linux nativo — stessa forma a tre rami di
-`reveal.ts`, con lo stesso onestà sulla verifica: WSL e macOS scritti seguendo il
-pattern, il ramo Linux nativo dichiaratamente non provato dal vivo.
+`reveal.ts`, con la stessa onestà sulla verifica: WSL, macOS e Linux nativo scritti
+seguendo lo stesso pattern a tre rami di `reveal.ts`; nessuno dei tre è stato ancora
+provato con un click reale su un dialogo nativo — l'implementazione è passata da
+subagent, che non possono pilotare un dialogo di sistema. Il click dal vivo resta da
+fare dall'utente, su qualunque macchina scelga per primo.
 Parte sempre dalla home del processo, mai dalla cartella già scritta nella casella —
 scelta esplicita, non un dimenticato: il tree manuale resta la via per navigare da
 dove si era, questa è la via per partire da capo col Finder che si conosce già.
@@ -968,7 +971,8 @@ sbagliata per tutta la vita del processo costerebbe un bottone spento senza moti
 dopo aver installato `zenity` a daemon acceso.
 Annullare il dialogo, o non avere il comando giusto in `PATH`, tornano identici
 (`{ok:false}`, silenzioso): non è un errore da mostrare, è "resta dove eri".
-`npm run check` passa a **106**, `npm run daemon` a **35**.
+`npm run check` sale a **109** (i tre test di `pickFolderNative` aggiunti in revisione
+finale, con un `exec` finto invece di un dialogo vero), `npm run daemon` resta **35**.
 
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata

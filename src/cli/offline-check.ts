@@ -17,6 +17,7 @@ import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { intentOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../daemon/memoria.ts'
+import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
@@ -793,6 +794,36 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   await new Promise(r => setTimeout(r, 400))
   check('§notifiche: stato invariato → nessuna seconda notifica', mandate.length === 1,
     `${mandate.length}`)
+}
+
+// ─── Finder di sistema: pickFolderNative con un `exec` finto ────────────────
+//
+// `pickFolderNative` non apre mai un dialogo vero qui: il seam d'iniezione (il
+// parametro `exec`, di default `run`) esiste apposta per poterla provare senza un
+// processo reale né un dialogo di sistema — vedi la revisione finale del piano.
+{
+  type FakeExec = Parameters<typeof pickFolderNative>[0]
+  const ok = (async () => ({ stdout: '/percorso/scelto\n', stderr: '' })) as unknown as FakeExec
+  const cancelled = (async () => ({ stdout: '', stderr: '' })) as unknown as FakeExec
+  const boom = (async () => { throw new Error('comando non trovato') }) as unknown as FakeExec
+
+  const rOk = await pickFolderNative(ok)
+  check('§browse: pickFolderNative — successo restituisce il percorso scelto',
+    rOk.ok === true && rOk.path === '/percorso/scelto', JSON.stringify(rOk))
+
+  const rCancelled = await pickFolderNative(cancelled)
+  check('§browse: pickFolderNative — annullo (stdout vuoto) restituisce ok:false',
+    rCancelled.ok === false, JSON.stringify(rCancelled))
+
+  let threw = false
+  let rBoom: Awaited<ReturnType<typeof pickFolderNative>> | undefined
+  try {
+    rBoom = await pickFolderNative(boom)
+  } catch {
+    threw = true
+  }
+  check('§browse: pickFolderNative — comando assente/errore non risale, torna ok:false',
+    !threw && rBoom?.ok === false, JSON.stringify({ threw, rBoom }))
 }
 
 let failed = 0

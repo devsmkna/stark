@@ -51,6 +51,8 @@
     try {
       const r = await store.api.browseNative()
       if (r.ok) cwd = r.path
+    } catch {
+      // silenzioso, come da spec: annullo o fallimento non mostrano errori
     } finally {
       nativeBusy = false
     }
