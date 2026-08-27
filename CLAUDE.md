@@ -1199,6 +1199,69 @@ tre scene su quattro. Restano non visti dal vivo `todo.updated`, `question.v2.*`
 e un `file.edited` da un edit vero. Sono nello spec e nei tipi — cioè esattamente il genere di
 certezza che le due correzioni qui sopra insegnano a non prendere per buona.
 
+**Il secondo adapter esiste, e ADR-014 è fatta** (27 agosto 2026, sera). Il giorno più lungo
+del progetto, e vale la pena leggerlo in ordine perché ogni passo è nato da quello prima.
+
+**L'adapter OpenCode gira** (`npm run opencode`, 16/16 dal vivo). Il contratto del §1, scritto
+la mattina guardando **un solo** agent, **non è stato toccato**: il daemon apre una chat
+passando `agent: 'opencode'` e non sa nient'altro. Sotto, `host.ts` tiene **un server condiviso**
+con N conversazioni mentre Claude Code **spawna un processo per conversazione**, e chi chiude
+una sessione non sa quale delle due cose ha fatto. Era la domanda per cui ADR-012 esiste, e la
+risposta è sì. Ne segue però che la premessa di ADR-005 — «risvegliare costa quota» — è vera
+**di Claude Code**, non del dominio.
+Il secondo adapter fa in un punto **meno** lavoro del primo: la fila FIFO dei prompt è nel
+protocollo (`delivery: 'queue'`) e «consenti sempre» è una parola (`reply: 'always'`).
+
+**Tre difetti che solo un secondo agent poteva far emergere**, tutti visti guardando: il menu
+dei modelli **non aveva un tetto** (`max-height` esisteva solo nella media query del telefono —
+con gli 8 modelli di Claude Code non si notava, con i **61** di OpenCode le voci in fondo
+finivano sopra il bordo e non si potevano premere); la barra mostrava `auto`, **una modalità che
+l'adapter aveva appena dichiarato inesistente**; e `'default'` è vocabolario di Claude Code —
+là è un alias vero, su OpenCode non vuol dire niente, e una chat nata così restava sul default
+del server, che qui è `big-pickle`, **morto a monte**: una chat nata rotta senza via d'uscita.
+
+**«Consenti sempre» non consentiva niente** — bug vecchio quanto i toggle dei permessi, trovato
+verificando che il secondo adapter non avesse rotto il primo, e **verificato con `git show` che
+non fosse mio**. Quattro giri misurati con un `Write` (non un `echo`: i comandi innocui sono
+pre-approvati e non chiedono niente — ci sono cascata una volta): l'hook `PreToolUse`
+**scavalca `canUseTool`**, e il suo tipo di ritorno non ha alcun campo per ricordare qualcosa;
+l'hook `PermissionRequest`, che nei tipi sarebbe la porta giusta, **non scatta mai**. Ma l'hook
+è la strada che STARK usa sempre (in `auto` il classificatore risolve prima), quindi ogni volta
+che una categoria era su «chiedi» il bottone si comportava come «Consenti» **e il journal
+scriveva `always`**: la bugia su disco che il commento nel codice prometteva di evitare.
+Il Principio 5 dice che STARK non deve poter meno del CLI, e nella TUI il «sempre» funziona:
+quindi non si toglie il bottone, **si scrive la regola** (`adapters/claude-code/regole.ts`), col
+formato misurato — non inventato — e la condotta di `memoria.ts`: è un file **dell'utente**, non
+si riscrive, e un JSON illeggibile si rifiuta invece di sovrascriverlo.
+
+**ADR-014: la modalità esce dal modello.** `PermissionMode` era l'enumerazione delle sei
+modalità di Claude Code **dentro `core/events.ts`** — la quinta falla del confine, e l'unica che
+stava nel modello e non nel daemon. Ora è una stringa aperta e chi la può usare lo **dichiara
+l'agent**: `SessionOption`, l'evento `session.option`, il comando `session.setOption`. La barra
+di stato è un ciclo su ciò che le arriva, disposto per `kind` — che è presentazione, non un
+elenco di parole da conoscere. Misurato guidando la UI: **OpenCode** mostra `build` · `MCP none`
+· `opencode/big-pickle` con le **sue** descrizioni; **Claude Code** mostra `auto` · `MCP none` ·
+`claude-opus-5[1m]` con le sei e `bypassPermissions` spenta con la ragione vera.
+Tre cose imparate facendola: i **journal già scritti** si disegnano con lo stesso codice dei
+nuovi (se `options` è vuoto la UI chiama la **stessa** `optionsFrom` degli adapter — un solo
+percorso, non due che divergono); **`note` non è `reason`** (uno è un avviso su una scelta che
+si può fare, l'altro dice perché una voce è spenta — ed è la distinzione che ha tolto «no auto
+mode» da tutti e 61 i modelli di OpenCode); e **le descrizioni le scrive l'agent**, perché
+guardando la barra si è visto che su OpenCode la voce `plan` mostrava la frase di *Claude Code*,
+capitata lì per omonimia: vera per caso, falsa nei fatti.
+
+**Regressione su Claude Code: intatta**, provata su sessioni vere e non per esito HTTP —
+`npm run slice` (invariante §4 OK), `slice` con `STARK_ASK=shell,edit` (le categorie diventano
+davvero `Bash`, `Write`, `Edit`), `queue` 6/6, `resume` 4/4, e la UI guidata fino alla risposta.
+
+**Una nota di metodo che si è ripetuta cinque volte in un giorno**: una prova che guarda il
+posto sbagliato **non fallisce — mente, o scade**. `blocks` invece di `parts`; il chip del
+modello; il testo del menu (mostra l'etichetta, non l'id); `pending` invece di
+`pendingPermissions`; e un `echo` pre-approvato che dava «il meccanismo non scatta» quando era
+solo silenzio. Leggere il nome vero costa dieci secondi; indovinarlo costa un giro.
+
+`npm run check` 143 → **171**, `npm run daemon` 38, `npm run opencode` **16**.
+
 Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
 cambiato quello vecchio. Restano i divieti veri (`deny`), e sul filone telefono la durata

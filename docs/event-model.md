@@ -1063,15 +1063,39 @@ Claude Code, non del dominio**. Su OpenCode lo Sleep libera solo l'attenzione di
 
 ### Cosa cambia nel modello canonico
 
-**1. `PermissionMode` diventa «opzioni di sessione».** Oggi `'default' | 'acceptEdits' | 'plan' |
-'auto' | 'dontAsk' | 'bypassPermissions'` è vocabolario di Claude Code **dentro `core/events.ts`**
-— la quinta falla del confine, e l'unica che sta nel modello e non nel daemon. OpenCode non ha
-modalità: ha **agenti** (`build`, `plan`), ciascuno con modello e ruleset di permessi propri.
-La forma giusta è che **l'agent dichiari i suoi selettori** e la barra di stato li disegni senza
-conoscerli. Due indizi indipendenti che sia quella: ACP c'è arrivato da solo
-(`session/set_config_option`, categorie `mode`/`model`/`thought_level`) e STARK è già a metà
-strada (`ModelChoice[]` / `ModeChoice[]` viaggiano già in `session.created`). Non è una
-riscrittura: è finire una cosa cominciata.
+**1. `PermissionMode` è diventata «opzioni di sessione» — fatto il 27 agosto (ADR-014).**
+Era `'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'` **dentro
+`core/events.ts`**: la quinta falla del confine, e l'unica che stava nel modello e non nel
+daemon. Ora è una stringa aperta, e chi la può usare lo **dichiara l'agent**: `SessionOption`
+(id, etichetta, valore, scelte) più l'evento `session.option` e il comando `session.setOption`.
+Le sei parole sono tornate in `sdk-options.ts`, con `modoDiClaude()` che le richiude nell'enum
+dell'SDK.
+Due indizi indipendenti dicevano che fosse la forma giusta, e sono risultati veri: ACP c'è
+arrivato da solo (`session/set_config_option`, categorie `mode`/`model`/`thought_level`) e STARK
+era già a metà strada (`ModelChoice[]`/`ModeChoice[]` viaggiavano già in `session.created`).
+**Come si vede a schermo**, misurato guidando la UI vera:
+
+| | chip della barra | tendina delle modalità |
+|---|---|---|
+| OpenCode | `build` · `MCP none` · `opencode/big-pickle` | `build`, `plan`, **con le descrizioni sue** |
+| Claude Code | `auto` · `MCP none` · `claude-opus-5[1m]` | le sei, `bypassPermissions` spenta con la ragione |
+
+Tre cose che non si indovinano e che il lavoro ha insegnato:
+
+- **I journal già scritti si disegnano con lo stesso codice di quelli nuovi.** `session.mode` e
+  `session.model` restano **leggibili** e nessun adapter li emette più; se `options` è vuoto la
+  UI lo ricostruisce chiamando la **stessa** `optionsFrom` che usano gli adapter. Un solo
+  percorso, non due che divergono. E un journal **misto** esiste davvero — una chat aperta prima
+  e risvegliata dopo — quindi le forme vecchie aggiornano anche il selettore: se no la barra
+  mostrerebbe il valore nuovo in un campo e quello vecchio nella tendina.
+- **`note` non è `reason`.** `reason` dice perché una voce è **spenta**, `note` è un avviso su
+  una scelta che si può fare. È la distinzione che ha tolto «no auto mode» da tutti e 61 i
+  modelli di OpenCode, dove l'auto mode non esiste come concetto.
+- **Le descrizioni le scrive l'agent.** Guardando la barra si è visto che su OpenCode la voce
+  `plan` mostrava «*Plans first, touches nothing*» — la frase che la UI conosce per la modalità
+  di **Claude Code**, capitata lì per omonimia: vera per caso, falsa nei fatti. Ora l'adapter
+  descrive i propri agenti, e le frasi della UI restano solo come ripiego per i journal scritti
+  prima.
 
 **2. Entrano tre fatti nuovi**, tutti dietro `Capabilities` — dichiarati, non presunti:
 
@@ -1126,12 +1150,12 @@ leggendo:
    nata rotta senza via d'uscita. Ora l'adapter chiede a OpenCode quale modello userebbe e lo
    dichiara, che è l'analogo esatto del `resolveModel` di Claude Code.
 
-**E uno che resta aperto, registrato invece che aggirato:** nella tendina dei modelli tutte e 61
-le voci portano l'avviso «*No auto mode — this chat would fall back and ask for everything*».
-Su Claude Code è un'informazione vera e utile; su OpenCode l'auto mode **non esiste come
-concetto**, quindi quell'avviso è rumore su ogni riga. Non si corregge con un campo in più:
-si corregge con ADR-014, quando la barra mostrerà ciò che l'agent dichiara invece di sei parole
-che conosce a memoria.
+**E uno che era stato registrato e poi chiuso lo stesso giorno:** nella tendina dei modelli
+tutte e 61 le voci portavano l'avviso «*No auto mode — this chat would fall back and ask for
+everything*». Su Claude Code è vero e utile; su OpenCode l'auto mode **non esiste come
+concetto**, quindi era rumore su ogni riga. Non si correggeva con un campo in più — si è
+corretto con ADR-014, distinguendo `note` (un avviso su una scelta che si può fare) da `reason`
+(perché una voce è spenta): un agent senza classificatore semplicemente non popola quel campo.
 
 ### Perché non ACP
 
