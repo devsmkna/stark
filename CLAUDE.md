@@ -1088,6 +1088,59 @@ sbagliare era la sola via che usa l'utente, quella della UI. `npm run daemon` pa
 **38**: le quattro nuove tengono ferma la regola senza aprire una sessione, perché è una
 scelta fra due stringhe.
 
+**Il vocabolario canonico è stato messo sotto carico vero, e il confine del §1 è
+diventato codice** (27 agosto 2026, ADR-012). Due giri nella stessa sessione.
+
+**P21 — la prova di carico.** La §15 della specifica era stata scritta a tavolino sui 94
+schemi `Event*` di OpenCode; questa è la parte scritta dopo averci fatto passare dei
+dati: server 1.17.20 su una cartella di prova, un turno che legge un file, ne scrive uno
+e lancia un comando. Il modello **tiene dove è stato disegnato su OpenCode** — `text.*`,
+`reasoning.*`, `step.*`, `permission.*` corrispondono nome per nome, e non è fortuna: è
+§14 che li aveva presi da lì — e **si piega dove è stato disegnato su Claude Code**.
+Le cose che valgono: `file.edited` e `session.diff` **non arrivano** (una `write` che ha
+creato davvero il file non ne ha prodotto nessuno dei due, in nessun giro: l'effetto sta
+dentro `tool.success.structured`, **senza hunks**, e il diff su OpenCode si *chiede*) —
+quindi la schermata Effetti, che poggia sugli hunks che Claude Code regala, su OpenCode
+richiede che sia l'adapter a costruirli; `session.idle` **non si è mai visto** su quattro
+giri, compreso quello finito bene, quindi «il turno è finito» lì è una *deduzione* del
+client e non un fatto annunciato; e `todo.updated` **esiste**, il che corregge la
+conclusione presa il giorno prima — «`TodoWrite` non esiste» è vero *di Claude Code
+2.1.241*, ma da lì avevo concluso troppo. La domanda giusta non era «il tool esiste?» ma
+«**il fatto** esiste?». È la prima cosa che la prova ha trovato *mancante* nel modello, ed
+è mancante per il motivo che ADR-012 prevedeva: il modello ha seguito un agent solo.
+Un dettaglio che è costato un giro intero: lo spec dichiara il carico utile sotto
+`properties`, **il filo manda `data`** — il permesso *era* arrivato e la sonda non lo
+riconosceva. Detto in chiaro anche cosa non si è potuto misurare: la chiave OpenCode Zen
+di questa macchina può usare **un solo modello** (il catalogo ne elenca 29 a chiunque,
+gli altri danno 401) e quello si rompe spesso a metà turno, quindi `question.v2.asked`,
+il revert, la compattazione e il cambio di agent restano visti solo nello spec.
+
+**Il confine del §1, da parola a codice.** Cercando il contratto da far implementare al
+secondo adapter si è scoperto che **non esisteva**: c'era la sola classe concreta, e a
+importarla non erano le sonde ma `daemon/registry.ts`, `server.ts`, `memoria.ts`. Il
+paletto n.1 dell'ADR era già violato **dalla parte di Claude Code**. Quattro falle, tutte
+con lo stesso modo di fallire — **in silenzio**: `askTools: string[]` portava `Bash` e
+`mcp__*` fino alla rotta HTTP (ora `ask: PermissionCategory[]`, e a tradurre è l'adapter,
+come `events.ts` diceva già a parole); `configDir` era il nome della variabile d'ambiente
+di Claude Code ed era arrivato **fin dentro la UI** (ora `profile`, stringa opaca);
+`PermissionAnswer.remember` era un `PermissionUpdate` **dell'SDK Anthropic costruito
+dentro `registry.ts`**, `destination: 'localSettings'` compreso — il daemon decideva in
+quale file di Claude Code finiva la regola (ora è una stringa: *il soggetto*); e
+`Live.adapter` era la classe concreta come tipo (ora `AgentSession`).
+`memoria.ts` è passato sotto il confine come capacità **opzionale**
+`setCommandDescriptions`, perché «scrivi una `description`» è del dominio ma «scrivila
+nel `CLAUDE.md` globale» è la risposta di *quell'* agent. `src/adapters/index.ts` è ora
+l'unico file che nomina un agent specifico.
+Verificato **dal vivo**, non per esito HTTP: aperta una sessione con un `profile` che
+punta a una cartella nuova, il processo figlio ci ha creato dentro `sessions/`,
+`projects/` e `.claude.json`. Se il rinomino si fosse perso per strada quelle cartelle
+sarebbero nate nel profilo vero — è la sola prova che distingue «il campo arriva» da «il
+campo esiste». `npm run check` passa a **149**, `npm run daemon` resta a 38.
+Scritto anche cosa resta **fuori** dal confine e si sceglie di lasciarcelo: le sonde che
+aprono sessioni vere importano ancora la classe, e la UI spiega cos'è un profilo
+nominando `CLAUDE_CONFIG_DIR` — testo corretto oggi, falso il giorno in cui la stessa
+schermata dovrà descrivere il profilo di un altro agent.
+
 Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
 cambiato quello vecchio. Restano i divieti veri (`deny`), e sul filone telefono la durata
