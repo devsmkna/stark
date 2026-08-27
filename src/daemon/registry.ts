@@ -10,9 +10,10 @@ import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
-import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
+import { isRecent, listTranscripts, transcriptPath, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
+import { configDirOf, listProfiles } from '../adapters/claude-code/profiles.ts'
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
@@ -433,19 +434,41 @@ export class Registry {
    * risveglia, quindi importare e poter riprendere sono la stessa cosa fatta una volta.
    * Un journal già presente non si tocca — reimportare sopra raddoppierebbe la storia.
    */
-  async importSession(sessionId: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-    const found = (await listTranscripts(this.defaults.configDir))
-      .find(t => t.sessionId === sessionId)
-    if (!found?.path) return { ok: false, error: 'trascritto non trovato su questa macchina' }
-
+  async importSession(sessionId: string):
+    Promise<{ ok: true; id: string; configDir?: string } | { ok: false; error: string }> {
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
     const journal = new Journal(dest, sessionId)
     if (journal.lastSeq > 0) {
       journal.close()
       return { ok: false, error: 'già importata' }
     }
+
+    // Si cerca per **nome file**, non dentro `listTranscripts` (i 60 trascritti più
+    // recenti — un limite pensato per un elenco da sfogliare): un id scritto a mano
+    // può essere vecchio quanto si vuole. E si cerca prima nel profilo di default,
+    // poi negli altri della macchina: un id può appartenere a una `CLAUDE_CONFIG_DIR`
+    // diversa da quella con cui è partito il daemon.
+    const defaultDir = configDirOf(this.defaults.configDir)
+    let path = transcriptPath(sessionId, defaultDir)
+    let foundIn: string | undefined
+    if (!path) {
+      for (const p of listProfiles(this.defaults.configDir)) {
+        if (resolve(p.path) === defaultDir) continue   // già provato sopra
+        const candidate = transcriptPath(sessionId, p.path)
+        if (candidate) { path = candidate; foundIn = resolve(p.path); break }
+      }
+    }
+    if (!path) {
+      // Nessun residuo: il journal appena creato e mai scritto se ne va, se no
+      // resterebbe una chat senza `cwd` in mezzo a quelle vere (stessa disciplina
+      // di `open()` sul confine).
+      journal.close()
+      rmSync(dest, { force: true })
+      return { ok: false, error: 'trascritto non trovato su questa macchina' }
+    }
+
     try {
-      const { events } = importTranscript(found.path)
+      const { events } = importTranscript(path)
       // `session.resumeRef` per primo: senza, il journal saprebbe dire cosa è successo
       // ma non come tornarci, e la conversazione importata resterebbe da guardare e
       // basta. L'ora è quella del primo fatto, non di adesso: una conversazione di due
@@ -456,7 +479,7 @@ export class Registry {
       journal.close()
     }
     this.bump()
-    return { ok: true, id: sessionId }
+    return { ok: true, id: sessionId, ...(foundIn ? { configDir: foundIn } : {}) }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────

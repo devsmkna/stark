@@ -6,7 +6,7 @@
 // specifica marca come trappole, così che se un domani smettono di essere gestiti il
 // test lo dica invece di scoprirlo la UI.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
@@ -824,6 +824,66 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   }
   check('§browse: pickFolderNative — comando assente/errore non risale, torna ok:false',
     !threw && rBoom?.ok === false, JSON.stringify({ threw, rBoom }))
+}
+
+// ─── §resume: importSession cerca per nome file, in tutti i profili ─────────
+//
+// Due profili Claude finti sullo stesso filesystem temporaneo, con dentro un
+// trascritto ciascuno. `HOME` va spostata perché `listProfiles` elenca le cartelle
+// `~/.claude*` della casa dell'utente: senza, i profili finti non esisterebbero per
+// lei. E `STARK_HOME` va assegnata **prima** di importare `registry.ts`, che la
+// risolve una volta sola al load del modulo — per questo l'import è dinamico, non
+// statico (un `import` statico verrebbe issato in cima al file, cioè eseguito prima
+// dell'assegnazione: la stessa trappola già documentata per `npm run daemon`).
+{
+  const casaPrima = process.env['HOME']
+  const starkPrima = process.env['STARK_HOME']
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-resume-'))
+  const starkHome = resolve(casa, '.stark')
+  process.env['HOME'] = casa
+  process.env['STARK_HOME'] = starkHome
+
+  /** Un profilo Claude finto con dentro un trascritto minimo ma vero. */
+  const profiloFinto = (nome: string, sessionId: string, cwd: string): string => {
+    const root = resolve(casa, nome)
+    const proj = resolve(root, 'projects', '-tmp-proj')
+    mkdirSync(proj, { recursive: true })
+    writeFileSync(resolve(proj, `${sessionId}.jsonl`), JSON.stringify({
+      type: 'user', uuid: 'u1', timestamp: '2024-01-02T03:04:05.000Z', cwd,
+      message: { role: 'user', content: [{ type: 'text', text: 'ciao' }] },
+    }) + '\n')
+    return root
+  }
+
+  const ID_DEFAULT = '11111111-1111-4111-8111-111111111111'
+  const ID_ALTRO = '22222222-2222-4222-8222-222222222222'
+  const ID_ASSENTE = '33333333-3333-4333-8333-333333333333'
+  const dirDefault = profiloFinto('.claude', ID_DEFAULT, '/tmp/proj-default')
+  const dirAltro = profiloFinto('.claude-altro', ID_ALTRO, '/tmp/proj-altro')
+
+  const { Registry } = await import('../daemon/registry.ts')
+  const reg = new Registry({ configDir: dirDefault })
+
+  const rDefault = await reg.importSession(ID_DEFAULT)
+  check('§resume: trova un trascritto per id anche fuori dai 60 più recenti',
+    rDefault.ok === true && rDefault.id === ID_DEFAULT && rDefault.configDir === undefined,
+    JSON.stringify(rDefault))
+
+  const rAltro = await reg.importSession(ID_ALTRO)
+  check('§resume: cerca anche in un profilo diverso da quello di default',
+    rAltro.ok === true && rAltro.configDir === dirAltro,
+    JSON.stringify({ rAltro, atteso: dirAltro }))
+
+  const rAssente = await reg.importSession(ID_ASSENTE)
+  const orfano = resolve(starkHome, 'sessioni', `${ID_ASSENTE}.jsonl`)
+  check('§resume: un id assente in ogni profilo torna errore chiaro, nessun journal orfano',
+    rAssente.ok === false && /non trovato/.test((rAssente as { error: string }).error)
+      && !existsSync(orfano),
+    JSON.stringify({ rAssente, orfano: existsSync(orfano) }))
+
+  if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
+  if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
+  rmSync(casa, { recursive: true, force: true })
 }
 
 let failed = 0
