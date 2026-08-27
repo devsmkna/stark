@@ -1097,14 +1097,25 @@ Tre cose che non si indovinano e che il lavoro ha insegnato:
   descrive i propri agenti, e le frasi della UI restano solo come ripiego per i journal scritti
   prima.
 
-**2. Entrano tre fatti nuovi**, tutti dietro `Capabilities` — dichiarati, non presunti:
+**2. Entrano tre fatti nuovi**, tutti dietro `Capabilities` — dichiarati, non presunti. **Due
+sono fatti** (§10-bis del modello):
 
-- **`todo.*`** — la checklist. Verificata due volte oggi: Claude Code 2.1.241 **non** ce l'ha a
-  runtime, OpenCode sì (evento, rotta, chiave di permesso). Entra come capacità, e dove non c'è
-  la UI non la mostra.
-- **`session.retried`** — `{ attempt, error }`. Un turno che riprova tre volte e uno che parte al
-  primo colpo oggi sono identici a schermo, e non sono la stessa cosa. Su Claude Code lo fa
-  l'SDK sotto e non affiora: capacità a `false`, non un buco.
+- **`todo.updated`** — la checklist. **Fatta.** Verificata due volte: Claude Code 2.1.241 **non**
+  ce l'ha a runtime, OpenCode sì. L'elenco arriva **intero ogni volta** e si **sostituisce**, non
+  si fonde: è la forma in cui lo manda l'agent ed è quella giusta per un journal append-only —
+  chi rilegge non deve applicare patch, gli basta l'ultimo evento. Nella barra è un chip
+  `fatte/totali` che si apre sull'elenco, e **non è premibile**: la checklist è dell'agent, e una
+  spunta che non cambia niente sarebbe finta. Compare solo dove c'è: `capabilities.todos`
+  distingue «non ce l'ha» da «non ha ancora niente da fare».
+- **`session.retried`** — `{ attempt, reason }`. **Fatto.** Un turno che riprova tre volte e uno
+  che parte al primo colpo erano identici a schermo, e non sono la stessa cosa: è la spiegazione
+  della pausa che si vede sopra. Sta **nel turno**, come la compattazione, perché è successo lì.
+  Su Claude Code lo fa l'SDK sotto e non affiora: capacità a `false`, che non è un buco — è un
+  fatto che quell'agent non racconta.
+  Nessuno dei due si può produrre a comando (la checklist la tiene solo OpenCode, e l'unico
+  modello disponibile si rompe a metà turno), quindi si guardano con un journal costruito a mano:
+  `tools/prova-todo-retry.ts`. Non è barare — il §4 dice che lo stato nasce dal journal, quindi
+  se si disegna bene da lì si disegna bene sempre.
 - **`revert.*`** — annullare le modifiche. **Costo dichiarato in anticipo, perché è il più caro
   dei tre**: non è un evento da tradurre, è una schermata da disegnare (quali confini, cosa si
   annulla, cosa succede alla conversazione dopo). OpenCode ha snapshot veri (un git interno) e un

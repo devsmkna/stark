@@ -424,6 +424,8 @@ function capacita(): Capabilities {
     permissionAlways: true, // nativo: `reply: 'always'`
     questions: true,
     revert: true,          // stage/commit/clear, con snapshot veri (un git interno)
+    retries: true,         // `session.next.retried`, con `attempt` ed `error`
+    todos: true,           // `todo.updated`, piu' la rotta `GET /session/{id}/todo`
     toolProgress: true,    // `session.next.tool.progress`
     fileBrowser: false,
     pty: true,             // il server espone i PTY, STARK non li usa ancora

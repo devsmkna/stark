@@ -46,6 +46,11 @@
     if (o.kind === 'model') return snap.capabilities?.switchModel !== false
     return true
   }
+  /** Quante voci della checklist sono chiuse. `cancelled` conta: non resta da fare. */
+  const fatti = $derived(
+    snap.todos.filter(t => t.status === 'completed' || t.status === 'cancelled').length,
+  )
+
   /** Come si chiama una scelta: l'etichetta dell'agent, o il valore nudo. */
   const nome = (v: string, l?: string): string => l ?? v
 
@@ -286,6 +291,36 @@
         {/if}
       </span>
     {/each}
+
+    <!-- La checklist, se l'agent ne tiene una. Il chip dice **quante ne restano**, che
+         è la cosa che cambia da un turno all'altro; l'elenco si apre al tocco.
+         Compare solo quando c'è: una lista vuota su un agent che la checklist non ce
+         l'ha proprio (Claude Code 2.1.241, verificato) sarebbe un chip che non dice
+         niente e non lo dirà mai. -->
+    {#if snap.todos.length > 0}
+      <span class="pop">
+        <button class="tune" onclick={() => choose('todo')}
+          aria-label="Checklist: {fatti} of {snap.todos.length} done"
+          title="What the agent is working through">
+          <Icon name="i-check" style="color:var(--accent)" />
+          <span class="lbl">{fatti}/{snap.todos.length}</span><Icon name="i-down" />
+        </button>
+        {#if open === 'todo'}
+          <div class="menu" style={store.narrow ? '' : 'width:290px'}>
+            {#each snap.todos as t, i (i)}
+              <!-- Non è un bottone: non si può spuntare da qui. La checklist è
+                   dell'agent, e una spunta che non cambia niente sarebbe finta. -->
+              <div class="mi" class:dis={t.status === 'completed' || t.status === 'cancelled'}>
+                <Icon name={t.status === 'completed' ? 'i-check'
+                  : t.status === 'in_progress' ? 'i-bolt' : 'i-doc'}
+                  style={t.status === 'in_progress' ? 'color:var(--accent)' : ''} />
+                <span>{t.content}<span class="sub">{t.status}{#if t.priority} · {t.priority}{/if}</span></span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </span>
+    {/if}
 
     <span class="pop">
       <!-- Gli strumenti esterni si accendono per chat, e di partenza sono spenti: una

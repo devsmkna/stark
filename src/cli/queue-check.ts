@@ -26,7 +26,7 @@ const MODE = (process.env['STARK_MODE'] ?? 'auto') as PermissionMode
 let seq = 0
 const snap = {
   v: 1, sessionId: 'coda', state: 'starting', tools: [], slashCommands: [],
-  models: [], modes: [], options: [], mcpServers: [], turns: [], files: [], shell: [],
+  models: [], modes: [], options: [], todos: [], mcpServers: [], turns: [], files: [], shell: [],
   pendingPermissions: [], pendingQuestions: [], pendingPlans: [], blocked: [], notices: [],
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: { nominalUsd: 0 },
   quotaWindows: [], lastSeq: 0, lastTs: 0, stateSince: 0,

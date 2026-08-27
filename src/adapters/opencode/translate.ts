@@ -200,22 +200,31 @@ export class OpenCodeTranslator {
         })
         break
 
-      // ─── quello per cui il modello canonico non ha ancora una parola ────
+      // ─── i due fatti che la prova di carico ha fatto entrare nel modello ────
       //
-      // Registrati come `notice` invece che ignorati: un fatto che l'utente non vede e'
-      // peggio di un fatto detto male, e cosi' si vede subito quanto spesso capitano —
-      // che e' l'informazione che serve per decidere se meritano un evento proprio
-      // (§14-bis: `todo`, `session.retried` e `revert` sono gia' decisi, non ancora
-      // scritti).
+      // Fino a ieri erano `notice`, cioe' registrati invece che modellati: un fatto che
+      // l'utente non vede e' peggio di un fatto detto male. Ora hanno un evento proprio
+      // e una capacita' che dice se quell'agent li ha (§10-bis).
       case 'session.next.retried':
         out.push({
-          k: 'notice', level: 'warn',
-          text: `ritentativo ${num(d['attempt'])}: ${str(((d['error'] ?? {}) as Record<string, unknown>)['message'])}`,
+          k: 'session.retried',
+          attempt: num(d['attempt']),
+          reason: str(((d['error'] ?? {}) as Record<string, unknown>)['message']) || 'il modello non ha risposto',
         })
         break
       case 'todo.updated': {
-        const todos = Array.isArray(d['todos']) ? d['todos'] : []
-        out.push({ k: 'notice', level: 'info', text: `checklist: ${todos.length} voci` })
+        const grezzi = Array.isArray(d['todos']) ? d['todos'] : []
+        out.push({
+          k: 'todo.updated',
+          todos: grezzi.map(x => {
+            const o = (x ?? {}) as Record<string, unknown>
+            return {
+              content: str(o['content']),
+              status: str(o['status']) || 'pending',
+              ...(o['priority'] ? { priority: str(o['priority']) } : {}),
+            }
+          }).filter(t => t.content),
+        })
         break
       }
 

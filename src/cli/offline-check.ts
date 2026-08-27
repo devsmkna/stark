@@ -705,6 +705,39 @@ check('diff: forma unificata, numeri di riga coerenti',
     mancanti.length === 0, mancanti.join(','))
 }
 
+// ─── §10-bis: i due fatti che la prova di carico ha fatto entrare ───────────
+
+{
+  let n = 0
+  const e = (payload: CanonicalEvent['payload']): CanonicalEvent => ev(++n, n * 1000, payload)
+  const s = reduce([], 's-nuovi')
+  applyTo(s, e({ k: 'session.created', agent: 'x', cwd: '/tmp', model: 'm',
+    capabilities: capabilitiesFor('m'), tools: [], commands: [] }))
+  applyTo(s, e({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'via' }] }))
+
+  applyTo(s, e({ k: 'session.retried', attempt: 2, reason: '502 a monte' }))
+  const parte = s.turns[0]?.parts.find(x => x.kind === 'retry')
+  check('§10-bis: un ritentativo finisce NEL TURNO, dov\'è successo',
+    parte?.kind === 'retry' && parte.attempt === 2 && parte.reason === '502 a monte')
+
+  // La checklist arriva intera ogni volta: si SOSTITUISCE. Fonderla vorrebbe dire
+  // ricostruire uno stato applicando patch, che è l'opposto di come si rilegge un
+  // journal append-only — e una voce cancellata dall'agent non sparirebbe mai.
+  applyTo(s, e({ k: 'todo.updated', todos: [
+    { content: 'uno', status: 'completed' }, { content: 'due', status: 'in_progress' },
+    { content: 'tre', status: 'pending' },
+  ] }))
+  check('§10-bis: la checklist si legge dall\'ultimo evento', s.todos.length === 3)
+  applyTo(s, e({ k: 'todo.updated', todos: [{ content: 'uno', status: 'completed' }] }))
+  check('§10-bis: un elenco nuovo SOSTITUISCE il vecchio, non ci si somma',
+    s.todos.length === 1 && s.todos[0]?.content === 'uno')
+
+  // Le due capacità dicono la differenza fra «non ce l'ha» e «non ha niente da fare».
+  check('§10-bis: Claude Code dichiara di NON avere checklist né ritentativi visibili',
+    capabilitiesFor('claude-sonnet-5').todos === false
+    && capabilitiesFor('claude-sonnet-5').retries === false)
+}
+
 // ─── ADR-014: le opzioni di sessione, e i journal gia' scritti ──────────────
 
 // La parte che puo' fare danno non e' la forma nuova: e' che le conversazioni gia' su
@@ -815,26 +848,26 @@ check('diff: forma unificata, numeri di riga coerenti',
 
 {
   const oc = new OpenCodeTranslator()
-  const ev = (type: string, data: Record<string, unknown> = {}) => ({ type, data })
+  const ev2 = (type: string, data: Record<string, unknown> = {}) => ({ type, data })
   const tipi = (ps: ReturnType<typeof oc.translate>) => ps.map(p => p.k).join(',')
 
   oc.apriTurno('T1')
 
   check('OpenCode: il carico utile si legge in `data`, non in `properties`',
-    tipi(oc.translate(ev('session.next.text.delta', { textID: 'p1', delta: 'ciao' }))) === 'text.delta')
+    tipi(oc.translate(ev2('session.next.text.delta', { textID: 'p1', delta: 'ciao' }))) === 'text.delta')
 
   // Il pezzo piu' delicato di tutto l'adapter: OpenCode non annuncia la fine del turno
   // (`session.idle` mai visto in otto giri, `session.wait` non implementato).
-  const conTool = oc.translate(ev('session.next.step.ended', { finish: 'tool-calls', tokens: {} }))
+  const conTool = oc.translate(ev2('session.next.step.ended', { finish: 'tool-calls', tokens: {} }))
   check('OpenCode: `tool-calls` NON chiude il turno — il giro continua',
     !tipi(conTool).includes('turn.ended'), tipi(conTool))
 
-  const conStop = oc.translate(ev('session.next.step.ended', { finish: 'stop', tokens: { input: 10, output: 2 } }))
+  const conStop = oc.translate(ev2('session.next.step.ended', { finish: 'stop', tokens: { input: 10, output: 2 } }))
   check('OpenCode: `stop` chiude il turno, e la sessione torna idle',
     tipi(conStop) === 'step.ended,usage.updated,turn.ended,session.state', tipi(conStop))
 
   check('OpenCode: chiudere due volte lo stesso turno non emette niente',
-    oc.translate(ev('session.next.step.ended', { finish: 'stop', tokens: {} })).length === 2)
+    oc.translate(ev2('session.next.step.ended', { finish: 'stop', tokens: {} })).length === 2)
 
   // `length` non e' `stop`: un turno troncato non e' un turno riuscito, e appiattirli
   // sarebbe la bugia comoda che il §4 vieta.
@@ -847,15 +880,15 @@ check('diff: forma unificata, numeri di riga coerenti',
   const oc2 = new OpenCodeTranslator()
   oc2.apriTurno('T2')
   check('OpenCode: `tool.input.ended` grezzo non produce niente',
-    oc2.translate(ev('session.next.tool.input.ended', { callID: 'c1', text: '{"command":"ls"}' })).length === 0)
-  const chiamato = oc2.translate(ev('session.next.tool.called', { callID: 'c1', tool: 'bash', input: { command: 'ls -1' } }))
+    oc2.translate(ev2('session.next.tool.input.ended', { callID: 'c1', text: '{"command":"ls"}' })).length === 0)
+  const chiamato = oc2.translate(ev2('session.next.tool.called', { callID: 'c1', tool: 'bash', input: { command: 'ls -1' } }))
   check('OpenCode: `tool.called` porta l\'input parsato e il soggetto',
     chiamato.length === 1 && chiamato[0]?.k === 'tool.input.ended'
     && (chiamato[0] as { summary?: string }).summary === 'ls -1')
 
   // Due eventi distinti invece di un flag `ok`.
-  const bene = oc2.translate(ev('session.next.tool.success', { callID: 'c1', content: [] }))
-  const male = oc2.translate(ev('session.next.tool.failed', { callID: 'c2', error: { message: 'esploso' } }))
+  const bene = oc2.translate(ev2('session.next.tool.success', { callID: 'c1', content: [] }))
+  const male = oc2.translate(ev2('session.next.tool.failed', { callID: 'c2', error: { message: 'esploso' } }))
   check('OpenCode: success e failed diventano lo stesso `tool.ended` con `ok` diverso',
     (bene[0] as { ok?: boolean })?.ok === true && (male[0] as { ok?: boolean })?.ok === false)
 
@@ -863,12 +896,24 @@ check('diff: forma unificata, numeri di riga coerenti',
   // aperto per sempre — lo stesso difetto del «turno-fantasma» gia' corretto altrove.
   const oc3 = new OpenCodeTranslator()
   oc3.apriTurno('T3')
-  const rotto = oc3.translate(ev('session.next.step.failed', { error: { message: 'a monte' } }))
+  const rotto = oc3.translate(ev2('session.next.step.failed', { error: { message: 'a monte' } }))
   check('OpenCode: uno step fallito chiude il turno invece di lasciarlo appeso',
     tipi(rotto) === 'session.error,turn.ended,session.state', tipi(rotto))
 
   check('OpenCode: senza un turno aperto non si chiude niente',
-    new OpenCodeTranslator().translate(ev('session.idle')).length === 0)
+    new OpenCodeTranslator().translate(ev2('session.idle')).length === 0)
+
+  const oc4 = new OpenCodeTranslator()
+  oc4.apriTurno('T4')
+  const rit = oc4.translate(ev2('session.next.retried', { attempt: 3, error: { message: 'giu\'' } }))
+  check('OpenCode: un ritentativo diventa un fatto canonico, non un avviso',
+    rit[0]?.k === 'session.retried' && rit[0].attempt === 3, JSON.stringify(rit))
+  const td = oc4.translate(ev2('todo.updated', { todos: [
+    { content: 'a', status: 'pending', priority: 'high' }, { content: '', status: 'x' },
+  ] }))
+  check('OpenCode: la checklist si traduce, e una voce senza testo si scarta',
+    td[0]?.k === 'todo.updated' && td[0].todos.length === 1
+    && td[0].todos[0]?.priority === 'high', JSON.stringify(td))
 
   check('OpenCode: il modello si scrive `provider/id`',
     modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')

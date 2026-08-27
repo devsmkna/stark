@@ -137,6 +137,13 @@ export function capabilitiesFor(model: string): Capabilities {
     permissionAlways: true,
     questions: true,
     revert: false,       // c'è `enableFileCheckpointing`, non ancora usato
+    // I ritentativi li fa l'SDK sotto e non affiorano: non e' un buco, e' un fatto che
+    // questo agent non racconta. Misurato: nessun messaggio nativo li dichiara.
+    retries: false,
+    // Verificato due volte il 27 agosto sulla lista **runtime** dei tool di una
+    // sessione vera (60 tool): c'e' `Task`/`TaskOutput`/`TaskStop`, non `TodoWrite`
+    // ne' i `TaskCreate`. I tipi dell'SDK li dichiarano lo stesso — §16.10.
+    todos: false,
     toolProgress: false,
     fileBrowser: false,
     pty: false,          // Roadmap, Fase 2

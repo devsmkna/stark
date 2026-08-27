@@ -10,7 +10,7 @@ import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
   type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
-  type SessionOption,
+  type SessionOption, type TodoItem,
   type ContextUsage, type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
@@ -94,8 +94,16 @@ export type CompactPartView = {
   trigger?: 'manual' | 'auto'
   at: number
 }
+/**
+ * Il turno e' stato ritentato. Sta nel flusso e non nell'intestazione perche' e'
+ * successo **li'**: e' la spiegazione della pausa che si vede sopra.
+ */
+export type RetryPartView = {
+  kind: 'retry'; partId: string; attempt: number; reason: string; at: number
+}
 export type PartView =
   TextPartView | ReasoningPartView | ToolPartView | AnswerPartView | CompactPartView
+  | RetryPartView
 
 export type TurnView = {
   turnId: string
@@ -179,6 +187,11 @@ export type SessionSnapshot = {
   models: ModelChoice[]
   modes: ModeChoice[]
   /**
+   * La checklist dell'agent, se ne tiene una. Vuota vuol dire due cose diverse — «non
+   * ce l'ha» e «non ha ancora niente da fare» — e a distinguerle e' `capabilities.todos`.
+   */
+  todos: TodoItem[]
+  /**
    * I selettori che l'agent dichiara, e che la barra di stato disegna **senza
    * conoscerli** (ADR-014). Vuoto su un journal scritto prima: allora valgono `models`
    * e `modes`, che sono gli stessi due casi in forma vecchia.
@@ -248,7 +261,7 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
-    models: [], modes: [], options: [], mcpServers: [],
+    models: [], modes: [], options: [], todos: [], mcpServers: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [], pendingPlans: [],
     blocked: [], notices: [], quotaWindows: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
@@ -561,6 +574,21 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.quotaWindows = p.windows; s.quotaWindowsAt = e.ts; break
     case 'context.usage':
       s.contextUsage = p.usage; s.contextUsageAt = e.ts; break
+    case 'session.retried': {
+      // Senza un turno aperto non c'e' un posto nel flusso: un ritentativo avviene per
+      // definizione dentro un turno. Se ne arrivasse uno fuori, si perderebbe qui — e
+      // lo dice questo commento, come per la compattazione.
+      turn()?.parts.push({
+        kind: 'retry', partId: `retry-${e.seq}`,
+        attempt: p.attempt, reason: p.reason, at: e.ts,
+      })
+      break
+    }
+    // La checklist arriva **intera** ogni volta: si sostituisce, non si fonde. E' la
+    // forma in cui la manda l'agent ed e' quella giusta per un journal append-only —
+    // chi rilegge non deve applicare patch, gli basta l'ultimo evento.
+    case 'todo.updated': s.todos = p.todos; break
+
     case 'context.compacted': {
       // Senza un turno aperto non c'e un posto nel flusso in cui metterla, e non e mai
       // successo: la compattazione avviene mentre un turno gira. Se un giorno arrivasse

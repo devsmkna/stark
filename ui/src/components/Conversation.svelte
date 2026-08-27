@@ -699,6 +699,23 @@
                     <span class="l"></span>
                   </div>
 
+                {:else if part.kind === 'retry'}
+                  <!-- Il modello non ha risposto e l'agent riprova. Sta nel flusso e non
+                       nell'intestazione perché è successo **lì**: è la spiegazione della
+                       pausa che si vede sopra. Senza questa riga, un turno che riprova
+                       tre volte e uno che parte al primo colpo sono identici a schermo —
+                       e non sono la stessa cosa. -->
+                  <div class="compact">
+                    <span class="l"></span>
+                    <span class="t" title={part.reason}>
+                      <!-- `&nbsp;` e non uno spazio normale: Svelte **taglia** lo spazio
+                           iniziale dentro un blocco, e si leggeva «attempt 1· Provider»
+                           attaccato. Stessa trappola già registrata per la barra. -->
+                      Retried · attempt {part.attempt}{#if part.reason}&nbsp;· {part.reason}{/if}
+                    </span>
+                    <span class="l"></span>
+                  </div>
+
                 {:else if part.kind === 'answer'}
                   <!-- La richiesta non è passata di qui: si era espanso il blocco in
                        basso. Ciò che resta nel flusso è cosa hai risposto, dove è

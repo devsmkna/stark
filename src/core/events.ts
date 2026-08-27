@@ -286,6 +286,10 @@ export type Capabilities = {
   permissionAlways: boolean
   questions: boolean
   revert: boolean
+  /** L'agent racconta i propri ritentativi. Su Claude Code li fa l'SDK e non affiorano. */
+  retries: boolean
+  /** L'agent tiene una checklist mentre lavora (`todo.updated`). */
+  todos: boolean
   toolProgress: boolean
   fileBrowser: boolean
   pty: boolean
@@ -523,8 +527,48 @@ export type Payload =
    * del CLI, non perché serva a riprenderla.
    */
   | { k: 'context.cleared'; ref?: string }
+
+  // ─── §10-bis quello che l'agent rifa' da solo ─────────────────────────────
+
+  /**
+   * Il turno e' stato **ritentato**: il modello non ha risposto e l'agent riprova.
+   *
+   * Entra nel modello dopo la prova di carico su OpenCode (ADR-012), ed e' un fatto
+   * che l'utente non vedeva: un turno che riprova tre volte e uno che parte al primo
+   * colpo erano identici a schermo, e non sono la stessa cosa — spiegano una pausa di
+   * un minuto che altrimenti sembra un blocco.
+   *
+   * Su Claude Code i ritentativi li fa l'SDK sotto e **non affiorano**: la capacita'
+   * `retries` e' `false` la', e non e' un buco — e' un fatto che quell'agent non
+   * racconta. Su OpenCode arriva come `session.next.retried` con `attempt` ed `error`.
+   */
+  | { k: 'session.retried'; attempt: number; reason: string }
+
+  /**
+   * La checklist che l'agent tiene mentre lavora.
+   *
+   * L'elenco arriva **intero ogni volta**, non a differenze: e' cosi' che lo manda
+   * OpenCode (`todo.updated` con `todos[]`), ed e' anche la forma giusta per un journal
+   * append-only — chi rilegge non deve ricostruire uno stato applicando patch, gli
+   * basta l'ultimo evento.
+   *
+   * §16.10 registra che Claude Code 2.1.241 **non ce l'ha** a runtime: verificato due
+   * volte, sulla lista dei tool di una sessione vera. La capacita' `todos` e' quindi
+   * `false` la', e la UI non mostra niente — che e' diverso da mostrare una lista vuota.
+   */
+  | { k: 'todo.updated'; todos: TodoItem[] }
   | { k: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { k: 'action.blocked'; by: 'classifier' | 'denyRule'; callId?: string; reason: string }
+
+/**
+ * Una voce della checklist.
+ *
+ * `status` e `priority` sono stringhe e non enumerazioni di proposito: sono parole
+ * dell'agent (OpenCode manda `pending`/`in_progress`/`completed`/`cancelled` e
+ * `high`/`medium`/`low`), e chiuderle qui vorrebbe dire rifare la falla di
+ * `PermissionMode` in piccolo. La UI ne fa una spunta e un ordine, non un `switch`.
+ */
+export type TodoItem = { content: string; status: string; priority?: string }
 
 export type PayloadKind = Payload['k']
 
