@@ -31,7 +31,7 @@ import { Stato } from './stato.ts'
 import { aHtml, escapa, spezza } from './testo.ts'
 import type { PushPayload } from '../push.ts'
 import type { Activity } from '../../core/activity.ts'
-import type { CanonicalEvent, Command } from '../../core/events.ts'
+import type { AgentQuestion, CanonicalEvent, Command } from '../../core/events.ts'
 import type { SessionSnapshot } from '../../core/reduce.ts'
 import { turno } from './render.ts'
 
@@ -75,6 +75,36 @@ type Seguito = {
 /** Quanto si aspetta prima di riscrivere il messaggio del turno. */
 const RESPIRO = 3_000
 
+/**
+ * Cosa succede premendo un bottone. Vive in memoria e basta: un bottone premuto dopo un
+ * riavvio del daemon non deve rispondere a una richiesta che non esiste più.
+ */
+type Azione =
+  | { t: 'permission'; chatId: number; sessionId: string; requestId: string
+      decision: 'once' | 'always' | 'reject'; scope?: string }
+  | { t: 'question'; chatId: number; sessionId: string; requestId: string
+      indice: number; scelta: number }
+  | { t: 'question-invia'; chatId: number; sessionId: string; requestId: string }
+  | { t: 'question-chiudi'; chatId: number; sessionId: string; requestId: string }
+  | { t: 'usa'; chatId: number; sessionId: string }
+  | { t: 'model'; chatId: number; sessionId: string; valore: string }
+  | { t: 'mode'; chatId: number; sessionId: string; valore: string }
+
+/**
+ * Una `AskUserQuestion` mentre la si risponde. Le domande sono da 1 a 4 e sono cose
+ * **diverse**, non pezzi di una frase sola: si mostrano una alla volta, e la risposta si
+ * manda quando sono finite.
+ */
+type Domanda = {
+  chatId: number
+  sessionId: string
+  questions: AgentQuestion[]
+  indice: number
+  /** Per domanda, gli indici delle opzioni scelte. Un insieme anche quando è una sola. */
+  scelte: Map<number, Set<number>>
+  messaggio?: number
+}
+
 /** Cosa dire all'utente nelle impostazioni. Mai «non funziona» senza il perché. */
 export type StatoBot =
   | { fase: 'spento' }
@@ -95,6 +125,17 @@ export class Telegram {
   /** L'ultima volta che si è ignorato uno sconosciuto, per chat: si logga di rado. */
   #ignorati = new Map<number, number>()
   #seguiti = new Map<number, Seguito>()
+  /**
+   * Cosa fa un bottone, per token.
+   *
+   * `callback_data` ha un tetto **duro di 64 byte**: un uuid di richiesta più uno scope
+   * non ci stanno. Quindi nel bottone viaggia un token corto e la sostanza resta qui.
+   */
+  #azioni = new Map<string, Azione>()
+  /** Il messaggio che mostra una richiesta, per requestId: serve a togliergli i bottoni. */
+  #richieste = new Map<string, { chatId: number; messaggio: number }>()
+  /** Una `AskUserQuestion` in corso: da 1 a 4 domande, una alla volta. */
+  #domande = new Map<string, Domanda>()
 
   constructor(home: string, registro: Registro) {
     this.#stato = new Stato(home)
@@ -290,9 +331,18 @@ export class Telegram {
     if (u.callback_query) {
       // I callback veri arrivano con le fasi B3-B4; per ora si chiude la rotella, che è
       // l'unica cosa che Telegram non perdona: senza, gira per sempre.
+      // Prima di tutto: la rotella di Telegram gira per sempre se non le si risponde.
       await this.#api?.invia('answerCallbackQuery', { callback_query_id: u.callback_query.id })
       const dato = u.callback_query.data ?? ''
-      if (dato.startsWith('u:')) await this.#usa(chatId, dato.slice(2))
+      if (dato.startsWith('u:')) { await this.#usa(chatId, dato.slice(2)); return }
+      if (dato.startsWith('a:')) {
+        const a = this.#azioni.get(dato.slice(2))
+        // Un token già usato, o scaduto, non fa niente: la rotella è già chiusa e la
+        // richiesta o è stata risolta o non esiste più.
+        if (!a || a.chatId !== chatId) return
+        this.#azioni.delete(dato.slice(2))
+        await this.#premuto(a)
+      }
       return
     }
 
@@ -306,15 +356,84 @@ export class Telegram {
     if (testo === '/help' || testo === '') return this.#aiuto(chatId)
     if (testo === '/stop') {
       const id = this.#corrente(chatId)
-      if (!id) return this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+      if (!id) return void await this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
       const esito = await this.#registro.command(id, { c: 'session.interrupt' })
-      return this.#scrivi(chatId, esito.ok ? '⏹ fermata.' : `Non si è potuta fermare: ${escapa(esito.error)}`)
+      return void await this.#scrivi(chatId, esito.ok ? '⏹ fermata.' : `Non si è potuta fermare: ${escapa(esito.error)}`)
     }
+
+    if (testo === '/model' || testo === '/mode') return this.#scegli(chatId, testo.slice(1) as 'model' | 'mode')
+    if (testo === '/sleep') {
+      const id = this.#corrente(chatId)
+      if (!id) return void await this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+      const esito = await this.#registro.command(id, { c: 'session.sleep' })
+      return void await this.#scrivi(chatId, esito.ok ? '💤 dorme.' : `Non si è addormentata: ${escapa(esito.error)}`)
+    }
+    if (testo.startsWith('/rename ')) {
+      const id = this.#corrente(chatId)
+      if (!id) return void await this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+      // `session.rename` funziona anche su una chat che dorme: è l'unico comando che non
+      // ha bisogno di un processo dietro, ed è il registro a saperlo, non il bot.
+      const esito = await this.#registro.command(id, { c: 'session.rename', title: testo.slice(8).trim() })
+      return void await this.#scrivi(chatId, esito.ok ? '✓ rinominata.' : escapa(esito.error))
+    }
+    if (testo.startsWith('/new ')) return this.#nuova(chatId, testo.slice(5).trim())
 
     // L'elenco dei comandi del bot è **chiuso**: qualunque altro `/qualcosa` — `/clear`,
     // `/compact`, una skill — è un comando dell'agent e va all'agent tale e quale. `//`
     // forza il passaggio anche per un nome che qui collide.
     await this.#prompt(chatId, testo.startsWith('//') ? testo.slice(1) : testo)
+  }
+
+  /**
+   * Modello e modalità si scelgono da una tastiera costruita con **quello che dice lo
+   * snapshot** (`models`, `modes`), non con un elenco scritto qui: su un journal vecchio
+   * quei campi sono vuoti, e mostrare un elenco inventato vorrebbe dire offrire scelte
+   * che quella sessione non ha.
+   */
+  async #scegli(chatId: number, cosa: 'model' | 'mode'): Promise<void> {
+    const id = this.#corrente(chatId)
+    if (!id) return void await this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+    const snap = this.#registro.snapshot(id)
+    // Una modalità che il modello corrente non supporta resta in elenco **disabilitata**
+    // col motivo, come nella UI: nasconderla direbbe che non esiste. Qui, dove una
+    // tastiera non ha bottoni spenti, il motivo entra nell'etichetta.
+    const scelte = cosa === 'model'
+      ? snap?.models.map(m => ({ value: m.id, label: m.label ?? m.id }))
+      : snap?.modes.map(m => ({
+          value: m.mode,
+          label: m.available ? m.mode : `${m.mode} — ${m.reason ?? 'non disponibile'}`,
+          spenta: !m.available,
+        }))
+    if (!scelte || scelte.length === 0) {
+      return void await this.#scrivi(chatId,
+        `Questa conversazione non dice fra cosa si può scegliere. Adesso è `
+        + `<code>${escapa((cosa === 'model' ? snap?.model : snap?.mode) ?? '—')}</code>.`)
+    }
+    const tastiera: Bottone[][] = scelte.map(o => [{
+      text: taglia(o.label, 40),
+      // Una voce spenta porta un token che non fa niente: il bottone esiste per dire che
+      // quella scelta c'è, non per essere premuto.
+      callback_data: 'spenta' in o && o.spenta ? 'a:spenta'
+        : `a:${this.#token({ t: cosa === 'model' ? 'model' : 'mode', chatId, sessionId: id, valore: o.value })}`,
+    }])
+    await this.#scrivi(chatId, cosa === 'model' ? 'Con quale modello?' : 'Con quale modalità?', tastiera)
+  }
+
+  async #nuova(chatId: number, cwd: string): Promise<void> {
+    if (!cwd) return void await this.#scrivi(chatId, 'Serve la cartella: <code>/new /percorso/del/progetto</code>')
+    try {
+      // Il profilo del progetto si rilegge dalle impostazioni per la stessa ragione del
+      // risveglio: senza, la chat nasce con la `CLAUDE_CONFIG_DIR` sbagliata.
+      const profilo = this.#registro.settings().projects[cwd]?.profile
+      const id = await this.#registro.open({ cwd, ...(profilo ? { configDir: profilo } : {}) })
+      this.#stato.cambia(d => { d.chats[String(chatId)] = { ...d.chats[String(chatId)], current: id } })
+      await this.#scrivi(chatId, `📌 <b>${escapa(cartella(cwd))}</b> · nuova conversazione`)
+      this.#segui(chatId, id)
+    } catch (e) {
+      // `registry.open()` rifiuta da sé una cartella che non esiste: il motivo che
+      // arriva qui è già leggibile, e ripeterlo a parole nostre lo renderebbe più vago.
+      await this.#scrivi(chatId, `Non si è aperta: ${escapa(motivo(e))}`)
+    }
   }
 
   #corrente(chatId: number): string | undefined {
@@ -325,16 +444,16 @@ export class Telegram {
 
   async #prompt(chatId: number, testo: string): Promise<void> {
     const id = this.#corrente(chatId)
-    if (!id) return this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+    if (!id) return void await this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
     const riga = this.#registro.list().find(x => x.id === id)
-    if (!riga) return this.#scrivi(chatId, 'Quella conversazione non c\'è più.')
+    if (!riga) return void await this.#scrivi(chatId, 'Quella conversazione non c\'è più.')
 
     // Una chat che dorme rifiuta il prompt con «sessione non attiva»: risvegliare non è
     // un comando, è riaprirla con `resume`. Si fa da soli — chiedere «vuoi svegliarla?»
     // a ogni frase è attrito — ma si **annuncia**, perché rileggere tutto il contesto
     // costa quota davvero (corollario di ADR-005).
     if (!riga.live) {
-      if (!riga.cwd) return this.#scrivi(chatId, 'Quella conversazione non ha una cartella: non si può riaprire.')
+      if (!riga.cwd) return void await this.#scrivi(chatId, 'Quella conversazione non ha una cartella: non si può riaprire.')
       await this.#scrivi(chatId, '⏱ la riapro — rilegge tutto il contesto, e costa quota.')
       try {
         const profilo = this.#registro.settings().projects[riga.cwd]?.profile
@@ -346,12 +465,12 @@ export class Telegram {
         })
         await this.#attendi(id, 60_000)
       } catch (e) {
-        return this.#scrivi(chatId, `Non si è riaperta: ${escapa(motivo(e))}`)
+        return void await this.#scrivi(chatId, `Non si è riaperta: ${escapa(motivo(e))}`)
       }
     }
 
     const esito = await this.#registro.command(id, { c: 'session.prompt', text: testo })
-    if (!esito.ok) return this.#scrivi(chatId, `Non è stato accettato: ${escapa(esito.error)}`)
+    if (!esito.ok) return void await this.#scrivi(chatId, `Non è stato accettato: ${escapa(esito.error)}`)
     // Nessuna conferma: la conferma è il messaggio del turno che compare fra un istante.
     // Un «ok, mandato» sarebbe un messaggio in più su un canale che ne conta venti al
     // minuto, per dire una cosa che si vede da sola.
@@ -396,6 +515,18 @@ export class Telegram {
     if (!snap) return
     const s: Seguito = { sessionId, stacca: () => {}, testo: '', timer: null, toccato: 0 }
     s.stacca = this.#registro.subscribe(sessionId, Number.MAX_SAFE_INTEGER, e => {
+      // Un permesso e una domanda non aspettano il respiro e non entrano nel messaggio
+      // del turno: sono **messaggi nuovi**, perché devono suonare sul telefono e restare
+      // premibili. È il caso d'uso più forte di tutto il bot.
+      const k = e.payload.k
+      if (k === 'permission.asked') { void this.#chiedePermesso(chatId, sessionId, e.payload); return }
+      if (k === 'question.asked') { void this.#chiedeDomanda(chatId, sessionId, e.payload); return }
+      if (k === 'permission.replied' || k === 'question.replied' || k === 'question.rejected') {
+        void this.#risolta(e.payload.requestId, k === 'permission.replied'
+          ? etichettaPermesso(e.payload.decision)
+          : k === 'question.rejected' ? 'chiusa' : 'risposto')
+        return
+      }
       if (s.timer === null) s.timer = setTimeout(() => { void this.#disegna(chatId) }, RESPIRO)
       // La fine del turno non aspetta il respiro: è l'unico aggiornamento che deve
       // arrivare **sempre**, ed è quello che si legge quando si torna a guardare.
@@ -406,6 +537,147 @@ export class Telegram {
       }
     })
     this.#seguiti.set(chatId, s)
+  }
+
+  // ── permessi e domande ────────────────────────────────────────────────────
+
+  #token(a: Azione): string {
+    const t = randomBytes(4).toString('hex')
+    this.#azioni.set(t, a)
+    // I bottoni non restano premibili in eterno: una richiesta vecchia di ore è già
+    // stata risolta altrove, o la sessione non c'è più.
+    setTimeout(() => this.#azioni.delete(t), 6 * 60 * 60_000).unref?.()
+    return t
+  }
+
+  async #chiedePermesso(chatId: number, sessionId: string, p: {
+    requestId: string; action: string; resources: string[]; savable: string[]
+  }): Promise<void> {
+    const risorse = p.resources.length > 0 ? `\n<pre>${escapa(p.resources.join('\n'))}</pre>` : ''
+    const tastiera: Bottone[][] = [[
+      { text: '✓ Consenti', callback_data: `a:${this.#token({ t: 'permission', chatId, sessionId, requestId: p.requestId, decision: 'once' })}` },
+      { text: '✗ Rifiuta', callback_data: `a:${this.#token({ t: 'permission', chatId, sessionId, requestId: p.requestId, decision: 'reject' })}` },
+    ]]
+    for (const s of p.savable) {
+      tastiera.push([{ text: `Sempre: ${taglia(s, 26)}`,
+        callback_data: `a:${this.#token({ t: 'permission', chatId, sessionId, requestId: p.requestId, decision: 'always', scope: s })}` }])
+    }
+    const m = await this.#scrivi(chatId, `⛔ <b>chiede il permesso</b> — ${escapa(p.action)}${risorse}`, tastiera)
+    if (m !== undefined) this.#richieste.set(p.requestId, { chatId, messaggio: m })
+  }
+
+  async #chiedeDomanda(chatId: number, sessionId: string, p: {
+    requestId: string; questions: AgentQuestion[]
+  }): Promise<void> {
+    if (p.questions.length === 0) return
+    const d: Domanda = { chatId, sessionId, questions: p.questions, indice: 0, scelte: new Map() }
+    this.#domande.set(p.requestId, d)
+    const m = await this.#scrivi(chatId, testoDomanda(d), this.#tastieraDomanda(p.requestId, d))
+    if (m !== undefined) { d.messaggio = m; this.#richieste.set(p.requestId, { chatId, messaggio: m }) }
+  }
+
+  #tastieraDomanda(requestId: string, d: Domanda): Bottone[][] {
+    const q = d.questions[d.indice]
+    if (!q) return []
+    const scelte = d.scelte.get(d.indice) ?? new Set<number>()
+    const righe: Bottone[][] = q.options.map((o, i) => [{
+      text: `${q.multiSelect ? (scelte.has(i) ? '☑' : '☐') + ' ' : ''}${taglia(o.label, 30)}`,
+      callback_data: `a:${this.#token({ t: 'question', chatId: d.chatId, sessionId: d.sessionId, requestId, indice: d.indice, scelta: i })}`,
+    }])
+    const coda: Bottone[] = []
+    if (q.multiSelect) {
+      coda.push({ text: 'Invia', callback_data: `a:${this.#token({ t: 'question-invia', chatId: d.chatId, sessionId: d.sessionId, requestId })}` })
+    }
+    coda.push({ text: 'Chiudi', callback_data: `a:${this.#token({ t: 'question-chiudi', chatId: d.chatId, sessionId: d.sessionId, requestId })}` })
+    righe.push(coda)
+    return righe
+  }
+
+  async #premuto(a: Azione): Promise<void> {
+    if (a.t === 'usa') return this.#usa(a.chatId, a.sessionId)
+    if (a.t === 'model' || a.t === 'mode') {
+      const esito = await this.#registro.command(a.sessionId, a.t === 'model'
+        ? { c: 'session.setModel', model: a.valore }
+        : { c: 'session.setMode', mode: a.valore as never })
+      await this.#scrivi(a.chatId, esito.ok ? `✓ <code>${escapa(a.valore)}</code>` : escapa(esito.error))
+      return
+    }
+    if (a.t === 'permission') {
+      // Si manda il comando e **non** si riscrive il messaggio: a riscriverlo sarà
+      // l'evento `permission.replied` che torna dal flusso. Non è pignoleria — se hai
+      // risposto **dal browser**, quell'evento arriva lo stesso e i bottoni spariscono
+      // con scritto cosa è successo. La verità sono gli eventi, mai il click.
+      const esito = await this.#registro.command(a.sessionId, {
+        c: 'permission.reply', requestId: a.requestId, decision: a.decision,
+        ...(a.scope ? { scope: a.scope } : {}),
+      })
+      if (!esito.ok) await this.#risolta(a.requestId, `non accettata: ${esito.error}`)
+      return
+    }
+    const d = this.#domande.get(a.requestId)
+    if (!d) return
+    if (a.t === 'question-chiudi') {
+      await this.#registro.command(d.sessionId, { c: 'question.reject', requestId: a.requestId })
+      return
+    }
+    if (a.t === 'question') {
+      const q = d.questions[a.indice]
+      if (!q) return
+      const scelte = d.scelte.get(a.indice) ?? new Set<number>()
+      if (q.multiSelect) {
+        if (scelte.has(a.scelta)) scelte.delete(a.scelta); else scelte.add(a.scelta)
+        d.scelte.set(a.indice, scelte)
+        return this.#ridisegnaDomanda(a.requestId, d)
+      }
+      d.scelte.set(a.indice, new Set([a.scelta]))
+      return this.#avanza(a.requestId, d)
+    }
+    if (a.t === 'question-invia') return this.#avanza(a.requestId, d)
+  }
+
+  /** Alla domanda dopo, o alla risposta se erano finite. */
+  async #avanza(requestId: string, d: Domanda): Promise<void> {
+    if (d.indice + 1 < d.questions.length) {
+      d.indice++
+      return this.#ridisegnaDomanda(requestId, d)
+    }
+    // La chiave è **il testo della domanda**, non l'`header`: è la forma che costruisce
+    // già la UI, letta da lì e non indovinata. Sbagliarla manderebbe all'agent risposte
+    // che non sa a quale domanda appartengano.
+    const answers: Record<string, string | string[]> = {}
+    d.questions.forEach((q, i) => {
+      const scelti = [...(d.scelte.get(i) ?? new Set<number>())].map(n => q.options[n]?.label ?? '')
+      answers[q.question] = q.multiSelect ? scelti : (scelti[0] ?? '')
+    })
+    await this.#registro.command(d.sessionId, { c: 'question.reply', requestId, answers })
+  }
+
+  async #ridisegnaDomanda(requestId: string, d: Domanda): Promise<void> {
+    if (!this.#api || d.messaggio === undefined) return
+    try {
+      await this.#api.invia('editMessageText', {
+        chat_id: d.chatId, message_id: d.messaggio, text: testoDomanda(d),
+        parse_mode: 'HTML', reply_markup: { inline_keyboard: this.#tastieraDomanda(requestId, d) },
+      })
+    } catch (e) {
+      if (!String(motivo(e)).includes('not modified')) console.error('[telegram] domanda:', motivo(e))
+    }
+  }
+
+  /** Una richiesta ha avuto risposta — da qui, o dal browser: i bottoni se ne vanno. */
+  async #risolta(requestId: string, come: string): Promise<void> {
+    this.#domande.delete(requestId)
+    const dove = this.#richieste.get(requestId)
+    if (!dove || !this.#api) return
+    this.#richieste.delete(requestId)
+    try {
+      await this.#api.invia('editMessageReplyMarkup', {
+        chat_id: dove.chatId, message_id: dove.messaggio, reply_markup: { inline_keyboard: [] },
+      })
+      await this.#scrivi(dove.chatId, `↳ <i>${escapa(come)}</i>`)
+    } catch (e) {
+      if (!String(motivo(e)).includes('not modified')) console.error('[telegram] risolta:', motivo(e))
+    }
   }
 
   async #disegna(chatId: number): Promise<void> {
@@ -493,13 +765,16 @@ export class Telegram {
       + `${r.model ? ` · <code>${escapa(r.model)}</code>` : ''}${doing}`)
   }
 
-  #aiuto(chatId: number): Promise<void> {
-    return this.#scrivi(chatId, [
+  async #aiuto(chatId: number): Promise<void> {
+    await this.#scrivi(chatId, [
       '<b>STARK</b>',
       'Scrivi e basta: quello che mandi diventa un prompt per la conversazione scelta.',
       '<code>/chats</code> — scegli la conversazione',
       '<code>/status</code> — cosa sta facendo',
       '<code>/stop</code> — fermala adesso',
+      '<code>/model</code> · <code>/mode</code> — cambia modello o modalità',
+      '<code>/new /percorso</code> — apri una conversazione nuova',
+      '<code>/rename titolo</code> · <code>/sleep</code>',
       '<code>/unlink</code> — scollega questo telefono',
       '',
       '<i>Gli altri slash (<code>/clear</code>, <code>/compact</code>, le skill) vanno '
@@ -514,9 +789,10 @@ export class Telegram {
    * Meglio un messaggio brutto che un messaggio perso: senza questa rete, il primo
    * blocco di codice strano fa sparire una risposta e nessuno capisce perché.
    */
-  async #scrivi(chatId: number, html: string, tastiera?: Bottone[][]): Promise<void> {
-    if (!this.#api) return
+  async #scrivi(chatId: number, html: string, tastiera?: Bottone[][]): Promise<number | undefined> {
+    if (!this.#api) return undefined
     const pezzi = spezza(html)
+    let ultimo: number | undefined
     for (let i = 0; i < pezzi.length; i++) {
       const corpo: Record<string, unknown> = {
         chat_id: chatId,
@@ -526,14 +802,15 @@ export class Telegram {
         ...(tastiera && i === pezzi.length - 1 ? { reply_markup: { inline_keyboard: tastiera } } : {}),
       }
       try {
-        await this.#api.invia('sendMessage', corpo)
+        ultimo = (await this.#api.invia<{ message_id: number }>('sendMessage', corpo)).message_id
       } catch (e) {
         if (!(e instanceof ErroreTelegram) || e.codice !== 400) throw e
         delete corpo['parse_mode']
         corpo['text'] = senzaTag(pezzi[i] ?? '')
-        await this.#api.invia('sendMessage', corpo)
+        ultimo = (await this.#api.invia<{ message_id: number }>('sendMessage', corpo)).message_id
       }
     }
+    return ultimo
   }
 }
 
@@ -576,6 +853,18 @@ function faQualcosa(a: Activity): string {
   if (a.kind === 'writing') return 'sta scrivendo'
   if (a.kind === 'thinking') return 'sta ragionando'
   return 'al lavoro'
+}
+
+function etichettaPermesso(d: 'once' | 'always' | 'reject'): string {
+  return d === 'reject' ? 'rifiutato' : d === 'always' ? 'consentito sempre' : 'consentito'
+}
+
+function testoDomanda(d: Domanda): string {
+  const q = d.questions[d.indice]
+  if (!q) return ''
+  const quante = d.questions.length > 1 ? ` (${d.indice + 1}/${d.questions.length})` : ''
+  const opzioni = q.options.map(o => `· <b>${escapa(o.label)}</b> — ${escapa(o.description)}`).join('\n')
+  return `❓ <b>${escapa(q.header)}</b>${quante}\n${escapa(q.question)}\n\n${opzioni}`
 }
 
 function segno(r: { state: string; live: boolean }): string {

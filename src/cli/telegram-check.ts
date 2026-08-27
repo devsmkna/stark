@@ -289,6 +289,131 @@ await respira(400)
 check('la fine del turno non aspetta il respiro',
   chiamate.some(c => c.metodo === 'editMessageText'), chiamate.map(c => c.metodo).join(','))
 
+// ── permessi ───────────────────────────────────────────────────────────────
+
+// La chat sta seguendo 'aaa' dalla sezione precedente.
+chiamate.length = 0
+evento('aaa', { k: 'permission.asked', requestId: 'r1', action: 'Bash',
+  resources: ['rm -rf node_modules && npm ci'], savable: ['Bash'], source: {} }, 60)
+await respira(400)
+let tastieraPerm: { text: string; callback_data: string }[][] | undefined
+{
+  const m = chiamate.find(c => c.metodo === 'sendMessage')
+  tastieraPerm = (m?.corpo['reply_markup'] as { inline_keyboard?: typeof tastieraPerm })?.inline_keyboard
+  // Un messaggio NUOVO, non una modifica del turno: deve suonare sul telefono e restare
+  // premibile. È il caso d'uso più forte del bot.
+  check('un permesso arriva come messaggio nuovo, non dentro il turno',
+    m !== undefined && String(m.corpo['text']).includes('chiede il permesso'), String(m?.corpo['text']))
+  check('con Consenti, Rifiuta e una riga per ogni «sempre»',
+    tastieraPerm?.length === 2 && tastieraPerm[0]?.length === 2
+    && String(tastieraPerm[1]?.[0]?.text).startsWith('Sempre'), JSON.stringify(tastieraPerm))
+  // Il tetto è duro: 64 byte, e un uuid più uno scope non ci starebbero.
+  check('ogni callback_data sta nei 64 byte di Telegram',
+    (tastieraPerm ?? []).flat().every(b => Buffer.byteLength(b.callback_data) <= 64),
+    (tastieraPerm ?? []).flat().map(b => b.callback_data).join(' '))
+}
+
+comandi.length = 0
+chiamate.length = 0
+coda.push({ update_id: seq++, callback_query: { id: 'cb3', data: tastieraPerm?.[1]?.[0]?.callback_data ?? '',
+  from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+await respira(400)
+check('premere «Sempre: Bash» manda permission.reply con decision e scope',
+  comandi[0]?.cmd.c === 'permission.reply'
+  && (comandi[0]?.cmd as { decision: string }).decision === 'always'
+  && (comandi[0]?.cmd as { scope?: string }).scope === 'Bash', JSON.stringify(comandi))
+// I bottoni NON spariscono al click: spariscono quando l'evento torna dal flusso. È la
+// stessa cosa che li fa sparire se hai risposto **dal browser**.
+check('e i bottoni restano finché l\'evento non torna dal flusso',
+  !chiamate.some(c => c.metodo === 'editMessageReplyMarkup'), chiamate.map(c => c.metodo).join(','))
+
+chiamate.length = 0
+evento('aaa', { k: 'permission.replied', requestId: 'r1', decision: 'always', scope: 'Bash' }, 61)
+await respira(400)
+check('quando l\'evento arriva, i bottoni se ne vanno e si legge cosa è successo',
+  chiamate.some(c => c.metodo === 'editMessageReplyMarkup')
+  && chiamate.some(c => String(c.corpo['text'] ?? '').includes('consentito sempre')),
+  chiamate.map(c => c.metodo).join(','))
+
+// Un secondo click sullo stesso bottone non deve rispondere due volte.
+comandi.length = 0
+coda.push({ update_id: seq++, callback_query: { id: 'cb4', data: tastieraPerm?.[1]?.[0]?.callback_data ?? '',
+  from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+await respira(400)
+check('un token già usato non risponde una seconda volta', comandi.length === 0, JSON.stringify(comandi))
+
+// Il caso che giustifica tutto: risposto **dal browser**, non da qui.
+chiamate.length = 0
+evento('aaa', { k: 'permission.asked', requestId: 'r2', action: 'Write',
+  resources: ['src/x.ts'], savable: [], source: {} }, 62)
+await respira(400)
+chiamate.length = 0
+evento('aaa', { k: 'permission.replied', requestId: 'r2', decision: 'reject' }, 63)
+await respira(400)
+check('un permesso risolto dal browser toglie i bottoni da solo',
+  chiamate.some(c => c.metodo === 'editMessageReplyMarkup')
+  && chiamate.some(c => String(c.corpo['text'] ?? '').includes('rifiutato')),
+  chiamate.map(c => c.metodo).join(','))
+
+// ── domande ────────────────────────────────────────────────────────────────
+
+chiamate.length = 0
+evento('aaa', { k: 'question.asked', requestId: 'q1', questions: [
+  { header: 'Approccio', question: 'Come procediamo?', multiSelect: false,
+    options: [{ label: 'Riscrivere', description: 'da capo' }, { label: 'Correggere', description: 'sul posto' }] },
+  { header: 'Prove', question: 'Quali prove aggiungiamo?', multiSelect: true,
+    options: [{ label: 'Unitarie', description: 'veloci' }, { label: 'End-to-end', description: 'vere' }] },
+] }, 70)
+await respira(400)
+let tastieraQ: { text: string; callback_data: string }[][] | undefined
+{
+  const m = chiamate.find(c => c.metodo === 'sendMessage')
+  tastieraQ = (m?.corpo['reply_markup'] as { inline_keyboard?: typeof tastieraQ })?.inline_keyboard
+  // Una alla volta: due domande sono cose **diverse**, non pezzi di una frase sola.
+  check('una domanda alla volta, con il conteggio',
+    String(m?.corpo['text']).includes('Approccio') && String(m?.corpo['text']).includes('(1/2)')
+    && !String(m?.corpo['text']).includes('Prove'), String(m?.corpo['text']))
+  check('un bottone per opzione, più Chiudi', tastieraQ?.length === 3, JSON.stringify(tastieraQ))
+}
+
+comandi.length = 0
+chiamate.length = 0
+coda.push({ update_id: seq++, callback_query: { id: 'cb5', data: tastieraQ?.[0]?.[0]?.callback_data ?? '',
+  from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+await respira(400)
+check('scegliere su una domanda singola passa alla successiva, senza rispondere ancora',
+  comandi.length === 0 && chiamate.some(c => String(c.corpo['text'] ?? '').includes('(2/2)')),
+  chiamate.map(c => `${c.metodo}:${String(c.corpo['text'] ?? '').slice(0, 30)}`).join(' | '))
+
+// La seconda è a scelta multipla: i bottoni fanno spunta e serve Invia.
+{
+  const m = chiamate.find(c => c.metodo === 'editMessageText')
+  const t2 = (m?.corpo['reply_markup'] as { inline_keyboard?: typeof tastieraQ })?.inline_keyboard
+  check('a scelta multipla compaiono le caselle e il bottone Invia',
+    String(t2?.[0]?.[0]?.text).startsWith('☐') && (t2?.[2] ?? []).some(b => b.text === 'Invia'),
+    JSON.stringify(t2))
+  chiamate.length = 0
+  coda.push({ update_id: seq++, callback_query: { id: 'cb6', data: t2?.[1]?.[0]?.callback_data ?? '',
+    from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+  const t3 = (chiamate.find(c => c.metodo === 'editMessageText')?.corpo['reply_markup'] as { inline_keyboard?: typeof tastieraQ })?.inline_keyboard
+  check('spuntare non risponde: cambia solo la casella',
+    String(t3?.[1]?.[0]?.text).startsWith('☑') && comandi.length === 0, JSON.stringify(t3))
+
+  comandi.length = 0
+  coda.push({ update_id: seq++, callback_query: { id: 'cb7', data: (t3?.[2] ?? []).find(b => b.text === 'Invia')?.callback_data ?? '',
+    from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+  const risposta = comandi[0]?.cmd as { c: string; answers?: Record<string, string | string[]> } | undefined
+  // La chiave è **il testo della domanda**, non l'header: è la forma che costruisce già
+  // la UI. Sbagliarla manderebbe all'agent risposte che non sa a chi appartengono.
+  check('Invia manda question.reply con le domande come chiavi',
+    risposta?.c === 'question.reply'
+    && risposta.answers?.['Come procediamo?'] === 'Riscrivere'
+    && JSON.stringify(risposta.answers?.['Quali prove aggiungiamo?']) === '["End-to-end"]',
+    JSON.stringify(risposta))
+}
+
 // ── la doppia notifica ─────────────────────────────────────────────────────
 
 chiamate.length = 0
@@ -318,6 +443,63 @@ check('e lo dice, perché rileggere il contesto costa quota',
   chiamate.some(c => String(c.corpo['text'] ?? '').includes('costa quota')))
 check('e poi manda il prompt',
   comandi.some(c => c.cmd.c === 'session.prompt'), JSON.stringify(comandi))
+
+// ── modello, modalità, nuova, rinomina ─────────────────────────────────────
+
+// La sessione corrente adesso è 'bbb' (risvegliata sopra). Le si dà uno snapshot con
+// modelli e modalità, come li avrebbe una chat vera.
+snapshots.set('bbb', {
+  ...reduce([], 'bbb'),
+  model: 'claude-opus-5', mode: 'auto',
+  models: [
+    { id: 'default', label: 'Default (recommended)', autoMode: true, contextWindow: 200000 },
+    { id: 'claude-sonnet-5', label: 'Sonnet 5', autoMode: true, contextWindow: 200000 },
+  ],
+  modes: [
+    { mode: 'auto', available: true },
+    { mode: 'bypassPermissions', available: false, reason: 'non si può da root' },
+  ],
+})
+
+chiamate.length = 0
+await manda(TELEFONO, '/model')
+{
+  const t = (chiamate.find(c => c.metodo === 'sendMessage')?.corpo['reply_markup'] as { inline_keyboard?: { text: string; callback_data: string }[][] })?.inline_keyboard
+  check('/model offre quello che dice lo snapshot, non un elenco scritto nel bot',
+    t?.length === 2 && String(t[0]?.[0]?.text).includes('Default'), JSON.stringify(t))
+  comandi.length = 0
+  coda.push({ update_id: seq++, callback_query: { id: 'cb8', data: t?.[1]?.[0]?.callback_data ?? '',
+    from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+  check('e sceglierlo manda session.setModel',
+    comandi[0]?.cmd.c === 'session.setModel'
+    && (comandi[0]?.cmd as { model: string }).model === 'claude-sonnet-5', JSON.stringify(comandi))
+}
+
+chiamate.length = 0
+comandi.length = 0
+await manda(TELEFONO, '/mode')
+{
+  const t = (chiamate.find(c => c.metodo === 'sendMessage')?.corpo['reply_markup'] as { inline_keyboard?: { text: string; callback_data: string }[][] })?.inline_keyboard
+  // Una modalità non disponibile resta in elenco **col motivo**: nasconderla direbbe che
+  // non esiste. È la regola «mai poter meno del CLI, e dire perché».
+  check('una modalità non disponibile resta in elenco col motivo',
+    String(t?.[1]?.[0]?.text).includes('non si può da root'), JSON.stringify(t))
+  coda.push({ update_id: seq++, callback_query: { id: 'cb9', data: t?.[1]?.[0]?.callback_data ?? '',
+    from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+  check('e premerla non manda niente', comandi.length === 0, JSON.stringify(comandi))
+}
+
+comandi.length = 0
+await manda(TELEFONO, '/rename il diff affiancato')
+check('/rename passa dal registro, che sa farlo anche su una chat che dorme',
+  comandi[0]?.cmd.c === 'session.rename', JSON.stringify(comandi))
+
+aperture.length = 0
+await manda(TELEFONO, '/new /casa/terzo')
+check('/new apre una conversazione nuova nella cartella data',
+  aperture.length === 1 && aperture[0]?.cwd === '/casa/terzo', JSON.stringify(aperture))
 
 // ── i limiti di Telegram ───────────────────────────────────────────────────
 
