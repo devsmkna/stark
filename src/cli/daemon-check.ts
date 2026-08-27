@@ -186,6 +186,18 @@ check('un url malformato → 400, non un\'eccezione che porta giù la richiesta'
     body: JSON.stringify({ url: 'not-a-url', scheme: 'notion' }),
   })).status === 400)
 
+// ─── il Finder di sistema: rotta ─────────────────────────────────────────────
+//
+// Solo perimetro e forma della risposta: **non** si chiama davvero un click reale
+// sul dialogo nativo (bloccherebbe questo script in attesa di un umano). Il click
+// vero si verifica a mano, sulla macchina, come già per F1.
+check('senza token → 403 anche per /api/browse-native',
+  (await fetch(`${url}/api/browse-native`, { method: 'POST' })).status === 403)
+const sistema = await (await fetch(`${url}/api/system`, { headers: auth })).json() as
+  { nativeFolderPicker?: unknown }
+check('/api/system espone `nativeFolderPicker` come booleano',
+  typeof sistema.nativeFolderPicker === 'boolean', JSON.stringify(sistema.nativeFolderPicker))
+
 // ─── una sessione che non parte ─────────────────────────────────────────────
 
 // Costa zero quota, e prova la cosa che conta di più in un daemon che deve
