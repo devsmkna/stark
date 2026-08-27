@@ -13,6 +13,8 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import type { Update } from '../daemon/telegram/api.ts'
+import { EMPTY_USAGE, type CanonicalEvent, type Command } from '../core/events.ts'
+import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 
 const CASA = resolve(tmpdir(), 'stark-telegram-check-home')
 rmSync(CASA, { recursive: true, force: true })
@@ -74,7 +76,49 @@ const righe = [
   { id: 'aaa', title: 'sistema il diff', state: 'busy', cwd: '/casa/stark', live: true },
   { id: 'bbb', title: 'niente', state: 'idle', cwd: '/casa/altro', live: false },
 ]
-const registro = { list: () => righe }
+
+// Un registro finto: il bot non deve sapere com'è fatto quello vero, e mettere in scena
+// un registro completo costerebbe una sessione vera, cioè quota.
+const comandi: { id: string; cmd: Command }[] = []
+const aperture: { cwd: string; resume?: { ref: string }; configDir?: string }[] = []
+const ascoltatori = new Map<string, ((e: CanonicalEvent) => void)[]>()
+const snapshots = new Map<string, SessionSnapshot>()
+snapshots.set('aaa', reduce([], 'aaa'))
+
+/** Fa arrivare un evento come farebbe il flusso del registro. */
+const evento = (id: string, payload: CanonicalEvent['payload'], seq: number): void => {
+  const e = { v: 1, seq, ts: Date.now(), sessionId: id, payload } as CanonicalEvent
+  const snap = snapshots.get(id)
+  if (snap) applyTo(snap, e)
+  for (const f of ascoltatori.get(id) ?? []) f(e)
+}
+
+const registro = {
+  list: () => righe,
+  snapshot: (id: string) => snapshots.get(id) ?? null,
+  subscribe: (id: string, _from: number, send: (e: CanonicalEvent) => void) => {
+    const elenco = ascoltatori.get(id) ?? []
+    elenco.push(send)
+    ascoltatori.set(id, elenco)
+    return () => { ascoltatori.set(id, (ascoltatori.get(id) ?? []).filter(f => f !== send)) }
+  },
+  command: async (id: string, cmd: Command) => {
+    comandi.push({ id, cmd })
+    const r = righe.find(x => x.id === id)
+    if (!r?.live) return { ok: false as const, error: 'sessione non attiva' }
+    return { ok: true as const }
+  },
+  open: async (spec: { cwd: string; resume?: { ref: string }; configDir?: string }) => {
+    aperture.push(spec)
+    const r = righe.find(x => x.id === spec.resume?.ref)
+    if (r) r.live = true
+    // Il risveglio vero manda `session.state: idle` quando è pronta: `#attendi` sta
+    // aspettando proprio quello.
+    setTimeout(() => evento(spec.resume?.ref ?? '', { k: 'session.state', state: 'idle' }, 1), 80)
+    return spec.resume?.ref ?? 'nuova'
+  },
+  settings: () => ({ projects: { '/casa/altro': { profile: '/root/.claude-digitizers' } } }),
+}
 
 const bot = new Telegram(CASA, registro)
 await bot.imposta('123456:finto')
@@ -180,6 +224,100 @@ chiamate.length = 0
 await manda(TELEFONO, '/status')
 check('/status dice cosa sta facendo la sessione scelta',
   String(chiamate[0]?.corpo['text'] ?? '').includes('stark'), String(chiamate[0]?.corpo['text'] ?? ''))
+
+// ── scrivere all'agent ─────────────────────────────────────────────────────
+
+comandi.length = 0
+chiamate.length = 0
+await manda(TELEFONO, 'sistema il bug del diff')
+check('un messaggio normale diventa un prompt per la sessione scelta',
+  comandi.length === 1 && comandi[0]?.id === 'aaa'
+  && comandi[0]?.cmd.c === 'session.prompt'
+  && (comandi[0]?.cmd as { text: string }).text === 'sistema il bug del diff',
+  JSON.stringify(comandi))
+// Nessun «ok, mandato»: la conferma è il messaggio del turno che compare fra un istante,
+// e su un canale che conta venti messaggi al minuto un ok è un messaggio sprecato.
+check('e non risponde «ok»: la conferma è il turno che compare',
+  !chiamate.some(c => c.metodo === 'sendMessage'), chiamate.map(c => c.metodo).join(','))
+
+// Gli slash che non sono del bot appartengono all'agent, e ci arrivano tali e quali.
+comandi.length = 0
+await manda(TELEFONO, '/clear')
+check('uno slash che non è del bot va all\'agent tale e quale',
+  (comandi[0]?.cmd as { text?: string })?.text === '/clear', JSON.stringify(comandi))
+comandi.length = 0
+await manda(TELEFONO, '//status')
+check('`//` forza il passaggio anche per un nome che qui collide',
+  (comandi[0]?.cmd as { text?: string })?.text === '/status', JSON.stringify(comandi))
+
+comandi.length = 0
+await manda(TELEFONO, '/stop')
+check('/stop interrompe', comandi[0]?.cmd.c === 'session.interrupt', JSON.stringify(comandi))
+
+// ── il turno si segue modificando UN messaggio ─────────────────────────────
+
+chiamate.length = 0
+evento('aaa', { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'sistema il bug' }] }, 10)
+evento('aaa', { k: 'tool.started', callId: 'c1', name: 'Read' }, 11)
+evento('aaa', { k: 'tool.input.ended', callId: 'c1', input: {}, summary: 'src/core/diff.ts', intent: 'leggo come si fanno gli hunk' }, 12)
+evento('aaa', { k: 'text.started', partId: 'p1' }, 13)
+for (let i = 0; i < 20; i++) evento('aaa', { k: 'text.delta', partId: 'p1', delta: `pezzo ${i} ` }, 14 + i)
+await respira(4_200)   // il respiro è 3s: uno solo deve essere scattato
+{
+  const invii = chiamate.filter(c => c.metodo === 'sendMessage').length
+  const modifiche = chiamate.filter(c => c.metodo === 'editMessageText').length
+  check('venti eventi non fanno venti messaggi', invii === 1 && modifiche <= 1,
+    `${invii} invii, ${modifiche} modifiche`)
+  const testo = String(chiamate.find(c => c.metodo === 'sendMessage')?.corpo['text'] ?? '')
+  check('e il messaggio dice cosa sta facendo, con la motivazione dell\'agent',
+    testo.includes('leggo come si fanno gli hunk') && testo.includes('src/core/diff.ts'), testo)
+}
+
+chiamate.length = 0
+for (let i = 0; i < 5; i++) evento('aaa', { k: 'text.delta', partId: 'p1', delta: `ancora ${i} ` }, 40 + i)
+await respira(4_200)
+check('gli aggiornamenti dopo il primo MODIFICANO, non aggiungono',
+  chiamate.filter(c => c.metodo === 'editMessageText').length === 1
+  && chiamate.filter(c => c.metodo === 'sendMessage').length === 0,
+  chiamate.map(c => c.metodo).join(','))
+
+// La fine del turno non aspetta il respiro: è l'unico aggiornamento che deve arrivare
+// sempre, ed è quello che si legge tornando a guardare.
+chiamate.length = 0
+evento('aaa', { k: 'turn.ended', turnId: 't1', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 50)
+await respira(400)
+check('la fine del turno non aspetta il respiro',
+  chiamate.some(c => c.metodo === 'editMessageText'), chiamate.map(c => c.metodo).join(','))
+
+// ── la doppia notifica ─────────────────────────────────────────────────────
+
+chiamate.length = 0
+await bot.manda({ kind: 'done', title: 'Done · stark', body: 'sistema il diff', sessionId: 'aaa' })
+check('non richiama su una sessione che sta già seguendo dal vivo',
+  chiamate.length === 0, chiamate.map(c => c.metodo).join(','))
+chiamate.length = 0
+await bot.manda({ kind: 'done', title: 'Done · altro', body: 'niente', sessionId: 'bbb' })
+check('ma chiama per una sessione diversa', chiamate.length === 1)
+
+// ── risveglio ──────────────────────────────────────────────────────────────
+
+aperture.length = 0
+comandi.length = 0
+chiamate.length = 0
+coda.push({ update_id: seq++, callback_query: { id: 'cb2', data: 'u:bbb', from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+await respira(400)
+await manda(TELEFONO, 'riprendi da dove eravamo')
+await respira(600)
+check('una chat che dorme si riapre con resume, non con un comando',
+  aperture.length === 1 && aperture[0]?.resume?.ref === 'bbb', JSON.stringify(aperture))
+// Senza il profilo del progetto la chat si risveglia senza login e senza MCP, e sembra
+// rotta: è un bug già documentato, che questo punto rifarebbe identico.
+check('e col profilo Claude del progetto, non con quello di default',
+  aperture[0]?.configDir === '/root/.claude-digitizers', String(aperture[0]?.configDir))
+check('e lo dice, perché rileggere il contesto costa quota',
+  chiamate.some(c => String(c.corpo['text'] ?? '').includes('costa quota')))
+check('e poi manda il prompt',
+  comandi.some(c => c.cmd.c === 'session.prompt'), JSON.stringify(comandi))
 
 // ── i limiti di Telegram ───────────────────────────────────────────────────
 

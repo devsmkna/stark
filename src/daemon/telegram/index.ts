@@ -31,6 +31,9 @@ import { Stato } from './stato.ts'
 import { aHtml, escapa, spezza } from './testo.ts'
 import type { PushPayload } from '../push.ts'
 import type { Activity } from '../../core/activity.ts'
+import type { CanonicalEvent, Command } from '../../core/events.ts'
+import type { SessionSnapshot } from '../../core/reduce.ts'
+import { turno } from './render.ts'
 
 type Riga = {
   id: string; title: string; state: string; cwd?: string
@@ -39,7 +42,38 @@ type Riga = {
 
 type Registro = {
   list(): Riga[]
+  snapshot(id: string): SessionSnapshot | null
+  subscribe(id: string, from: number, send: (e: CanonicalEvent) => void): () => void
+  command(id: string, cmd: Command): Promise<{ ok: true } | { ok: false; error: string }>
+  open(spec: { cwd: string; resume?: { ref: string }; configDir?: string }): Promise<string>
+  settings(): { projects: Record<string, { profile?: string }> }
 }
+
+/**
+ * La conversazione che una chat sta seguendo dal vivo.
+ *
+ * **Una sola per chat, di proposito.** Telegram tollera circa un messaggio al secondo
+ * per chat, e modificarne uno costa come mandarlo: tre sessioni seguite in parallelo
+ * sfonderebbero il limite da sole, e il primo a rimetterci sarebbe proprio il messaggio
+ * che stai leggendo. Le altre chat continuano a chiamare tramite `callFor` — quello è
+ * un messaggio ogni cambio di stato, non decine al secondo.
+ */
+type Seguito = {
+  sessionId: string
+  stacca: () => void
+  /** Il messaggio del turno in corso, quello che si modifica invece di moltiplicare. */
+  messaggio?: number
+  /** Il testo che quel messaggio contiene adesso: senza, si rimanderebbe l'identico. */
+  testo: string
+  /** L'id del turno che `messaggio` sta mostrando. Cambia → messaggio nuovo. */
+  turnoId?: string
+  timer: ReturnType<typeof setTimeout> | null
+  /** Quando è stato aggiornato l'ultima volta: serve a non notificare due volte (§B5). */
+  toccato: number
+}
+
+/** Quanto si aspetta prima di riscrivere il messaggio del turno. */
+const RESPIRO = 3_000
 
 /** Cosa dire all'utente nelle impostazioni. Mai «non funziona» senza il perché. */
 export type StatoBot =
@@ -60,6 +94,7 @@ export class Telegram {
   #situazione: StatoBot = { fase: 'spento' }
   /** L'ultima volta che si è ignorato uno sconosciuto, per chat: si logga di rado. */
   #ignorati = new Map<number, number>()
+  #seguiti = new Map<number, Seguito>()
 
   constructor(home: string, registro: Registro) {
     this.#stato = new Stato(home)
@@ -93,6 +128,8 @@ export class Telegram {
   }
 
   async ferma(): Promise<void> {
+    for (const s of this.#seguiti.values()) { s.stacca(); if (s.timer) clearTimeout(s.timer) }
+    this.#seguiti.clear()
     this.#fermo?.abort()
     this.#fermo = null
     this.#api = null
@@ -154,7 +191,17 @@ export class Telegram {
 
   async manda(p: PushPayload): Promise<void> {
     const testo = `<b>${escapa(p.title)}</b>\n${escapa(p.body)}`
-    for (const a of this.#stato.dati.allow) await this.#scrivi(a.chatId, testo)
+    for (const a of this.#stato.dati.allow) {
+      // Se questa chat sta seguendo **proprio quella** sessione dal vivo, e il messaggio
+      // del turno è stato riscritto un istante fa, l'ultima riga dice già «✓ ... 12s»:
+      // un secondo messaggio che dice «ha finito» sarebbe rumore sopra la risposta.
+      // È lo stesso concetto di `zittoQui` nella UI — «la chat che sto guardando» — e
+      // porta lo stesso nome apposta.
+      const seguito = this.#seguiti.get(a.chatId)
+      const zittoQui = seguito?.sessionId === p.sessionId && Date.now() - seguito.toccato < 30_000
+      if (zittoQui) continue
+      await this.#scrivi(a.chatId, testo)
+    }
   }
 
   // ── il ciclo ──────────────────────────────────────────────────────────────
@@ -257,9 +304,142 @@ export class Telegram {
       return
     }
     if (testo === '/help' || testo === '') return this.#aiuto(chatId)
+    if (testo === '/stop') {
+      const id = this.#corrente(chatId)
+      if (!id) return this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+      const esito = await this.#registro.command(id, { c: 'session.interrupt' })
+      return this.#scrivi(chatId, esito.ok ? '⏹ fermata.' : `Non si è potuta fermare: ${escapa(esito.error)}`)
+    }
 
-    await this.#scrivi(chatId, 'Per ora so fare <code>/chats</code>, <code>/status</code> e '
-      + '<code>/unlink</code>. Scrivere prompt arriva subito dopo.')
+    // L'elenco dei comandi del bot è **chiuso**: qualunque altro `/qualcosa` — `/clear`,
+    // `/compact`, una skill — è un comando dell'agent e va all'agent tale e quale. `//`
+    // forza il passaggio anche per un nome che qui collide.
+    await this.#prompt(chatId, testo.startsWith('//') ? testo.slice(1) : testo)
+  }
+
+  #corrente(chatId: number): string | undefined {
+    return this.#stato.dati.chats[String(chatId)]?.current
+  }
+
+  // ── scrivere all'agent ────────────────────────────────────────────────────
+
+  async #prompt(chatId: number, testo: string): Promise<void> {
+    const id = this.#corrente(chatId)
+    if (!id) return this.#scrivi(chatId, 'Nessuna conversazione scelta. <code>/chats</code>')
+    const riga = this.#registro.list().find(x => x.id === id)
+    if (!riga) return this.#scrivi(chatId, 'Quella conversazione non c\'è più.')
+
+    // Una chat che dorme rifiuta il prompt con «sessione non attiva»: risvegliare non è
+    // un comando, è riaprirla con `resume`. Si fa da soli — chiedere «vuoi svegliarla?»
+    // a ogni frase è attrito — ma si **annuncia**, perché rileggere tutto il contesto
+    // costa quota davvero (corollario di ADR-005).
+    if (!riga.live) {
+      if (!riga.cwd) return this.#scrivi(chatId, 'Quella conversazione non ha una cartella: non si può riaprire.')
+      await this.#scrivi(chatId, '⏱ la riapro — rilegge tutto il contesto, e costa quota.')
+      try {
+        const profilo = this.#registro.settings().projects[riga.cwd]?.profile
+        // Il profilo va riletto dalle impostazioni del progetto, o la chat si risveglia
+        // senza login e senza MCP e **sembra rotta**: è un bug già documentato, che
+        // questo punto rifarebbe identico se non lo copiasse.
+        await this.#registro.open({
+          cwd: riga.cwd, resume: { ref: id }, ...(profilo ? { configDir: profilo } : {}),
+        })
+        await this.#attendi(id, 60_000)
+      } catch (e) {
+        return this.#scrivi(chatId, `Non si è riaperta: ${escapa(motivo(e))}`)
+      }
+    }
+
+    const esito = await this.#registro.command(id, { c: 'session.prompt', text: testo })
+    if (!esito.ok) return this.#scrivi(chatId, `Non è stato accettato: ${escapa(esito.error)}`)
+    // Nessuna conferma: la conferma è il messaggio del turno che compare fra un istante.
+    // Un «ok, mandato» sarebbe un messaggio in più su un canale che ne conta venti al
+    // minuto, per dire una cosa che si vede da sola.
+    this.#segui(chatId, id)
+  }
+
+  /** Aspetta che una sessione appena riaperta sia pronta a ricevere. */
+  #attendi(id: string, entro: number): Promise<void> {
+    return new Promise((risolvi, rifiuta) => {
+      const scadenza = setTimeout(() => { stacca(); rifiuta(new Error('non è ripartita entro un minuto')) }, entro)
+      const stacca = this.#registro.subscribe(id, Number.MAX_SAFE_INTEGER, e => {
+        if (e.payload.k !== 'session.state') return
+        if (e.payload.state === 'idle') { clearTimeout(scadenza); stacca(); risolvi() }
+      })
+    })
+  }
+
+  // ── seguire dal vivo ──────────────────────────────────────────────────────
+
+  /**
+   * Si aggancia al flusso di una sessione per sapere **quando** ridisegnare — e basta.
+   *
+   * Il bot NON tiene un proprio `SessionSnapshot`: lo rilegge dal registro al momento di
+   * disegnare. Non è pigrizia, è l'unica cosa corretta: per una sessione viva
+   * `registry.snapshot()` restituisce **l'oggetto interno del registro**, quello che il
+   * daemon aggiorna e che la UI legge. Applicarci sopra gli stessi eventi una seconda
+   * volta lo corromperebbe — ogni delta di testo contato due volte, ogni `turn.started`
+   * che apre un turno gemello. È esattamente com'è stato scoperto: il messaggio mostrava
+   * il prompt del turno e nessuna delle sue operazioni, perché le parti finivano nel
+   * primo dei due turni e il disegno guardava il secondo.
+   *
+   * L'invariante §4 resta intatta, anzi più stretta: c'è **un solo** `applyTo`, quello
+   * del registro, e chi mostra qualcosa legge il risultato invece di rifare il calcolo.
+   */
+  #segui(chatId: number, sessionId: string): void {
+    const prima = this.#seguiti.get(chatId)
+    if (prima?.sessionId === sessionId) return
+    prima?.stacca()
+    if (prima?.timer) clearTimeout(prima.timer)
+
+    const snap = this.#registro.snapshot(sessionId)
+    if (!snap) return
+    const s: Seguito = { sessionId, stacca: () => {}, testo: '', timer: null, toccato: 0 }
+    s.stacca = this.#registro.subscribe(sessionId, Number.MAX_SAFE_INTEGER, e => {
+      if (s.timer === null) s.timer = setTimeout(() => { void this.#disegna(chatId) }, RESPIRO)
+      // La fine del turno non aspetta il respiro: è l'unico aggiornamento che deve
+      // arrivare **sempre**, ed è quello che si legge quando si torna a guardare.
+      if (e.payload.k === 'turn.ended') {
+        if (s.timer) clearTimeout(s.timer)
+        s.timer = null
+        void this.#disegna(chatId)
+      }
+    })
+    this.#seguiti.set(chatId, s)
+  }
+
+  async #disegna(chatId: number): Promise<void> {
+    const s = this.#seguiti.get(chatId)
+    if (!s || !this.#api) return
+    s.timer = null
+    const snap = this.#registro.snapshot(s.sessionId)
+    const t = snap?.turns[snap.turns.length - 1]
+    if (!t) return
+    const testo = turno(t)
+    // Se il testo non è cambiato non si manda niente: un `editMessageText` costa come un
+    // messaggio, e senza questo controllo ogni respiro ne spenderebbe uno per nulla.
+    if (testo === s.testo && s.turnoId === t.turnId) return
+    s.testo = testo
+    s.toccato = Date.now()
+    try {
+      if (s.turnoId === t.turnId && s.messaggio !== undefined) {
+        await this.#api.invia('editMessageText', {
+          chat_id: chatId, message_id: s.messaggio, text: testo,
+          parse_mode: 'HTML', link_preview_options: { is_disabled: true },
+        })
+      } else {
+        const m = await this.#api.invia<{ message_id: number }>('sendMessage', {
+          chat_id: chatId, text: testo, parse_mode: 'HTML',
+          link_preview_options: { is_disabled: true },
+        })
+        s.turnoId = t.turnId
+        s.messaggio = m.message_id
+      }
+    } catch (e) {
+      // «message is not modified» non è un guasto: è Telegram che dice che il testo era
+      // già quello. Tutto il resto vale la pena saperlo.
+      if (!String(motivo(e)).includes('not modified')) console.error('[telegram] disegno:', motivo(e))
+    }
   }
 
   async #accoppia(chatId: number, dato: string, nome: string): Promise<void> {
@@ -300,6 +480,7 @@ export class Telegram {
       d.chats[String(chatId)] = { ...d.chats[String(chatId)], current: id }
     })
     await this.#scrivi(chatId, `📌 <b>${escapa(cartella(r.cwd))}</b> · ${escapa(taglia(r.title, 60))}`)
+    this.#segui(chatId, id)
   }
 
   async #situazioneChat(chatId: number): Promise<void> {
@@ -315,9 +496,14 @@ export class Telegram {
   #aiuto(chatId: number): Promise<void> {
     return this.#scrivi(chatId, [
       '<b>STARK</b>',
+      'Scrivi e basta: quello che mandi diventa un prompt per la conversazione scelta.',
       '<code>/chats</code> — scegli la conversazione',
       '<code>/status</code> — cosa sta facendo',
+      '<code>/stop</code> — fermala adesso',
       '<code>/unlink</code> — scollega questo telefono',
+      '',
+      '<i>Gli altri slash (<code>/clear</code>, <code>/compact</code>, le skill) vanno '
+      + 'all\'agent così come sono. <code>//testo</code> forza il passaggio.</i>',
     ].join('\n'))
   }
 
