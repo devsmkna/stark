@@ -15,10 +15,26 @@
   import { promptText } from '$core/events.ts'
   import { colours, hhmm, project, since, toolIcon, turnStatus } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
-  import type { Store } from '../lib/store.svelte.ts'
+  import type { Store, View } from '../lib/store.svelte.ts'
 
-  let { store, snap, link }:
-    { store: Store; snap: SessionSnapshot; link: LinkStatus } = $props()
+  // `id` e `setView` invece di `store.selected`/`store.show()`: con più pannelli
+  // aperti insieme, «la chat a fuoco» non è più la chat che *questo* componente sta
+  // mostrando. Passarli come prop rende visibile a chi monta il componente che ogni
+  // istanza parla di una chat precisa — e toglie il modo di sbagliarsi dall'interno.
+  let { store, snap, link, id, setView, onClose }:
+    {
+      store: Store; snap: SessionSnapshot; link: LinkStatus
+      id: string
+      setView: (v: View) => void
+      /** Chiude il pannello che mostra questa chat. C'è solo quando i pannelli sono
+       *  più di uno: il `×` sta nella barra che esiste già invece che in una seconda
+       *  intestazione sopra, che ripeterebbe il titolo e ruberebbe una riga di altezza. */
+      onClose?: () => void
+    } = $props()
+
+  /** La riga dell'elenco di **questa** chat, non di quella a fuoco. */
+  const row = $derived(store.rows.find(r => r.id === id))
+  const live = $derived(row?.live ?? false)
 
   // Di default è aperto il turno **attivo** — quello che l'agent sta davvero facendo,
   // che non è sempre l'ultimo: se mandi un messaggio mentre lavora ancora al
@@ -273,7 +289,7 @@
   // sempre il primo colore — e lo stesso progetto avrebbe due colori diversi nelle
   // due metà dello schermo, che è esattamente ciò che il colore serve a evitare.
   const colour = $derived(colours(store.rows).get(project(snap.cwd)) ?? 0)
-  const title = $derived(store.row?.title ?? project(snap.cwd))
+  const title = $derived(row?.title ?? project(snap.cwd))
 
   /**
    * Su cosa ha lavorato un tool — il *cosa*, non il *perché* (quello è `part.intent`,
@@ -318,8 +334,8 @@
   }
   async function commitRename(): Promise<void> {
     renaming = false
-    if (store.selected && draft.trim() && draft !== title) {
-      await store.rename(store.selected, draft)
+    if (draft.trim() && draft !== title) {
+      await store.rename(id, draft)
     }
   }
 </script>
@@ -352,14 +368,14 @@
     {/if}
 
     <button class="iconb" title="Put to sleep — frees memory, not quota"
-      style="margin-left:auto" disabled={!store.live}
-      onclick={() => void store.sleep()}><Icon name="i-moon" /></button>
+      style="margin-left:auto" disabled={!live}
+      onclick={() => void store.sleep(id)}><Icon name="i-moon" /></button>
 
     <!-- Il conteggio in parole non ci sta su uno schermo stretto: sotto la soglia
          resta solo l'icona, stesso bottone, stessa destinazione — non è nascosta,
          è un'etichetta che qui non c'è spazio a scrivere per intero (Principio 5:
          quello che sparisce è il testo, non la funzione). -->
-    <button class="effbtn" style="margin-left:0" onclick={() => store.show('effects')}
+    <button class="effbtn" style="margin-left:0" onclick={() => setView('effects')}
       title="{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} · {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}">
       {#if !store.narrow}
         <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
@@ -367,9 +383,13 @@
       {/if}
       <Icon name="i-bars" />
     </button>
+
+    {#if onClose}
+      <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
+    {/if}
   </div>
 
-  {#if link !== 'live' && store.live}
+  {#if link !== 'live' && live}
     <div class="offline">
       <Icon name={link === 'connecting' ? 'i-loader' : 'i-wifi-off'}
         style="animation:{link === 'connecting' ? 'sp 1.1s linear infinite' : 'none'}" />
@@ -470,12 +490,12 @@
                  una conversazione riletta dal journal resta comunque giusto sapere
                  **perché** quell'azione non è avvenuta — è la domanda che ci si fa
                  rileggendo, mesi dopo, un lavoro che si era fermato. -->
-            {#if store.live}
+            {#if live}
               <div class="bn2">
                 To decide these yourself instead of leaving them to auto mode, switch this chat to
                 <b>ask me</b>. It applies from now on, so you will need to ask again for this one.
               </div>
-              <button class="btn" onclick={() => void store.setMode('default')}>
+              <button class="btn" onclick={() => void store.setMode('default', id)}>
                 Switch to «ask me»
               </button>
             {/if}

@@ -6,6 +6,7 @@
   import NewChat from './components/NewChat.svelte'
   import Settings from './components/Settings.svelte'
   import Icon from './components/Icon.svelte'
+  import Workspace from './components/Workspace.svelte'
   import { Store } from './lib/store.svelte.ts'
 
   const store = new Store()
@@ -83,10 +84,20 @@
           address stays the same.</p>
         </div>
       </div>
+    <!-- Schermo largo: il posto della conversazione lo prende l'albero, **anche con
+         una foglia sola**. Non è una cornice in più — con un pannello solo `Workspace`
+         non disegna niente attorno alla chat (niente `×`, niente riga di fuoco) — ma è
+         l'unico modo di avere una zona di rilascio su cui trascinare la seconda: senza,
+         da una chat sola non si potrebbe mai arrivare a due.
+         Sotto la soglia stretta il layout è ignorato del tutto (§8 di
+         ui-schermate.md): si vede solo il pannello a fuoco, col template di sempre. -->
+    {:else if !store.narrow && store.layout}
+      <Workspace {store} />
     {:else if store.snap && store.view === 'effects'}
-      <Effects {store} snap={store.snap} />
+      <Effects {store} snap={store.snap} id={store.selected ?? ''} setView={v => store.show(v)} />
     {:else if store.snap}
-      <Conversation {store} snap={store.snap} link={store.link} />
+      <Conversation {store} snap={store.snap} link={store.link}
+        id={store.selected ?? ''} setView={v => store.show(v)} />
     {:else if store.selected}
       <div class="mid">Opening…</div>
     {:else if store.loaded && store.rows.length === 0}

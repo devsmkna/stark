@@ -14,9 +14,19 @@
   import type { CommandRunView, FileEditView, SessionSnapshot } from '$core/reduce.ts'
   import { stats } from '$core/diff.ts'
   import { hhmm } from '../lib/view.ts'
-  import type { Store } from '../lib/store.svelte.ts'
+  import type { Store, View } from '../lib/store.svelte.ts'
 
-  let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
+    // `id` non serve qui dentro — gli effetti si leggono tutti da `snap` — ma la firma
+  // è la stessa di `Conversation` di proposito: chi monta un pannello passa le stesse
+  // due prop a entrambe le letture, senza doversi ricordare quale delle due le vuole.
+  let { store, snap, id: _id, setView, onClose }:
+    {
+      store: Store; snap: SessionSnapshot
+      id: string
+      setView: (v: View) => void
+      /** Vedi `Conversation.svelte`: il `×` del pannello, quando ce n'è più di uno. */
+      onClose?: () => void
+    } = $props()
 
   let mode = $state<'file' | 'time'>('file')
 
@@ -66,7 +76,7 @@
 <div class="col">
   <div class="bar">
     <button class="iconb" title="Back to the conversation"
-      onclick={() => store.show('chat')}><Icon name="i-back" /></button>
+      onclick={() => setView('chat')}><Icon name="i-back" /></button>
     <div class="t">
       {nf} {nf === 1 ? 'file' : 'files'} · {nc} {nc === 1 ? 'command' : 'commands'}
     </div>
@@ -74,6 +84,9 @@
       <button class:on={mode === 'file'} onclick={() => { mode = 'file' }}>By file</button>
       <button class:on={mode === 'time'} onclick={() => { mode = 'time' }}>By time</button>
     </div>
+    {#if onClose}
+      <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
+    {/if}
   </div>
 
   <div class="scroller" style="padding:12px;flex:1">

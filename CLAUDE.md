@@ -974,6 +974,66 @@ Annullare il dialogo, o non avere il comando giusto in `PATH`, tornano identici
 `npm run check` sale a **109** (i tre test di `pickFolderNative` aggiunti in revisione
 finale, con un `exec` finto invece di un dialogo vero), `npm run daemon` resta **35**.
 
+**Le chat si affiancano** (27 agosto 2026). N conversazioni aperte insieme nella stessa
+pagina, in pannelli ridimensionabili: si trascina una riga dell'elenco sul **bordo** di un
+pannello e quello si divide nella direzione del bordo, o sul **centro** e la chat prende il
+posto di quella che c'era. Ogni pannello è una conversazione intera — barra, flusso, casella
+di scrittura, barra di stato — non una vista in sola lettura.
+
+Tre decisioni che hanno deciso il resto. La prima: **un clic non apre un pannello**. Cliccare
+una riga fa quello che ha sempre fatto, cioè sostituire la chat che stai guardando; ad
+aggiungere un riquadro è il trascinamento, che è un gesto che si fa apposta. La seconda: **una
+chat non può stare in due pannelli** — trascinare una già aperta la *sposta*, non la duplica —
+se no ci sarebbero due sottoscrizioni SSE sulla stessa sessione, cioè due copie dello stesso
+snapshot che possono divergere. La terza: sotto gli 860px il layout è **ignorato del tutto**,
+non rimpicciolito (§8 di `ui-schermate.md`); resta salvato però, quindi tornando su uno schermo
+largo i pannelli si ritrovano dov'erano — verificato ridimensionando la finestra avanti e
+indietro, non dedotto.
+
+L'albero della disposizione è **puro** (`ui/src/lib/layout.ts`, niente Svelte né DOM):
+`splitLeaf`, `closeLeaf`, `replaceLeaf`, `resizeSplit`, `reconcile`. È lì che sta la parte che
+si sbaglia davvero — dove finisce una foglia nuova, cosa collassa quando una sparisce — e lì si
+prova con `node` puro: `npm run layout:check`, **22** verifiche. Sta in `tools/` e non in
+`src/cli/` perché il `tsconfig.json` della radice ha `rootDir: src`, e un file lì che importa da
+`ui/` farebbe smettere di compilare `npm run build`.
+
+Nello Store `snap`/`link`/`view` **non sono più campi**: sono accessori sul pannello a fuoco.
+Il piano prevedeva di tenerli accanto ai pannelli durante la migrazione; due stati paralleli
+però possono divergere, e così invece tutto ciò che parla della «chat aperta» — Dock, Status,
+la barra laterale — non ha dovuto imparare niente di nuovo. Il layout vive nel **browser**
+(`localStorage['stark.layout']`), come il tema e la dimensione del testo: «tengo tre chat
+affiancate su questo schermo» è del dispositivo, non del progetto. Dentro finiscono solo id,
+mai snapshot — quelli si rileggono dal daemon, e salvarli vorrebbe dire mostrare al
+ricaricamento una conversazione ferma a ieri.
+
+Nessuna **intestazione di pannello** in più, contro il disegno iniziale: titolo e passaggio
+conversazione/effetti stanno già nella barra di `Conversation`/`Effects`, e una seconda riga
+sopra li avrebbe ripetuti rubando altezza a *ogni* pannello. Il `×` entra in quella barra con
+una prop `onClose`, che con un pannello solo non c'è — a una chat a schermo intero non si
+aggiunge niente.
+
+**Quattro difetti trovati misurando dal vivo, nessuno visibile leggendo il codice.** Il primo è
+il più istruttivo: `class="split {node.dir}"` produce `class="split row"`, e `app.css` ha già
+una `.row` globale — la riga di un tool. I pannelli ereditavano il suo `align-items:center` e
+restavano alti quanto il contenuto (245px su 900), col suo fondo e il suo bordo. Da lì
+`d-row`/`d-col`, e il divisore rinominato `.hdl`. Il secondo: con **una** chat sola `App` non
+montava `Workspace`, quindi non esisteva nessuna zona di rilascio — da un pannello non si
+sarebbe mai potuti arrivare a due. Il terzo: la persistenza non funzionava **mai**, perché
+l'indirizzo veniva onorato prima del layout salvato, e una scheda già aperta ha sempre un
+indirizzo `/chat/<id>`; adesso prima si rimettono i pannelli, poi la chat dell'indirizzo va a
+fuoco fra loro. Il quarto: `reconcile()` uniformava le proporzioni anche quando non cadeva
+nessuna foglia, cioè a ogni avvio — i divisori tornavano in mezzo e il ridimensionamento non si
+ricordava; ora si conservano e si rinormalizzano, in `reconcile` e in `closeLeaf`.
+
+Verificato dal vivo con Playwright su un daemon di prova con journal sintetici (costo zero di
+quota: tre conversazioni finte, nessun turno vero), a 1400 e 390px, leggendo i rettangoli veri
+oltre agli screenshot: split orizzontale (594+594×900), split verticale annidato dentro il
+destro (tre pannelli, 890/297/297 dopo il ridimensionamento), divisore trascinato e
+**ricaricamento** che restituisce le stesse identiche larghezze, chiusura che collassa il
+genitore rimasto con un figlio solo, e a 390px `.split`, `.pane`, `.hdl` e `×` **tutti a zero**
+col layout salvato intatto. `npm run check` resta **109**, `npm run layout:check` è nuovo a
+**22**, `svelte-check` 0 errori su 107 file.
+
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
 chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
@@ -1060,6 +1120,12 @@ Decisioni già prese:
   ogni token, quindi due chat che lavorano insieme si scavalcherebbero di continuo. `since`
   cambia solo quando cambia lo stato, e chi finisce per primo cambia gruppo con un `since`
   nuovo — quindi sale in cima al suo senza bisogno di un caso speciale.
+- le chat si **affiancano** in pannelli ridimensionabili, aperti trascinando una riga
+  dell'elenco sul bordo (divide) o sul centro (sostituisce) di un pannello. Un clic
+  semplice continua a **sostituire** la chat a fuoco: aggiungere un riquadro è un gesto
+  che si fa apposta. Una chat sta in un pannello solo — trascinarne una già aperta la
+  sposta. Il layout sta nel browser, non sul daemon: è del dispositivo. Sotto gli 860px
+  è ignorato, non rimpicciolito, e resta salvato per quando lo schermo torna largo.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
