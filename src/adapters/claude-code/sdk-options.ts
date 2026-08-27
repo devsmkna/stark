@@ -166,6 +166,8 @@ export function resolveModel(models: unknown, requested: string): string {
  * un agent, che è ciò che il §1 vieta fuori di qui. La UI ne fa un avviso: la voce
  * resta scegliibile, perché il CLI la accetta (Principio 5), ma dice cosa succede.
  */
+const SENZA_AUTO = 'No auto mode — this chat would fall back and ask for everything'
+
 export function modelChoices(raw: unknown, current: string): ModelChoice[] {
   const out: ModelChoice[] = []
   const seen = new Set<string>()
@@ -176,9 +178,14 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       seen.add(id)
       const resolved = typeof m?.['resolvedModel'] === 'string' ? m['resolvedModel'] : undefined
       const label = typeof m?.['displayName'] === 'string' ? m['displayName'] : undefined
+      const auto = modelSupportsAutoMode(resolved ?? id)
       out.push({
-        id, autoMode: modelSupportsAutoMode(resolved ?? id),
+        id, autoMode: auto,
         contextWindow: contextWindowFor(resolved ?? id),
+        // L'avviso lo scrive **questo** agent, e solo qui ha senso: su Claude Code
+        // alcuni modelli reggono auto mode e altri no, quindi l'assenza distingue. Su
+        // un agent senza classificatore non distinguerebbe niente — vedi `optionsFrom`.
+        ...(auto ? {} : { note: SENZA_AUTO }),
         ...(label ? { label } : {}), ...(resolved ? { resolved } : {}),
       })
     }
@@ -190,6 +197,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
     out.unshift({
       id: current, autoMode: modelSupportsAutoMode(current),
       contextWindow: contextWindowFor(current),
+      ...(modelSupportsAutoMode(current) ? {} : { note: SENZA_AUTO }),
     })
   }
   return out

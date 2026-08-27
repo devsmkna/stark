@@ -29,7 +29,7 @@ import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
-  buildOptions, capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
+  buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel, slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -788,9 +788,20 @@ check('diff: forma unificata, numeri di riga coerenti',
   check('ADR-014: chi non ha modalità non dichiara il selettore',
     optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: true, contextWindow: 1 }] })
       .every((o) => o.id !== 'mode'))
-  check('ADR-014: «no auto mode» è una NOTA, non un motivo di rifiuto',
+  // `note` si COPIA, non si deduce. La prima versione la inventava da `autoMode`, e su
+  // un agent senza classificatore — dove `autoMode` è `false` per tutti — comparivano
+  // 61 triangoli di avviso che non dicevano niente. Un'assenza è degna di nota solo
+  // dove esiste l'alternativa, e a saperlo è l'adapter.
+  check('ADR-014: una nota si copia dall\'agent, non si deduce da `autoMode`',
     optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: false, contextWindow: 1 }] })[0]
-      ?.choices[0]?.note === 'No auto mode')
+      ?.choices[0]?.note === undefined)
+  check('ADR-014: e quando l\'agent la scrive, arriva',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: false, contextWindow: 1, note: 'attento' }] })[0]
+      ?.choices[0]?.note === 'attento')
+  // Su Claude Code l'avviso deve esserci: lì l'assenza distingue davvero.
+  check('Claude Code: un modello che non regge auto mode porta l\'avviso',
+    (modelChoices([], 'claude-haiku-4-5')[0]?.note ?? '').includes('No auto mode')
+    && modelChoices([], 'claude-sonnet-5')[0]?.note === undefined)
 }
 
 // ─── «Consenti sempre»: si scrive in un file DELL'UTENTE ────────────────────

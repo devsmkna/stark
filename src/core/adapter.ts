@@ -176,10 +176,13 @@ export function optionsFrom(
         value: m.id,
         ...(m.label ? { label: m.label } : {}),
         available: true,
-        // `note` e non `reason`: la scelta si puo' fare, e' un avviso. La differenza
-        // conta — su un agent senza classificatore quell'avviso non ha senso e questo
-        // campo semplicemente non si popola.
-        ...(m.autoMode ? {} : { note: 'No auto mode' }),
+        // La nota si **copia**, non si deduce. Prima qui c'era
+        // `m.autoMode ? {} : { note: 'No auto mode' }`: il commento diceva gia' che su
+        // un agent senza classificatore quell'avviso non ha senso, e la riga sotto lo
+        // metteva lo stesso — su OpenCode `autoMode` e' `false` per tutti e 61 i
+        // modelli, quindi comparivano 61 triangoli che non dicevano niente. Un'assenza
+        // e' degna di nota solo dove esiste l'alternativa, e a saperlo e' l'adapter.
+        ...(m.note ? { note: m.note } : {}),
       })),
     })
   }

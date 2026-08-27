@@ -136,6 +136,15 @@ export type ModelChoice = {
   label?: string
   resolved?: string
   autoMode: boolean
+  /**
+   * Un avviso su questo modello, **scritto dall'agent**.
+   *
+   * Nasce da un difetto vero: `optionsFrom` deduceva la nota da `autoMode`, e su
+   * OpenCode — dove l'auto mode non esiste come concetto e quindi `autoMode` è `false`
+   * per tutti — comparivano 61 triangoli di avviso che non dicevano niente. Un'assenza
+   * è degna di nota solo dove esiste l'alternativa: a saperlo è chi ha i modelli.
+   */
+  note?: string
   /** In token. Stesso motivo di `autoMode`: dipende dal modello, non dall'agent, e
    *  saperlo fuori dall'adapter vorrebbe dire indovinare la finestra di contesto. */
   contextWindow: number
