@@ -15,8 +15,9 @@ import { vigila, type Push, type PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
+import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
-import { allineaMemoria, INIZIO_REGOLA } from '../daemon/memoria.ts'
+import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
@@ -25,7 +26,7 @@ import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
-  capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
+  buildOptions, capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -656,6 +657,50 @@ const uDue = unified(DUE)
 check('diff: forma unificata, numeri di riga coerenti',
   uDue.filter(r => r.kind === 'removed').every(r => r.oldNo === 2)
   && uDue.filter(r => r.kind === 'added').some(r => r.newNo === 2))
+
+// ─── il confine del §1: il contratto dell'adapter (ADR-012) ─────────────────
+
+// Queste verifiche esistono perché tutte e quattro le falle che ADR-012 ha trovato
+// fallivano **in silenzio**. Un `profile` che non arriva non dà un errore: dà una
+// sessione che guarda nella cartella sbagliata, non trova niente da riprendere e
+// sembra rotta senza motivo. È il modo peggiore di rompersi, quindi va tenuto fermo.
+
+{
+  const base = { cwd: '/tmp', model: 'default', mode: 'auto' as const }
+
+  const conProfilo = buildOptions({ ...base, profile: '/root/.claude-altro' })
+  check('§1: il `profile` del contratto diventa CLAUDE_CONFIG_DIR nell\'adapter',
+    (conProfilo.env as Record<string, string> | undefined)?.['CLAUDE_CONFIG_DIR'] === '/root/.claude-altro')
+
+  const senzaProfilo = buildOptions(base)
+  check('§1: senza profilo non si tocca l\'ambiente del processo figlio',
+    senzaProfilo.env === undefined)
+
+  const conExe = buildOptions({ ...base, executable: '/usr/local/bin/claude' })
+  check('§1: `executable` punta l\'eseguibile, e il default resta quello dell\'SDK',
+    conExe.pathToClaudeCodeExecutable === '/usr/local/bin/claude'
+    && senzaProfilo.pathToClaudeCodeExecutable === undefined)
+
+  check('ADR-012: il backend di default è claude-code',
+    backendFor().id === 'claude-code' && DEFAULT_AGENT === 'claude-code')
+
+  // Un nome sconosciuto deve **rompersi col nome dentro**: ricadere sul default
+  // sarebbe il modo peggiore di fallire, perché sembra funzionare.
+  let motivo = ''
+  try { backendFor('non-esiste') } catch (e) { motivo = String((e as Error).message) }
+  check('ADR-012: un agent sconosciuto è un errore, e dice quale',
+    motivo.includes('non-esiste'), motivo)
+
+  // Il contratto è un'interfaccia, non una promessa a parole: se un metodo sparisse,
+  // il daemon lo scoprirebbe solo su una sessione viva.
+  const sessione = backendFor().open(base, { onPayload: () => {} })
+  const mancanti = ([
+    'start', 'prompt', 'interrupt', 'setModel', 'setMode', 'setMcp',
+    'refreshQuota', 'refreshContext', 'fileSuggestions', 'settled', 'sleep', 'close',
+  ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
+  check('§1: la sessione aperta dal backend implementa tutto il contratto',
+    mancanti.length === 0, mancanti.join(','))
+}
 
 // ─── le impostazioni (§16.5) ────────────────────────────────────────────────
 

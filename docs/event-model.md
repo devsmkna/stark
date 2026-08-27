@@ -1063,6 +1063,47 @@ Code il ritentativo lo fa l'SDK sotto e non affiora, quindi STARK non ha mai avu
 modellarlo. Un turno che riprova tre volte e uno che parte al primo colpo sono la stessa cosa
 sullo schermo, e non sono la stessa cosa.
 
+### Il confine del §1, da parola a codice
+
+La prova di carico ha prodotto anche un risultato che non richiedeva di far girare
+niente: cercando il contratto da far implementare al secondo adapter, si è scoperto che
+**non esisteva**. C'era la sola classe concreta `ClaudeCodeAdapter`, e a importarla
+direttamente non erano solo le sonde ma `daemon/registry.ts`, `daemon/server.ts`,
+`daemon/memoria.ts`. Il paletto n.1 di ADR-012 era quindi già violato **dalla parte di
+Claude Code**, prima ancora che il secondo adapter cominciasse — e per un anno di
+sviluppo il §1 è stato una frase in un documento, non una cosa che il compilatore
+potesse controllare.
+
+Quattro falle, tutte con lo stesso modo di fallire — **in silenzio**:
+
+| dove | cosa usciva dall'adapter | ora |
+|---|---|---|
+| `OpenSpec.askTools: string[]` | i nomi di tool di Claude Code (`Bash`, `mcp__*`) fino alla rotta HTTP, col registro che chiamava `askToolsFor()` | `ask: PermissionCategory[]`, e a tradurre è l'adapter |
+| `OpenSpec.configDir` | il nome della variabile d'ambiente di Claude Code, arrivato **fin dentro la UI** | `profile`, stringa opaca; `CLAUDE_CONFIG_DIR` si legge solo al confine col mondo |
+| `PermissionAnswer.remember` | un `PermissionUpdate` dell'**SDK Anthropic** costruito dentro `registry.ts`, con `destination: 'localSettings'` | una stringa: **il soggetto** da ricordare. Dove finisca scritto lo sa l'adapter |
+| `Live.adapter: ClaudeCodeAdapter` | la classe concreta come tipo | `AgentSession`, un'interfaccia |
+
+`daemon/memoria.ts` è finito sotto il confine (`adapters/claude-code/memoria.ts`) ed è
+esposto come capacità **opzionale** `setCommandDescriptions`: quel campo lo scrive il
+modello, quindi per Claude Code l'unico modo è una regola nel suo `CLAUDE.md` globale —
+ma è una risposta di *quell'* agent, non del dominio.
+
+Verificato dal vivo, non per esito HTTP: aperta una sessione con un `profile` che punta
+a una cartella nuova, il processo figlio ci ha creato dentro `sessions/`, `projects/` e
+`.claude.json`. Se il rinomino si fosse perso per strada, quelle cartelle sarebbero nate
+nel profilo vero — è la sola prova che distingue «il campo arriva» da «il campo esiste».
+Sei verifiche nuove tengono ferme le quattro traduzioni, perché nessuna delle quattro
+darebbe un errore rompendosi.
+
+**Cosa resta fuori dal confine, e si sceglie di lasciarcelo per ora.** Le sonde in
+`src/cli/` importano `ClaudeCodeAdapter` direttamente, ed è giusto per quelle che
+provano *l'adapter* (`offline-check`, `import-check`); per quelle che aprono una
+sessione vera (`vertical-slice`, `resume-check`, `queue-check`, `takeover-check`,
+`diff-live-check`) sarebbe più onesto passare da `backendFor()`. E la UI **spiega** in
+chiaro cos'è un profilo nominando `CLAUDE_CONFIG_DIR` (in `Settings.svelte` e
+`NewChat.svelte`): quel testo è corretto oggi e diventerà falso il giorno in cui la
+stessa schermata dovrà descrivere il profilo di un altro agent.
+
 **Cosa NON si è potuto misurare.** La chiave OpenCode Zen di questa macchina può usare **un solo
 modello** (`nemotron-3-ultra-free`): il catalogo ne elenca 29 a chiunque, gli altri rispondono
 `401 Model … is not supported`. E quel modello si rompe spesso a metà turno («Invalid
@@ -1166,8 +1207,10 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/events.ts` | i tipi di questo documento, uno a uno |
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
-| `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 78 verifiche su eventi finti, **costo zero di quota** |
+| `src/core/adapter.ts` | **il contratto**: cosa si può chiedere a un agent, nel vocabolario del §1 |
+| `src/adapters/index.ts` | l'unico file che nomina un agent specifico; `backendFor()` sceglie |
+| `src/adapters/claude-code/` | l'unico punto che *conosce* Claude Code; sopra l'Agent SDK (ADR-009) |
+| `src/cli/offline-check.ts` | `npm run check` — 149 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 | `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |

@@ -41,8 +41,12 @@ export type OpenSpec = {
   model?: string
   mode?: string
   resume?: { ref: string; fork?: boolean }
-  /** Quale profilo Claude (`CLAUDE_CONFIG_DIR`) usare. Omesso: quello di default. */
-  configDir?: string
+  /**
+   * Quale profilo usare. Stringa **opaca**: la UI la porta e non la interpreta, e dopo
+   * ADR-012 non si chiama più `configDir` — quello era il nome della variabile
+   * d'ambiente di Claude Code, arrivato fin quassù attraverso il confine del §1.
+   */
+  profile?: string
 }
 
 /** Una conversazione nata nel terminale, come la elenca il daemon. */

@@ -9,31 +9,17 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type {
   Capabilities, ModeChoice, ModelChoice, PermissionMode, SlashCommand,
 } from '../../core/events.ts'
+import type { SessionSpec } from '../../core/adapter.ts'
 
-export type LaunchOptions = {
-  cwd: string
-  model: string
-  /** Default STARK: 'auto' (ADR-008). */
-  mode: PermissionMode
-  /** Riprendere una conversazione esistente. `ref` è l'id di sessione di Claude Code. */
-  resume?: { ref: string; fork?: boolean }
-  /** Imporre l'id invece di scoprirlo: così STARK sa come risvegliare già in partenza. */
-  sessionId?: string
-  /**
-   * Dove vivono sessioni e credenziali. Chi usa `CLAUDE_CONFIG_DIR` ha le proprie
-   * conversazioni fuori da `~/.claude`, e un processo che non se lo vede passare
-   * guarda nella cartella sbagliata: non trova nulla da riprendere e forse nemmeno il
-   * login. Fallisce con l'aria di essere rotto senza motivo.
-   */
-  configDir?: string
-  /**
-   * Quale eseguibile guidare. Il default è quello che l'SDK porta con sé, appaiato
-   * alla sua versione. Si punta altrove solo con una ragione.
-   */
-  pathToExecutable?: string
-  /** I nomi di tool per cui l'utente vuole essere interrogato. */
-  askTools?: string[]
-}
+/**
+ * Le opzioni di lancio **sono** il contratto del §1: `SessionSpec`, senza aggiunte.
+ * Prima di ADR-012 questo tipo esisteva a parte e parlava di `configDir`,
+ * `pathToExecutable` e `askTools` — cioe' del vocabolario di Claude Code — e quei
+ * nomi risalivano fino alla rotta HTTP del daemon e alla UI. Qui restano solo come
+ * **traduzione**, dentro `buildOptions`, che e' il posto giusto: e' l'unica funzione
+ * il cui mestiere e' proprio dire come STARK configura questo agent.
+ */
+export type LaunchOptions = SessionSpec
 
 export function buildOptions(o: LaunchOptions): Options {
   const opts: Options = {
@@ -69,8 +55,14 @@ export function buildOptions(o: LaunchOptions): Options {
   } else if (o.sessionId) {
     opts.sessionId = o.sessionId
   }
-  if (o.configDir) opts.env = { ...process.env, CLAUDE_CONFIG_DIR: o.configDir }
-  if (o.pathToExecutable) opts.pathToClaudeCodeExecutable = o.pathToExecutable
+  // Il `profile` del contratto e' una stringa opaca: **qui** diventa
+  // `CLAUDE_CONFIG_DIR`. Chi la usa ha le proprie conversazioni fuori da `~/.claude`,
+  // e un processo che non se la vede passare guarda nella cartella sbagliata: non
+  // trova nulla da riprendere e forse nemmeno il login. Fallisce con l'aria di essere
+  // rotto senza motivo, quindi vale la pena che sia scritto dove si traduce.
+  if (o.profile) opts.env = { ...process.env, CLAUDE_CONFIG_DIR: o.profile }
+  // Il default e' l'eseguibile che l'SDK porta con se', appaiato alla sua versione.
+  if (o.executable) opts.pathToClaudeCodeExecutable = o.executable
   return opts
 }
 

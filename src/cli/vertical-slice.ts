@@ -11,12 +11,21 @@ import { randomUUID } from 'node:crypto'
 import { ClaudeCodeAdapter } from '../adapters/claude-code/adapter.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
-import type { CanonicalEvent, PermissionMode } from '../core/events.ts'
+import {
+  PERMISSION_CATEGORIES,
+  type CanonicalEvent, type PermissionCategory, type PermissionMode,
+} from '../core/events.ts'
 
 const MODEL = process.env['STARK_MODEL'] ?? 'claude-sonnet-5'
 const MODE = (process.env['STARK_MODE'] ?? 'auto') as PermissionMode
 // I matcher sono il pannello dei permessi (§8). Vuoto = zero card = default ADR-008.
-const ASK = (process.env['STARK_ASK'] ?? '').split(',').map(s => s.trim()).filter(Boolean)
+// **Categorie**, non nomi di tool: dopo ADR-012 il contratto parla di `shell`,
+// `edit`, `read`, `net`, `agents`, `external`, e a tradurle in `Bash` o `mcp__*` è
+// l'adapter. Una parola che non è una categoria si scarta invece di finire
+// silenziosamente in un matcher che non combacia con niente.
+const ASK = (process.env['STARK_ASK'] ?? '').split(',')
+  .map(s => s.trim())
+  .filter((s): s is PermissionCategory => PERMISSION_CATEGORIES.includes(s as PermissionCategory))
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const SANDBOX = resolve(ROOT, 'spike/sandbox/vslice')
@@ -45,7 +54,7 @@ const adapter = new ClaudeCodeAdapter({
   cwd: SANDBOX,
   model: MODEL,
   mode: MODE,
-  askTools: ASK,
+  ask: ASK,
   onRaw: m => raw.write(JSON.stringify(m)),
   onPermission: async ({ toolName }) => {
     // Qui, in STARK vero, si consulta la tabella dei toggle e solo ciò che non è già

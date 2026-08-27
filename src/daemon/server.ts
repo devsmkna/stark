@@ -16,10 +16,23 @@ import { Push, vigila, type Subscription } from './push.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { diagnostics, warmDiagnostics } from '../adapters/claude-code/profiles.ts'
-import { allineaMemoria } from './memoria.ts'
+import { backendFor } from '../adapters/index.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
+import type { MemoryOutcome } from '../core/adapter.ts'
+
+/**
+ * «Scrivi una `description` quando lanci un comando», chiesto all'agent.
+ *
+ * Passa dal backend perché **come** si ottiene non è la stessa cosa per due agent: su
+ * Claude Code quel campo lo scrive il modello, quindi l'unico modo è una regola nel suo
+ * `CLAUDE.md` globale — che è anche il motivo per cui il pannello dichiara che la
+ * regola vale pure fuori da STARK. Un agent che non ha il concetto non implementa il
+ * metodo, e allora non c'è niente da dire: `undefined`, e la UI non mostra la riga.
+ */
+function descrizioniComandi(profile: string | undefined, accesa: boolean): MemoryOutcome | undefined {
+  return backendFor().setCommandDescriptions?.(profile, accesa)
+}
 
 export type DaemonOptions = {
   port?: number
@@ -59,12 +72,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     // Le sessioni dell'utente possono vivere fuori da ~/.claude. Se non si propaga
     // questa, i processi figli guardano nella cartella sbagliata: nessuna
     // conversazione da riprendere e forse nemmeno il login, con l'aria di essere rotti.
-    configDir: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
+    // `CLAUDE_CONFIG_DIR` si legge **qui**, al confine col mondo, e da qui in giù è
+    // solo «il profilo»: una stringa opaca che il registro passa e non interpreta.
+    profile: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
   })
 
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
-  warmDiagnostics()
+  backendFor().warmDiagnostics?.()
 
   // La regola sulle descrizioni dei comandi va riallineata **all'avvio**, non solo
   // quando si tocca l'impostazione: il `CLAUDE.md` globale è un file dell'utente, e
@@ -73,9 +88,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // file un'altra — cioè l'impostazione mentirebbe.
   {
     const configDir = opts.configDir ?? process.env['CLAUDE_CONFIG_DIR']
-    const esito = allineaMemoria(configDir, registry.settings().toolDescriptions)
-    if (esito.error) console.error('memoria globale non scrivibile:', esito.path, esito.error)
-    else if (esito.cambiato) console.log('memoria globale allineata:', esito.path)
+    const esito = descrizioniComandi(configDir, registry.settings().toolDescriptions)
+    // `undefined` non è un guasto: è un agent che quel concetto non ce l'ha, e allora
+    // non c'è niente da allineare e niente da dire.
+    if (esito?.error) console.error('memoria globale non scrivibile:', esito.path, esito.error)
+    else if (esito?.cambiato) console.log('memoria globale allineata:', esito.path)
   }
 
   // Le notifiche sul telefono. Vive nel daemon e non nella pagina perché è **l'unico**
@@ -214,7 +231,7 @@ async function route(
       // sta guardando è la cosa che il browser non può sapere da sé, e la sezione
       // Agent lo mostra prima ancora che l'utente tocchi l'interruttore.
       const s = registry.settings()
-      return send(res, 200, { settings: s, memoria: allineaMemoria(configDir, s.toolDescriptions) })
+      return send(res, 200, { settings: s, memoria: descrizioniComandi(configDir, s.toolDescriptions) })
     }
     if (method === 'PUT' && path === '/api/settings') {
       const body = await readJson<Settings>(req)
@@ -225,7 +242,7 @@ async function route(
       const salvate = registry.saveSettings(body)
       // Il file dell'agent segue la spunta subito, non al prossimo riavvio: una
       // preferenza che ha effetto «più tardi» è una preferenza che sembra rotta.
-      const memoria = allineaMemoria(configDir, salvate.toolDescriptions)
+      const memoria = descrizioniComandi(configDir, salvate.toolDescriptions)
       // L'esito torna al client perché è l'unica cosa che l'utente non può dedurre:
       // *quale* file è stato toccato, e se non si è potuto scriverlo.
       return send(res, 200, { settings: salvate, memoria })
@@ -271,7 +288,7 @@ async function route(
         port: port(),
         home: STARK_HOME,
         listening: 'localhost only',
-        agent: await diagnostics(configDir),
+        agent: await backendFor().diagnostics?.(configDir),
       })
     }
 

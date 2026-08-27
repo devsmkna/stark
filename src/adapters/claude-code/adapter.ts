@@ -16,21 +16,15 @@ import {
   EMPTY_USAGE,
   type AgentQuestion, type McpServer, type Payload, type PermissionMode, type PromptPart,
 } from '../../core/events.ts'
-
-/** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
-export type PromptImage = {
-  ref: string
-  mediaType: string
-  bytes: number
-  name?: string
-  /** base64. Non finisce nel journal: vedi `PromptPart`. */
-  data: string
-}
+import type {
+  AdapterHooks, AgentSession, PermissionAnswer, PromptImage, SessionSpec,
+} from '../../core/adapter.ts'
 import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
   resolveModel, slashCommands, type LaunchOptions,
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
+import { askToolsFor } from './permissions.ts'
 import { quotaWindows } from './quota.ts'
 import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
@@ -42,61 +36,37 @@ import { Translator } from './translate.ts'
  */
 type InCoda = { turnId: string; parts: PromptPart[]; msg: SDKUserMessage; annunciato: boolean }
 
-/** Cosa STARK decide su una richiesta di permesso. */
-export type PermissionAnswer =
-  | { allow: true; input?: Record<string, unknown>; remember?: PermissionUpdate[] }
-  | { allow: false; reason: string }
+/**
+ * Quello che serve ad aprire una sessione di Claude Code: il contratto neutro, piu'
+ * le callback. Non c'e' un «piu' le opzioni di Claude Code»: se ce ne servisse una
+ * che il contratto non prevede, quella e' la cosa da registrare — vedi ADR-012,
+ * paletto n.1.
+ */
+export type AdapterOptions = SessionSpec & AdapterHooks
 
 /**
- * Cosa STARK decide su un piano.
+ * «Consenti sempre», tradotto nella forma che Claude Code capisce.
  *
- * `mode` viaggia con l'approvazione perché nel terminale è un gesto solo: si approva
- * *e* si sceglie come proseguire. Separarli lascerebbe una finestra in cui l'agent è
- * già ripartito con la modalità di prima — cioè `plan`, che non tocca niente.
+ * Il contratto (`PermissionAnswer.remember`) dice **cosa** ricordare: una stringa, il
+ * soggetto. Che quel soggetto diventi una regola `addRules` scritta in
+ * `.claude/settings.local.json` e' un fatto di questo agent, e prima di ADR-012 lo
+ * costruiva `daemon/registry.ts` — cioe' il daemon decideva in quale file di Claude
+ * Code finiva la regola (falla n.3). Su un altro agent la stessa stringa diventera'
+ * altro: su OpenCode un elemento di `save` mandato con `reply: "always"`.
+ *
+ * Non lo emuliamo piu' a mano: rimandare indietro la regola la fa scrivere all'SDK
+ * (ADR-009).
  */
-export type PlanAnswer =
-  | { approved: true; mode?: PermissionMode }
-  | { approved: false; feedback?: string }
-
-/** Cosa STARK riporta indietro da una domanda dell'agent. */
-export type QuestionAnswer =
-  | { answers: Record<string, string | string[]>; response?: string }
-  | null   // l'utente ha chiuso la card senza rispondere
-
-export type AdapterOptions = LaunchOptions & {
-  /**
-   * I server MCP che questa conversazione vuole accesi, per nome. Tutti gli altri
-   * vengono spenti prima del primo turno. Omesso vuol dire **nessuno**, che è il
-   * default di STARK: gli strumenti esterni si accendono quando servono, non si
-   * subiscono perché stanno sulla macchina.
-   */
-  mcp?: string[]
-  onPayload: (p: Payload) => void
-  /** Il messaggio nativo, per il file di debug separato dal journal (§13). */
-  onRaw?: (m: unknown) => void
-  /**
-   * Chiamata solo per ciò che la tabella dei permessi di STARK non consente già.
-   * Se manca, tutto ciò che arriva fin qui viene consentito: in `auto` mode è il
-   * comportamento giusto, perché il classificatore ha già deciso a monte (ADR-008).
-   */
-  onPermission?: (r: { requestId: string; toolName: string; input: Record<string, unknown> })
-    => Promise<PermissionAnswer>
-  /** Chiamata quando l'agent fa una domanda a scelta multipla. */
-  onQuestion?: (r: { requestId: string; questions: AgentQuestion[] })
-    => Promise<QuestionAnswer>
-  /**
-   * Chiamata quando l'agent ha finito di pianificare e chiede di partire.
-   *
-   * Passa dalla stessa porta dei permessi — è `canUseTool` su `ExitPlanMode`,
-   * verificato dal vivo — ma **non** è un permesso e non deve diventarne una card:
-   * un permesso si concede guardando un soggetto, un piano si approva leggendolo.
-   * Senza questa callback il piano finiva nella card generica, che di quel testo non
-   * mostrava niente perché `plan` non è un campo in cui si cerca un soggetto.
-   */
-  onPlan?: (r: { requestId: string; plan: string; path?: string }) => Promise<PlanAnswer>
+function regolaDaRicordare(soggetto: string): PermissionUpdate[] {
+  return [{
+    type: 'addRules',
+    rules: [{ toolName: soggetto }],
+    behavior: 'allow',
+    destination: 'localSettings',
+  }]
 }
 
-export class ClaudeCodeAdapter {
+export class ClaudeCodeAdapter implements AgentSession {
   private readonly opts: AdapterOptions
   private readonly tr = new Translator()
   private readonly input = new PromptQueue()
@@ -115,7 +85,10 @@ export class ClaudeCodeAdapter {
     // classificatore risolve prima, e la callback non viene mai chiamata (misurato).
     // L'unico punto che gira su OGNI chiamata è l'hook PreToolUse, ed è documentato
     // esattamente per questo. Il set dei matcher È il pannello dei permessi (ADR-008).
-    const ask = this.opts.askTools ?? []
+    // Le categorie diventano nomi di tool **qui**, che e' l'unico posto che li
+    // conosce. Prima lo faceva `daemon/registry.ts` chiamando `askToolsFor()`, cioe'
+    // il daemon sapeva che esistono `Bash` e `mcp__*`: la falla n.1 di ADR-012.
+    const ask = askToolsFor(this.opts.ask ?? [])
     if (ask.length > 0) {
       options.hooks = {
         PreToolUse: ask.map(tool => ({
@@ -767,11 +740,10 @@ export class ClaudeCodeAdapter {
 
     const verdict = await this.decide(toolName, input)
     if (!verdict.allow) return { behavior: 'deny', message: verdict.reason }
-    const remember = verdict.remember ?? []
     return {
       behavior: 'allow',
       updatedInput: verdict.input ?? input,
-      ...(remember.length > 0 ? { updatedPermissions: remember } : {}),
+      ...(verdict.remember ? { updatedPermissions: regolaDaRicordare(verdict.remember) } : {}),
     }
   }
 
@@ -802,7 +774,7 @@ export class ClaudeCodeAdapter {
     // e rimandarne una indietro la scrive in .claude/settings.local.json (ADR-009).
     this.emit({
       k: 'permission.replied', requestId,
-      decision: (verdict.remember ?? []).length > 0 ? 'always' : 'once',
+      decision: verdict.remember ? 'always' : 'once',
     })
     return verdict
   }

@@ -9,33 +9,44 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { ClaudeCodeAdapter, type PermissionAnswer, type PlanAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
-import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
-import { importTranscript } from '../adapters/claude-code/import.ts'
-import { askToolsFor } from '../adapters/claude-code/permissions.ts'
+import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
+import type {
+  AgentSession, ConversationInfo, PermissionAnswer, PlanAnswer, QuestionAnswer,
+} from '../core/adapter.ts'
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
-import type { AgentQuestion, Attachment, CanonicalEvent, Command, PermissionMode, PromptPart } from '../core/events.ts'
+import type {
+  AgentQuestion, Attachment, CanonicalEvent, Command, PermissionCategory, PermissionMode, PromptPart,
+} from '../core/events.ts'
 
 export type OpenSpec = {
   cwd: string
   model?: string
   mode?: PermissionMode
   resume?: { ref: string; fork?: boolean }
-  askTools?: string[]
+  /**
+   * Su cosa chiedere conferma: **categorie**, non nomi di tool. Fino ad ADR-012 questo
+   * campo era `askTools: string[]` e portava `Bash` e `mcp__*` — vocabolario di Claude
+   * Code — fin quassù, con il registro che chiamava `askToolsFor()` per tradurlo. Ora
+   * a tradurre è l'adapter, che è l'unico a conoscere quei nomi.
+   */
+  ask?: PermissionCategory[]
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
   /**
-   * Il profilo Claude da usare — una `CLAUDE_CONFIG_DIR` diversa da quella di default
-   * del daemon. Omesso: resta quella di default. Ogni sessione spawna il suo processo
-   * (ADR-009), quindi due chat con profili diversi non si toccano: non serve che il
-   * daemon ne tenga «aperto uno solo», serve solo passare il valore giusto qui.
+   * Il profilo da usare — per Claude Code una `CLAUDE_CONFIG_DIR` diversa da quella di
+   * default del daemon, per un altro agent qualcos'altro. Da qui in su è una stringa
+   * **opaca**: si passa, non si interpreta. Omesso: resta quello di default.
+   * Ogni sessione spawna il suo processo (ADR-009), quindi due chat con profili diversi
+   * non si toccano: non serve che il daemon ne tenga «aperto uno solo».
    */
-  configDir?: string
+  profile?: string
+  /** Con quale agent. Omesso: quello di default. */
+  agent?: string
 }
 
 export type SessionRow = {
@@ -76,7 +87,7 @@ export type SessionRow = {
 }
 
 /** Una conversazione della CLI come la vede la UI, con ciò che il registro sa in più. */
-export type ImportableRow = TranscriptInfo & {
+export type ImportableRow = ConversationInfo & {
   /** È già dentro STARK: importarla di nuovo non aggiungerebbe niente. */
   already: boolean
   /** Scritta da poco: **forse** è aperta in un terminale proprio adesso. */
@@ -90,7 +101,7 @@ type Pending =
 
 type Live = {
   id: string
-  adapter: ClaudeCodeAdapter
+  adapter: AgentSession
   journal: Journal
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
@@ -188,9 +199,9 @@ export class Registry {
    * di tutta la storia a ogni aggiornamento dell'elenco.
    */
   private readonly letti = new Map<string, { offset: number; snap: SessionSnapshot }>()
-  private readonly defaults: { model: string; mode: PermissionMode; configDir?: string }
+  private readonly defaults: { model: string; mode: PermissionMode; profile?: string }
 
-  constructor(defaults: { model?: string; mode?: PermissionMode; configDir?: string } = {}) {
+  constructor(defaults: { model?: string; mode?: PermissionMode; profile?: string } = {}) {
     this.defaults = {
       // `'default'` non è un segnaposto: è un `value` vero nella lista che l'SDK
       // restituisce (`list_models`), e si risolve con la stessa logica di un modello
@@ -203,7 +214,7 @@ export class Registry {
       // `--strict-mcp-config` era stato scartato per i server MCP.
       model: defaults.model ?? 'default',
       mode: defaults.mode ?? 'auto',
-      ...(defaults.configDir ? { configDir: defaults.configDir } : {}),
+      ...(defaults.profile ? { profile: defaults.profile } : {}),
     }
   }
 
@@ -282,7 +293,8 @@ export class Registry {
     // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
     // l'utente non ha modo di collegare la cosa allo Sleep. Lo dice il journal.
     const mcp = spec.mcp ?? snapshot.mcpServers.filter(s => s.enabled).map(s => s.name)
-    const ask = spec.askTools ?? askToolsFor(askCategories(this.settings()))
+    // Le categorie escono da qui **come categorie**: a farne nomi di tool è l'adapter.
+    const ask = spec.ask ?? askCategories(this.settings())
     // Stessa ragione, stesso posto: il modello è quanto di più "com'era" ci sia. Prima
     // di questo il risveglio non lo guardava, e ogni Sleep smontava silenziosamente la
     // scelta di modello per quella chat — una sessione spostata su Opus si svegliava su
@@ -306,7 +318,7 @@ export class Registry {
     // biforca è un'altra domanda, e la si lascia dov'è.
     const resume = refDaRiprendere(spec.resume, snapshot.resumeRef)
 
-    const adapter = new ClaudeCodeAdapter({
+    const adapter = backendFor(spec.agent ?? DEFAULT_AGENT).open({
       cwd: spec.cwd,
       model,
       // La modalità di partenza è un'**impostazione**, non un valore cablato: era
@@ -317,13 +329,13 @@ export class Registry {
       // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.
-      ...((spec.configDir ?? this.defaults.configDir) ? { configDir: spec.configDir ?? this.defaults.configDir } : {}),
+      ...((spec.profile ?? this.defaults.profile) ? { profile: spec.profile ?? this.defaults.profile } : {}),
       ...(resume ? { resume } : { sessionId: id }),
-      // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
-      // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo
-      // fanno); tutti gli altri prendono la tabella, che è il pannello dei permessi.
-      ...(ask.length ? { askTools: ask } : {}),
+      // Chi apre con categorie esplicite sa cosa sta facendo (le prove lo fanno);
+      // tutti gli altri prendono la tabella, che è il pannello dei permessi.
+      ...(ask.length ? { ask } : {}),
       ...(mcp.length ? { mcp } : {}),
+    }, {
       onRaw: m => raw.write(JSON.stringify(m)),
       onPayload: p => {
         const e = journal.append(p)      // prima il disco
@@ -542,12 +554,15 @@ export class Registry {
    * seconda è l'avviso sulla presa in carico.
    */
   async importable(): Promise<ImportableRow[]> {
-    const found = await listTranscripts(this.defaults.configDir)
+    const b = backendFor()
+    // Un agent senza un terminale proprio non ha conversazioni da importare, e non è
+    // la stessa cosa che averne zero: la domanda non si pone (§12).
+    const found = (await b.listConversations?.(this.defaults.profile)) ?? []
     const now = Date.now()
     return found.map(t => ({
       ...t,
       already: existsSync(resolve(SESSIONS, `${t.sessionId}.jsonl`)),
-      recent: isRecent(t, now),
+      recent: b.isRecent?.(t, now) ?? false,
     }))
   }
 
@@ -559,9 +574,11 @@ export class Registry {
    * Un journal già presente non si tocca — reimportare sopra raddoppierebbe la storia.
    */
   async importSession(sessionId: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-    const found = (await listTranscripts(this.defaults.configDir))
+    const b = backendFor()
+    const found = ((await b.listConversations?.(this.defaults.profile)) ?? [])
       .find(t => t.sessionId === sessionId)
     if (!found?.path) return { ok: false, error: 'trascritto non trovato su questa macchina' }
+    if (!b.importConversation) return { ok: false, error: 'questo agent non ha conversazioni da importare' }
 
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
     const journal = new Journal(dest, sessionId)
@@ -570,7 +587,7 @@ export class Registry {
       return { ok: false, error: 'già importata' }
     }
     try {
-      const { events } = importTranscript(found.path)
+      const { events } = b.importConversation(found.path)
       // `session.resumeRef` per primo: senza, il journal saprebbe dire cosa è successo
       // ma non come tornarci, e la conversazione importata resterebbe da guardare e
       // basta. L'ora è quella del primo fatto, non di adesso: una conversazione di due
@@ -772,22 +789,17 @@ export class Registry {
           p.resolve({ allow: false, reason: 'Negato dall\'utente' })
           return { ok: true }
         }
-        // «Consenti sempre» deve consentire davvero anche la prossima volta, e la
-        // regola la scrive l'SDK in .claude/settings.local.json (ADR-009). Senza
+        // «Consenti sempre» deve consentire davvero anche la prossima volta: senza
         // questo passaggio il pulsante si comporterebbe come «Consenti», e l'evento
-        // nel journal direbbe `always`: una bugia scritta su disco.
+        // nel journal direbbe `always` — una bugia scritta su disco.
+        //
+        // Qui passa **il soggetto** da ricordare e nient'altro. Fino ad ADR-012 questo
+        // ramo costruiva un `PermissionUpdate` dell'SDK Anthropic, con dentro
+        // `destination: 'localSettings'`: il daemon decideva in quale file di Claude
+        // Code finiva la regola (falla n.3). In che forma quella stringa diventi una
+        // regola lo sa solo l'adapter.
         const scope = cmd.decision === 'always' ? cmd.scope : undefined
-        p.resolve(scope
-          ? {
-              allow: true,
-              remember: [{
-                type: 'addRules',
-                rules: [{ toolName: scope }],
-                behavior: 'allow',
-                destination: 'localSettings',
-              }],
-            }
-          : { allow: true })
+        p.resolve(scope ? { allow: true, remember: scope } : { allow: true })
         return { ok: true }
       }
       case 'question.reply': {

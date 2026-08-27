@@ -20,7 +20,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { configDirOf } from '../adapters/claude-code/profiles.ts'
+import { configDirOf } from './profiles.ts'
 
 /** Esportato perché le prove non devono ricopiare la stringa a mano: se cambia
  *  qui, deve cambiare anche lì — e un delimitatore diverso non riconosce più il

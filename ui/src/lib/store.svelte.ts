@@ -520,7 +520,7 @@ export class Store {
       const { id } = await this.api.open({
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
-        ...(profile ? { configDir: profile } : {}),
+        ...(profile ? { profile } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
         void this.setProject(cwd, { profile: opts.profile })
@@ -549,7 +549,7 @@ export class Store {
       // motivo apparente (nessuna conversazione da riprendere, forse nemmeno il login).
       const profile = this.project(row.cwd).profile
       await this.api.open({
-        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { configDir: profile } : {}),
+        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { profile } : {}),
       })
       this.dialog = null
       // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso.
