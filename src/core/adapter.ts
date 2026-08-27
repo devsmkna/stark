@@ -165,6 +165,7 @@ export function optionsFrom(
         ...(m.label ? { label: m.label } : {}),
         available: m.available,
         ...(m.reason ? { reason: m.reason } : {}),
+        ...(m.note ? { note: m.note } : {}),
       })),
     })
   }

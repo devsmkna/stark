@@ -156,7 +156,15 @@ export type ModeChoice = {
   mode: PermissionMode
   label?: string
   available: boolean
+  /** Perche' NON si puo' usare. Vuoto quando si puo'. */
   reason?: string
+  /**
+   * A cosa serve, detto dall'agent. Non e' `reason`: quella spiega un rifiuto, questa
+   * descrive una scelta che si puo' fare. Finche' le modalita' erano sei parole note,
+   * la descrizione stava nella UI (`MODE_BLURB`); un agent che ne dichiara di proprie
+   * deve poter dire anche cosa fanno — «build» e «plan» non si spiegano da soli.
+   */
+  note?: string
 }
 
 // ─── §11-bis le opzioni di sessione (ADR-014) ───────────────────────────────

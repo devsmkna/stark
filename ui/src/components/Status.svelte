@@ -10,26 +10,44 @@
   // rifiuta** (Principio 5). Nasconderle farebbe sembrare STARK meno capace del CLI.
   import Icon from './Icon.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
-  import type { ModeChoice, PermissionMode, QuotaWindow } from '$core/events.ts'
+  import type { QuotaWindow, SessionOption } from '$core/events.ts'
+  import { optionsFrom } from '$core/adapter.ts'
   import { MODE_BLURB, MODE_ICON, since, stamp, tilde, until } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
 
-  let open = $state<'mode' | 'model' | 'mcp' | null>(null)
+  // Era un elenco chiuso di tre. Ora e' l'`id` del selettore aperto, e la UI non sa
+  // quali esistano: li dichiara l'agent (ADR-014).
+  let open = $state<string | null>(null)
   let bar = $state<HTMLElement | null>(null)
 
-  const canSwitchMode = $derived(snap.capabilities?.switchMode !== false && store.live)
-  const canSwitchModel = $derived(snap.capabilities?.switchModel !== false && store.live)
 
-  // Su un journal scritto prima che il modello canonico portasse gli elenchi, `modes`
-  // è vuoto. Le sei modalità sono canoniche, quindi si mostrano lo stesso: quello che
-  // manca è **quale non si può usare**, e in dubbio non si spegne niente.
-  const MODES: PermissionMode[] =
-    ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']
-  const modes = $derived<ModeChoice[]>(
-    snap.modes.length > 0 ? snap.modes : MODES.map(mode => ({ mode, available: true })),
+  /**
+   * I selettori da disegnare (ADR-014).
+   *
+   * Su un journal scritto prima, `options` è vuoto e ci sono ancora `mode`/`modes` e
+   * `model`/`models`: si ricostruiscono con **la stessa funzione** che usano gli
+   * adapter, invece di tenere qui un secondo modo di comporli. Una conversazione
+   * vecchia si disegna quindi con lo stesso codice di una nuova.
+   */
+  const opts = $derived<SessionOption[]>(
+    snap.options.length > 0
+      ? snap.options
+      : optionsFrom({ mode: snap.mode, modes: snap.modes, model: snap.model, models: snap.models }),
   )
+  const sinistra = $derived(opts.filter(o => o.kind !== 'model'))
+  const destra = $derived(opts.filter(o => o.kind === 'model'))
+
+  /** Si può cambiare adesso? La capability è dell'agent, `live` è dello stato. */
+  function modificabile(o: SessionOption): boolean {
+    if (!store.live) return false
+    if (o.kind === 'mode') return snap.capabilities?.switchMode !== false
+    if (o.kind === 'model') return snap.capabilities?.switchModel !== false
+    return true
+  }
+  /** Come si chiama una scelta: l'etichetta dell'agent, o il valore nudo. */
+  const nome = (v: string, l?: string): string => l ?? v
 
   // Il chip dice quanti ne hai accesi, non quanti ne esistono: è la cosa che cambia
   // cosa succede al prossimo turno.
@@ -210,7 +228,9 @@
   const fmt = (n: number): string =>
     n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 
-  function choose(what: 'mode' | 'model' | 'mcp'): void {
+  /** `mcp` non e' un selettore: e' l'unica voce della barra che la UI conosce per
+   *  nome, perche' accende piu' cose insieme invece di sceglierne una. */
+  function choose(what: string): void {
     open = open === what ? null : what
   }
 </script>
@@ -222,34 +242,50 @@
 
 <div class="status" bind:this={bar}>
   <div class="l">
-    <span class="pop">
-      <!-- `aria-label` non è un di più: sotto la soglia stretta l'etichetta sparisce e
-           le icone sono `aria-hidden`, quindi senza questo il bottone resterebbe **senza
-           nome** per chi legge a voce — cioè premibile e muto. Il `title` da solo farebbe
-           da nome, ma direbbe «Permission mode» invece di quale modalità è attiva. -->
-      <button class="tune" disabled={!canSwitchMode} onclick={() => choose('mode')}
-        aria-label="Permission mode: {snap.mode ?? 'auto'}"
-        title={canSwitchMode ? 'Permission mode' : 'This chat has no process behind it right now'}>
-        <Icon name={MODE_ICON[snap.mode ?? 'auto'] ?? 'i-bolt'} style="color:var(--accent)" />
-        <span class="lbl">{snap.mode ?? 'auto'}</span>
-        <Icon name="i-down" />
-      </button>
-      {#if open === 'mode'}
-        <div class="menu">
-          {#each modes as m (m.mode)}
-            <button class="mi" class:on={m.mode === snap.mode} class:dis={!m.available}
-              disabled={!m.available}
-              onclick={() => { open = null; void store.setMode(m.mode) }}>
-              <Icon name={MODE_ICON[m.mode] ?? 'i-shield'}
-                style={m.mode === snap.mode ? 'color:var(--accent)' : ''} />
-              <span>{m.mode}<span class="sub">{m.reason ?? MODE_BLURB[m.mode] ?? ''}</span></span>
-              {#if !m.available}<span class="tag">unavailable</span>
-              {:else if m.mode === snap.mode}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </span>
+    <!-- I selettori che l'agent dichiara (ADR-014). La barra non sa quali siano:
+         disegna quelli che le arrivano. Prima qui c'era un chip per la modalità, con le
+         sei parole di Claude Code scritte nel browser. -->
+    {#each sinistra as o (o.id)}
+      <span class="pop">
+        <!-- `aria-label` non è un di più: sotto la soglia stretta l'etichetta sparisce e
+             le icone sono `aria-hidden`, quindi senza questo il bottone resterebbe **senza
+             nome** per chi legge a voce — cioè premibile e muto. Il `title` da solo farebbe
+             da nome, ma direbbe «Permissions» invece di quale valore è attivo. -->
+        <button class="tune" disabled={!modificabile(o)} onclick={() => choose(o.id)}
+          aria-label="{o.label}: {o.value}"
+          title={modificabile(o) ? o.label : 'This chat has no process behind it right now'}>
+          {#if o.kind === 'mode'}
+            <Icon name={MODE_ICON[o.value] ?? 'i-shield'} style="color:var(--accent)" />
+          {/if}
+          <span class="lbl">{o.value}</span>
+          {#if o.choices.length > 1}<Icon name="i-down" />{/if}
+        </button>
+        {#if open === o.id}
+          <div class="menu">
+            {#each o.choices as c (c.value)}
+              <button class="mi" class:on={c.value === o.value} class:dis={!c.available}
+                disabled={!c.available}
+                onclick={() => { open = null; void store.setOption(o.id, c.value) }}>
+                {#if o.kind === 'mode'}
+                  <Icon name={MODE_ICON[c.value] ?? 'i-shield'}
+                    style={c.value === o.value ? 'color:var(--accent)' : ''} />
+                {/if}
+                <!-- La descrizione viene dall'agent quando ce l'ha (`note`), e solo in
+                     mancanza dalle frasi che la UI conosce. `reason` è un'altra cosa:
+                     dice perché una voce è **spenta**, e quando c'è viene prima.
+                     `MODE_BLURB` resta come ripiego per i journal scritti prima di
+                     ADR-014, che non portano nessuna descrizione — non come verità su
+                     un agent che non l'ha dichiarata. -->
+                <span>{nome(c.value, c.label)}<span class="sub"
+                  >{c.reason ?? c.note ?? MODE_BLURB[c.value] ?? ''}</span></span>
+                {#if !c.available}<span class="tag">unavailable</span>
+                {:else if c.value === o.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </span>
+    {/each}
 
     <span class="pop">
       <!-- Gli strumenti esterni si accendono per chat, e di partenza sono spenti: una
@@ -305,36 +341,41 @@
   </div>
 
   <div class="r">
-    <span class="pop">
-      <button class="tune" disabled={!canSwitchModel || snap.models.length === 0}
-        onclick={() => choose('model')}
-        title={snap.models.length === 0
-          ? 'This chat was recorded before STARK carried the model list'
-          : 'Model'}>
-        <!-- In uno span, non come testo nudo: un nodo di testo dentro un flex diventa
-             un elemento anonimo, che nessuna regola CSS può raggiungere — e questo è
-             l'unico valore della barra la cui lunghezza non si conosce in anticipo. -->
-        <span class="mname">{snap.model ?? '—'}</span>
-        {#if snap.models.length > 0}<Icon name="i-down" />{/if}
-      </button>
-      {#if open === 'model'}
-        <div class="menu">
-          {#each snap.models as m (m.id)}
-            {@const current = m.id === snap.model || m.resolved === snap.model}
-            <button class="mi" class:on={current}
-              onclick={() => { open = null; void store.setModel(m.id) }}>
-              {#if !m.autoMode}<Icon name="i-warn" style="color:var(--wait)" />{/if}
-              <span>{m.label ?? m.id}<span class="sub">
-                {m.autoMode
-                  ? 'Supports auto mode'
-                  : 'No auto mode — this chat would fall back and ask for everything'}
-              </span></span>
-              {#if current}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </span>
+    <!-- Il selettore del modello, che ha una presentazione sua: il valore e' l'unico
+         della barra la cui lunghezza non si conosce in anticipo, quindi va troncato. -->
+    {#each destra as o (o.id)}
+      <span class="pop">
+        <button class="tune" disabled={!modificabile(o) || o.choices.length === 0}
+          onclick={() => choose(o.id)}
+          aria-label="{o.label}: {o.value}"
+          title={o.choices.length === 0
+            ? 'This chat was recorded before STARK carried the model list'
+            : o.label}>
+          <!-- In uno span, non come testo nudo: un nodo di testo dentro un flex diventa
+               un elemento anonimo, che nessuna regola CSS può raggiungere. -->
+          <span class="mname">{o.value || '—'}</span>
+          {#if o.choices.length > 0}<Icon name="i-down" />{/if}
+        </button>
+        {#if open === o.id}
+          <div class="menu">
+            {#each o.choices as c (c.value)}
+              <button class="mi" class:on={c.value === o.value} class:dis={!c.available}
+                disabled={!c.available}
+                onclick={() => { open = null; void store.setOption(o.id, c.value) }}>
+                <!-- L'avviso c'è solo se l'agent l'ha scritto. Su OpenCode l'auto mode
+                     non esiste come concetto, e prima quella riga compariva su tutti e
+                     61 i modelli dicendo una cosa che lì non vuol dire niente. -->
+                {#if c.note}<Icon name="i-warn" style="color:var(--wait)" />{/if}
+                <span>{nome(c.value, c.label)}<span class="sub"
+                  >{c.reason ?? c.note ?? ''}</span></span>
+                {#if !c.available}<span class="tag">unavailable</span>
+                {:else if c.value === o.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </span>
+    {/each}
 
     <span class="sep">·</span>
 

@@ -384,6 +384,17 @@ export class Store {
 
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
+  /**
+   * Cambia una scelta dichiarata dall'agent (ADR-014).
+   *
+   * La UI non sa cosa siano gli `id`: li ha ricevuti in `session.created` e li rimanda
+   * indietro. `setMode`/`setModel` restano perche' del codice li usa per nome — la
+   * risposta a un piano sceglie **una modalita'**, non «l'opzione con id mode».
+   */
+  setOption(id: string, value: string): Promise<boolean> {
+    return this.send({ c: 'session.setOption', id, value })
+  }
+
   setMode(mode: PermissionMode): Promise<boolean> { return this.send({ c: 'session.setMode', mode }) }
   /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18). */
   setMcp(server: string, enabled: boolean): Promise<boolean> {

@@ -44,7 +44,10 @@ function refModello(model: string): { providerID: string; id: string } | undefin
  * (visto dal vivo, P22), e una barra senza nessuna scelta sarebbe peggio di una con le
  * due che ogni installazione ha di sicuro.
  */
-const AGENTI_NOTI = ['build', 'plan']
+const AGENTI_NOTI: Array<{ nome: string; descrizione: string }> = [
+  { nome: 'build', descrizione: 'Tutti i tool, senza restrizioni' },
+  { nome: 'plan', descrizione: 'Modifiche e comandi chiedono conferma' },
+]
 const AGENT_DI_DEFAULT = 'build'
 
 export class OpenCodeAdapter implements AgentSession {
@@ -513,12 +516,17 @@ async function elencoModi(c: Client): Promise<ModeChoice[]> {
         .filter(x => x.nome)
     }
   } catch { /* un elenco vuoto e' comunque una risposta */ }
-  if (agenti.length === 0) agenti = AGENTI_NOTI.map(nome => ({ nome }))
+  // La descrizione la scrive **l'adapter**, non la UI. Senza, il browser ripiegava
+  // sulle frasi che conosce per le modalita' di Claude Code e su «plan» ne mostrava
+  // una che parla di un altro agent — vera per omonimia, falsa nei fatti.
+  if (agenti.length === 0) agenti = [...AGENTI_NOTI]
   return agenti.map(a => ({
     mode: a.nome,
     label: a.nome,
     available: true,
-    ...(a.descrizione ? { reason: a.descrizione } : {}),
+    // `note`, non `reason`: queste modalita' si possono usare tutte. `reason` spiega
+    // un rifiuto, e usarla per una descrizione avrebbe fatto sembrare spenta ogni voce.
+    ...(a.descrizione ? { note: a.descrizione } : {}),
   }))
 }
 
