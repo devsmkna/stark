@@ -132,6 +132,9 @@
   // ─── Telegram ─────────────────────────────────────────────────────────────
 
   let tg = $state<TelegramInfo | null>(null)
+  /** Separato da `errore`, che è renderizzato solo in System: un fallimento qui deve
+   *  leggersi **qui**, o «Save» torna al suo posto e sembra che non sia successo niente. */
+  let erroreTg = $state('')
   let bozzaToken = $state('')
   let salvando = $state(false)
   let provato = $state(false)
@@ -140,30 +143,33 @@
   let orologio: ReturnType<typeof setInterval> | null = null
 
   const ricaricaTg = async (): Promise<void> => {
-    try { tg = await store.api.telegram() } catch (e) { errore = String((e as Error).message ?? e) }
+    try { tg = await store.api.telegram() } catch (e) { erroreTg = String((e as Error).message ?? e) }
   }
   const salvaTg = async (): Promise<void> => {
     salvando = true
+    erroreTg = ''
     // Si ricarica dal daemon invece di fidarsi della risposta: `getMe` è già stata
     // chiamata di là, quindi qui si vede subito se il token era falso — che è il motivo
     // per cui questo campo non risponde «salvato» e basta.
     try { await store.api.setTelegramToken(bozzaToken.trim()); bozzaToken = ''; await ricaricaTg() }
-    catch (e) { errore = String((e as Error).message ?? e) }
+    catch (e) { erroreTg = String((e as Error).message ?? e) }
     finally { salvando = false }
   }
   const scordaTg = async (): Promise<void> => {
     try { await store.api.forgetTelegram(); codice = ''; await ricaricaTg() }
-    catch (e) { errore = String((e as Error).message ?? e) }
+    catch (e) { erroreTg = String((e as Error).message ?? e) }
   }
   const provaTg = async (): Promise<void> => {
+    erroreTg = ''
     try { await store.api.testTelegram(); provato = true; setTimeout(() => { provato = false }, 2000) }
-    catch (e) { errore = String((e as Error).message ?? e) }
+    catch (e) { erroreTg = String((e as Error).message ?? e) }
   }
   const staccaTg = async (chatId: number): Promise<void> => {
     try { await store.api.unpairTelegram(chatId); await ricaricaTg() }
-    catch (e) { errore = String((e as Error).message ?? e) }
+    catch (e) { erroreTg = String((e as Error).message ?? e) }
   }
   const accoppiaTg = async (): Promise<void> => {
+    erroreTg = ''
     try {
       const r = await store.api.pairTelegram()
       codice = r.code
@@ -177,7 +183,7 @@
       }
       aggiorna()
       orologio = setInterval(aggiorna, 1000)
-    } catch (e) { errore = String((e as Error).message ?? e) }
+    } catch (e) { erroreTg = String((e as Error).message ?? e) }
   }
   $effect(() => () => { if (orologio) clearInterval(orologio) })
 
@@ -565,7 +571,9 @@
                 onclick={() => void salvaTg()}>{salvando ? 'Checking…' : 'Save'}</button></span>
             </div>
           {/if}
-          {#if tg?.stato.fase === 'errore'}
+          {#if erroreTg}
+            <div class="notice"><Icon name="i-plane" /><span>{erroreTg}</span></div>
+          {:else if tg?.stato.fase === 'errore'}
             <div class="notice"><Icon name="i-plane" /><span>{tg.stato.motivo}</span></div>
           {/if}
         </div>
