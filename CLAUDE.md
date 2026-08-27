@@ -950,6 +950,26 @@ numero del CLI — non c'è un sovrapprezzo di STARK.
 Le sonde restano in `spike/`: `modo-default.ts`, `costo-classificatore.ts`, `costo-risveglio.ts`,
 `risveglio-freddo.ts`. Vanno rifatte a ogni salto di versione del CLI.
 
+**Il Finder di sistema per "New chat"** (27 agosto 2026, chiesto dall'utente dopo aver
+visto lo screenshot del browser manuale: «non è conveniente»). Accanto — non al posto —
+del tree che elenca le sottocartelle una alla volta, un bottone apre il selettore
+nativo della macchina del daemon: `System.Windows.Forms.FolderBrowserDialog` via
+PowerShell su WSL, `choose folder` via `osascript` su macOS, `zenity
+--file-selection --directory` su Linux nativo — stessa forma a tre rami di
+`reveal.ts`, con lo stesso onestà sulla verifica: WSL e macOS scritti seguendo il
+pattern, il ramo Linux nativo dichiaratamente non provato dal vivo.
+Parte sempre dalla home del processo, mai dalla cartella già scritta nella casella —
+scelta esplicita, non un dimenticato: il tree manuale resta la via per navigare da
+dove si era, questa è la via per partire da capo col Finder che si conosce già.
+`nativeFolderPickerAvailable()` si ricalcola **a ogni richiesta** invece che una sola
+volta all'avvio — la stessa lezione già scritta per il rilevamento Tailscale, qui
+applicata prima di ripeterla: un `execFile` in più costa pochissimo, una cache
+sbagliata per tutta la vita del processo costerebbe un bottone spento senza motivo
+dopo aver installato `zenity` a daemon acceso.
+Annullare il dialogo, o non avere il comando giusto in `PATH`, tornano identici
+(`{ok:false}`, silenzioso): non è un errore da mostrare, è "resta dove eri".
+`npm run check` passa a **106**, `npm run daemon` a **35**.
+
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
 chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
