@@ -10,6 +10,7 @@ import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
   type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
+  type SessionOption,
   type ContextUsage, type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
@@ -152,6 +153,20 @@ export type BlockedView = {
   by: 'classifier' | 'denyRule'; callId?: string; reason: string; ts: number
 }
 
+/**
+ * Tiene allineata un'opzione quando arriva una delle **forme vecchie**
+ * (`session.mode` / `session.model`).
+ *
+ * Serve perche' un journal misto esiste davvero: una conversazione aperta prima di
+ * ADR-014 e risvegliata dopo ha le due forme nello stesso file. Senza questo, la barra
+ * mostrerebbe il valore giusto in un campo e quello vecchio nel selettore, e i due si
+ * contraddirebbero a schermo.
+ */
+function specchia(s: SessionSnapshot, id: string, value: string): void {
+  const o = s.options.find(x => x.id === id)
+  if (o) o.value = value
+}
+
 export type SessionSnapshot = {
   v: number
   sessionId: string
@@ -163,6 +178,12 @@ export type SessionSnapshot = {
    *  UI mostra allora solo il valore corrente, invece di inventarsi un elenco. */
   models: ModelChoice[]
   modes: ModeChoice[]
+  /**
+   * I selettori che l'agent dichiara, e che la barra di stato disegna **senza
+   * conoscerli** (ADR-014). Vuoto su un journal scritto prima: allora valgono `models`
+   * e `modes`, che sono gli stessi due casi in forma vecchia.
+   */
+  options: SessionOption[]
   /** Il titolo scelto a mano. Se manca, lo si ricava dal primo prompt. */
   title?: string
   state: SessionState
@@ -227,7 +248,7 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
-    models: [], modes: [], mcpServers: [],
+    models: [], modes: [], options: [], mcpServers: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [], pendingPlans: [],
     blocked: [], notices: [], quotaWindows: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
@@ -273,6 +294,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.capabilities = p.capabilities; s.tools = p.tools; s.slashCommands = p.commands
       if (p.models) s.models = p.models
       if (p.modes) s.modes = p.modes
+      if (p.options) s.options = p.options
       // `session.created` arriva ogni volta che nasce un processo figlio nuovo per
       // questa sessione — non solo alla prima: anche a ogni risveglio, e a ogni
       // riavvio del daemon che la ospitava. Un processo che *nasce* non puo' avere
@@ -293,14 +315,27 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.state = p.state
       if (p.reason !== undefined) s.stateReason = p.reason
       break
-    case 'session.model': s.model = p.model; break
+    // ADR-014: la via nuova. `mode` e `model` restano come **comodita'** sullo
+    // snapshot — l'elenco delle chat e le notifiche li vogliono senza aprire una
+    // conversazione — ma non sono piu' due casi speciali del modello: sono due
+    // opzioni con un id convenuto.
+    case 'session.option': {
+      const o = s.options.find(x => x.id === p.id)
+      if (o) o.value = p.value
+      if (p.id === 'mode') s.mode = p.value
+      if (p.id === 'model') s.model = p.value
+      break
+    }
+    // Le due forme vecchie: nessun adapter le emette piu', ma i journal scritti prima
+    // ne sono pieni e devono continuare a ricostruirsi identici (§4).
+    case 'session.model': s.model = p.model; specchia(s, 'model', p.model); break
     case 'session.tools': s.tools = p.tools; break
     // Si sostituisce, non si fonde: l'evento porta la fotografia intera di com'erano
     // in quel momento. Fondere terrebbe in vita un server sparito dalla macchina.
     case 'session.mcp': s.mcpServers = p.servers; break
     case 'session.commands': s.slashCommands = p.commands; break
     case 'session.resumeRef': s.resumeRef = p.ref; break
-    case 'session.mode': s.mode = p.mode; break
+    case 'session.mode': s.mode = p.mode; specchia(s, 'mode', p.mode); break
     case 'session.slept': s.state = 'sleeping'; break
     case 'session.woke': s.state = 'idle'; break
     case 'session.error':

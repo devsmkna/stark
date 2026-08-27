@@ -30,7 +30,8 @@
 // firma serve sapere come quell'agent lo realizza, la firma è al livello sbagliato.
 
 import type {
-  AgentQuestion, Payload, PermissionCategory, PermissionMode,
+  AgentQuestion, ModeChoice, ModelChoice, Payload, PermissionCategory, PermissionMode,
+  SessionOption,
 } from './events.ts'
 
 /** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
@@ -141,6 +142,49 @@ export type AdapterHooks = {
   onPlan?: (r: { requestId: string; plan: string; path?: string }) => Promise<PlanAnswer>
 }
 
+/**
+ * I due selettori che quasi ogni agent ha, nella forma generale.
+ *
+ * Vive qui e non in un adapter perche' `'mode'` e `'model'` sono **convenzioni del
+ * modello** (le usano l'elenco delle chat e le notifiche per sapere quei due valori
+ * senza aprire una conversazione), e perche' due adapter che li costruissero ciascuno
+ * per conto proprio finirebbero per chiamarli in due modi diversi a schermo.
+ *
+ * Non e' un obbligo: un agent che non ha modalita' passa `modes: []` e il selettore non
+ * compare. E' la differenza fra «non ce l'ha» e «ce l'ha vuoto».
+ */
+export function optionsFrom(
+  a: { mode?: PermissionMode; modes?: ModeChoice[]; model?: string; models?: ModelChoice[] },
+): SessionOption[] {
+  const out: SessionOption[] = []
+  if (a.modes?.length) {
+    out.push({
+      id: 'mode', label: 'Permissions', kind: 'mode', value: a.mode ?? '',
+      choices: a.modes.map(m => ({
+        value: m.mode,
+        ...(m.label ? { label: m.label } : {}),
+        available: m.available,
+        ...(m.reason ? { reason: m.reason } : {}),
+      })),
+    })
+  }
+  if (a.models?.length) {
+    out.push({
+      id: 'model', label: 'Model', kind: 'model', value: a.model ?? '',
+      choices: a.models.map(m => ({
+        value: m.id,
+        ...(m.label ? { label: m.label } : {}),
+        available: true,
+        // `note` e non `reason`: la scelta si puo' fare, e' un avviso. La differenza
+        // conta — su un agent senza classificatore quell'avviso non ha senso e questo
+        // campo semplicemente non si popola.
+        ...(m.autoMode ? {} : { note: 'No auto mode' }),
+      })),
+    })
+  }
+  return out
+}
+
 // ─── la conversazione viva ──────────────────────────────────────────────────
 
 /**
@@ -154,6 +198,16 @@ export interface AgentSession {
   start(): Promise<void>
   prompt(text: string, images?: PromptImage[]): string
   interrupt(): Promise<void>
+  /**
+   * Cambia una delle scelte che l'agent ha dichiarato (ADR-014).
+   *
+   * E' il verbo generale: `setModel` e `setMode` restano perche' del codice interno li
+   * usa per nome — l'approvazione di un piano sceglie **una modalita'**, non «l'opzione
+   * con id mode» — ma la UI passa sempre di qui, e un agent che dichiarasse un terzo
+   * selettore (il livello di ragionamento, quale agent e' attivo) non richiederebbe
+   * una riga di codice nel browser.
+   */
+  setOption(id: string, value: string): Promise<void>
   setModel(model: string): Promise<void>
   setMode(mode: PermissionMode): Promise<void>
   setMcp(server: string, enabled: boolean): Promise<void>

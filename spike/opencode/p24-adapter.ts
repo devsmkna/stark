@@ -75,11 +75,21 @@ check('«decidi tu» diventa il modello vero che OpenCode userebbe',
   String(snap['model']))
 check('il ref di ripresa e\' quello di OpenCode', String(snap['resumeRef'] ?? '').startsWith('ses'),
   String(snap['resumeRef']))
+// ADR-014: OpenCode dichiara **le proprie** modalita', che sono i suoi agenti. Fino a
+// ieri questa prova controllava che le quattro modalita' di Claude Code fossero spente
+// con la ragione — una verita' che esisteva solo finche' il modello canonico conosceva
+// sei parole di un agent solo.
 const modi = (snap['modes'] ?? []) as Array<Record<string, unknown>>
-const spente = modi.filter(m => m['available'] === false)
-check('le modalita\' che non esistono sono spente CON la ragione',
-  spente.length === 4 && spente.every(m => typeof m['reason'] === 'string' && String(m['reason']).length > 0),
-  `${spente.length} spente`)
+check('dichiara le PROPRIE modalità, non quelle di Claude Code',
+  modi.length > 0 && modi.some(m => m['mode'] === 'build') && modi.some(m => m['mode'] === 'plan')
+  && !modi.some(m => m['mode'] === 'acceptEdits'),
+  modi.map(m => String(m['mode'])).join(','))
+const opzioni = (snap['options'] ?? []) as Array<Record<string, unknown>>
+check('e le espone come opzioni di sessione, che la barra disegna senza conoscerle',
+  opzioni.some(o => o['id'] === 'mode') && opzioni.some(o => o['id'] === 'model'),
+  opzioni.map(o => `${String(o['id'])}=${String(o['value'])}`).join(' · '))
+check('la modalità è una delle sue, non un valore declassato a caso',
+  modi.some(m => m['mode'] === snap['mode']), String(snap['mode']))
 
 // ─── i modelli offerti, e cambiarne uno ─────────────────────────────────────
 const modelli = (snap['models'] ?? []) as Array<Record<string, unknown>>

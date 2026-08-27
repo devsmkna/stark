@@ -21,11 +21,31 @@ import type { SessionSpec } from '../../core/adapter.ts'
  */
 export type LaunchOptions = SessionSpec
 
+/**
+ * Le sei modalità **di Claude Code**, e la funzione che ci riporta dentro.
+ *
+ * Dopo ADR-014 `PermissionMode` è una stringa aperta nel modello canonico: sono gli
+ * agent a dichiarare come si chiamano le proprie modalità. Qui si torna all'enumerazione
+ * dell'SDK, ed è giusto che la conversione stia in questo file — è l'unico il cui
+ * mestiere è dire come STARK configura *questo* agent.
+ *
+ * Una modalità che non è delle sei non si passa: passarla darebbe un errore dell'SDK a
+ * runtime su un valore che noi sapevamo già essere sbagliato.
+ */
+export const MODI_CLAUDE = [
+  'default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions',
+] as const
+export type ModoClaude = typeof MODI_CLAUDE[number]
+
+export function modoDiClaude(m: string | undefined): ModoClaude | undefined {
+  return MODI_CLAUDE.includes(m as ModoClaude) ? (m as ModoClaude) : undefined
+}
+
 export function buildOptions(o: LaunchOptions): Options {
   const opts: Options = {
     cwd: o.cwd,
     model: o.model,
-    permissionMode: o.mode,
+    permissionMode: modoDiClaude(o.mode),
     // `false`, e la ragione è cambiata nel tempo: vale la pena scriverla intera.
     //
     // Era `true` perché senza, la sessione eredita tutti i server MCP della macchina:
@@ -178,9 +198,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
  */
 export function modeChoices(): ModeChoice[] {
   const root = typeof process.getuid === 'function' && process.getuid() === 0
-  const ALL: PermissionMode[] = [
-    'auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions',
-  ]
+  const ALL: PermissionMode[] = ['auto', ...MODI_CLAUDE.filter(m => m !== 'auto')]
   return ALL.map(mode => mode === 'bypassPermissions' && root
     ? {
         mode, available: false,

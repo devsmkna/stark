@@ -752,6 +752,12 @@ export class Registry {
       case 'session.interrupt':
         await l.adapter.interrupt()
         return { ok: true }
+      // ADR-014: il verbo generale. Il daemon non sa cosa siano gli `id` — li ha
+      // dichiarati l'agent — e li passa senza guardarli. `setModel`/`setMode` restano
+      // per le sonde e per il codice interno che sceglie *una modalita'* per nome.
+      case 'session.setOption':
+        await l.adapter.setOption(cmd.id, cmd.value)
+        return { ok: true }
       case 'session.setModel':
         await l.adapter.setModel(cmd.model)
         return { ok: true }

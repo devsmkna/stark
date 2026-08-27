@@ -18,6 +18,7 @@ import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
 import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
+import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
@@ -704,6 +705,61 @@ check('diff: forma unificata, numeri di riga coerenti',
     mancanti.length === 0, mancanti.join(','))
 }
 
+// ─── ADR-014: le opzioni di sessione, e i journal gia' scritti ──────────────
+
+// La parte che puo' fare danno non e' la forma nuova: e' che le conversazioni gia' su
+// disco continuino a ricostruirsi identiche. Un journal misto esiste davvero — una
+// chat aperta prima di ADR-014 e risvegliata dopo ha le due forme nello stesso file.
+
+{
+  const opz = [
+    { id: 'mode', label: 'Permissions', value: 'auto', kind: 'mode' as const,
+      choices: [{ value: 'auto', available: true }, { value: 'plan', available: true }] },
+    { id: 'model', label: 'Model', value: 'a', kind: 'model' as const,
+      choices: [{ value: 'a', available: true }, { value: 'b', available: true }] },
+  ]
+  let n = 0
+  const e = (payload: CanonicalEvent['payload']): CanonicalEvent => ev(++n, n, payload)
+  const base = (): SessionSnapshot => {
+    const s = reduce([], 's-opt')
+    applyTo(s, e({ k: 'session.created', agent: 'x', cwd: '/tmp', model: 'a',
+      capabilities: capabilitiesFor('a'), tools: [], commands: [], options: opz }))
+    return s
+  }
+
+  const nuovo = base()
+  applyTo(nuovo, e({ k: 'session.option', id: 'mode', value: 'plan' }))
+  check('ADR-014: un\'opzione cambiata aggiorna il selettore E la comodita\' sullo snapshot',
+    nuovo.options.find((o) => o.id === 'mode')?.value === 'plan' && nuovo.mode === 'plan')
+
+  // La forma VECCHIA, quella dei journal gia' scritti: deve muovere le stesse due cose,
+  // se no la barra mostrerebbe il valore nuovo in un campo e quello vecchio nel
+  // selettore, contraddicendosi a schermo.
+  const vecchio = base()
+  applyTo(vecchio, e({ k: 'session.mode', mode: 'plan' }))
+  check('ADR-014: un journal scritto PRIMA si ricostruisce identico',
+    vecchio.mode === 'plan' && vecchio.options.find((o) => o.id === 'mode')?.value === 'plan')
+
+  const vm = base()
+  applyTo(vm, e({ k: 'session.model', model: 'b' }))
+  check('ADR-014: e vale anche per il modello',
+    vm.model === 'b' && vm.options.find((o) => o.id === 'model')?.value === 'b')
+
+  // Un id che l'agent non ha dichiarato non deve inventare un selettore dal nulla.
+  const ignoto = base()
+  applyTo(ignoto, e({ k: 'session.option', id: 'thinking', value: 'alto' }))
+  check('ADR-014: un\'opzione non dichiarata non ne crea una',
+    ignoto.options.length === 2)
+
+  // Il costruttore condiviso: un agent senza modalita' non deve avere un chip vuoto.
+  check('ADR-014: chi non ha modalità non dichiara il selettore',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: true, contextWindow: 1 }] })
+      .every((o) => o.id !== 'mode'))
+  check('ADR-014: «no auto mode» è una NOTA, non un motivo di rifiuto',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: false, contextWindow: 1 }] })[0]
+      ?.choices[0]?.note === 'No auto mode')
+}
+
 // ─── «Consenti sempre»: si scrive in un file DELL'UTENTE ────────────────────
 
 // Regola di condotta, la stessa di `memoria.ts`: quel file non e' nostro. Non si
@@ -973,15 +1029,18 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
       permissionMode: 'plan' } as unknown as NativeEvent).length === 0)
   const cambio = t3.handle({ type: 'system', subtype: 'status', status: 'idle',
     permissionMode: 'acceptEdits' } as unknown as NativeEvent)
+  // Dopo ADR-014 il fatto e' lo stesso e la forma no: la modalita' e' una delle
+  // opzioni che l'agent dichiara, non un caso speciale del modello.
   check('§5: una modalità cambiata dal CLI diventa un evento canonico',
-    cambio[0]?.k === 'session.mode' && cambio[0].mode === 'acceptEdits',
+    cambio[0]?.k === 'session.option' && cambio[0].id === 'mode'
+    && cambio[0].value === 'acceptEdits',
     JSON.stringify(cambio))
   // Il resto del messaggio non deve andare perso per strada: il cambio si aggiunge,
   // non sostituisce.
   const insieme = t3.handle({ type: 'system', subtype: 'status', status: 'requesting',
     permissionMode: 'default' } as unknown as NativeEvent)
   check('§5: il cambio di modalità non mangia il resto del messaggio',
-    insieme.length === 2 && insieme[0]?.k === 'session.mode'
+    insieme.length === 2 && insieme[0]?.k === 'session.option'
     && insieme[1]?.k === 'session.state', JSON.stringify(insieme.map(x => x.k)))
 }
 

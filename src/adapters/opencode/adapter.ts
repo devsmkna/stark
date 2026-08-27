@@ -11,8 +11,9 @@
 // tirano di piu' stanno scritte dove tirano, non qui in cima.
 
 import { randomUUID } from 'node:crypto'
-import type {
-  AdapterHooks, AgentSession, PromptImage, SessionSpec,
+import {
+  optionsFrom,
+  type AdapterHooks, type AgentSession, type PromptImage, type SessionSpec,
 } from '../../core/adapter.ts'
 import type {
   Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
@@ -32,19 +33,19 @@ function refModello(model: string): { providerID: string; id: string } | undefin
 }
 
 /**
- * `PermissionMode` → l'agent di OpenCode, e ritorno.
+ * Su OpenCode **la modalita' E' l'agent**.
  *
- * **Questo e' il pezzo da buttare**, ed e' registrato invece che nascosto (ADR-012,
- * paletto n.2). OpenCode non ha modalita' dei permessi: ha **agenti**, ciascuno con
- * modello, prompt e ruleset propri. `plan` combacia per fortuna, tutto il resto e' una
- * bugia comoda — `auto` non e' `build`, e' solo la cosa piu' vicina.
+ * Fino a ieri qui c'era una mappatura provvisoria (`plan` → `plan`, tutto il resto
+ * arrotondato) perche' il modello canonico conosceva solo le sei parole di Claude Code.
+ * Con ADR-014 quella traduzione **non serve piu**': l'agent dichiara come si chiamano
+ * le proprie modalita', e `build` e `plan` compaiono nella barra con il loro nome.
  *
- * ADR-014 lo risolve per davvero facendo dichiarare all'agent i propri selettori. Fino
- * ad allora questa funzione esiste perche' senza di lei la barra di stato mostrerebbe
- * una modalita' che non c'e', che e' peggio di mostrarne una approssimata.
+ * I due integrati restano scritti qui come rete: `v2.agent.list()` puo' tornare vuoto
+ * (visto dal vivo, P22), e una barra senza nessuna scelta sarebbe peggio di una con le
+ * due che ogni installazione ha di sicuro.
  */
-const AGENT_DI: Partial<Record<PermissionMode, string>> = { plan: 'plan' }
-const modoDaAgent = (agent: string): PermissionMode => (agent === 'plan' ? 'plan' : 'default')
+const AGENTI_NOTI = ['build', 'plan']
+const AGENT_DI_DEFAULT = 'build'
 
 export class OpenCodeAdapter implements AgentSession {
   private readonly spec: SessionSpec
@@ -84,6 +85,7 @@ export class OpenCodeAdapter implements AgentSession {
     // e': una barra di stato che scrive «default» non dice niente, e se quel modello e'
     // giu' a monte non c'e' nemmeno modo di capire perche'.
     this.modelli = await elencoModelli(c)
+    const modi = await elencoModi(c)
     if (!refModello(this.modello)) {
       const suo = await defaultSuo(c)
       if (suo) this.modello = suo
@@ -98,7 +100,7 @@ export class OpenCodeAdapter implements AgentSession {
     } else {
       const r = await c.v2.session.create({
         ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
-        ...(AGENT_DI[this.modo] ? { agent: AGENT_DI[this.modo] } : {}),
+          ...(this.modo ? { agent: this.modo } : {}),
         location: { directory: this.spec.cwd },
       })
       const ses = dato(r) as { id?: string } | undefined
@@ -122,12 +124,13 @@ export class OpenCodeAdapter implements AgentSession {
       capabilities: capacita(),
       tools: await elencoTool(c),
       commands: await elencoComandi(c),
-      modes: await elencoModi(c),
+      modes: modi,
       // Senza questo elenco la barra di stato non offre niente da scegliere, e una
       // chat che nasce su un modello rotto resta rotta senza via d'uscita. Misurato:
       // il default dichiarato da OpenCode Zen su questa macchina e' `big-pickle`, che
       // e' giu' a monte da giorni.
       models: this.modelli,
+      options: optionsFrom({ mode: this.modo, modes: modi, model: this.modello, models: this.modelli }),
     })
     // Non si dichiara la modalita' **chiesta** ma quella in cui si e' davvero.
     // `elencoModi` qui sopra dichiara `auto`, `acceptEdits`, `dontAsk` e
@@ -135,14 +138,14 @@ export class OpenCodeAdapter implements AgentSession {
     // questo declassamento la barra mostrerebbe una modalita' che lo stesso adapter ha
     // appena detto di non avere. E' lo stesso comportamento che Claude Code ha con un
     // modello che non regge auto mode — riparte in Manual e lo dice.
-    if (!AGENT_DI[this.modo] && this.modo !== 'default') {
+    if (!modi.some(m => m.mode === this.modo && m.available)) {
       this.emit({
         k: 'notice', level: 'info',
-        text: `OpenCode non ha la modalità «${this.modo}»: questa chat parte in «default» (ADR-014)`,
+        text: `OpenCode non ha la modalità «${this.modo}»: questa chat parte con l'agent «${AGENT_DI_DEFAULT}»`,
       })
-      this.modo = 'default'
+      this.modo = AGENT_DI_DEFAULT
     }
-    this.emit({ k: 'session.mode', mode: this.modo })
+    this.emit({ k: 'session.option', id: 'mode', value: this.modo })
     this.emit({ k: 'session.state', state: 'idle' })
   }
 
@@ -307,28 +310,24 @@ export class OpenCodeAdapter implements AgentSession {
     this.sveglia()
   }
 
+  async setOption(id: string, value: string): Promise<void> {
+    if (id === 'mode') return this.setMode(value)
+    if (id === 'model') return this.setModel(value)
+    this.emit({ k: 'notice', level: 'warn', text: `opzione sconosciuta: ${id}` })
+  }
+
   async setModel(model: string): Promise<void> {
     this.modello = model
     const ref = refModello(model)
     if (ref) await this.client?.v2.session.switchModel({ sessionID: this.sessionId, model: ref })
-    this.emit({ k: 'session.model', model })
+    this.emit({ k: 'session.option', id: 'model', value: model })
   }
 
+  /** La modalita' **e'** l'agent: si cambia agent e basta. */
   async setMode(mode: PermissionMode): Promise<void> {
-    const agent = AGENT_DI[mode]
-    if (!agent && mode !== 'default') {
-      // Il CLI non lo consente, quindi STARK non finge di averlo fatto: dice perche'.
-      // La voce nella tendina e' gia' marcata non disponibile con la ragione — questo
-      // ramo copre chi ci arriva da un'altra strada (un comando, un risveglio).
-      this.emit({
-        k: 'notice', level: 'warn',
-        text: `OpenCode non ha la modalità «${mode}»: resta «${this.modo}»`,
-      })
-      return
-    }
     this.modo = mode
-    if (agent) await this.client?.v2.session.switchAgent({ sessionID: this.sessionId, agent })
-    this.emit({ k: 'session.mode', mode })
+    await this.client?.v2.session.switchAgent({ sessionID: this.sessionId, agent: mode })
+    this.emit({ k: 'session.option', id: 'mode', value: mode })
   }
 
   async setMcp(server: string, enabled: boolean): Promise<void> {
@@ -490,30 +489,37 @@ async function elencoComandi(c: Client): Promise<SlashCommand[]> {
 }
 
 /**
- * Le modalita' offerte dalla barra di stato.
+ * Le modalita' offerte dalla barra di stato — che su OpenCode sono **i suoi agenti**.
  *
- * Qui si vede meglio che altrove perche' ADR-014 e' necessaria: si sta traducendo un
- * elenco di **agenti** in un elenco di **modalita'**, cioe' due cose diverse, e il
- * risultato e' che di sei modalita' ne restano due vere. Le altre quattro si dichiarano
- * **non disponibili con la ragione** invece di sparire — Principio 5.
+ * Prima di ADR-014 questa funzione traduceva un elenco di agenti in un elenco di
+ * modalita' di Claude Code, cioe' due cose diverse, e di sei ne restavano due vere con
+ * quattro spente. Adesso non traduce piu' niente: dichiara `build` e `plan` con il loro
+ * nome, ed e' la barra a disegnarli senza saperli.
  */
 async function elencoModi(c: Client): Promise<ModeChoice[]> {
-  let agenti: string[] = []
+  let agenti: Array<{ nome: string; descrizione?: string }> = []
   try {
     const v = dato(await c.v2.agent.list())
-    if (Array.isArray(v)) agenti = v.map(x => String((x as Record<string, unknown>)['name'] ?? '')).filter(Boolean)
+    if (Array.isArray(v)) {
+      agenti = v
+        .map(x => x as Record<string, unknown>)
+        // Solo i **primari**: i subagent (`general`, `explore`, `scout`) non si
+        // scelgono dalla barra, li invoca l'agent quando gli servono.
+        .filter(x => x['mode'] !== 'subagent' && x['hidden'] !== true)
+        .map(x => ({
+          nome: String(x['name'] ?? ''),
+          ...(x['description'] ? { descrizione: String(x['description']) } : {}),
+        }))
+        .filter(x => x.nome)
+    }
   } catch { /* un elenco vuoto e' comunque una risposta */ }
-  const haPlan = agenti.length === 0 || agenti.includes('plan')
-  const perche = 'OpenCode non ha modalità dei permessi: ha agenti (ADR-014)'
-  return [
-    { mode: 'default', available: true },
-    { mode: 'plan', available: haPlan, ...(haPlan ? {} : { reason: 'nessun agent «plan» su questa macchina' }) },
-    { mode: 'acceptEdits', available: false, reason: perche },
-    { mode: 'auto', available: false, reason: perche },
-    { mode: 'dontAsk', available: false, reason: perche },
-    { mode: 'bypassPermissions', available: false, reason: perche },
-  ]
+  if (agenti.length === 0) agenti = AGENTI_NOTI.map(nome => ({ nome }))
+  return agenti.map(a => ({
+    mode: a.nome,
+    label: a.nome,
+    available: true,
+    ...(a.descrizione ? { reason: a.descrizione } : {}),
+  }))
 }
 
-export { modoDaAgent }
 export { modelloDa }

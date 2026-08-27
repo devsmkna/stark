@@ -71,12 +71,21 @@ export const DEFAULTS: Settings = {
   defaultMode: 'auto',
 }
 
-/** Le sei che il CLI accetta. Una stringa fuori da qui torna al default invece di
- *  arrivare al processo figlio, che la rifiuterebbe all'avvio. */
-const MODI: PermissionMode[] =
-  ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']
+/**
+ * La modalità con cui partono le chat nuove.
+ *
+ * Qui **non si convalida contro un elenco**, e il cambio è ADR-014: prima c'erano le
+ * sei parole di Claude Code scritte a mano nel daemon, che è esattamente il posto in
+ * cui il §1 dice che non devono stare. Un altro agent ne ha altre — OpenCode ha
+ * `build` e `plan` — e un elenco fisso qui rifiuterebbe le sue.
+ *
+ * A dire se una modalità si può usare è l'**adapter**, che la dichiara nelle proprie
+ * opzioni e, se non ce l'ha, declassa **dicendolo** (misurato dal vivo su OpenCode:
+ * `auto` → `default` con una nota nel flusso). Qui resta solo la difesa contro un file
+ * scritto male: una stringa vuota, o qualcosa che non è una stringa, torna al default.
+ */
 const saneMode = (m: unknown): PermissionMode =>
-  MODI.includes(m as PermissionMode) ? m as PermissionMode : 'auto'
+  typeof m === 'string' && m.trim().length > 0 && m.length < 64 ? m : 'auto'
 
 const FILE = 'settings.json'
 

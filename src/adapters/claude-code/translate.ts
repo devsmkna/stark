@@ -78,7 +78,11 @@ export class Translator {
     const m = e['permissionMode']
     if (typeof m !== 'string' || !m || m === this.mode) return []
     this.mode = m
-    return [{ k: 'session.mode', mode: m as PermissionMode }]
+    // ADR-014: la modalita' e' una delle opzioni dichiarate, non piu' un caso
+    // speciale del modello. Il fatto raccontato e' lo stesso — il CLI ha dichiarato
+    // una modalita' diversa da quella che sapevamo — e resta importante perche'
+    // `EnterPlanMode` e' un tool dell'agent: puo' cambiarla lui.
+    return [{ k: 'session.option', id: 'mode', value: m }]
   }
 
   /** Ciò che l'adapter ha già annunciato: senza, il primo `system:init` riemetterebbe

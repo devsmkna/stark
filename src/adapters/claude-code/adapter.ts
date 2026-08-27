@@ -16,12 +16,15 @@ import {
   EMPTY_USAGE,
   type AgentQuestion, type McpServer, type Payload, type PermissionMode, type PromptPart,
 } from '../../core/events.ts'
-import type {
-  AdapterHooks, AgentSession, PermissionAnswer, PromptImage, SessionSpec,
+import {
+  optionsFrom,
+  type AdapterHooks, type AgentSession, type PermissionAnswer, type PromptImage,
+  type SessionSpec,
 } from '../../core/adapter.ts'
 import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
-  resolveModel, slashCommands, type LaunchOptions,
+  modoDiClaude, resolveModel, slashCommands,
+  type LaunchOptions, type ModoClaude,
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
 import { askToolsFor } from './permissions.ts'
@@ -526,16 +529,38 @@ export class ClaudeCodeAdapter implements AgentSession {
    * lo sa è chi ha ricevuto il comando, cioè noi.
    */
   private fermato = false
+  /**
+   * Il verbo generale (ADR-014). L'`id` lo abbiamo dichiarato noi in `session.created`,
+   * quindi qui si sa cosa vuol dire; chi lo manda no, ed e' il punto.
+   */
+  async setOption(id: string, value: string): Promise<void> {
+    if (id === 'mode') return this.setMode(value)
+    if (id === 'model') return this.setModel(value)
+    this.emit({ k: 'notice', level: 'warn', text: `opzione sconosciuta: ${id}` })
+  }
+
   async setMode(mode: PermissionMode): Promise<void> {
-    await this.q?.setPermissionMode(mode)
-    this.emit({ k: 'session.mode', mode })
+    // Dopo ADR-014 la modalita' arriva come stringa aperta: chi la richiude nelle sei
+    // dell'SDK e' questo adapter, l'unico che le conosce. Una che non c'e' non si
+    // manda — darebbe un errore a runtime su un valore gia' noto come sbagliato — e
+    // non si tace: il Principio 5 vuole la spiegazione, non il silenzio.
+    const m = modoDiClaude(mode)
+    if (!m) {
+      this.emit({
+        k: 'notice', level: 'warn',
+        text: `Claude Code non ha la modalità «${mode}»: non è stata cambiata`,
+      })
+      return
+    }
+    await this.q?.setPermissionMode(m)
+    this.emit({ k: 'session.option', id: 'mode', value: mode })
     // Anche qui: il traduttore riporta i cambi che vengono dal CLI, e senza saperlo
     // riemetterebbe questo stesso valore al prossimo `system:status`.
     this.tr.seedMode(mode)
   }
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model)
-    this.emit({ k: 'session.model', model })
+    this.emit({ k: 'session.option', id: 'model', value: model })
   }
 
   /** ADR-005: lo Sleep è STARK che chiude la sessione. L'agent non sa cosa sia. */
@@ -562,6 +587,9 @@ export class ClaudeCodeAdapter implements AgentSession {
     this.created = true
     const model = resolveModel(info['models'], this.opts.model)
     const caps = info['capabilities']
+    const modi = modeChoices()
+    const modelli = modelChoices(info['models'], model)
+    const modoIniziale = String(info['current_permission_mode'] ?? this.opts.mode)
     this.emit({
       k: 'session.created',
       agent: 'claude-code',
@@ -570,13 +598,17 @@ export class ClaudeCodeAdapter implements AgentSession {
       capabilities: capabilitiesFor(model),
       tools: [],
       commands: slashCommands(info['commands']),
-      models: modelChoices(info['models'], model),
-      modes: modeChoices(),
+      models: modelli,
+      modes: modi,
+      // ADR-014: gli stessi due, nella forma generale. `models`/`modes` restano
+      // perche' un journal scritto prima ha solo quelli — e perche' toglierli
+      // significherebbe riscrivere la storia invece di leggerla.
+      options: optionsFrom({ mode: modoIniziale, modes: modi, model, models: modelli }),
       ...(Array.isArray(caps) ? { protocolCapabilities: caps.map(String) } : {}),
     })
 
-    const actual = String(info['current_permission_mode'] ?? this.opts.mode)
-    this.emit({ k: 'session.mode', mode: actual as PermissionMode })
+    const actual = modoIniziale
+    this.emit({ k: 'session.option', id: 'mode', value: actual })
     // Il traduttore deve sapere da dove si parte, se no il primo `system:init`
     // riemetterebbe la modalità appena scritta un istante fa.
     this.tr.seedMode(actual)
@@ -748,8 +780,12 @@ export class ClaudeCodeAdapter implements AgentSession {
         // il CLI, e il fatto che l'abbia davvero fatto lo deve dire lui. Misurato: lo
         // dice nel suo `system:status` subito dopo. Scriverlo noi qui vorrebbe dire
         // annunciare un cambiamento che abbiamo solo chiesto.
-        ...(answer.mode
-          ? { updatedPermissions: [{ type: 'setMode' as const, mode: answer.mode, destination: 'session' as const }] }
+        ...(modoDiClaude(answer.mode)
+          ? { updatedPermissions: [{
+              type: 'setMode' as const,
+              mode: modoDiClaude(answer.mode) as ModoClaude,
+              destination: 'session' as const,
+            }] }
           : {}),
       }
     }

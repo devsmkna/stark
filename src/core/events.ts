@@ -17,9 +17,21 @@ export type SessionState =
   | 'error'
   | 'closed'
 
-// §11: le sei modalità reali di Claude Code. STARK ne espone tre.
-export type PermissionMode =
-  | 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'
+/**
+ * La modalità dei permessi, **come la chiama l'agent**.
+ *
+ * Era un'enumerazione chiusa delle sei modalità di Claude Code, dentro il modello
+ * canonico: la quinta falla del confine del §1, e l'unica che stava qui invece che nel
+ * daemon. La prova di carico l'ha resa impossibile da ignorare — OpenCode non ha
+ * modalità, ha **agenti** (`build`, `plan`), ciascuno col proprio modello e il proprio
+ * ruleset. Non è la stessa cosa con un altro nome: è un concetto diverso che occupa lo
+ * stesso posto nella barra di stato.
+ *
+ * Adesso è una stringa opaca, e **chi la può usare lo dichiara l'agent** (`options`
+ * in `session.created`). Fuori dall'adapter nessuno deve conoscere questi valori — se
+ * un componente ne confronta uno per nome, quello è il difetto da registrare. ADR-014.
+ */
+export type PermissionMode = string
 
 // ─── tipi di supporto ───────────────────────────────────────────────────────
 
@@ -135,11 +147,54 @@ export type ModelChoice = {
  * `available: false` non e un motivo per nascondere la voce: il Principio 5 vuole che
  * si veda spenta CON la spiegazione. La spiegazione la scrive l'adapter, che e l'unico
  * che sa chi rifiuta e perche.
+ *
+ * `label` esiste da ADR-014: finche' le modalita' erano sei parole note, la UI poteva
+ * saperle a memoria. Ora l'agent le dichiara, e deve poter dire **come si chiamano** —
+ * «build» e «plan» non sono nomi che una GUI possa indovinare.
  */
 export type ModeChoice = {
   mode: PermissionMode
+  label?: string
   available: boolean
   reason?: string
+}
+
+// ─── §11-bis le opzioni di sessione (ADR-014) ───────────────────────────────
+
+/**
+ * Una scelta dentro un selettore, e se si puo' davvero fare.
+ *
+ * `note` non e' `reason`: `reason` dice **perche' non si puo'**, `note` e' un avviso su
+ * una scelta che si puo' fare lo stesso. Tenerli distinti evita la riga che oggi
+ * compare su tutti i 61 modelli di OpenCode — «no auto mode» — dove l'auto mode non
+ * esiste nemmeno come concetto.
+ */
+export type OptionChoice = {
+  value: string
+  label?: string
+  available: boolean
+  reason?: string
+  note?: string
+}
+
+/**
+ * Un selettore che l'agent dichiara e la barra di stato disegna **senza conoscerlo**.
+ *
+ * E' la forma generale di cio' che oggi sono `models` e `modes`: due casi particolari
+ * cablati nella UI. Un agent nuovo popola la barra senza una riga di codice nel
+ * browser, e diventano esprimibili scelte che oggi non hanno posto — il livello di
+ * ragionamento, la variante di un modello, quale agent e' attivo.
+ *
+ * `kind` serve **solo alla presentazione** (quale icona, quanto e' importante): non e'
+ * un elenco chiuso di cose che la UI deve saper trattare, ed e' la differenza fra
+ * «disegna cio' che ti dicono» e «conosci le sei parole».
+ */
+export type SessionOption = {
+  id: string
+  label: string
+  value: string
+  choices: OptionChoice[]
+  kind?: 'mode' | 'model' | 'other'
 }
 
 /**
@@ -235,11 +290,29 @@ export type Payload =
   | { k: 'session.created'; agent: string; cwd: string; model: string
       capabilities: Capabilities; tools: string[]; commands: SlashCommand[]
       // Cosa si puo scegliere dalla barra di stato, senza che la UI debba saperlo.
-      models?: ModelChoice[]; modes?: ModeChoice[]
+      // `models`/`modes` sono i due casi particolari nati con Claude Code; `options`
+      // e' la forma generale che li supera (ADR-014). Restano tutti e tre perche' un
+      // journal scritto prima ha solo i primi due, e il §4 vuole che si possa
+      // ricostruire com'era — non che si riscriva la storia.
+      models?: ModelChoice[]; modes?: ModeChoice[]; options?: SessionOption[]
       // I comportamenti di protocollo che questa versione implementa. È documentato
       // usare questi nomi per la feature detection invece di confrontare versioni.
       protocolCapabilities?: string[] }
   | { k: 'session.state'; state: SessionState; reason?: string }
+  /**
+   * Una scelta dichiarata dall'agent e' cambiata (ADR-014).
+   *
+   * Sostituisce `session.model` e `session.mode`, che restano **leggibili** perche' i
+   * journal gia' scritti ne sono pieni, ma che nessun adapter emette piu'. Un solo
+   * modo per andare avanti, piu' un lettore per la storia: e' la stessa regola con cui
+   * il §13 tratta un file append-only.
+   *
+   * Due `id` sono **convenzione**, non vocabolario di un agent: `'mode'` e `'model'`.
+   * Servono perche' l'elenco delle chat e le notifiche vogliono sapere quei due valori
+   * senza aprire una conversazione. Un agent che non ha modalita' semplicemente non
+   * dichiara `'mode'`.
+   */
+  | { k: 'session.option'; id: string; value: string }
   | { k: 'session.model'; model: string }
   | { k: 'session.mode'; mode: PermissionMode }
   // La lista dei tool non è nota alla nascita della sessione: arriva col primo turno.
@@ -499,6 +572,12 @@ export type Command =
   | { c: 'session.open'; agent: string; cwd: string; model?: string; mode?: PermissionMode }
   | { c: 'session.prompt'; text: string; attachments?: Attachment[] }
   | { c: 'session.interrupt' }
+  /**
+   * Cambia una scelta dichiarata dall'agent (ADR-014). La UI manda l'`id` che ha
+   * ricevuto e il valore scelto, senza sapere cosa significhino: e' la differenza fra
+   * «disegna cio' che ti dicono» e «conosci le sei parole».
+   */
+  | { c: 'session.setOption'; id: string; value: string }
   | { c: 'session.setModel'; model: string }
   | { c: 'session.setMode'; mode: PermissionMode }
   | { c: 'session.setMcp'; server: string; enabled: boolean }
