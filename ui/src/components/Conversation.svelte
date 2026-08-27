@@ -325,6 +325,19 @@
   /** Le modifiche prodotte da questa chiamata, per mostrarle dove sono accadute. */
   const editsOf = (callId: string) => snap.files.filter(f => f.callId === callId)
 
+  // Trascinare il pannello: la barra è la sua maniglia. Stesso meccanismo della riga
+  // dell'elenco (`Sidebar.svelte`), quindi `Workspace` non deve imparare niente di
+  // nuovo — e `replacePane`/`splitPane` sanno già che una chat già aperta si **sposta**
+  // invece di duplicarsi. Solo con più pannelli aperti: con uno solo non c'è nessun
+  // altro riquadro su cui lasciarla cadere, ed è esattamente ciò che dice `onClose`.
+  const dragHandle = $derived(onClose !== undefined)
+  function onDragStart(e: DragEvent): void {
+    e.dataTransfer?.setData('text/stark-chat-id', id)
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    store.draggingChat = id
+  }
+  const onDragEnd = (): void => { store.draggingChat = null }
+
   let renaming = $state(false)
   let draft = $state('')
 
@@ -341,7 +354,8 @@
 </script>
 
 <div class="col">
-  <div class="bar">
+  <div class="bar" draggable={dragHandle ? 'true' : 'false'}
+    ondragstart={onDragStart} ondragend={onDragEnd}>
     <!-- Solo sullo schermo stretto: là la lista non e' affiancata, e senza questo
          non ci sarebbe modo di tornarci (§8 di ui-schermate.md). -->
     {#if store.narrow}
@@ -1015,6 +1029,12 @@
   .prose :global(th) { background: var(--surface-2); color: var(--ink); font-weight: 700; }
   .prose :global(strong) { color: var(--ink); }
 
+  /* La barra è la maniglia con cui si sposta il pannello, ma solo quando i pannelli
+     sono più d'uno (`draggable="true"`): con uno solo il cursore direbbe che si può
+     fare una cosa che non porta da nessuna parte. I figli tengono il proprio cursore
+     — il titolo resta `text` perché lì si rinomina, i bottoni restano `pointer`. */
+  .bar[draggable='true'] { cursor: grab; }
+  .bar[draggable='true']:active { cursor: grabbing; }
   .bar .t { border: 0; padding: 0; text-align: left; cursor: text; }
   .rn {
     font: inherit; font-size: 12.5px; font-weight: 600; flex: 1;
