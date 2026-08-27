@@ -137,6 +137,16 @@ export class Store {
    */
   narrow = $state(false)
 
+  /**
+   * L'id della chat che si sta trascinando dalla barra laterale, o `null`.
+   *
+   * Sta qui e non dentro `Workspace` perché serve a **tutti** i pannelli insieme: è
+   * quello che accende le zone di rilascio, e finché non c'è un trascinamento in corso
+   * quelle zone non devono nemmeno esistere — se no intercetterebbero le immagini
+   * trascinate sulla casella di scrittura, che è un gesto diverso con un altro esito.
+   */
+  draggingChat = $state<string | null>(null)
+
   tab = $state<NewTab>('new')
   importable = $state<ImportableRow[] | null>(null)
   importing = $state<string | null>(null)

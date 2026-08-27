@@ -21,11 +21,15 @@
   // aperti insieme, «la chat a fuoco» non è più la chat che *questo* componente sta
   // mostrando. Passarli come prop rende visibile a chi monta il componente che ogni
   // istanza parla di una chat precisa — e toglie il modo di sbagliarsi dall'interno.
-  let { store, snap, link, id, setView }:
+  let { store, snap, link, id, setView, onClose }:
     {
       store: Store; snap: SessionSnapshot; link: LinkStatus
       id: string
       setView: (v: View) => void
+      /** Chiude il pannello che mostra questa chat. C'è solo quando i pannelli sono
+       *  più di uno: il `×` sta nella barra che esiste già invece che in una seconda
+       *  intestazione sopra, che ripeterebbe il titolo e ruberebbe una riga di altezza. */
+      onClose?: () => void
     } = $props()
 
   /** La riga dell'elenco di **questa** chat, non di quella a fuoco. */
@@ -379,6 +383,10 @@
       {/if}
       <Icon name="i-bars" />
     </button>
+
+    {#if onClose}
+      <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
+    {/if}
   </div>
 
   {#if link !== 'live' && live}

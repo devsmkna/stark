@@ -19,11 +19,13 @@
     // `id` non serve qui dentro — gli effetti si leggono tutti da `snap` — ma la firma
   // è la stessa di `Conversation` di proposito: chi monta un pannello passa le stesse
   // due prop a entrambe le letture, senza doversi ricordare quale delle due le vuole.
-  let { store, snap, id: _id, setView }:
+  let { store, snap, id: _id, setView, onClose }:
     {
       store: Store; snap: SessionSnapshot
       id: string
       setView: (v: View) => void
+      /** Vedi `Conversation.svelte`: il `×` del pannello, quando ce n'è più di uno. */
+      onClose?: () => void
     } = $props()
 
   let mode = $state<'file' | 'time'>('file')
@@ -82,6 +84,9 @@
       <button class:on={mode === 'file'} onclick={() => { mode = 'file' }}>By file</button>
       <button class:on={mode === 'time'} onclick={() => { mode = 'time' }}>By time</button>
     </div>
+    {#if onClose}
+      <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
+    {/if}
   </div>
 
   <div class="scroller" style="padding:12px;flex:1">
