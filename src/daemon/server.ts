@@ -12,6 +12,7 @@ import { createGuard } from './security.ts'
 import { serveUi, UI_DIR } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
+import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, vigila, type Subscription } from './push.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
@@ -225,6 +226,12 @@ async function route(
     if (method === 'GET' && path === '/api/browse') {
       return send(res, 200, registry.browse(url.searchParams.get('path') ?? undefined))
     }
+    // Il Finder di sistema (spec: docs/superpowers/specs/2026-08-27-native-folder-
+    // picker-design.md), accanto al browser manuale sopra — non al suo posto. Un
+    // annullo dell'utente non è un errore: sempre 200, `{ok:false}` a dirlo.
+    if (method === 'POST' && path === '/api/browse-native') {
+      return send(res, 200, await pickFolderNative())
+    }
     // Arrivare a un file citato in chat (F3): apre il gestore di file della macchina
     // sulla cartella giusta, col file selezionato quando l'ambiente lo consente. Non
     // allarga il perimetro — il daemon esegue già comandi come root — ma sta dietro
@@ -264,6 +271,7 @@ async function route(
         home: STARK_HOME,
         listening: 'localhost only',
         agent: await diagnostics(configDir),
+        nativeFolderPicker: await nativeFolderPickerAvailable(),
       })
     }
 

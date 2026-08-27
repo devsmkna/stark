@@ -30,14 +30,33 @@
   // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
   let profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
   let profilePick = $state<string | null>(null)
+  // Il Finder nativo: parte `false` finché `/api/system` non risponde, quindi il
+  // bottone nasce disabilitato — coerente col resto di STARK, che non mostra mai una
+  // possibilità come attiva prima di averla verificata.
+  let nativePicker = $state(false)
+  let nativeBusy = $state(false)
   $effect(() => {
     if (store.tab === 'new' && profiles === null) {
       void store.api.system().then(
-        s => { profiles = s.agent.profiles },
-        () => { profiles = [] },
+        s => { profiles = s.agent.profiles; nativePicker = s.nativeFolderPicker },
+        () => { profiles = []; nativePicker = false },
       )
     }
   })
+
+  /** Il dialogo blocca la risposta HTTP finché l'utente non sceglie o annulla: può
+   *  durare secondi o minuti, da qui `nativeBusy` invece di un fallimento apparente. */
+  async function browseNative(): Promise<void> {
+    nativeBusy = true
+    try {
+      const r = await store.api.browseNative()
+      if (r.ok) cwd = r.path
+    } catch {
+      // silenzioso, come da spec: annullo o fallimento non mostrano errori
+    } finally {
+      nativeBusy = false
+    }
+  }
   // Assente vuol dire «non ancora deciso per questa cartella»: se STARK la conosce
   // già e ha un profilo salvato, non si chiede di nuovo — è deciso.
   const savedProfile = $derived(store.project(cwd.trim()).profile)
@@ -172,6 +191,11 @@
           <input class="field" autofocus bind:value={cwd} placeholder="/root/DevsMachna/stark"
             onkeydown={e => { if (e.key === 'Enter') start() }} />
           <button class="btn" type="button" onclick={openBrowse}>Open path…</button>
+          <button class="btn" type="button" disabled={!nativePicker || nativeBusy}
+            title={nativePicker ? undefined : 'Not available on this machine (no native folder picker found)'}
+            onclick={() => void browseNative()}>
+            {nativeBusy ? 'Waiting…' : 'Browse (system Finder)…'}
+          </button>
         </div>
 
         {#if browsing}
@@ -212,7 +236,8 @@
             </div>
           {/if}
           <div class="hint">The folder decides the project and its colour. Type the full path,
-            or <b>Open path…</b> to browse the machine.</div>
+            <b>Open path…</b> to browse the machine, or <b>Browse (system Finder)…</b> for the
+            native picker.</div>
         {/if}
       </div>
 
