@@ -34,6 +34,8 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-010 — Con cosa si scrive la UI (Vite + Svelte 5; il daemon resta senza build)
   - ADR-011 — Notifiche sul telefono via Web Push, e cosa esce dalla macchina
   - ADR-012 — Il secondo adapter: OpenCode come prova di carico (supera ADR-004)
+  - ADR-013 — Come STARK parla a OpenCode: SDK ufficiale, non ACP
+  - ADR-014 — La modalità dei permessi diventa «opzioni di sessione»
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -1140,6 +1142,62 @@ Scritto anche cosa resta **fuori** dal confine e si sceglie di lasciarcelo: le s
 aprono sessioni vere importano ancora la classe, e la UI spiega cos'è un profilo
 nominando `CLAUDE_CONFIG_DIR` — testo corretto oggi, falso il giorno in cui la stessa
 schermata dovrà descrivere il profilo di un altro agent.
+
+**La prova di carico allargata, e il disegno dell'adapter** (27 agosto 2026, chiesto
+dall'utente: «leggiti la documentazione ufficiale, sperimenta, e quando hai dati veri valuta come
+costruire l'adapter»). Tre sonde nuove, due correzioni a me stessa, due ADR.
+
+**L'SDK ufficiale esisteva e la P21 aveva sbagliato strada.** `@opencode-ai/sdk`, versionato
+**appaiato al CLI** (1.17.20 ↔ 1.17.20) come `@anthropic-ai/claude-agent-sdk` ↔ Claude Code, ed
+espone `createOpencodeServer()` — sa avviare il processo da sé, l'analogo di `query()`. Ora è una
+dipendenza dichiarata (**ADR-013**), con i costi scritti e non nascosti: la superficie giusta per
+una GUI è `/v2`, **ufficiale ma non documentata** (188 rotte pubblicate, un terzo documentate,
+zero della famiglia `/api/*`), e il repo dichiara che quel pacchetto sarà sostituito da
+`sdk-next`.
+
+**ACP valutato a fondo e scartato come modello canonico.** 39 agent lo parlano, OpenCode
+nativamente. Ma l'adapter ACP **ufficiale** di Claude ha dovuto aggiungere **sei estensioni
+proprietarie** per esprimerlo, e ACP dichiara la quota del piano **fuori scope** per iscritto.
+L'elenco di ciò che gli manca — quota, categorie del contesto, compattazione, `/clear`, fila
+FIFO, classificatore, revert, sotto-agent annidati, MCP a caldo, ricerca file — è, una per una,
+la lista delle cose aggiunte a STARK dopo aver misurato che il CLI le faceva e la GUI no. Cioè il
+Principio 5 in forma di elenco. Resta ottimo come **terzo adapter** futuro, dietro lo stesso
+contratto.
+
+**Due correzioni a quello che avevo scritto poche ore prima.** (1) Su OpenCode **gli hunks ci
+sono**: `FileDiff.patch` è in formato git e `step.ended` porta `snapshot` e `files[]` — cambia la
+*porta* (si chiedono invece di arrivare), non la fattibilità. (2) «I tipi non sono i fatti»,
+**terza volta in un giorno**: l'SDK di Claude Code dichiara `TodoWriteInput` e una famiglia
+`TaskCreate/TaskUpdate/TaskList`, il che sembrava smentire §16.10 — ma la lista **runtime** di una
+sessione vera (60 tool) ha `Task`/`TaskOutput`/`TaskStop` e **non** ha `TodoWrite` né i
+`TaskCreate`. §16.10 regge, e ci si aggiunge la regola che l'ha salvata: **la fonte di verità è
+l'handshake, non lo schema**. Stessa forma dell'hook `PermissionDenied` (dichiarato, mai
+chiamato) e di `session.wait` di OpenCode (nei tipi, «not available yet» dal server).
+
+**Il contratto del §1 regge senza modifiche**, ed è il primo risultato vero del secondo adapter:
+il backend di OpenCode tiene **un server condiviso** con N sessioni dentro, quello di Claude Code
+**spawna un processo per sessione**, e chi sta sopra non vede la differenza. Ne segue però che la
+premessa di ADR-005 «risvegliare costa quota» è vera **di Claude Code**, non del dominio: su
+OpenCode non c'è nessun contesto da rileggere.
+
+**Dove si piega, e cosa si è deciso** (§14-bis di `docs/event-model.md`): `PermissionMode` è
+vocabolario di Claude Code **dentro il modello** — OpenCode non ha modalità, ha **agenti** con
+modello e permessi propri — e diventa **«opzioni di sessione» dichiarate dall'agent**
+(**ADR-014**; ci sono arrivati anche gli altri: ACP ha deprecato `session/set_mode` per
+`set_config_option`, e STARK era già a metà strada con `ModelChoice[]`/`ModeChoice[]`). Entrano
+tre fatti nuovi dietro `Capabilities` — **`todo`**, **`session.retried`** e **`revert`**, l'ultimo
+scelto dall'utente sapendo che è il più caro dei tre perché non è un evento ma una schermata da
+disegnare. E nascono tre capacità nuove, che sono i punti in cui i due agent **non** si
+somigliano: `planQuota` (su OpenCode non c'è un piano, c'è una chiave), `mcpPerSession` (là
+`mcp.connect` prende `{name, directory}`, non un `sessionID` — l'unica funzione con cui STARK
+aveva raggiunto il CLI, alla lettera non esprimibile) e `turnEnd` (`session.idle` non si è mai
+visto in otto giri e `session.wait` non è implementato: la fine del turno si **deduce**).
+
+**Quello che NON si è potuto misurare, scritto invece che dedotto.** La chiave OpenCode Zen di
+questa macchina regge **un solo modello**, e quello si rompe a metà turno: la P23 è fallita su
+tre scene su quattro. Restano non visti dal vivo `todo.updated`, `question.v2.*`, il sotto-agent
+e un `file.edited` da un edit vero. Sono nello spec e nei tipi — cioè esattamente il genere di
+certezza che le due correzioni qui sopra insegnano a non prendere per buona.
 
 Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
