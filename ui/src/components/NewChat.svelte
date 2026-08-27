@@ -191,10 +191,10 @@
           <input class="field" autofocus bind:value={cwd} placeholder="/root/DevsMachna/stark"
             onkeydown={e => { if (e.key === 'Enter') start() }} />
           <button class="btn" type="button" onclick={openBrowse}>Open path…</button>
-          <button class="btn" type="button" disabled={!nativePicker || nativeBusy}
-            title={nativePicker ? undefined : 'Not available on this machine (no native folder picker found)'}
+          <button class="btn finder" type="button" disabled={!nativePicker || nativeBusy}
+            title={nativePicker ? 'Browse with the system Finder' : 'Not available on this machine (no native folder picker found)'}
             onclick={() => void browseNative()}>
-            {nativeBusy ? 'Waiting…' : 'Browse (system Finder)…'}
+            <Icon name="i-reveal" />{nativeBusy ? 'Waiting…' : 'Finder…'}
           </button>
         </div>
 
@@ -236,8 +236,7 @@
             </div>
           {/if}
           <div class="hint">The folder decides the project and its colour. Type the full path,
-            <b>Open path…</b> to browse the machine, or <b>Browse (system Finder)…</b> for the
-            native picker.</div>
+            <b>Open path…</b> to browse the machine, or <b>Finder…</b> for the native picker.</div>
         {/if}
       </div>
 
@@ -362,6 +361,11 @@
   .pathrow { display: flex; gap: 6px; }
   .pathrow .field { flex: 1; }
   .pathrow .btn { flex: none; white-space: nowrap; }
+  /* Icona + etichetta corta invece del testo per esteso: "Open path…" resta più
+     largo di natura (nome+verbo), "Finder…" con l'icona di i-reveal basta a
+     riconoscerlo senza allargare la riga quanto "Browse (system Finder)…". */
+  .pathrow .btn.finder { display: inline-flex; align-items: center; gap: 5px; }
+  .pathrow .btn.finder :global(svg.ic) { width: 12px; height: 12px; }
 
   /* Il browser di cartelle: stesso posto della casella che sostituisce, non un
      dialogo sopra il dialogo — aprirne un secondo sopra il primo per scegliere
