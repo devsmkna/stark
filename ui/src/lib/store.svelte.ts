@@ -10,12 +10,16 @@
 // del risultato, e §18 dice che del risultato non c'è niente da fare — ciò che accade
 // torna dal flusso. Concentrarli qui rende quella regola visibile invece che sperata.
 
-import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
+import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
   type ImportableRow, type LinkStatus, type Memoria, type SessionRow, type Settings,
 } from './api.ts'
+import { Pane } from './pane.svelte.ts'
+import {
+  closeLeaf, leafIds, reconcile, replaceLeaf, resizeSplit, splitLeaf, type LayoutNode,
+} from './layout.ts'
 import { Notifier } from './notify.svelte.ts'
 import { CALL_HEAD, callFor, type Call } from '$core/calls.ts'
 import { PushPhone } from './push.svelte.ts'
@@ -77,14 +81,37 @@ export class Store {
 
   rows = $state<SessionRow[]>([])
   selected = $state<string | null>(null)
-  snap = $state<SessionSnapshot | null>(null)
-  link = $state<LinkStatus>('connecting')
+
+  /**
+   * Le chat aperte in un pannello, per id. Quando `layout` non è `null`, ogni sua
+   * foglia ha un `Pane` qui dentro — ed è quello a tenere snapshot, collegamento e
+   * lettura scelta, che prima erano tre campi piatti dello Store.
+   *
+   * Sono restati **accessori** (`snap`, `link`, `view`, qui sotto) invece di sparire:
+   * puntano al pannello a fuoco, cioè dicono esattamente quello che dicevano prima.
+   * Così il resto della UI che parla della «chat aperta» — Dock, Status, la barra
+   * laterale — non ha dovuto imparare niente di nuovo, e soprattutto non esistono due
+   * verità che possono divergere.
+   */
+  panes = $state<Map<string, Pane>>(new Map())
+  /** La disposizione dei pannelli sullo schermo largo. `null` vuol dire nessun
+   *  pannello aperto (lo stato vuoto di sempre). Sotto la soglia stretta è ignorato:
+   *  là si vede solo il pannello a fuoco. */
+  layout = $state<LayoutNode | null>(null)
+
+  /** Il pannello a fuoco: quello a cui si riferiscono `snap`/`link`/`view` e ogni
+   *  comando senza id esplicito. */
+  get pane(): Pane | undefined { return this.selected ? this.panes.get(this.selected) : undefined }
+
+  get snap(): SessionSnapshot | null { return this.pane?.snap ?? null }
+  get link(): LinkStatus { return this.pane?.link ?? 'connecting' }
   /** Il collegamento all'elenco, che è un flusso diverso da quello della chat aperta. */
   listLink = $state<LinkStatus>('connecting')
   fatal = $state<string | null>(null)
   loaded = $state(false)
 
-  view = $state<View>('chat')
+  get view(): View { return this.pane?.view ?? 'chat' }
+  set view(v: View) { const p = this.pane; if (p) p.view = v }
 
   /**
    * Gli effetti sono un **posto**, non un interruttore: stanno nell'indirizzo, e ci si
@@ -114,7 +141,8 @@ export class Store {
   importable = $state<ImportableRow[] | null>(null)
   importing = $state<string | null>(null)
 
-  #stopStream: (() => void) | null = null
+  static readonly #LAYOUT_KEY = 'stark.layout'
+
   #stopList: (() => void) | null = null
   /** Lo stato di ogni riga com'era l'ultima volta: è da qui che si vede il passaggio. */
   #was = new Map<string, string>()
@@ -175,7 +203,16 @@ export class Store {
         this.fatal = null
         // Il primo elenco è anche il momento in cui si può aprire ciò che dice
         // l'indirizzo: prima non si saprebbe nemmeno se quella chat esiste.
-        if (!this.#partita) { this.#partita = true; void this.#apriDaIndirizzo() }
+        if (!this.#partita) {
+          this.#partita = true
+          // Prima l'indirizzo, poi il layout salvato: un link diretto a `/chat/<id>`
+          // dice cosa si vuole vedere **adesso**, e non deve farsi scavalcare da come
+          // erano disposti i pannelli l'ultima volta.
+          void (async () => {
+            await this.#apriDaIndirizzo()
+            if (this.selected === null) await this.#ripristinaLayout()
+          })()
+        }
       },
       s => {
         this.listLink = s
@@ -227,13 +264,7 @@ export class Store {
    */
   async #apriDaIndirizzo(): Promise<void> {
     const r = fromPath()
-    if (!r) {
-      this.#stopStream?.()
-      this.#stopStream = null
-      this.selected = null
-      this.snap = null
-      return
-    }
+    if (!r) { this.#chiudiTutto(); return }
     if (!this.rows.some(x => x.id === r.id)) {
       // Un indirizzo che punta a una chat cancellata, o di un'altra macchina. Si dice,
       // e si resta all'elenco: meglio di una schermata che gira a vuoto.
@@ -307,35 +338,194 @@ export class Store {
    */
   back(): void {
     go(null, 'chat')
-    this.#stopStream?.()
-    this.#stopStream = null
-    this.selected = null
-    this.snap = null
+    this.#chiudiTutto()
   }
 
+  /**
+   * Apre una chat **al posto** di quella a fuoco. Un clic sulla barra laterale non
+   * aggiunge un pannello: aggiungerne uno è un gesto esplicito — si trascina la riga
+   * sul bordo di un pannello (§drag, `Workspace.svelte`). Qui invece la disposizione
+   * non cambia, cambia cosa c'è dentro il riquadro che stavi guardando.
+   */
   async select(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
     if (opts.indirizzo !== false) go(id, 'chat')
     if (this.selected === id) return
-    this.#stopStream?.()
-    this.selected = id
-    this.snap = null
-    this.view = 'chat'
     this.refused = null
-    try {
-      const { snapshot } = await this.api.snapshot(id)
-      this.snap = snapshot
-    } catch (e) {
-      this.refused = (e as Error).message
+    // Già aperta in un altro pannello: ci si sposta sopra invece di aprirne una
+    // seconda copia — due sottoscrizioni SSE sulla stessa sessione non servono a
+    // nessuno, e il §«una chat = un pannello» della spec nasce da lì.
+    if (this.panes.has(id)) { this.focusPane(id); return }
+
+    const uscente = this.selected
+    const pane = new Pane(id)
+    const esito = await pane.open(this.api)
+    if (!esito.ok) { this.refused = esito.error; return }
+    this.#addPane(pane)
+    this.layout = this.layout && uscente && leafIds(this.layout).includes(uscente)
+      ? replaceLeaf(this.layout, uscente, id)
+      : { type: 'leaf', paneId: id }
+    if (uscente && uscente !== id && !leafIds(this.layout).includes(uscente)) this.#dropPane(uscente)
+    this.selected = id
+    this.#saveLayout()
+  }
+
+  // ─── pannelli ─────────────────────────────────────────────────────────────
+
+  /** Apre `chatId` in un pannello **nuovo**, accanto a quello a fuoco. Se è già
+   *  aperta da qualche parte la porta a fuoco invece di duplicarla. */
+  async openPane(chatId: string): Promise<void> {
+    if (this.panes.has(chatId)) { this.focusPane(chatId); return }
+    if (!this.layout) { await this.select(chatId); return }
+    await this.splitPane(this.selected ?? leafIds(this.layout)[0]!, 'row', chatId)
+  }
+
+  /**
+   * Trascinare una chat dalla barra laterale sul bordo di un pannello: `newChatId`
+   * diventa una foglia nuova accanto a `targetChatId`, nella direzione `dir`.
+   */
+  async splitPane(targetChatId: string, dir: 'row' | 'col', newChatId: string): Promise<void> {
+    if (newChatId === targetChatId) return
+    if (!this.layout || !leafIds(this.layout).includes(targetChatId)) { await this.select(newChatId); return }
+    if (this.panes.has(newChatId)) {
+      // Già aperta altrove: si sposta la foglia invece di duplicarla. Toglierla e
+      // rimetterla accanto al bersaglio è più semplice che spostare un nodo
+      // nell'albero, e il `Pane` resta la stessa istanza — il flusso non si riapre.
+      const senza = closeLeaf(this.layout, newChatId)
+      this.layout = senza && leafIds(senza).includes(targetChatId)
+        ? splitLeaf(senza, targetChatId, dir, newChatId)
+        : this.layout
+      this.focusPane(newChatId)
       return
     }
-    // `from` è letto a ogni tentativo, non fissato adesso: dopo una caduta il punto
-    // giusto è avanzato, e ripartire da quello di prima rimanderebbe eventi già visti.
-    this.#stopStream = this.api.stream(
-      id,
-      () => this.snap?.lastSeq ?? 0,
-      e => { if (this.snap && e.sessionId === this.snap.sessionId) applyTo(this.snap, e) },
-      s => { this.link = s },
-    )
+    const pane = new Pane(newChatId)
+    const esito = await pane.open(this.api)
+    if (!esito.ok) { this.refused = esito.error; return }
+    this.#addPane(pane)
+    this.layout = splitLeaf(this.layout, targetChatId, dir, newChatId)
+    this.focusPane(newChatId)
+  }
+
+  /** Il drop al **centro** di un pannello: la chat cambia, il riquadro resta dov'è. */
+  async replacePane(targetChatId: string, newChatId: string): Promise<void> {
+    if (newChatId === targetChatId) return
+    if (!this.layout || !leafIds(this.layout).includes(targetChatId)) { await this.select(newChatId); return }
+    if (this.panes.has(newChatId)) {
+      // Spostare una chat già aperta sopra un'altra vuol dire che il pannello da cui
+      // arriva sparisce: prima si toglie di lì, poi si mette al posto del bersaglio.
+      const senza = closeLeaf(this.layout, newChatId)
+      if (!senza || !leafIds(senza).includes(targetChatId)) { this.focusPane(newChatId); return }
+      this.layout = replaceLeaf(senza, targetChatId, newChatId)
+      this.#dropPane(targetChatId)
+      this.focusPane(newChatId)
+      return
+    }
+    const pane = new Pane(newChatId)
+    const esito = await pane.open(this.api)
+    if (!esito.ok) { this.refused = esito.error; return }
+    this.#addPane(pane)
+    this.layout = replaceLeaf(this.layout, targetChatId, newChatId)
+    this.#dropPane(targetChatId)
+    this.focusPane(newChatId)
+  }
+
+  /** Chiude il pannello di `chatId`: ferma il flusso e toglie la foglia. Se era
+   *  l'unico, si torna allo stato vuoto — lo stesso esito di `back()`. */
+  closePane(chatId: string): void {
+    if (!this.panes.has(chatId)) return
+    this.layout = this.layout ? closeLeaf(this.layout, chatId) : null
+    this.#dropPane(chatId)
+    if (this.selected !== chatId) { this.#saveLayout(); return }
+    const next = this.layout ? leafIds(this.layout)[0] ?? null : null
+    this.selected = next
+    go(next, next ? this.panes.get(next)?.view ?? 'chat' : 'chat')
+    this.#saveLayout()
+  }
+
+  /** Sposta il fuoco (e l'indirizzo) su un pannello già aperto. */
+  focusPane(chatId: string): void {
+    if (!this.panes.has(chatId)) return
+    if (this.selected !== chatId) this.selected = chatId
+    go(chatId, this.panes.get(chatId)?.view ?? 'chat')
+    this.#saveLayout()
+  }
+
+  /** Il divisore è stato rilasciato con queste proporzioni. Solo al rilascio, non a
+   *  ogni frame: durante il trascinamento l'albero si aggiorna in memoria e basta. */
+  resizePane(parentPath: number[], sizes: number[]): void {
+    if (!this.layout) return
+    this.layout = resizeSplit(this.layout, parentPath, sizes)
+    this.#saveLayout()
+  }
+
+  #addPane(pane: Pane): void {
+    // La mappa si riassegna invece di essere mutata: `$state` su una `Map` normale
+    // non vede una `set()` in profondità, e senza questo il pannello nuovo comparirebbe
+    // solo al prossimo cambiamento di qualcos'altro.
+    this.panes.set(pane.chatId, pane)
+    this.panes = new Map(this.panes)
+  }
+
+  #dropPane(chatId: string): void {
+    this.panes.get(chatId)?.close()
+    this.panes.delete(chatId)
+    this.panes = new Map(this.panes)
+  }
+
+  /** Chiude tutti i pannelli e torna allo stato vuoto. */
+  #chiudiTutto(): void {
+    for (const pane of this.panes.values()) pane.close()
+    this.panes = new Map()
+    this.layout = null
+    this.selected = null
+    this.#saveLayout()
+  }
+
+  // ─── persistenza del layout ───────────────────────────────────────────────
+
+  /**
+   * Il layout vive nel **browser**, non sul daemon: è del dispositivo, come il tema e
+   * la dimensione del testo — «tengo tre chat affiancate su questo schermo largo» non
+   * è un fatto del progetto. Dentro finiscono solo id, mai snapshot: quelli si
+   * rileggono dal daemon all'apertura, e salvarli vorrebbe dire mostrare al
+   * ricaricamento una conversazione ferma a ieri.
+   */
+  #saveLayout(): void {
+    try {
+      if (!this.layout) localStorage.removeItem(Store.#LAYOUT_KEY)
+      else localStorage.setItem(Store.#LAYOUT_KEY, JSON.stringify({ tree: this.layout, focused: this.selected }))
+    } catch { /* modalità privata: il layout non sopravvive al ricaricamento, e va bene */ }
+  }
+
+  /**
+   * Ricostruisce il layout salvato, dopo il primo elenco — stesso cancello di
+   * `#apriDaIndirizzo`, e per la stessa ragione: prima di allora non si sa quali chat
+   * esistono davvero. Le foglie che puntano a chat sparite vengono tolte; se non ne
+   * resta nessuna, lo stato è quello vuoto di sempre.
+   */
+  async #ripristinaLayout(): Promise<void> {
+    let salvato: { tree: LayoutNode; focused: string | null } | null = null
+    try {
+      const raw = localStorage.getItem(Store.#LAYOUT_KEY)
+      if (raw) salvato = JSON.parse(raw) as { tree: LayoutNode; focused: string | null }
+    } catch { /* localStorage assente o JSON corrotto: si riparte senza layout */ }
+    if (!salvato?.tree) return
+    const vive = new Set(this.rows.map(r => r.id))
+    const tree = reconcile(salvato.tree, id => vive.has(id))
+    if (!tree) { this.#saveLayout(); return }
+
+    await Promise.all(leafIds(tree).map(async id => {
+      const pane = new Pane(id)
+      if ((await pane.open(this.api)).ok) this.#addPane(pane)
+    }))
+    // Un'apertura può fallire lo stesso (journal sparito fra l'elenco e adesso):
+    // si riconcilia una seconda volta sui pannelli che ci sono davvero.
+    const superstiti = reconcile(tree, id => this.panes.has(id))
+    if (!superstiti) { this.#chiudiTutto(); return }
+    this.layout = superstiti
+    const foglie = leafIds(superstiti)
+    this.selected = salvato.focused && foglie.includes(salvato.focused) ? salvato.focused : foglie[0]!
+    go(this.selected, this.pane?.view ?? 'chat', true)
+    this.#saveLayout()
   }
 
   // ─── comandi ──────────────────────────────────────────────────────────────
@@ -368,7 +558,9 @@ export class Store {
 
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
-  setMode(mode: PermissionMode): Promise<boolean> { return this.send({ c: 'session.setMode', mode }) }
+  setMode(mode: PermissionMode, id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setMode', mode }, id)
+  }
   /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18). */
   setMcp(server: string, enabled: boolean): Promise<boolean> {
     return this.send({ c: 'session.setMcp', server, enabled })
@@ -515,10 +707,17 @@ export class Store {
         cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { configDir: profile } : {}),
       })
       this.dialog = null
-      // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso.
+      // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso, nel
+      // pannello dov'era invece che al posto di quello a fuoco.
       const id = row.id
-      this.selected = null
-      await this.select(id)
+      if (this.panes.has(id)) {
+        this.#dropPane(id)
+        const pane = new Pane(id)
+        if ((await pane.open(this.api)).ok) this.#addPane(pane)
+        this.focusPane(id)
+      } else {
+        await this.select(id)
+      }
     } catch (e) {
       this.refused = (e as Error).message
     } finally {
@@ -529,20 +728,15 @@ export class Store {
   async remove(id: string): Promise<void> {
     const esito = await this.api.remove(id)
     if (!esito.ok) { this.refused = esito.error ?? 'refused'; return }
-    if (this.selected === id) {
-      this.#stopStream?.()
-      this.#stopStream = null
-      this.selected = null
-      this.snap = null
-      // L'indirizzo puntava a una chat che non c'è più: lasciarcelo vorrebbe dire che
-      // il prossimo ricaricamento apre un vicolo cieco.
-      go(null, 'chat')
-    }
+    // L'indirizzo puntava a una chat che non c'è più: lasciarcelo vorrebbe dire che
+    // il prossimo ricaricamento apre un vicolo cieco. `closePane` lo riscrive da sé,
+    // sul pannello superstite o sull'elenco se non ne resta nessuno.
+    if (this.panes.has(id)) this.closePane(id)
   }
 
   dispose(): void {
     removeEventListener('popstate', this.#popstate)
-    this.#stopStream?.()
+    for (const pane of this.panes.values()) pane.close()
     this.#stopList?.()
   }
 }
