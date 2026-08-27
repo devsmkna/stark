@@ -29,7 +29,8 @@
     "ui:build": "vite build",
     "ui:check": "svelte-check --tsconfig ./ui/tsconfig.json",
     "icons": "node tools/gen-icons.mjs",
-    "sonda": "node tools/sonda-telefono/server.mjs"
+    "sonda": "node tools/sonda-telefono/server.mjs",
+    "opencode": "node spike/opencode/p24-adapter.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",

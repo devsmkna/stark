@@ -16,6 +16,7 @@ import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
+import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
@@ -700,6 +701,74 @@ check('diff: forma unificata, numeri di riga coerenti',
   ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
   check('§1: la sessione aperta dal backend implementa tutto il contratto',
     mancanti.length === 0, mancanti.join(','))
+}
+
+// ─── il secondo adapter: il traduttore di OpenCode (§14-bis) ────────────────
+
+// Il traduttore e' una funzione pura di proposito, quindi si prova su eventi finti a
+// costo zero — come quello di Claude Code. Qui sotto ci sono soprattutto le cose che si
+// **deducono**, perche' una deduzione sbagliata non da' un errore: da' una
+// conversazione che sembra giusta e non lo e'.
+
+{
+  const oc = new OpenCodeTranslator()
+  const ev = (type: string, data: Record<string, unknown> = {}) => ({ type, data })
+  const tipi = (ps: ReturnType<typeof oc.translate>) => ps.map(p => p.k).join(',')
+
+  oc.apriTurno('T1')
+
+  check('OpenCode: il carico utile si legge in `data`, non in `properties`',
+    tipi(oc.translate(ev('session.next.text.delta', { textID: 'p1', delta: 'ciao' }))) === 'text.delta')
+
+  // Il pezzo piu' delicato di tutto l'adapter: OpenCode non annuncia la fine del turno
+  // (`session.idle` mai visto in otto giri, `session.wait` non implementato).
+  const conTool = oc.translate(ev('session.next.step.ended', { finish: 'tool-calls', tokens: {} }))
+  check('OpenCode: `tool-calls` NON chiude il turno — il giro continua',
+    !tipi(conTool).includes('turn.ended'), tipi(conTool))
+
+  const conStop = oc.translate(ev('session.next.step.ended', { finish: 'stop', tokens: { input: 10, output: 2 } }))
+  check('OpenCode: `stop` chiude il turno, e la sessione torna idle',
+    tipi(conStop) === 'step.ended,usage.updated,turn.ended,session.state', tipi(conStop))
+
+  check('OpenCode: chiudere due volte lo stesso turno non emette niente',
+    oc.translate(ev('session.next.step.ended', { finish: 'stop', tokens: {} })).length === 2)
+
+  // `length` non e' `stop`: un turno troncato non e' un turno riuscito, e appiattirli
+  // sarebbe la bugia comoda che il §4 vieta.
+  check('OpenCode: un troncamento non si racconta come «completato»',
+    motivoDa('length') === 'error' && motivoDa('stop') === 'completed'
+    && motivoDa('aborted') === 'aborted')
+
+  // L'input **parsato** sta in `tool.called`, non in `tool.input.ended` (che porta il
+  // grezzo): tradurre quello sbagliato darebbe una riga senza soggetto.
+  const oc2 = new OpenCodeTranslator()
+  oc2.apriTurno('T2')
+  check('OpenCode: `tool.input.ended` grezzo non produce niente',
+    oc2.translate(ev('session.next.tool.input.ended', { callID: 'c1', text: '{"command":"ls"}' })).length === 0)
+  const chiamato = oc2.translate(ev('session.next.tool.called', { callID: 'c1', tool: 'bash', input: { command: 'ls -1' } }))
+  check('OpenCode: `tool.called` porta l\'input parsato e il soggetto',
+    chiamato.length === 1 && chiamato[0]?.k === 'tool.input.ended'
+    && (chiamato[0] as { summary?: string }).summary === 'ls -1')
+
+  // Due eventi distinti invece di un flag `ok`.
+  const bene = oc2.translate(ev('session.next.tool.success', { callID: 'c1', content: [] }))
+  const male = oc2.translate(ev('session.next.tool.failed', { callID: 'c2', error: { message: 'esploso' } }))
+  check('OpenCode: success e failed diventano lo stesso `tool.ended` con `ok` diverso',
+    (bene[0] as { ok?: boolean })?.ok === true && (male[0] as { ok?: boolean })?.ok === false)
+
+  // Uno step fallito e' una fine, e va detto: senza questo ramo il turno resterebbe
+  // aperto per sempre — lo stesso difetto del «turno-fantasma» gia' corretto altrove.
+  const oc3 = new OpenCodeTranslator()
+  oc3.apriTurno('T3')
+  const rotto = oc3.translate(ev('session.next.step.failed', { error: { message: 'a monte' } }))
+  check('OpenCode: uno step fallito chiude il turno invece di lasciarlo appeso',
+    tipi(rotto) === 'session.error,turn.ended,session.state', tipi(rotto))
+
+  check('OpenCode: senza un turno aperto non si chiude niente',
+    new OpenCodeTranslator().translate(ev('session.idle')).length === 0)
+
+  check('OpenCode: il modello si scrive `provider/id`',
+    modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')
 }
 
 // ─── le impostazioni (§16.5) ────────────────────────────────────────────────
