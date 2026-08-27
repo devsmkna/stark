@@ -215,12 +215,18 @@ export class Store {
         // l'indirizzo: prima non si saprebbe nemmeno se quella chat esiste.
         if (!this.#partita) {
           this.#partita = true
-          // Prima l'indirizzo, poi il layout salvato: un link diretto a `/chat/<id>`
-          // dice cosa si vuole vedere **adesso**, e non deve farsi scavalcare da come
-          // erano disposti i pannelli l'ultima volta.
+          // **Prima** il layout salvato, poi l'indirizzo — e la rotta va letta ora,
+          // perché il ripristino la riscrive da sé sul pannello a fuoco.
+          // L'ordine inverso sembrava più naturale («il link diretto vince») ma
+          // rendeva la persistenza inutile nel caso normale: l'indirizzo di una
+          // scheda già aperta è sempre `/chat/<qualcosa>`, quindi avrebbe aperto
+          // quella chat da sola e buttato via i pannelli a ogni ricaricamento.
+          // Così invece vincono tutti e due: si rimettono i pannelli com'erano, e
+          // la chat dell'indirizzo va a fuoco fra loro.
+          const rotta = fromPath()
           void (async () => {
-            await this.#apriDaIndirizzo()
-            if (this.selected === null) await this.#ripristinaLayout()
+            await this.#ripristinaLayout()
+            if (rotta) await this.#apriDaIndirizzo()
           })()
         }
       },
@@ -282,7 +288,8 @@ export class Store {
       go(null, 'chat', true)
       return
     }
-    if (this.selected !== r.id) await this.select(r.id, { indirizzo: false })
+    if (this.panes.has(r.id)) this.focusPane(r.id)
+    else if (this.selected !== r.id) await this.select(r.id, { indirizzo: false })
     this.view = r.view
   }
 

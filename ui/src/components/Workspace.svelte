@@ -9,6 +9,7 @@
   import Conversation from './Conversation.svelte'
   import Effects from './Effects.svelte'
   import Workspace from './Workspace.svelte'
+  import { leafIds } from '../lib/layout.ts'
 
   let { store, node = store.layout, path = [] }:
     { store: Store; node?: LayoutNode | null; path?: number[] } = $props()
@@ -17,6 +18,10 @@
 
   let box: HTMLElement | undefined = $state()
   let trascinando = $state<number | null>(null)
+
+  /** Con un pannello solo non c'è niente da chiudere né da mettere a fuoco: la chat
+   *  deve restare identica a com'era prima che i pannelli esistessero. */
+  const soli = $derived(store.layout ? leafIds(store.layout).length === 1 : true)
 
   /**
    * Il divisore prende il puntatore invece di lasciare l'ascolto al contenitore: senza
@@ -88,16 +93,16 @@
 {#if node?.type === 'leaf'}
   {@const id = node.paneId}
   {@const pane = store.panes.get(id)}
-  <div class="pane" class:on={store.selected === id}
+  <div class="pane" class:on={!soli && store.selected === id}
     role="presentation"
     onpointerdowncapture={() => store.focusPane(id)}>
     {#if pane?.snap}
       {#if pane.view === 'effects'}
         <Effects {store} snap={pane.snap} {id} setView={v => { pane.view = v }}
-          onClose={() => store.closePane(id)} />
+          onClose={soli ? undefined : () => store.closePane(id)} />
       {:else}
         <Conversation {store} snap={pane.snap} link={pane.link} {id}
-          setView={v => { pane.view = v }} onClose={() => store.closePane(id)} />
+          setView={v => { pane.view = v }} onClose={soli ? undefined : () => store.closePane(id)} />
       {/if}
     {:else}
       <div class="mid">Opening…</div>
@@ -117,13 +122,13 @@
     {/if}
   </div>
 {:else if node?.type === 'split'}
-  <div class="split {node.dir}" bind:this={box}>
+  <div class="split d-{node.dir}" bind:this={box}>
     {#each node.children as child, i (i)}
       <div class="cell" style="flex:{node.sizes[i] ?? 1 / node.children.length}">
         <Workspace {store} node={child} path={[...path, i]} />
       </div>
       {#if i < node.children.length - 1}
-        <div class="div {node.dir}" class:drag={trascinando === i}
+        <div class="hdl d-{node.dir}" class:drag={trascinando === i}
           role="separator" aria-orientation={node.dir === 'row' ? 'vertical' : 'horizontal'}
           onpointerdown={e => giu(e, i)}
           onpointermove={muovi}
@@ -135,23 +140,25 @@
 {/if}
 
 <style>
-  .split { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
-  .split.col { flex-direction: column; }
+  /* `d-row`/`d-col` e non `row`/`col`: `app.css` ha già una `.row` globale — la riga
+     di un tool — e una classe di direzione nuda ci finiva dentro, prendendosi il suo
+     `align-items:center` (i pannelli restavano alti quanto il contenuto invece che
+     quanto lo schermo), il suo fondo e il suo bordo. Visto misurando, non leggendo. */
+  .split { display: flex; align-items: stretch; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+  .split.d-col { flex-direction: column; }
   /* `flex-basis:0` con `flex-grow` proporzionale: le proporzioni valgono sullo spazio
      vero, non sul contenuto — se no un pannello con dentro un turno larghissimo si
      prenderebbe più della sua parte. */
   .cell { flex-basis: 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; }
   .cell > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 
-  .div { flex: none; background: var(--line); position: relative; }
-  .split.row > .div { width: 1px; cursor: col-resize; }
-  .split.col > .div { height: 1px; cursor: row-resize; }
+  .hdl { flex: none; background: var(--line); position: relative; }
+  .split.d-row > .hdl { width: 1px; cursor: col-resize; }
+  .split.d-col > .hdl { height: 1px; cursor: row-resize; }
   /* Un pixel si vede ma non si afferra: l'area sensibile è più larga della linea,
      e sborda sui pannelli senza spostarli di nulla. */
-  .div::after {
-    content: ''; position: absolute; inset: -3px;
-  }
-  .div:hover, .div.drag { background: var(--accent); }
+  .hdl::after { content: ''; position: absolute; inset: -3px; }
+  .hdl:hover, .hdl.drag { background: var(--accent); }
 
   .pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
   .pane > :global(.col) { flex: 1; min-width: 0; min-height: 0; }

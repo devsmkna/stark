@@ -93,7 +93,8 @@ export function closeLeaf(tree: LayoutNode, paneId: string): LayoutNode | null {
 
   if (remaining.length === 1) return replaceAtPath(tree, parentPath, remaining[0]!)
   return replaceAtPath(tree, parentPath, {
-    type: 'split', dir: parent.dir, children: remaining, sizes: uniform(remaining.length),
+    type: 'split', dir: parent.dir, children: remaining,
+    sizes: rinormalizza(parent.sizes.filter((_, i) => i !== idx)),
   })
 }
 
@@ -120,12 +121,28 @@ export function resizeSplit(tree: LayoutNode, parentPath: number[], sizes: numbe
  *  svuotati. `null` se non ne resta nessuna. */
 export function reconcile(tree: LayoutNode, keep: (paneId: string) => boolean): LayoutNode | null {
   if (tree.type === 'leaf') return keep(tree.paneId) ? tree : null
-  const children = tree.children
-    .map(c => reconcile(c, keep))
-    .filter((c): c is LayoutNode => c !== null)
-  if (children.length === 0) return null
-  if (children.length === 1) return children[0]!
-  return { type: 'split', dir: tree.dir, children, sizes: uniform(children.length) }
+  const tenuti = tree.children
+    .map((c, i) => [reconcile(c, keep), i] as const)
+    .filter((v): v is readonly [LayoutNode, number] => v[0] !== null)
+  if (tenuti.length === 0) return null
+  if (tenuti.length === 1) return tenuti[0]![0]
+  return {
+    type: 'split', dir: tree.dir,
+    children: tenuti.map(([c]) => c),
+    // Le proporzioni dei superstiti si tengono e si rinormalizzano, non si azzerano:
+    // `reconcile` gira anche al ricaricamento, quando di solito non cade nessuna
+    // foglia — uniformare lì vorrebbe dire che i divisori tornano in mezzo ogni volta,
+    // cioè che ridimensionare un pannello non si ricorda. Visto dal vivo, non dedotto.
+    sizes: rinormalizza(tenuti.map(([, i]) => tree.sizes[i] ?? 1 / tree.children.length)),
+  }
 }
 
 const uniform = (n: number): number[] => Array.from({ length: n }, () => 1 / n)
+
+/** Le stesse proporzioni relative, riportate a somma 1. Se la somma è zero — non
+ *  dovrebbe succedere, ma un `localStorage` scritto a mano può contenere qualunque
+ *  cosa — si ripiega su parti uguali invece di dividere per zero. */
+function rinormalizza(sizes: number[]): number[] {
+  const somma = sizes.reduce((a, b) => a + b, 0)
+  return somma > 0 ? sizes.map(s => s / somma) : uniform(sizes.length)
+}

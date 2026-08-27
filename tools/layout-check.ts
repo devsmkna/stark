@@ -58,8 +58,14 @@ const LEAF_A: LayoutNode = { type: 'leaf', paneId: 'a' }
   const t3closed = closeLeaf(t3, 'a')
   check('closeLeaf: chiudere una foglia in mezzo lascia le altre due',
     t3closed?.type === 'split' && t3closed.children.length === 2, JSON.stringify(t3closed))
-  check('closeLeaf: e ridistribuisce lo spazio in parti uguali',
+  check('closeLeaf: e ridistribuisce lo spazio ai superstiti',
     t3closed?.type === 'split' && t3closed.sizes.every(s => Math.abs(s - 0.5) < 1e-9))
+
+  const stretto = resizeSplit(t3, [], [0.2, 0.2, 0.6])
+  const dopo = closeLeaf(stretto, 'a')
+  check('closeLeaf: i superstiti tengono le proporzioni relative, riportate a 1',
+    dopo?.type === 'split' && Math.abs(dopo.sizes[0]! - 0.25) < 1e-9 && Math.abs(dopo.sizes[1]! - 0.75) < 1e-9,
+    JSON.stringify(dopo))
 }
 
 // replaceLeaf
@@ -100,6 +106,14 @@ const LEAF_A: LayoutNode = { type: 'leaf', paneId: 'a' }
   check('reconcile: toglie le foglie che non passano il filtro',
     kept !== null && JSON.stringify(leafIds(kept).sort()) === JSON.stringify(['a', 'c']),
     JSON.stringify(kept))
+  // La regola che conta al ricaricamento: senza foglie cadute non deve cambiare nulla,
+  // proporzioni comprese — se no i divisori tornerebbero in mezzo a ogni avvio.
+  const intero = resizeSplit(splitLeaf(LEAF_A, 'a', 'row', 'b'), [], [0.75, 0.25])
+  const uguale = reconcile(intero, () => true)
+  check('reconcile: se non cade nessuna foglia le proporzioni restano quelle',
+    uguale?.type === 'split' && uguale.sizes[0] === 0.75 && uguale.sizes[1] === 0.25,
+    JSON.stringify(uguale))
+
   check('reconcile: un genitore rimasto con un figlio solo collassa',
     reconcile(t, id => id === 'a')?.type === 'leaf')
   check('reconcile: nessuna foglia superstite torna null', reconcile(t, () => false) === null)
