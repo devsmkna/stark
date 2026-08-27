@@ -196,16 +196,40 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
  * CLI non accetta si mostra disabilitata con la spiegazione, mai nascosta. Nasconderla
  * farebbe sembrare STARK meno capace del terminale.
  */
+/**
+ * Cosa fa ciascuna modalita', **detto da qui**.
+ *
+ * Queste frasi stavano nella UI (`view.ts`, `MODE_BLURB`), ed era il posto sbagliato:
+ * descrivono il comportamento di *questo* agent, e la prova di carico l'ha mostrato in
+ * modo lampante — su OpenCode la voce `plan` mostrava «Plans first, touches nothing»,
+ * cioe' la frase di Claude Code capitata li' per omonimia. Vera per caso, falsa nei
+ * fatti. Dopo ADR-014 chi descrive una modalita' e' chi ce l'ha.
+ */
+const COSA_FA: Record<string, string> = {
+  auto: 'A classifier checks every action. No cards.',
+  default: 'Asks before everything',
+  acceptEdits: 'File edits go through, the rest asks',
+  plan: 'Plans first, touches nothing',
+  dontAsk: 'Never asks. The classifier still checks.',
+  bypassPermissions: 'No checks at all',
+}
+
 export function modeChoices(): ModeChoice[] {
   const root = typeof process.getuid === 'function' && process.getuid() === 0
   const ALL: PermissionMode[] = ['auto', ...MODI_CLAUDE.filter(m => m !== 'auto')]
-  return ALL.map(mode => mode === 'bypassPermissions' && root
-    ? {
-        mode, available: false,
-        reason: 'Refused by the CLI itself when it runs with root privileges — '
-          + 'not a STARK restriction.',
-      }
-    : { mode, available: true })
+  return ALL.map(mode => ({
+    mode,
+    ...(COSA_FA[mode] ? { note: COSA_FA[mode] } : {}),
+    // `bypassPermissions` da root lo rifiuta **il CLI**, non STARK: la voce resta in
+    // elenco spenta con la ragione, che e' la differenza fra un limite e un default.
+    ...(mode === 'bypassPermissions' && root
+      ? {
+          available: false,
+          reason: 'Refused by the CLI itself when it runs with root privileges — '
+            + 'not a STARK restriction.',
+        }
+      : { available: true }),
+  }))
 }
 
 export function slashCommands(raw: unknown): SlashCommand[] {

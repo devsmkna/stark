@@ -274,6 +274,26 @@ export class Registry {
     return { home: SESSIONS, sessions: out, bytes: out.reduce((n, x) => n + x.bytes, 0) }
   }
 
+  /**
+   * Con quale modalità parte una chat nuova.
+   *
+   * Tre gradini, e l'ordine conta (ADR-014). Chi apre con una modalità esplicita vince
+   * sempre — è il caso delle prove e del risveglio. Poi la scelta dell'utente **per
+   * quell'agent**. Poi, solo per l'agent di default, la vecchia preferenza unica, che
+   * resta perché buttarla farebbe ripartire da `auto` chi aveva scelto `default` senza
+   * dirglielo. E in fondo: **la prima modalità che l'agent dichiara di avere** — non
+   * `auto`, che è una parola di Claude Code e su un altro agent non vuol dire niente.
+   */
+  private async modoDiPartenza(spec: OpenSpec): Promise<PermissionMode> {
+    if (spec.mode) return spec.mode
+    const agent = spec.agent ?? DEFAULT_AGENT
+    const perAgent = this.settings().defaultModes?.[agent]
+    if (perAgent) return perAgent
+    if (agent === DEFAULT_AGENT && this.settings().defaultMode) return this.settings().defaultMode
+    const suoi = await backendFor(agent).modes?.()
+    return suoi?.find(m => m.available)?.mode ?? this.defaults.mode
+  }
+
   async open(spec: OpenSpec): Promise<string> {
     // Riprendere una conversazione riusa il suo id, così il journal continua invece di
     // biforcarsi. Un fork invece è una sessione nuova, e deve avere un journal nuovo.
@@ -325,7 +345,7 @@ export class Registry {
       // l'unica differenza strutturale fra STARK e la CLI nuda (che parte in `default`,
       // misurato) e non c'era modo di toccarla. Chi apre una chat con una modalità
       // esplicita vince comunque — è il caso delle prove, e del risveglio.
-      mode: spec.mode ?? this.settings().defaultMode ?? this.defaults.mode,
+      mode: await this.modoDiPartenza(spec),
       // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.

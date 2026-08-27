@@ -289,6 +289,18 @@ export interface AgentBackend {
    * offerto per finta. Chi non la implementa c'e' sempre.
    */
   available?(): Promise<boolean>
+  /**
+   * Quali modalita' ha questo agent, **senza aprire una conversazione**.
+   *
+   * Serve alle impostazioni: «New chats start in…» deve poter offrire le voci giuste
+   * prima che esista una sessione. Fino ad ADR-014 quella schermata mostrava `auto` e
+   * `default` scritte a mano nel browser — due parole di Claude Code, che su un altro
+   * agent non vogliono dire niente.
+   *
+   * E' una domanda che non deve costare: chi la implementa risponde con cio' che sa a
+   * priori, non avviando un processo per riempire una tendina.
+   */
+  modes?(): Promise<ModeChoice[]>
   /** Le conversazioni nate nel terminale di quell'agent, da poter importare. */
   listConversations?(profile?: string, limit?: number): Promise<ConversationInfo[]>
   /** Da quanto una conversazione dev'essere ferma perché *non* sia in corso altrove. */

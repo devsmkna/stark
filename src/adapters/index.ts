@@ -14,16 +14,19 @@
 
 import { spawn } from 'node:child_process'
 import type { AgentBackend, AdapterHooks, SessionSpec } from '../core/adapter.ts'
+import type { ModeChoice } from '../core/events.ts'
 import { ClaudeCodeAdapter } from './claude-code/adapter.ts'
 import { isRecent, listTranscripts } from './claude-code/catalogue.ts'
 import { importTranscript } from './claude-code/import.ts'
 import { allineaMemoria } from './claude-code/memoria.ts'
 import { diagnostics, warmDiagnostics } from './claude-code/profiles.ts'
-import { OpenCodeAdapter } from './opencode/adapter.ts'
+import { modeChoices } from './claude-code/sdk-options.ts'
+import { modiNoti, OpenCodeAdapter } from './opencode/adapter.ts'
 
 export const claudeCode: AgentBackend = {
   id: 'claude-code',
   open: (spec: SessionSpec, hooks: AdapterHooks) => new ClaudeCodeAdapter({ ...spec, ...hooks }),
+  modes: async () => modeChoices(),
   listConversations: listTranscripts,
   isRecent,
   importConversation: importTranscript,
@@ -52,6 +55,7 @@ export const openCode: AgentBackend = {
     if (ocPresente === null) ocPresente = await risolve('opencode')
     return ocPresente
   },
+  modes: modiNoti,
 }
 
 let ocPresente: boolean | null = null
@@ -92,9 +96,14 @@ export function backendFor(agent: string = DEFAULT_AGENT): AgentBackend {
 export const agentIds = (): string[] => Object.keys(BACKENDS)
 
 /** Gli agent di questa macchina, con chi c'e' davvero. */
-export async function agentiDisponibili(): Promise<Array<{ id: string; available: boolean }>> {
+export async function agentiDisponibili(): Promise<Array<{
+  id: string; available: boolean; modes: ModeChoice[]
+}>> {
   return Promise.all(agentIds().map(async id => ({
     id,
     available: (await BACKENDS[id]?.available?.()) ?? true,
+    // Le modalita' viaggiano con l'elenco degli agent perche' chi disegna le
+    // impostazioni le vuole insieme: una tendina per agent, con le sue voci.
+    modes: (await BACKENDS[id]?.modes?.()) ?? [],
   })))
 }

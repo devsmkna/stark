@@ -66,11 +66,36 @@
 
   /** La modalità con cui partono le chat nuove. Non tocca quelle già aperte: i loro
    *  hook sono stati installati all'avvio, e rinegoziarli a metà turno non si può. */
-  async function salvaModo(m: string): Promise<void> {
+  async function salvaModo(agent: string, m: string): Promise<void> {
     const s = store.settings
     if (!s) return
-    await store.saveSettings({ ...s, defaultMode: m })
+    await store.saveSettings({
+      ...s,
+      defaultModes: { ...(s.defaultModes ?? {}), [agent]: m },
+      // La preferenza unica resta allineata per l'agent di default: un file scritto
+      // oggi deve restare leggibile da una versione che non conosce `defaultModes`.
+      ...(agent === 'claude-code' ? { defaultMode: m } : {}),
+    })
   }
+
+  // ─── quali agent, e quali modalità hanno ──────────────────────────────────
+  // Le voci NON sono scritte qui: le dichiara l'agent (ADR-014). Prima c'erano `auto` e
+  // `default` a mano nel browser — due parole di Claude Code, che su un altro agent non
+  // vogliono dire niente.
+  let agenti = $state<NonNullable<SystemInfo['agents']> | null>(null)
+  $effect(() => {
+    if (agenti === null) {
+      void store.api.system().then(
+        s => { agenti = (s.agents ?? []).filter(a => a.available && a.modes.length > 0) },
+        () => { agenti = [] },
+      )
+    }
+  })
+  const AGENT_NOMI: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode' }
+  const modoDi = (id: string): string =>
+    store.settings?.defaultModes?.[id]
+    ?? (id === 'claude-code' ? (store.settings?.defaultMode ?? '') : '')
+    ?? ''
 
   // ─── progetti ─────────────────────────────────────────────────────────────
 
@@ -219,24 +244,44 @@
         <!-- La modalità di partenza. Era l'unica differenza strutturale fra STARK e il
              terminale, e non si poteva toccare: `auto` era cablato nel registro.
              Misurato il 27 agosto 2026 — `claude` senza `--permission-mode` parte in
-             `default`. Le due voci sono quelle vere, non un'astrazione nostra. -->
-        <div class="fgroup">
-          <div class="flabel">New chats start in…</div>
-          <div class="seg" role="group" aria-label="Permission mode for new chats">
-            <button class:on={(store.settings.defaultMode ?? 'auto') === 'auto'}
-              onclick={() => void salvaModo('auto')}>auto</button>
-            <button class:on={store.settings.defaultMode === 'default'}
-              onclick={() => void salvaModo('default')}>default</button>
+             `default`.
+             Dopo ADR-014 le voci non stanno più qui: le dichiara l'agent, e ce n'è un
+             riquadro per ciascuno. Senza scelta salvata parte la prima che l'agent
+             dichiara disponibile — non `auto`, che è una parola di Claude Code. -->
+        {#each agenti ?? [] as a (a.id)}
+          <div class="fgroup">
+            <div class="flabel">New chats start in…{#if (agenti?.length ?? 0) > 1}
+              <span style="color:var(--muted)"> · {AGENT_NOMI[a.id] ?? a.id}</span>{/if}</div>
+            <div class="seg" role="group" aria-label="Starting mode for {AGENT_NOMI[a.id] ?? a.id}">
+              {#each a.modes.filter(m => m.available) as m (m.mode)}
+                <button class:on={modoDi(a.id) === m.mode}
+                  onclick={() => void salvaModo(a.id, m.mode)}>{m.label ?? m.mode}</button>
+              {/each}
+            </div>
+            <!-- Solo le voci che si possono davvero scegliere: descrivere una modalità
+                 che il controllo non offre (`bypassPermissions` da root) fa cercare un
+                 bottone che non c'è. La ragione per cui è spenta si legge nella barra
+                 della chat, dove la voce compare in elenco con la spiegazione. -->
+            {#if a.modes.some(m => m.note && m.available)}
+              <div class="hint">
+                {#each a.modes.filter(m => m.note && m.available) as m (m.mode)}
+                  <b>{m.label ?? m.mode}</b>&nbsp;{m.note}<br />
+                {/each}
+              </div>
+            {/if}
+            <!-- Questa è prosa su una MISURA fatta su Claude Code, non una regola del
+                 modello: mostrarla sotto le modalità di un altro agent sarebbe dire una
+                 cosa falsa. La parte funzionale — quali modalità esistono — viene
+                 dall'agent; questa è documentazione, ed è legata a chi è stato misurato. -->
+            {#if a.id === 'claude-code'}
+              <div class="hint">Measured, so you can choose knowing: the same work in
+              <b>auto</b> and <b>default</b> cost the same tokens (190k against 190k), and the
+              classifier did not move the plan quota by a single percentage point over 32 tool
+              calls — it is below what the meter can see. The real difference is not the bill,
+              it is whether you get interrupted.</div>
+            {/if}
           </div>
-          <div class="hint"><b>auto</b> is STARK's default: a classifier decides every action, and
-          nothing stops to ask — that is the point of it. <b>default</b> is what
-          <code>claude</code> does when you start it from a terminal without options: a risky
-          action <b>stops and asks you</b>.
-          <br />Measured, so you can choose knowing: the same work in the two modes cost the same
-          tokens (190k against 190k), and the classifier did not move the plan quota by a single
-          percentage point over 32 tool calls — it is below what the meter can see. The real
-          difference is not the bill, it is whether you get interrupted.</div>
-        </div>
+        {/each}
 
         <div class="hard">
           <div class="ht"><Icon name="i-block" /> Never, no exceptions</div>

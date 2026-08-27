@@ -74,7 +74,10 @@ export type Settings = {
   toolDescriptions: boolean
   /** In quale modalità permessi partono le chat nuove. La CLI nuda parte in `default`;
    *  STARK propone `auto` (ADR-008), ma la scelta è tua. */
+  /** La preferenza unica, per l'agent di default. Resta per i file già scritti. */
   defaultMode: string
+  /** La modalità di partenza **per agent** (ADR-014): le voci non sono universali. */
+  defaultModes?: Record<string, string>
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */
@@ -96,8 +99,15 @@ export type SystemInfo = {
     configDir: string
     profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
   }
-  /** Gli agent che questa macchina sa guidare, e chi c'è davvero installato. */
-  agents?: { id: string; available: boolean }[]
+  /**
+   * Gli agent che questa macchina sa guidare, chi c'è davvero installato, e **quali
+   * modalità ha ciascuno** — che le impostazioni devono poter offrire prima che esista
+   * una conversazione (ADR-014).
+   */
+  agents?: {
+    id: string; available: boolean
+    modes: { mode: string; label?: string; available: boolean; reason?: string; note?: string }[]
+  }[]
 }
 
 export type LinkStatus = 'connecting' | 'live' | 'lost'

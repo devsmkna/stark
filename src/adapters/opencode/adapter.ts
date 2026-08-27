@@ -44,7 +44,7 @@ function refModello(model: string): { providerID: string; id: string } | undefin
  * (visto dal vivo, P22), e una barra senza nessuna scelta sarebbe peggio di una con le
  * due che ogni installazione ha di sicuro.
  */
-const AGENTI_NOTI: Array<{ nome: string; descrizione: string }> = [
+export const AGENTI_NOTI: Array<{ nome: string; descrizione: string }> = [
   { nome: 'build', descrizione: 'Tutti i tool, senza restrizioni' },
   { nome: 'plan', descrizione: 'Modifiche e comandi chiedono conferma' },
 ]
@@ -529,5 +529,16 @@ async function elencoModi(c: Client): Promise<ModeChoice[]> {
     ...(a.descrizione ? { note: a.descrizione } : {}),
   }))
 }
+
+/**
+ * Le modalita' di OpenCode senza avviare niente.
+ *
+ * Sono i due agenti primari che ogni installazione ha. Chiederlo al server vorrebbe
+ * dire avviare un processo per riempire una tendina nelle impostazioni, e la risposta
+ * sarebbe la stessa nel 99% dei casi: una conversazione aperta, che il server ce l'ha
+ * davvero, chiede invece l'elenco vero (`elencoModi`).
+ */
+export const modiNoti = async (): Promise<ModeChoice[]> =>
+  AGENTI_NOTI.map(a => ({ mode: a.nome, label: a.nome, available: true, note: a.descrizione }))
 
 export { modelloDa }
