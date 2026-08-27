@@ -573,8 +573,21 @@
               <button class="lnk" onclick={() => void copia('token', store.api.tokenValue)}>
                 {copiato === 'token' ? 'Copied' : 'Copy'}</button></span>
             <span class="k2">Listening on</span><span class="v2">{system.listening}</span>
+            {#if system.perimeter?.open}
+              <span class="k2">Reachable as</span>
+              <span class="v2">{#each system.perimeter.hosts as h, i}{i > 0 ? ', ' : ''}{h.host}<span
+                style="color:var(--muted)">&nbsp;({h.source})</span>{/each}</span>
+            {/if}
             <span class="k2">Home</span><span class="v2">{system.home}</span>
           </div>
+          {#if system.perimeter?.open}
+            <div class="notice"><b>STARK is reachable from outside this machine.</b> Anyone who
+            can reach those names <b>and</b> has the token can make an agent run commands as root
+            here. That is the point — it is how you use STARK from your phone — but it is not the
+            default: it was turned on with <code>STARK_PUBLIC_HOST</code> (or by Tailscale) on the
+            machine itself, and it can only be turned off there, because the perimeter is read once
+            when the daemon starts.</div>
+          {/if}
           <div class="hint">The token now <b>stays the same across restarts</b>: it lives in
           <code>{system.home}/token</code> with <code>0600</code>, which is what lets
           you keep this tab open. Copy it to open STARK in a second browser. To replace it:

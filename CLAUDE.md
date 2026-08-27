@@ -1177,3 +1177,35 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
 STARK esegue comandi arbitrari **come root**. Quindi: ascolto su localhost per default,
 autenticazione obbligatoria per qualunque esposizione oltre localhost, apertura sulla LAN
 sempre come scelta esplicita dell'utente e mai come default.
+
+**Il perimetro si allarga dichiarandolo** (27 agosto 2026). Prima l'unico modo di far
+passare un hostname non-locale era che `tailscale status --json` lo dicesse: chi non usa
+Tailscale non aveva una strada. Ora c'è `STARK_PUBLIC_HOST`, che **somma** a Tailscale
+invece di sostituirlo. È una variabile d'ambiente e non un'impostazione per una ragione
+che decide da sola: `settings.json` si scrive via `PUT /api/settings`, cioè da una
+richiesta HTTP — e il perimetro non deve essere modificabile dalla superficie che
+protegge. L'alternativa scartata era far **mentire il proxy** (riscrivere `Host:
+127.0.0.1`, cancellare `Origin`): sposta il perimetro in un file di configurazione dove
+nessuno lo cerca, rende `/api/system` incapace di dire la verità, e si rompe in silenzio
+la prima volta che qualcuno tocca quel file.
+Quello che **non** si tocca, e il codice dice perché: `isLocal()` sull'indirizzo socket
+(ogni tunnel serio si ricollega dal loopback, e resta l'unica rete se l'ascolto finisse
+su `0.0.0.0`); `server.listen(port, '127.0.0.1')`; e `X-Forwarded-Proto`/`Forwarded`/
+`X-Forwarded-For`, che li scrive il client — dedurne `https` renderebbe la difesa
+sull'`Origin` teatro. Il confronto degli host è per **uguaglianza**, mai per suffisso:
+c'è una verifica apposta, perché `stark.dominio.it.attaccante.com` è il bug canonico di
+una lista di nomi. Niente wildcard, e le voci scartate si **stampano** all'avvio.
+Il costo si dice in quattro posti: log d'avvio, `/api/system` (che prima rispondeva
+`localhost only` come stringa fissa, cioè **mentiva già** con Tailscale acceso), Settings
+→ System, e `stark status`. Non è un interruttore nella UI: si accende sulla macchina e
+ha effetto al riavvio, perché il perimetro si legge una volta sola.
+Ricaduta corretta nello stesso giro: `soggetto()` in `push.ts` chiamava
+`detectTailnetHost()` per conto proprio — secondo `execFileSync` all'avvio e due verità
+che potevano differire. Ora il perimetro glielo passa il guard, ed è stato **visto
+fallire prima di essere corretto**: con `publicHosts` passata per parametro, il push
+stampava «nessun hostname pubblico» mentre il perimetro ne aveva uno.
+Come si mette in piedi la macchina attorno (tunnel `ssh -R`, Traefik, mTLS, e le tre
+trappole che costano di più): `docs/fuori-casa.md`. Come si verifica che il tunnel non
+strozzi il flusso: `npm run tunnel`, a costo zero di quota — misura **quando** arrivano
+i pezzi, non quanti, perché un proxy che bufferizza li consegna tutti, solo tutti
+insieme alla fine.

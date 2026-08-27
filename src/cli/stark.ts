@@ -134,7 +134,12 @@ function installa(): void {
  */
 function ambiente(): string[] {
   const fuori: string[] = []
+  // `STARK_PUBLIC_HOST` e `STARK_VAPID_SUBJECT` sono qui per una ragione precisa:
+  // dimenticarle qui non rompe niente in primo piano (`npm run stark`) e **richiude il
+  // perimetro in silenzio** dopo `stark start`, con il telefono che si becca un 403 che
+  // sembra un problema di token. È già successo con Tailscale, in un'altra forma.
   for (const k of ['STARK_HOME', 'STARK_PORT', 'STARK_MODEL', 'STARK_TOKEN',
+    'STARK_PUBLIC_HOST', 'STARK_VAPID_SUBJECT',
     'CLAUDE_CONFIG_DIR', 'PATH', 'HOME']) {
     const v = process.env[k]
     if (v) fuori.push('--setenv', `${k}=${v}`)
@@ -356,6 +361,17 @@ if (comando === 'run') {
     }).then(r => r.json()) as { sessions: { live: boolean }[] }
     const attive = sessions.filter(s => s.live).length
     console.log(`${sessions.length} conversazioni, ${attive} con un processo dietro`)
+    const sistema = await fetch(`${url}/api/system`, {
+      headers: { authorization: `Bearer ${readToken(STARK_HOME)}` },
+    }).then(r => r.json()) as { perimeter?: { open: boolean; hosts: { host: string; source: string }[] } }
+    // Lo chiede al daemon invece di rileggere l'ambiente: quello che conta è cosa ha
+    // letto **il processo in esecuzione**, che può essere partito prima dell'ultima
+    // modifica alla configurazione.
+    if (sistema.perimeter?.open) {
+      for (const h of sistema.perimeter.hosts) console.log(`raggiungibile anche come ${h.host} (${h.source})`)
+    } else {
+      console.log('raggiungibile solo da questa macchina')
+    }
     indirizzo(readToken(STARK_HOME))
   }
   process.exit(vivo ? 0 : 1)

@@ -8,7 +8,7 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { createGuard } from './security.ts'
+import { createGuard, type Perimetro } from './security.ts'
 import { serveUi, UI_DIR } from './static.ts'
 import { Registry, STARK_HOME, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
@@ -28,6 +28,13 @@ export type DaemonOptions = {
   configDir?: string
   /** Il token da usare. Omesso: usa **quello di questa macchina**, che è persistente. */
   token?: string
+  /**
+   * Gli hostname ammessi oltre a localhost, come li direbbe `STARK_PUBLIC_HOST`.
+   * Omesso: si legge l'ambiente. `[]`: nessuno, qualunque cosa dica l'ambiente — è la
+   * forma che serve alle prove, che non devono dipendere da com'è configurata la
+   * macchina su cui girano.
+   */
+  publicHosts?: string[]
 }
 
 /**
@@ -51,9 +58,28 @@ export type Daemon = {
   stop(): Promise<void>
 }
 
+/**
+ * Il perimetro si dice a voce alta all'avvio. Chi apre STARK oltre localhost lo sta
+ * facendo di proposito, ma il costo va scritto dove lo si legge senza cercarlo — e le
+ * voci scartate vanno dette, altrimenti una configurazione sbagliata è indistinguibile
+ * da una che funziona finché non arriva il 403 che sembra un problema di token.
+ */
+function annunciaPerimetro(p: Perimetro): void {
+  for (const s of p.scartate) {
+    console.error(`[perimetro] scartata «${s.voce}»: ${s.perche}`)
+  }
+  if (p.ammessi.length === 0) return
+  for (const a of p.ammessi) {
+    console.log(`[perimetro] raggiungibile anche come ${a.host} (${a.fonte})`)
+  }
+  console.log('[perimetro] chiunque raggiunga questi nomi e abbia il token può far\n'
+    + '            eseguire comandi come root su questa macchina.')
+}
+
 export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   let port = opts.port ?? PORTA
-  const guard = createGuard(() => port, opts.token ?? readToken(STARK_HOME))
+  const guard = createGuard(() => port, opts.token ?? readToken(STARK_HOME), opts.publicHosts)
+  annunciaPerimetro(guard.perimetro)
   const guardToken = guard.token
   const registry = new Registry({
     ...(opts.model ? { model: opts.model } : {}),
@@ -83,7 +109,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // posto da cui si può avvisare un telefono che non ti sta guardando: a schermo
   // spento nella scheda del browser non gira niente. Senza iscrizioni non fa nulla e
   // non costa nulla — vedi `push.ts`.
-  const push = new Push(STARK_HOME)
+  const push = new Push(STARK_HOME, guard.perimetro)
   if (push.disponibile) vigila(registry, push)
 
   const server = createServer((req, res) => {
@@ -269,7 +295,14 @@ async function route(
         url: `http://127.0.0.1:${port()}`,
         port: port(),
         home: STARK_HOME,
-        listening: 'localhost only',
+        // Non una stringa fissa: con Tailscale acceso «localhost only» mentiva già.
+        listening: guard.perimetro.ammessi.length === 0
+          ? 'localhost only'
+          : `localhost + ${guard.perimetro.ammessi.map(a => a.host).join(', ')}`,
+        perimeter: {
+          open: guard.perimetro.ammessi.length > 0,
+          hosts: guard.perimetro.ammessi.map(a => ({ host: a.host, source: a.fonte })),
+        },
         agent: await diagnostics(configDir),
         nativeFolderPicker: await nativeFolderPickerAvailable(),
       })

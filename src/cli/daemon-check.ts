@@ -46,6 +46,32 @@ function richiestaGrezza(porta: number, host: string, token: string): Promise<nu
   })
 }
 
+/**
+ * Come sopra, ma restituisce anche le intestazioni: serve per l'`Origin` (che `fetch`
+ * lascia scrivere, ma qui si vuole la stessa socket per non mescolare due meccanismi) e
+ * per leggere il `set-cookie` di una pagina servita con un `Host` esterno.
+ */
+function grezza(porta: number, opts: { host: string; token: string; path?: string; origin?: string; xff?: string })
+  : Promise<{ stato: number; testa: string }> {
+  return new Promise(res => {
+    const s = connect(porta, '127.0.0.1', () => {
+      s.write(`GET ${opts.path ?? '/api/sessions'} HTTP/1.1\r\n`
+        + `Host: ${opts.host}\r\n`
+        + `Authorization: Bearer ${opts.token}\r\n`
+        + (opts.origin ? `Origin: ${opts.origin}\r\n` : '')
+        + (opts.xff ? `X-Forwarded-For: ${opts.xff}\r\n` : '')
+        + 'Connection: close\r\n\r\n')
+    })
+    let buf = ''
+    s.on('data', d => { buf += d })
+    s.on('close', () => res({
+      stato: Number(/^HTTP\/1\.\d (\d{3})/.exec(buf)?.[1] ?? 0),
+      testa: buf.split('\r\n\r\n')[0] ?? '',
+    }))
+    s.on('error', () => res({ stato: 0, testa: '' }))
+  })
+}
+
 // Porta 0, token usa e getta e casa in `/tmp`: una prova non deve litigare con il
 // daemon vero — che ha una porta fissa e un token su disco — né scrivere fra le sue
 // conversazioni.
@@ -76,6 +102,72 @@ check('Host locale con token → 200',
 check('token giusto → 200', (await fetch(`${url}/api/sessions`, { headers: auth })).status === 200)
 check('Origin nostro → 200',
   (await fetch(`${url}/api/sessions`, { headers: { ...auth, origin: url } })).status === 200)
+
+// ─── perimetro dichiarato: STARK_PUBLIC_HOST ────────────────────────────────
+//
+// Gli host si passano **per parametro**, non per ambiente: una prova non deve dire cose
+// diverse a seconda di come è configurata la macchina che la esegue, e `perimetro()`
+// legge l'ambiente solo quando nessuno gli dice niente.
+const NOME = 'stark.esempio.test'
+
+check(`Host esterno NON dichiarato → 403 (il default resta solo-localhost)`,
+  (await richiestaGrezza(porta, NOME, token)) === 403)
+
+{
+  const aperto = await startDaemon({ port: 0, token, publicHosts: [NOME] })
+  const p2 = Number(new URL(aperto.url).port)
+  try {
+    check('Host esterno dichiarato → 200',
+      (await grezza(p2, { host: NOME, token })).stato === 200)
+    check('Host esterno maiuscolo → 200 (gli hostname sono case-insensitive)',
+      (await grezza(p2, { host: 'STARK.Esempio.TEST', token })).stato === 200)
+    check('Host esterno col punto finale (forma assoluta) → 200',
+      (await grezza(p2, { host: `${NOME}.`, token })).stato === 200)
+    check('Origin https dell\'host dichiarato → 200',
+      (await grezza(p2, { host: NOME, token, origin: `https://${NOME}` })).stato === 200)
+    check('Origin http sullo stesso nome → 403 (lo schema non si deduce)',
+      (await grezza(p2, { host: NOME, token, origin: `http://${NOME}` })).stato === 403)
+    // Il bug canonico di una lista di host: `endsWith` invece di `===`.
+    check('Origin con l\'host dichiarato come prefisso di un altro dominio → 403',
+      (await grezza(p2, { host: NOME, token, origin: `https://${NOME}.attaccante.example` })).stato === 403)
+    check('X-Forwarded-For non cambia niente: con token → 200',
+      (await grezza(p2, { host: NOME, token, xff: '1.2.3.4' })).stato === 200)
+    check('X-Forwarded-For non cambia niente: senza token → 403',
+      (await grezza(p2, { host: NOME, token: 'x'.repeat(64), xff: '1.2.3.4' })).stato === 403)
+    // Il cookie ha `Secure`: con un dominio pubblico non è più teorico, è ciò che
+    // permette al browser di tenerselo dopo il primo caricamento.
+    const pagina = await grezza(p2, { host: NOME, token, path: `/?token=${token}` })
+    check('pagina servita con Host esterno → set-cookie stark=… Secure',
+      /set-cookie: stark=[^\r\n]*Secure/i.test(pagina.testa), pagina.testa.split('\r\n')[0] ?? '')
+    // `/api/system` non può più dire «localhost only» mentre il perimetro è aperto:
+    // era il bug che c'era già con Tailscale acceso.
+    const sys = await fetch(`${aperto.url}/api/system`, { headers: auth })
+      .then(r => r.json()) as { listening: string; perimeter: { open: boolean; hosts: { host: string }[] } }
+    check('/api/system dice il vero sul perimetro aperto',
+      sys.perimeter.open && sys.perimeter.hosts.some(h => h.host === NOME) && !sys.listening.includes('only'),
+      sys.listening)
+  } finally { await aperto.stop() }
+}
+
+{
+  const { perimetro } = await import('../daemon/security.ts')
+  const p = perimetro(['*.esempio.test', '', 'non un hostname', `https://${NOME}/qualcosa`])
+  check('wildcard scartata, e detta',
+    p.ammessi.every(a => !a.host.includes('*')) && p.scartate.some(s => s.voce === '*.esempio.test'))
+  check('schema e percorso si tolgono da soli',
+    p.ammessi.some(a => a.host === NOME && a.origin === `https://${NOME}`))
+  check('una voce che non è un hostname finisce fra le scartate',
+    p.scartate.some(s => s.voce === 'non un hostname'))
+  // Senza `STARK_VAPID_SUBJECT`, il `sub` è il primo nome pubblico: un dominio vero,
+  // che è l'unica cosa che Apple accetta (`403 BadJwtToken` altrimenti).
+  const { soggetto } = await import('../daemon/push.ts')
+  const prima = process.env['STARK_VAPID_SUBJECT']
+  delete process.env['STARK_VAPID_SUBJECT']
+  check('sub VAPID = il primo host del perimetro', soggetto(p) === `https://${NOME}`, soggetto(p))
+  check('sub VAPID senza perimetro = il mailto: di ripiego',
+    soggetto({ ammessi: [], scartate: [] }).startsWith('mailto:'))
+  if (prima !== undefined) process.env['STARK_VAPID_SUBJECT'] = prima
+}
 
 // ─── Finder di sistema: native-browse ───────────────────────────────────────
 //
@@ -280,6 +372,10 @@ check('una sessione che non esiste torna vuoto, non un\'eccezione',
 // ─── flusso ─────────────────────────────────────────────────────────────────
 
 const dalVivo: CanonicalEvent[] = []
+// Quando è arrivato ciascun evento, non solo quali. Un proxy che bufferizza consegna
+// **lo stesso numero** di eventi — solo tutti insieme alla fine — quindi contarli non
+// distingue un flusso vivo da uno morto. Va misurato.
+const arrivi: number[] = []
 const stream = await fetch(`${url}/api/sessions/${id}/stream?from=0`, { headers: auth })
 const lettore = stream.body!.getReader()
 const decoder = new TextDecoder()
@@ -300,17 +396,20 @@ void (async () => {
       if (!riga) continue
       const e = JSON.parse(riga.slice(6)) as CanonicalEvent
       dalVivo.push(e)
+      arrivi.push(performance.now())
       if (e.payload.k === 'turn.ended') fine()
     }
   }
   } catch { /* il daemon si è fermato: la caduta del flusso è attesa, non un errore */ }
 })()
 
+const chiesto = performance.now()
 await fetch(`${url}/api/sessions/${id}/command`, {
   method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
   body: JSON.stringify({ c: 'session.prompt', text: 'Rispondi con una sola parola: pronto' }),
 })
 await finito
+const concluso = performance.now()
 
 // ─── coerenza ───────────────────────────────────────────────────────────────
 
@@ -319,6 +418,25 @@ const soloVisti = dalVivo.map(e => e.seq)
 const soloDisco = daDisco.events.map(e => e.seq).filter(n => n <= (soloVisti[soloVisti.length - 1] ?? 0))
 
 check('il flusso ha consegnato eventi', dalVivo.length > 0, `${dalVivo.length}`)
+
+// ─── il flusso è vivo, non bufferizzato ─────────────────────────────────────
+//
+// La firma di un proxy che bufferizza è precisa: gli eventi ci sono tutti, ma sono
+// arrivati **in blocco alla fine**. Cioè la coda della finestra li contiene quasi
+// tutti, e il divario massimo fra due arrivi consecutivi copre quasi tutta la durata.
+// Su loopback questa prova è sempre verde per costruzione: serve puntata a un tunnel
+// (`--contro`), dove è l'unica cosa che distingue «funziona» da «sembra funzionare».
+{
+  const durata = concluso - chiesto
+  const primo = (arrivi[0] ?? concluso) - chiesto
+  const coda = arrivi.filter(t => t > concluso - durata * 0.1).length
+  const quota = arrivi.length > 0 ? coda / arrivi.length : 0
+  let divario = 0
+  for (let i = 1; i < arrivi.length; i++) divario = Math.max(divario, (arrivi[i] ?? 0) - (arrivi[i - 1] ?? 0))
+  check('il flusso arriva mentre succede, non tutto alla fine',
+    arrivi.length < 3 || quota <= 0.8,
+    `primo dato ${primo | 0}ms · ${(quota * 100) | 0}% nell'ultimo 10% · divario max ${divario | 0}ms su ${durata | 0}ms`)
+}
 check('flusso e disco raccontano la stessa storia',
   JSON.stringify(soloVisti) === JSON.stringify(soloDisco),
   `flusso ${soloVisti.length} · disco ${soloDisco.length}`)

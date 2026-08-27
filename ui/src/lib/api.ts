@@ -91,6 +91,10 @@ export type SystemInfo = {
     configDir: string
     profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
   }
+  /** Chi può parlare col daemon oltre a questa macchina. `open: false` è il default:
+   *  aprire il perimetro si fa sulla macchina (`STARK_PUBLIC_HOST`, o Tailscale), e ha
+   *  effetto al riavvio del daemon — quindi non è un interruttore che sta qui. */
+  perimeter: { open: boolean; hosts: { host: string; source: 'tailscale' | 'env' }[] }
   /** Il Finder nativo è disponibile su QUESTA esecuzione del daemon, ricalcolato a
    *  ogni richiesta — non è una proprietà stabile della macchina. */
   nativeFolderPicker: boolean
