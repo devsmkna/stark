@@ -39,6 +39,13 @@ export function passeggero(motivo: string): boolean {
   // `not supported` e `401` NON entrano: una chiave che non abilita un modello non
   // cambia idea riprovando.
   if (m.includes('not supported') || m.includes('401') || m.includes('unauthor')) return false
+  // **Un budget esaurito non e' un intoppo passeggero.** `FreeUsageLimitError` di
+  // OpenCode Zen dice «hai finito l'allowance», e il suo messaggio contiene le parole
+  // «Rate limit exceeded» — che sembrano un 429 e non lo sono. Riprovare tre volte in
+  // nove secondi brucerebbe tre richieste dello stesso budget e ritarderebbe l'unica
+  // cosa che l'utente deve leggere. Misurato il 27 agosto: dopo una giornata di sonde
+  // la chiave rispondeva cosi' a ogni chiamata, streaming o no.
+  if (m.includes('freeusagelimit') || m.includes('usage limit')) return false
   return /\b(429|500|502|503|504)\b/.test(m)
     || m.includes('unavailable') || m.includes('overload')
     || m.includes('rate limit') || m.includes('timeout')

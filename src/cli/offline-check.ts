@@ -938,6 +938,11 @@ check('diff: forma unificata, numeri di riga coerenti',
     !passeggero('Provider request failed with HTTP 401: Model kimi-k2.5-free is not supported'))
   check('OpenCode: e nemmeno un errore che non dice niente di passeggero',
     !passeggero('Invalid opencode/openai-compatible-chat stream event'))
+  // La riga piu' sottile: il messaggio di un budget esaurito CONTIENE «Rate limit
+  // exceeded», quindi sembra un 429 e non lo e'. Riprovare brucerebbe tre richieste
+  // dello stesso budget e ritarderebbe l'unica cosa da leggere.
+  check('OpenCode: un budget free esaurito NON e\' un intoppo passeggero',
+    !passeggero('{"type":"FreeUsageLimitError","message":"Error from provider (Console): Rate limit exceeded. Please try again later."}'))
 
   check('OpenCode: il modello si scrive `provider/id`',
     modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')
