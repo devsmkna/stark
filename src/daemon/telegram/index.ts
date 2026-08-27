@@ -477,14 +477,36 @@ export class Telegram {
     this.#segui(chatId, id)
   }
 
-  /** Aspetta che una sessione appena riaperta sia pronta a ricevere. */
+  /**
+   * Aspetta che una sessione appena riaperta sia pronta a ricevere.
+   *
+   * Si guarda **prima** lo stato, e si riguarda subito **dopo** essersi iscritti. Non è
+   * cintura e bretelle: `open()` fa già ripartire il processo, quindi `session.state:
+   * idle` può essere arrivato mentre `open()` era ancora in corso — cioè prima che qui
+   * ci fosse qualcuno ad ascoltare. Aspettare un segnale già passato vuol dire aspettare
+   * per sempre, ed è esattamente com'è stato visto fallire dal vivo: sessione viva e
+   * `idle` nell'elenco, e il bot fermo su «la riapro».
+   *
+   * Il secondo controllo chiude la finestra che resta fra il primo e l'iscrizione.
+   */
   #attendi(id: string, entro: number): Promise<void> {
+    const pronta = (): boolean => this.#registro.list().find(r => r.id === id)?.state === 'idle'
+    if (pronta()) return Promise.resolve()
     return new Promise((risolvi, rifiuta) => {
-      const scadenza = setTimeout(() => { stacca(); rifiuta(new Error('non è ripartita entro un minuto')) }, entro)
+      let finito = false
+      const chiudi = (): boolean => {
+        if (finito) return false
+        finito = true
+        clearTimeout(scadenza)
+        stacca()
+        return true
+      }
+      const scadenza = setTimeout(() => { if (chiudi()) rifiuta(new Error('non è ripartita entro un minuto')) }, entro)
       const stacca = this.#registro.subscribe(id, Number.MAX_SAFE_INTEGER, e => {
-        if (e.payload.k !== 'session.state') return
-        if (e.payload.state === 'idle') { clearTimeout(scadenza); stacca(); risolvi() }
+        if (e.payload.k !== 'session.state' || e.payload.state !== 'idle') return
+        if (chiudi()) risolvi()
       })
+      if (pronta() && chiudi()) risolvi()
     })
   }
 

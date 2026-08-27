@@ -108,13 +108,23 @@ const registro = {
     if (!r?.live) return { ok: false as const, error: 'sessione non attiva' }
     return { ok: true as const }
   },
+  /**
+   * `true` = la sessione diventa pronta **dentro** `open()`, prima che il chiamante possa
+   * mettersi in ascolto. È l'ordine reale, ed è quello che ha fatto restare il bot fermo
+   * su «la riapro» mentre la sessione era già viva e `idle`: aspettava un segnale già
+   * passato. La prova prima mandava l'evento dopo 80ms, cioè modellava solo l'ordine
+   * fortunato — ed era verde su un bug che c'era.
+   */
+  apreSubito: true,
   open: async (spec: { cwd: string; resume?: { ref: string }; configDir?: string }) => {
     aperture.push(spec)
     const r = righe.find(x => x.id === spec.resume?.ref)
-    if (r) r.live = true
-    // Il risveglio vero manda `session.state: idle` quando è pronta: `#attendi` sta
-    // aspettando proprio quello.
-    setTimeout(() => evento(spec.resume?.ref ?? '', { k: 'session.state', state: 'idle' }, 1), 80)
+    const pronta = (): void => {
+      if (r) { r.live = true; r.state = 'idle' }
+      evento(spec.resume?.ref ?? '', { k: 'session.state', state: 'idle' }, 1)
+    }
+    if (registro.apreSubito) pronta()
+    else setTimeout(pronta, 80)
     return spec.resume?.ref ?? 'nuova'
   },
   settings: () => ({ projects: { '/casa/altro': { profile: '/root/.claude-digitizers' } } }),
@@ -443,6 +453,30 @@ check('e lo dice, perché rileggere il contesto costa quota',
   chiamate.some(c => String(c.corpo['text'] ?? '').includes('costa quota')))
 check('e poi manda il prompt',
   comandi.some(c => c.cmd.c === 'session.prompt'), JSON.stringify(comandi))
+check('e non resta appeso ad aspettare un segnale già passato',
+  !chiamate.some(c => String(c.corpo['text'] ?? '').includes('non è ripartita')),
+  chiamate.map(c => String(c.corpo['text'] ?? '').slice(0, 40)).join(' | '))
+
+// E l'ordine opposto, quello che funzionava già: la sessione diventa pronta **dopo**.
+{
+  registro.apreSubito = false
+  righe.push({ id: 'ccc', title: 'la terza', state: 'closed', cwd: '/casa/terzo', live: false })
+  snapshots.set('ccc', reduce([], 'ccc'))
+  coda.push({ update_id: seq++, callback_query: { id: 'cb10', data: 'u:ccc', from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+  comandi.length = 0
+  aperture.length = 0
+  await manda(TELEFONO, 'sveglia')
+  await respira(600)
+  check('funziona anche quando la sessione diventa pronta dopo',
+    aperture.some(a => a.resume?.ref === 'ccc') && comandi.some(c => c.cmd.c === 'session.prompt'),
+    JSON.stringify(comandi))
+  registro.apreSubito = true
+  // Si torna sulla conversazione di prima: le verifiche qui sotto danno per scontato che
+  // la corrente sia 'bbb', ed è così che si è rotto scrivendo questo blocco.
+  coda.push({ update_id: seq++, callback_query: { id: 'cb11', data: 'u:bbb', from: { id: TELEFONO }, message: { message_id: 1, chat: { id: TELEFONO } } } })
+  await respira(400)
+}
 
 // ── modello, modalità, nuova, rinomina ─────────────────────────────────────
 
