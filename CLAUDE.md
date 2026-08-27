@@ -25,7 +25,7 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-001 — Canale di comunicazione con gli agent
   - ADR-002 — Piattaforma: web app locale
   - ADR-003 — Dove vive la memoria di progetto
-  - ADR-004 — Un solo adapter nell'MVP (Claude Code)
+  - ADR-004 — Un solo adapter nell'MVP (Claude Code) — SUPERATA da ADR-012
   - ADR-005 — Ciclo di vita delle sessioni (daemon persistente + Sleep)
   - ADR-006 — Modello dei permessi — SUPERATA da ADR-008
   - ADR-008 — Permessi basati su auto mode (default: zero card, toggle opzionali)
@@ -33,6 +33,7 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-009 — Agent SDK ufficiale invece del protocollo a mano (supera in parte ADR-001)
   - ADR-010 — Con cosa si scrive la UI (Vite + Svelte 5; il daemon resta senza build)
   - ADR-011 — Notifiche sul telefono via Web Push, e cosa esce dalla macchina
+  - ADR-012 — Il secondo adapter: OpenCode come prova di carico (supera ADR-004)
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -193,7 +194,7 @@ e che non resti niente nell'elenco.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 71 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 143 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera.
 
 Per **guardare** la UI invece di descriverla:
@@ -950,22 +951,165 @@ numero del CLI — non c'è un sovrapprezzo di STARK.
 Le sonde restano in `spike/`: `modo-default.ts`, `costo-classificatore.ts`, `costo-risveglio.ts`,
 `risveglio-freddo.ts`. Vanno rifatte a ogni salto di versione del CLI.
 
-Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
-risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
-chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
+**Quattro cose per l'MVP, e una di esse era la domanda sbagliata** (27 agosto 2026, chieste
+dall'utente dopo aver domandato «cosa manca per considerare completo l'MVP?»). Erano: la
+**cache dell'elenco**, la **checklist dei todo**, il **plan mode**, la **ricerca**. La seconda
+si è rivelata inesistente, e al suo posto ne è emersa una più grossa.
+
+**L'elenco rileggeva ogni journal da capo, fino a quattro volte al secondo.** `registry.list()`
+faceva `reduce(Journal.read(...))` su **ogni** file a ogni colpetto SSE. Misurato sul journal
+vero da 12 MB (25.143 eventi): **82 ms per una sola conversazione**, 619 ms con dieci — di
+event loop **bloccato**, perché `readFileSync` e `JSON.parse` sono sincroni: a fermarsi era
+tutto, SSE compreso. La correzione non è una cache qualunque: è la prima volta che
+l'append-only del §13 viene **usato** invece che solo rispettato. `Journal.readFrom(path,
+offset)` legge solo la coda, e `reduce` non è altro che `applyTo` ripetuto — quindi lo stato di
+prima più le righe nuove *è* lo stato di adesso. Da 619 ms a **0,13 ms** a riposo, 0,31 ms con
+una riga nuova. Nello stesso giro: il journal di una sessione **viva** non si rilegge affatto,
+perché la sua riga la scrive il processo e la sovrascriveva comunque — era lavoro buttato, e per
+giunta proprio sulla chat più grande e più spesso ricalcolata. Due dettagli che non si
+indovinano e che le prove tengono fermi: l'offset avanza solo oltre le righe **complete** (una
+`writeSync` in corso può lasciare l'ultima a metà), e un file più **corto** dell'offset non è la
+coda dello stesso file — è un altro file, e si rilegge da capo.
+
+**`TodoWrite` non esiste.** Era la mia seconda proposta, e la premessa era sbagliata: la
+checklist che si ricorda dalla TUI **non è fra i 32 tool** che il CLI 2.1.241 dichiara nel suo
+`system:init` (verificato leggendo la cattura nativa di una sessione vera, non i tipi né la
+memoria). È esattamente la regola «non dedurre, verificare» applicata a me stessa: avevo
+descritto come «il pezzo più visibile della TUI che manca a STARK» una cosa che non c'è più.
+Scritto in `docs/event-model.md` §16.10 perché sembra il contrario, e chi verrà dopo rischia di
+rimetterlo.
+
+**Al suo posto: i lavori che continuano da soli.** Cercando cosa il CLI usa *oggi* al posto dei
+todo, sono saltati fuori due messaggi che STARK buttava via — `system:task_started` e
+`system:task_notification`. Non è un dettaglio: un comando lanciato **in background** risponde
+subito «Async agent launched successfully», quindi il suo `tool.ended` arriva positivo una riga
+dopo e la conversazione lo mostrava **finito**. Misurato su un journal reale: `tool_result` alla
+riga 53, esito vero alla riga **810**, cioè in un altro turno. Su una sola conversazione vera:
+**316 lavori, 15 in background, 5 sub-agent e 10 falliti** — quei dieci fallimenti non erano
+visibili da nessuna parte. Due eventi canonici nuovi (`task.started`/`task.ended`, §7) che si
+attaccano alla **riga del tool che li ha lanciati**, non a una riga nuova: un lavoro in
+background non è un secondo fatto, è ciò che si scopre dopo su un fatto già mostrato. Il
+collegamento fra le due metà è il `taskId` e non il `callId`, che nella notifica non c'è —
+e comunque la riga sta in un turno che non è più quello aperto. Verificato **sui dati veri**:
+`spike/task-ui.ts` ripassa una cattura nativa dal traduttore e apre la UI su quel journal —
+312 righe con il loro lavoro attaccato, e a schermo la riga di una sonda uccisa che adesso dice
+`failed` col motivo, dove prima c'era un ✓ verde.
+
+**Il piano si può leggere** (era la terza). `plan` era una delle modalità offerte dalla barra,
+ma `ExitPlanMode` non compariva in `src/` né in `ui/src/`. Verificato dal vivo
+(`spike/piano-todo-subagent.ts`): arriva come richiesta di permesso, con `{plan, planFilePath}`
+— e siccome `plan` non è fra i campi in cui `summarize()` cerca il soggetto di un'azione, quella
+card **non mostrava niente**. Si approvava un piano che non si poteva leggere. Ora è il terzo
+stato bloccante del blocco in basso, accanto ai permessi e alle domande, con un corpo che scorre
+e il markdown reso; e due eventi canonici propri (`plan.proposed`/`plan.replied`), per la stessa
+ragione per cui le domande non sono permessi: un permesso si concede riconoscendo un soggetto,
+un piano si approva **leggendolo**. Le due approvazioni sono due bottoni distinti — «accept
+edits» e «ask me first» — perché nel terminale sono due voci, e `mode` viaggia **con**
+l'approvazione (`updatedPermissions: [{type:'setMode'}]`, che funziona: misurato), se no
+resterebbe una finestra in cui l'agent è ripartito ma la modalità è ancora `plan`.
+
+Quella prova dal vivo ha trovato un bug che nessuna prova offline avrebbe visto: **STARK
+conosceva solo le modalità che imponeva lui**. Il CLI passava davvero ad `acceptEdits` — lo
+dichiarava nel suo `system:status` — e la barra di stato continuava a dire `plan`. Vale anche
+per `EnterPlanMode`, che è un **tool dell'agent**: l'agent può cambiare modalità da sé. Ora il
+traduttore emette `session.mode` ogni volta che un messaggio nativo ne dichiara una diversa
+dall'ultima nota.
+
+**E si cerca** (la quarta). Una casella sopra l'elenco, e i risultati che prendono il posto
+dell'albero: cercare non è un posto dove andare, è un modo di guardare l'elenco. Due ricerche
+tenute separate perché sono due domande diverse — **Titles** (filtro locale: i titoli sono già
+tutti nel browser) e **Inside conversations** (il daemon, che ha i journal). La cosa che decide
+tutto il resto: si cerca negli **snapshot**, non nei file. Quindi trova ciò che la UI mostra —
+una risposta arrivata in trecento `text.delta` non esiste come frase intera in nessuna riga del
+journal, e cercarla riga per riga non la troverebbe mai — e non rilegge niente, perché quegli
+snapshot sono gli stessi della cache di cui sopra. Su dati veri: **16 ms** la prima richiesta,
+**2,9 ms** la seconda. Premere un risultato apre la conversazione **su quel turno**, che si apre
+da sé, si porta in vista e lampeggia; se stava sopra un `/clear`, si apre anche il capitolo che
+lo conteneva.
+Tre difetti trovati **guidando la UI vera**, nessuno visibile leggendo il codice o dalle prove
+offline: una chiave duplicata in un `{#each}` (`each_key_duplicate`) che lasciava la barra su
+«Searching…» per sempre — due corrispondenze possono cadere allo stesso punto dello stesso
+turno; un tetto di cinque risultati che ne lasciava passare **48**, perché il limite si
+controllava solo a fine turno e un turno solo ne conteneva decine; e il salto al turno trovato
+che finiva **fuori vista**, perché l'auto-scroll rileggeva `stick` fuori dal frame e non dentro,
+quindi vinceva la corsa e riportava in fondo (misurato: turno a −684px, scroll incollato al
+massimo; dopo: turno a +45px). Il terzo si è corretto **chiudendo la corsa** — rileggere `stick`
+dentro il `requestAnimationFrame` — invece di inseguirla con un ritardo.
+
+Nello stesso giro è caduta un'ipotesi che sembrava un difetto: un «testo fantasma» dietro il
+bottone «Keep planning» nella prima fotografia. Misurati i rettangoli veri: `sovrapposti: false`,
+tutti e tre premibili con `elementFromPoint`. Era un fotogramma dell'animazione del blocco che
+si espande. Senza la misura si sarebbe «corretto» un bug inesistente.
+
+`npm run check` passa a **143**, `npm run daemon` a **34**. Sonde nuove in `spike/`:
+`piano-todo-subagent.ts` (costa quota), `piano-ui.ts` (costa un turno), `ricerca-ui.ts` e
+`task-ui.ts` (costo zero: rileggono journal e catture già esistenti).
+
+**I capitoli chiusi da un `/clear` stanno sopra il bordo** (27 agosto 2026, chiesto
+dall'utente con uno screenshot: «ha troppo spacing, e li voglio come WhatsApp o
+Telegram»). Due cose. Lo spacing: fra due tagli di fila restava 14+8+14 = **36px**,
+perché in un flex i margini **non collassano** — ora fra due righe consecutive c'è il solo
+`gap` di `.conv` (**8px**, 11 da telefono con lo zoom), e servono due regole
+(`.cleared + .cleared` e `.cleared:has(+ .cleared)`), non una: azzerare solo il
+margine sopra ne lascia comunque 18.
+La seconda è l'impianto: il capitolo vivo è alto **almeno quanto lo scroller**
+(`.chapter.live { min-height: 100% }`), e siccome la conversazione parte già in fondo, il
+primo turno della conversazione nuova cade **esattamente** sul bordo superiore e tutto ciò
+che lo precede resta più in alto — si risale a prenderlo, e per tornare c'è la freccia che
+c'era già. `flex-grow` **non** funziona ed è il pezzo che non si indovina: crescere
+distribuisce lo spazio *avanzato*, quindi il capitolo si sarebbe fermato a riempire la
+vista senza mai sfondarla — niente spazio da scorrere, e le righe sarebbero rimaste
+visibili lo stesso. Il `100%` invece è alto quanto il **content box**, che esclude i 12px
+di padding in basso: è quello che fa cadere l'inizio sul bordo al pixel invece che dodici
+sopra. Subito dopo un `/clear` il capitolo vivo non esiste ancora e va creato vuoto, se no
+le righe resterebbero in mezzo a una schermata deserta; e una schermata **completamente**
+vuota si legge come un guasto, quindi lì (e solo lì) c'è una riga che dice dov'è finito il
+resto. Misurato su Chrome e su **WebKit** (via l'HTTPS di Tailscale, perché su `http://`
+semplice WebKit non carica STARK — vedi più sopra): 0 righe visibili aperta la chat, tutte
+risalendo. `tools/prova-clear.ts` genera i journal per i casi che non capitano a comando.
+
+**E un `/clear` non sopravviveva allo Sleep** (27 agosto 2026, trovato rispondendo a «il
+comportamento è come ce lo aspettiamo?» dopo che l'utente aveva risvegliato la chat).
+`spec.resume.ref` faceva **due mestieri**: dare il nome al journal e dire al CLI quale
+conversazione riprendere. Di norma coincidono — all'apertura STARK passa il proprio id
+come `sessionId` — ma un `/clear` li fa divergere, perché il CLI **sposta la conversazione
+su un id nuovo**, che dichiara nel `system:init` successivo (→ `session.resumeRef`, già
+nel journal e mai letto da `open()`). Risultato: il risveglio riapriva la conversazione di
+**prima** del taglio. Misurato sulla chat vera dell'utente: **129.387** token prima del
+`/clear`, **57.748** dopo, e di nuovo **129.387** al risveglio. Fix: `refDaRiprendere()`,
+tre righe, `snapshot.resumeRef ?? spec.resume.ref` per i risvegli veri (un `fork` resta
+dov'è: lì lo snapshot è quello del journal nuovo, cioè vuoto). Provato con l'A/B che
+chiude il cerchio (`spike/risveglio-dopo-clear.ts`, costa quattro turni corti): parola
+nascosta prima del taglio, `/clear`, Sleep, risveglio → col ref dal journal l'agent
+risponde **NONLOSO**, col ref vecchio risponde **MELANZANA**. Stessa conversazione, stessa
+macchina, minuti di distanza: cambia solo quale ref si passa. Vale la pena sapere perché
+non era mai emerso: `npm run resume` usava già `first.resumeRef`, cioè la cosa giusta — a
+sbagliare era la sola via che usa l'utente, quella della UI. `npm run daemon` passa a
+**38**: le quattro nuove tengono ferma la regola senza aprire una sessione, perché è una
+scelta fra due stringhe.
+
+Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
-cambiato quello vecchio. Restano i divieti veri (`deny`), le due misure di quota mai
-fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
-sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
+cambiato quello vecchio. Restano i divieti veri (`deny`), e sul filone telefono la durata
+della credenziale (§5) e la seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora
+fattibile sul trasporto giusto).
+
+Sul filone «cosa manca all'MVP», dopo il giro del 27 agosto restano tre cose, in
+quest'ordine di valore: il **lavoro dentro un sub-agent** (oggi se ne vede l'incarico e il
+resoconto, non i passi — `parent_tool_use_id` esiste ma il traduttore non lo guarda, ed è una
+schermata da disegnare prima che da scrivere, §16.9); la **memoria** della cache dell'elenco
+(uno snapshot per conversazione tenuto in vita: la rilettura non si paga più, l'occupazione
+sì, ed è l'altra metà della domanda sulla rotazione del journal); e la **ricerca dentro la
+conversazione aperta**, che oggi passa dalla stessa casella dell'elenco e quindi risponde
+«quale chat», non «dove in questa».
 
 Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
 `deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica
 dell'instradamento.
 
-Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
-classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
-conversazione lunga** (P16). Le sonde usano prompt minuscoli, quindi non dicono niente su un
-trascritto vero: finché non c'è quella misura, lo Sleep non va presentato come indolore.
+~~Due cose non ancora misurate~~ — **fatte** il 27 agosto: vedi «Le due misure mai fatte»
+più sopra. Il classificatore resta sotto la risoluzione della misura; il risveglio arriva
+come `cache_read` e regge almeno 420 secondi di pausa.
 
 Decisioni già prese:
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
@@ -1036,6 +1180,25 @@ Decisioni già prese:
   ogni token, quindi due chat che lavorano insieme si scavalcherebbero di continuo. `since`
   cambia solo quando cambia lo stato, e chi finisce per primo cambia gruppo con un `since`
   nuovo — quindi sale in cima al suo senza bisogno di un caso speciale.
+- **si cerca dagli snapshot, non dai file**: la ricerca trova ciò che la UI mostra, e su una
+  macchina accesa non rilegge niente. Cercare nelle righe del journal sembrerebbe più diretto ed
+  è sbagliato: una risposta arrivata in trecento `text.delta` non è scritta intera da nessuna
+  parte. Niente espressioni regolari — una casella in cui `(` fa esplodere tutto è peggio di una
+  che trova meno.
+- **un lavoro che continua da solo sta sulla riga che lo ha lanciato**, non su una riga nuova:
+  un comando in background non è un secondo fatto, è ciò che si scopre dopo su un fatto già
+  mostrato. E il suo esito **vince** sull'esito della chiamata, che torna positivo un istante
+  dopo il lancio e direbbe «fatto» su un lavoro in corso.
+- **il piano è un documento, non un permesso**: si approva leggendolo, non riconoscendone il
+  soggetto. Ha i suoi eventi canonici e il suo riquadro, per la stessa ragione per cui le
+  domande non sono permessi. E `mode` viaggia **con** l'approvazione: nel terminale approvare
+  vuol dire anche scegliere come proseguire.
+- **la modalità dei permessi la dichiara il CLI**, non solo STARK: `EnterPlanMode` è un tool
+  dell'agent, e approvare un piano la cambia dall'altra parte. Leggerla solo quando la
+  imponiamo noi vuol dire mostrarne una falsa per il resto della conversazione.
+- **l'append-only del journal è una cosa da usare, non solo da rispettare**: chi rilegge un
+  file che cresce in coda deve leggere la coda. Vale per l'elenco (da 619 ms a 0,13) e vale
+  per chiunque altro dovrà rileggere un journal a ripetizione.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il

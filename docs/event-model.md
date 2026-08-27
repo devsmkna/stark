@@ -107,6 +107,20 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 
 `sleeping` è uno stato di STARK, non dell'agent: nessun evento dell'agent lo produce.
 
+### La modalità dei permessi la decide anche il CLI, non solo noi
+
+`session.mode` nasceva **solo** quando era STARK a imporre una modalità. Non è la stessa cosa di
+«qual è la modalità adesso», e la differenza si è vista dal vivo il 27 agosto 2026: approvando
+un piano con `setMode: acceptEdits`, il CLI passa davvero ad `acceptEdits` — lo dichiara nel
+proprio `system:status` — mentre la barra di stato continuava a mostrare `plan`.
+
+Non è un caso isolato: `EnterPlanMode` è un **tool dell'agent**, quindi l'agent può entrare in
+plan mode da sé, e senza leggere la modalità dichiarata dal CLI STARK mostrerebbe per il resto
+della conversazione quella di prima. La regola è quindi: il traduttore emette `session.mode`
+ogni volta che un messaggio nativo dichiara una modalità **diversa** dall'ultima nota. Solo sui
+cambiamenti — `system:status` arriva più volte per turno, e ripetere lo stesso valore
+riempirebbe il journal di righe che non dicono niente.
+
 ---
 
 ## 6. Eventi di sessione
@@ -445,6 +459,43 @@ direbbe la stessa cosa) o è dichiaratamente inerte (`Workflow`: «Ignored — s
 description in the script's meta block», dai tipi stessi). Vale quindi anche per un domani
 server MCP che scriva il proprio `description`, senza una riga di codice in più.
 
+### Un lavoro che continua dopo la chiamata che lo ha lanciato
+
+```ts
+| { k: 'task.started', taskId: string, callId?: string,
+                       kind: 'command' | 'agent' | 'other',
+                       description?: string, background: boolean }
+| { k: 'task.ended',   taskId: string, status: 'completed' | 'failed',
+                       summary?: string, outputFile?: string }
+```
+
+Non è un doppione di `tool.started`, ed è la differenza che li rende necessari. Un comando
+lanciato **in background** risponde subito — «Async agent launched successfully» — quindi il suo
+`tool.ended` arriva con esito positivo una riga dopo. Ma quello che è finito è il *lancio*.
+
+Misurato su una cattura reale: `tool_result` alla riga 53, esito vero alla riga **810**, cioè in
+un altro turno. Senza questi due eventi quell'esito in STARK non esiste, e la conversazione
+mostra una riga verde al posto di un lavoro ancora in corso — la bugia peggiore, quella su cui
+si aspetta.
+
+`callId` è la chiamata che lo ha avviato: il lavoro **non** è una riga nuova nel flusso, è ciò
+che si scopre dopo su una riga che c'è già. Per questo `applyTo` lo attacca alla `ToolPartView`
+esistente, e `task.ended` la ritrova per `taskId` — non per `callId`, che nella notifica non
+c'è, e comunque la riga sta in un turno che non è più quello aperto.
+
+`kind` è canonico: `local_bash`/`local_agent` sono vocabolario di Claude Code e restano
+nell'adapter (§1). `other` non è pigrizia: è la promessa che un tipo nuovo, aggiunto dal CLI
+domani, si veda lo stesso invece di sparire.
+
+Quanto vale, su journal veri di questa macchina: **316** lavori in una sola conversazione, di
+cui 15 in background, 5 sub-agent e **10 falliti**. Prima del 27 agosto 2026 cadevano tutti nel
+ramo di scarto del traduttore: quei dieci fallimenti non erano visibili da nessuna parte.
+
+Cosa **non** portano: il lavoro interno di un sub-agent. Il CLI ne manda il resoconto finale,
+non i suoi passi. `parent_tool_use_id` esiste sui messaggi (verificato: 3 messaggi, 1 genitore,
+in una sessione di prova) e un domani permetterebbe di annidarli — ma è un'altra cosa, e va
+disegnata prima di scriverla.
+
 `tool.input.delta` esiste perché entrambi gli agent trasmettono l'input del tool in streaming
 (Claude Code con `input_json_delta`, OpenCode con `session.next.tool.input.delta`). La UI può
 ignorarlo e aspettare `tool.input.ended`, ma il modello non deve buttarlo via: è ciò che permette
@@ -485,6 +536,37 @@ della richiesta `POST /api/session/{id}/permission/{requestID}/reply` di OpenCod
 > `suggestions`, un elenco di regole già pronte, e rimandarne una indietro in
 > `updatedPermissions` la scrive in `.claude/settings.local.json`. Le sessioni successive
 > smettono di chiedere da sole. Quindi `always` **non è emulato**: è la strada documentata.
+
+### Il piano: si legge, non si concede
+
+```ts
+| { k: 'plan.proposed', requestId: string, plan: string, path?: string }
+| { k: 'plan.replied',  requestId: string, decision: 'approved' | 'rejected',
+                        mode?: PermissionMode, feedback?: string }
+```
+
+Sono eventi a sé e non `permission.asked`, per la stessa ragione delle domande (vedi §16.1):
+per chi guarda, «ho scritto un piano, lo approvi?» e «posso eseguire questo comando?» sono due
+cose diverse, e una UI che le mostrasse uguali mentirebbe. Qui la differenza è ancora più netta:
+un permesso si concede riconoscendo **un soggetto** (un comando, un percorso), un piano si
+approva **leggendolo**. È un documento.
+
+Verificato dal vivo il 27 agosto 2026 (`spike/piano-todo-subagent.ts`): uscire dal plan mode
+arriva come richiesta di permesso sul tool `ExitPlanMode`, con `{ plan, planFilePath }`. Prima
+di questi eventi finiva nella card generica — e siccome `plan` non è fra i campi in cui
+`summarize()` cerca il soggetto di un'azione, quella card **non mostrava niente**: si approvava
+un piano che non si poteva leggere.
+
+`mode` viaggia **con** l'approvazione, non come comando separato: nel terminale approvare vuol
+dire anche scegliere come proseguire, e mandarli in due tempi lascerebbe una finestra in cui
+l'agent è già ripartito con la modalità di prima, cioè `plan`, che non tocca niente. L'adapter
+lo realizza con `updatedPermissions: [{ type: 'setMode', … }]` dell'SDK — che funziona:
+misurato, il CLI passa davvero ad `acceptEdits` e lo dichiara nel proprio `system:status`.
+
+`feedback` è cosa cambiare quando si rimanda a pianificare. Un rifiuto qui non è un errore: è
+una correzione, e il CLI la intende così — torna al modello come messaggio di `deny` e l'agent
+continua a pianificare. Vuoto è legittimo: obbligare a motivare un «no» renderebbe più scomodo
+dire di no che dire di sì.
 
 ### Quando questi eventi esistono, e quando non esistono affatto
 
@@ -720,6 +802,8 @@ type Command =
   | { c: 'session.close' }
   | { c: 'permission.reply', requestId: string, decision: 'once'|'always'|'reject', scope?: string }
   | { c: 'question.reply',   requestId: string, answer: string }
+  | { c: 'plan.reply',      requestId: string, decision: 'approved'|'rejected',
+                            mode?: PermissionMode, feedback?: string }
 ```
 
 ```ts
@@ -803,6 +887,32 @@ Invarianti:
 
 Il raw nativo, se lo si vuole per debug, va in un file separato e non versionato — mai mescolato
 al journal.
+
+### Append-only non è solo un vincolo: è una cosa che si può usare
+
+L'invariante 1 è stata a lungo solo rispettata. `Journal.readFrom(path, offset)` è il primo
+posto in cui viene **usata**: se il file è cresciuto di tre righe, lo stato di prima più quelle
+tre righe *è* lo stato di adesso, perché `reduce` non è altro che `applyTo` ripetuto su uno
+snapshot vuoto.
+
+Serviva perché l'elenco delle conversazioni rileggeva **ogni journal per intero** a ogni
+aggiornamento, cioè fino a quattro volte al secondo mentre una chat streama. Misurato su un
+journal reale da 12 MB (25.143 eventi): 82 ms per **una** conversazione; con dieci copie, 619 ms
+di event loop bloccato per giro — `readFileSync` e `JSON.parse` sono sincroni, quindi a fermarsi
+era tutto, SSE compreso. Con la cache incrementale: **0,13 ms** a riposo, 0,31 ms con una riga
+nuova in coda.
+
+Due dettagli che non si indovinano. L'offset avanza solo oltre le righe **complete**: una
+`writeSync` in corso può lasciare l'ultima riga a metà, e ripartire da dentro quella riga
+produrrebbe due frammenti che non sono JSON né l'uno né l'altro. E un file più **corto**
+dell'offset non è la coda dello stesso file: è un altro file (cancellato e ricreato), quindi si
+rilegge da capo — continuare uno snapshot vecchio sopra una storia nuova darebbe uno stato che
+non è mai esistito.
+
+Il corollario è la ricerca (§18): cercare passa dagli stessi snapshot, quindi su una macchina
+già accesa non rilegge niente — e trova ciò che la UI mostra, non ciò che sta scritto su disco.
+Una risposta arrivata in trecento `text.delta` nel journal non esiste come frase intera in
+nessuna riga: cercarla riga per riga non la troverebbe mai.
 
 ---
 
@@ -936,7 +1046,11 @@ cui `Capabilities` dovrà lavorare davvero.
    ancora — nel pannello sta in elenco, spento, con scritto perché.
 6. **Costo in quota del classificatore.** Ogni azione ispezionata è una chiamata a un secondo
    modello. Non è stato misurato, e su abbonamento a quota fissa è la risorsa che conta.
-7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa.
+7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa
+   — ma la pressione che la rendeva urgente è scesa: da quando l'elenco legge solo la coda
+   (§13), la dimensione del file non si paga più a ogni aggiornamento, solo alla prima lettura.
+   Restano da guardare la memoria (uno snapshot per conversazione, tenuto in vita) e il tempo di
+   apertura di una chat molto lunga.
 8. ~~**Il risveglio vero.**~~ **Risolto, e misurato (P16).** Rilanciare con `--resume` riaggancia
    il journal esistente e i `seq` **continuano** invece di ripartire da 1 — ripartire produrrebbe
    due eventi con lo stesso numero nello stesso file, e "ho già visto fino a N" smetterebbe di
@@ -944,6 +1058,17 @@ cui `Capabilities` dovrà lavorare davvero.
    dell'agent ripristina il contesto del modello. Per questo `--no-session-persistence` è
    incompatibile con lo Sleep. Resta non misurato **quanto costa in quota** risvegliare una
    conversazione lunga: le sonde usano prompt minuscoli.
+
+9. **Il lavoro *dentro* un sub-agent.** `task.started`/`task.ended` (§7) ne portano l'incarico e
+   il resoconto finale, che è ciò che il CLI manda. I passi interni no: viaggiano su messaggi
+   con `parent_tool_use_id` valorizzato (verificato: 3 messaggi, 1 genitore, in una sessione di
+   prova), che oggi il traduttore non guarda. Annidarli nel flusso è una schermata da disegnare
+   prima che da scrivere: un sub-agent può produrre da solo più blocchi di un turno intero.
+10. **`TodoWrite` non esiste**, e vale la pena che sia scritto qui perché sembra il contrario.
+   La checklist che si ricorda dalla TUI non è fra i 32 tool che il CLI **2.1.241** dichiara nel
+   suo `system:init` (verificato leggendo la cattura nativa di una sessione vera, non i tipi).
+   Il canale con cui il CLI racconta oggi un lavoro in corso è quello del §7. Se un domani il
+   tool tornasse, va rifatta la verifica — non dedotta dal ricordo.
 
 ---
 
@@ -990,6 +1115,23 @@ protocollo di differenze sarebbe una seconda copia dello stato da tenere allinea
 altro posto in cui la UI può divergere dal journal. Il ritardo di 250 ms non è una comodità: un
 solo turno produce decine di eventi al secondo, e ogni riga dell'elenco che non è viva si
 ricalcola rileggendo il suo journal da disco.
+
+### Cercare non è un comando
+
+`GET /api/search?q=` non cambia niente e non riguarda una conversazione sola, quindi è una GET
+sul registro come `/api/sessions`, non un `Command` del §11. Non tiene stato fra una richiesta e
+l'altra: chi scrive nella casella ne manda una per pausa di digitazione, e ognuna deve poter
+essere l'ultima.
+
+Cerca negli **snapshot**, non nei file (vedi §13): trova quindi ciò che la UI mostra. Due
+caratteri di soglia — con uno solo la risposta è «tutte», che non è una risposta. Nessuna
+espressione regolare, di proposito: una casella in cui scrivere `(` fa esplodere tutto è peggio
+di una che trova meno, e chi cerca `array.map(` intende quei caratteri lì.
+
+Il risultato porta il ritaglio **già fatto** e la posizione da evidenziare al suo interno
+(`at`, `len`). Rifare la ricerca nel browser vorrebbe dire scriverla due volte e sbagliarla in
+un posto solo: dove cade il maiuscolo/minuscolo, e di quanto si è spostato il testo dopo che gli
+a capo sono diventati spazi, è già stato deciso da chi ha cercato.
 
 ### Le due rotte che non sono comandi
 

@@ -14,7 +14,8 @@ import { applyTo, type SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
-  type ImportableRow, type LinkStatus, type Memoria, type SessionRow, type Settings,
+  type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
+  type SessionRow, type Settings,
 } from './api.ts'
 import { Notifier } from './notify.svelte.ts'
 import { CALL_HEAD, callFor, type Call } from '$core/calls.ts'
@@ -101,6 +102,21 @@ export class Store {
   renaming = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */
   refused = $state<string | null>(null)
+  /**
+   * Cosa si sta cercando. Sta qui e non dentro la barra laterale perché sopravvive al
+   * cambio di schermata: su telefono la ricerca è nell'elenco, il risultato apre la
+   * conversazione, e tornando indietro la ricerca deve essere ancora lì — se no la
+   * seconda cosa da controllare va ridigitata.
+   */
+  query = $state('')
+  /**
+   * Il turno da portare in vista quando la conversazione si apre.
+   *
+   * È uno stato e non un parametro di `select()` perché chi lo consuma è un altro
+   * componente, che deve poterlo vedere anche quando la chat era **già** quella
+   * aperta — caso in cui `select()` esce subito e non passa di lì.
+   */
+  mostra = $state<string | null>(null)
   /** Una riga sta partendo o si sta risvegliando: il pulsante non va premuto due volte. */
   working = $state(false)
   /**
@@ -405,6 +421,27 @@ export class Store {
     const id = this.selected
     if (!id || !this.live) return []
     return this.api.files(id, q)
+  }
+
+  /** Cercare in tutte le conversazioni. Chi chiama tiene i risultati: come `files()`,
+   *  è una domanda al daemon e non un comando, quindi non c'è niente da ricordare qui. */
+  async search(q: string): Promise<SessionMatches[]> {
+    return this.api.search(q)
+  }
+
+  /**
+   * Aprire una conversazione **su un turno preciso**, che è ciò che serve arrivando
+   * da un risultato di ricerca: aprirla e basta lascerebbe in fondo, cioè lontano da
+   * quello che si era appena trovato.
+   *
+   * `mostra` si assegna **prima** di `select`, non dopo: se la chat era già quella
+   * aperta `select` esce subito, e un'assegnazione dopo non troverebbe più nessuno
+   * che la sta aspettando. (Il nome non è `reveal` perché quello è già preso, ed è
+   * un'altra cosa: aprire il gestore di file della macchina su un percorso.)
+   */
+  async apri(id: string, turnId: string): Promise<void> {
+    this.mostra = turnId
+    await this.select(id)
   }
 
   /**

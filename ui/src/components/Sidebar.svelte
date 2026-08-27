@@ -5,7 +5,7 @@
   // progetto è uno solo: la struttura non deve cambiare forma sotto gli occhi.
   import Icon from './Icon.svelte'
   import Logo from './Logo.svelte'
-  import type { SessionRow } from '../lib/api.ts'
+  import type { Match, SessionMatches, SessionRow } from '../lib/api.ts'
   import {
     ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, stamp,
   } from '../lib/view.ts'
@@ -99,6 +99,58 @@
     }).filter(x => x.projects.length > 0),
   )
 
+  // ─── cercare ──────────────────────────────────────────────────────────────
+  //
+  // Due ricerche in una casella sola, e la differenza conta. Il **titolo** lo filtra
+  // il browser, perché i titoli sono già tutti qui: aspettare il daemon per nascondere
+  // delle righe che ho già in mano sarebbe un ritardo inventato. Il **contenuto** lo
+  // cerca il daemon, che è l'unico ad avere i journal — e li ha già ridotti in memoria
+  // per l'elenco, quindi non rilegge niente.
+  //
+  // Restano separati anche a schermo: «si chiama così» e «ne parla dentro» sono due
+  // risposte diverse, e mescolarle vorrebbe dire non poter dire quale delle due è.
+  const perTitolo = $derived(
+    store.query.trim().length < 2 ? [] : store.rows
+      .filter(r => r.title.toLowerCase().includes(store.query.trim().toLowerCase()))
+      .sort((a, b) => b.since - a.since),
+  )
+
+  let dentro = $state<SessionMatches[]>([])
+  let cercando = $state(false)
+  // `giro` è la stessa guardia contro il sorpasso del menu dei file (`Dock.svelte`):
+  // due risposte possono tornare in ordine diverso da come sono partite, e senza
+  // questo l'elenco mostrerebbe i risultati di due lettere fa.
+  let giro = 0
+  $effect(() => {
+    const q = store.query.trim()
+    if (q.length < 2) { giro++; dentro = []; cercando = false; return }
+    const mio = ++giro
+    cercando = true
+    // Un'attesa breve prima di chiedere: qui, a differenza dei file, la risposta
+    // costa — il daemon scorre i turni di **tutte** le conversazioni — e chi scrive
+    // «parser» produrrebbe sei ricerche di cui cinque già inutili quando partono.
+    const t = setTimeout(() => {
+      void store.search(q).then(r => {
+        if (mio !== giro) return
+        dentro = r
+        cercando = false
+      })
+    }, 150)
+    return () => clearTimeout(t)
+  })
+
+  const inRicerca = $derived(store.query.trim().length >= 2)
+
+  /** Il ritaglio con la corrispondenza evidenziata, senza ricercarla una seconda
+   *  volta: `at` e `len` arrivano già calcolati da chi ha cercato (`core/search.ts`). */
+  function pezzi(m: Match): [string, string, string] {
+    return [m.snippet.slice(0, m.at), m.snippet.slice(m.at, m.at + m.len), m.snippet.slice(m.at + m.len)]
+  }
+
+  const CHI: Record<Match['kind'], string> = {
+    prompt: 'you asked', answer: 'answered', tool: 'did',
+  }
+
   let draft = $state('')
 
   function openMenu(e: MouseEvent, row: SessionRow): void {
@@ -136,6 +188,21 @@
     </button>
   </div>
 
+  <!-- La ricerca sta **sopra** l'elenco e non dentro un pannello suo: cercare è un
+       modo di guardare l'elenco, non un posto diverso in cui andare. Per questo i
+       risultati prendono il posto dell'albero invece di aprirsi accanto. -->
+  <div class="find">
+    <Icon name="i-search" />
+    <input
+      type="search" placeholder="Search chats" aria-label="Search chats"
+      bind:value={store.query}
+      onkeydown={e => { if (e.key === 'Escape') store.query = '' }} />
+    {#if store.query}
+      <button class="clr" title="Clear search" aria-label="Clear search"
+        onclick={() => { store.query = '' }}><Icon name="i-x" /></button>
+    {/if}
+  </div>
+
   {#if ferme.length > 0}
     <div class="quotaout" role="status">
       <Icon name="i-warn" />
@@ -151,6 +218,59 @@
   {/if}
 
   <div class="scroller" style="flex:1;padding-bottom:6px">
+    {#if inRicerca}
+      {#if perTitolo.length > 0}
+        <div class="gstate">Titles</div>
+        {#each perTitolo as row (row.id)}
+          <button class="sit" class:on={row.id === store.selected}
+            onclick={() => void store.select(row.id)}
+            oncontextmenu={e => openMenu(e, row)}>
+            <div style="flex:1;text-align:left">
+              <div class="ttl">{row.title}</div>
+              <div class="meta">
+                {hhmm(row.lastTs)}
+                <span class="sst {label(row.state)}">{label(row.state)}</span>
+                <i class="dotk p{palette.get(project(row.cwd)) ?? 0}"></i> {project(row.cwd)}
+              </div>
+            </div>
+          </button>
+        {/each}
+      {/if}
+
+      {#if dentro.length > 0}
+        <div class="gstate">Inside conversations</div>
+        {#each dentro as s (s.sessionId)}
+          <!-- Il titolo della conversazione, non un'etichetta di gruppo: `.gproj`
+               avrebbe messo un maiuscoletto largo, che su un titolo lungo diventa
+               tre righe e si legge come una sezione invece che come una chat. -->
+          <button class="hitchat" onclick={() => void store.select(s.sessionId)}>
+            <span class="ht">{s.title}</span>
+            <!-- Quante in tutto, non quante ne vedi: con cinque righe mostrate e
+                 quaranta trovate, tacere sul resto direbbe che sono cinque. -->
+            <span class="cnt">{s.total}</span>
+          </button>
+          <!-- Chiave per indice, di proposito. Due corrispondenze possono cadere allo
+               stesso punto dello stesso turno — il riassunto di un tool e la sua
+               motivazione, per dirne una — e qualunque chiave costruita dal contenuto
+               collide (visto succedere: `each_key_duplicate` sul primo giro nel
+               browser vero). Qui non c'è identità da preservare: l'elenco si rifà
+               tutto a ogni ricerca. -->
+          {#each s.matches as m, i (i)}
+            {@const [pre, hit, post] = pezzi(m)}
+            <button class="hit" onclick={() => void store.apri(s.sessionId, m.turnId)}>
+              <span class="who">{CHI[m.kind]}</span>
+              <span class="snip">{pre}<mark>{hit}</mark>{post}</span>
+            </button>
+          {/each}
+        {/each}
+      {/if}
+
+      {#if perTitolo.length === 0 && dentro.length === 0}
+        <div class="mid" style="padding:20px 14px">
+          {cercando ? 'Searching…' : 'Nothing found.'}
+        </div>
+      {/if}
+    {:else}
     {#each tree as section (section.g)}
       <div class="gstate">{section.g}</div>
       {#each section.projects as [name, list] (name)}
@@ -202,6 +322,7 @@
     {#if tree.length === 0}
       <div class="mid" style="padding:20px 14px">No chats yet.</div>
     {/if}
+    {/if}
   </div>
 
   <button class="sidefoot" title="Settings"
@@ -213,6 +334,68 @@
 <style>
   /* Le righe sono <button> perché si premono: il vestito viene da app.css, qui c'è
      solo ciò che serve a togliere l'aspetto di pulsante senza perderne il mestiere. */
+  /* La casella di ricerca. `type="search"` per averla svuotabile da tastiera e
+     riconoscibile dal browser; l'aspetto è tutto qui, perché il reset di WebKit
+     porterebbe con sé una lente e una X di sistema che non c'entrano con nessuna
+     delle due qui presenti. */
+  .find {
+    display: flex; align-items: center; gap: 6px;
+    margin: 0 5px 6px; padding: 3px 6px;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
+    color: var(--muted);
+  }
+  .find:focus-within { border-color: var(--accent); }
+  .find input {
+    flex: 1; min-width: 0; font: inherit; font-size: 11.5px;
+    border: 0; background: none; color: var(--ink); outline: none; padding: 1px 0;
+  }
+  .find input::-webkit-search-decoration,
+  .find input::-webkit-search-cancel-button { display: none; }
+  .clr {
+    display: flex; border: 0; background: none; padding: 0; cursor: pointer;
+    color: var(--muted); flex: none;
+  }
+  .clr:hover { color: var(--ink); }
+
+  /* Una riga di risultato non è una riga dell'elenco: non è una conversazione, è un
+     punto **dentro** una. Per questo è rientrata sotto il titolo della chat e più
+     bassa — il titolo sopra dice già di quale si tratta. */
+  .hit {
+    display: block; width: calc(100% - 10px); margin: 0 5px 1px; padding: 3px 7px 4px;
+    text-align: left; border: 0; border-radius: 6px; background: none;
+    font: inherit; color: var(--muted); cursor: pointer;
+  }
+  .hit:hover { background: var(--surface-2); }
+  .hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .who {
+    display: block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+    opacity: .7;
+  }
+  .snip {
+    display: block; font-size: 11px; line-height: 1.35; color: var(--ink);
+    /* Due righe al massimo: il ritaglio è già tagliato da chi cerca, ma un carattere
+       stretto ce ne fa stare di più e tre righe per risultato spingono fuori vista
+       tutti gli altri. */
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .snip mark { background: var(--user-bg); color: var(--ink); border-radius: 2px; }
+  /* Il titolo sopra un gruppo di risultati. Si preme: porta alla conversazione
+     senza scegliere un punto, che è cosa si vuole quando le corrispondenze sono
+     tante e nessuna in particolare è quella giusta. */
+  .hitchat {
+    display: flex; align-items: baseline; gap: 8px;
+    width: calc(100% - 10px); margin: 7px 5px 2px; padding: 0 7px;
+    border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 600;
+    color: var(--ink); cursor: pointer; text-align: left;
+  }
+  .hitchat:hover .ht { text-decoration: underline; }
+  .hitchat .ht { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hitchat .cnt {
+    flex: none; font-size: 10px; font-weight: 400; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
   .sit, .sidefoot, .plus, .bell {
     background: none;
     border: 0;

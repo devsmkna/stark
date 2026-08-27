@@ -47,6 +47,17 @@ export type PermissionAnswer =
   | { allow: true; input?: Record<string, unknown>; remember?: PermissionUpdate[] }
   | { allow: false; reason: string }
 
+/**
+ * Cosa STARK decide su un piano.
+ *
+ * `mode` viaggia con l'approvazione perché nel terminale è un gesto solo: si approva
+ * *e* si sceglie come proseguire. Separarli lascerebbe una finestra in cui l'agent è
+ * già ripartito con la modalità di prima — cioè `plan`, che non tocca niente.
+ */
+export type PlanAnswer =
+  | { approved: true; mode?: PermissionMode }
+  | { approved: false; feedback?: string }
+
 /** Cosa STARK riporta indietro da una domanda dell'agent. */
 export type QuestionAnswer =
   | { answers: Record<string, string | string[]>; response?: string }
@@ -73,6 +84,16 @@ export type AdapterOptions = LaunchOptions & {
   /** Chiamata quando l'agent fa una domanda a scelta multipla. */
   onQuestion?: (r: { requestId: string; questions: AgentQuestion[] })
     => Promise<QuestionAnswer>
+  /**
+   * Chiamata quando l'agent ha finito di pianificare e chiede di partire.
+   *
+   * Passa dalla stessa porta dei permessi — è `canUseTool` su `ExitPlanMode`,
+   * verificato dal vivo — ma **non** è un permesso e non deve diventarne una card:
+   * un permesso si concede guardando un soggetto, un piano si approva leggendolo.
+   * Senza questa callback il piano finiva nella card generica, che di quel testo non
+   * mostrava niente perché `plan` non è un campo in cui si cerca un soggetto.
+   */
+  onPlan?: (r: { requestId: string; plan: string; path?: string }) => Promise<PlanAnswer>
 }
 
 export class ClaudeCodeAdapter {
@@ -519,6 +540,9 @@ export class ClaudeCodeAdapter {
   async setMode(mode: PermissionMode): Promise<void> {
     await this.q?.setPermissionMode(mode)
     this.emit({ k: 'session.mode', mode })
+    // Anche qui: il traduttore riporta i cambi che vengono dal CLI, e senza saperlo
+    // riemetterebbe questo stesso valore al prossimo `system:status`.
+    this.tr.seedMode(mode)
   }
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model)
@@ -564,6 +588,9 @@ export class ClaudeCodeAdapter {
 
     const actual = String(info['current_permission_mode'] ?? this.opts.mode)
     this.emit({ k: 'session.mode', mode: actual as PermissionMode })
+    // Il traduttore deve sapere da dove si parte, se no il primo `system:init`
+    // riemetterebbe la modalità appena scritta un istante fa.
+    this.tr.seedMode(actual)
     // Se chiediamo `auto` e la sessione parte in Manual, l'utente si ritroverebbe a
     // confermare tutto senza sapere perché. Il Principio 3 impone di dirglielo, e si
     // può dire PRIMA del primo prompt invece che dopo.
@@ -689,6 +716,52 @@ export class ClaudeCodeAdapter {
           answers: answer.answers,
           ...(answer.response !== undefined ? { response: answer.response } : {}),
         },
+      }
+    }
+
+    if (toolName === 'ExitPlanMode') {
+      const plan = typeof input['plan'] === 'string' ? input['plan'] : ''
+      const path = typeof input['planFilePath'] === 'string' ? input['planFilePath'] : undefined
+      this.emit({ k: 'plan.proposed', requestId, plan, ...(path ? { path } : {}) })
+      this.emit({ k: 'session.state', state: 'awaiting', reason: 'piano' })
+      // Senza qualcuno che lo guardi si approva, che è il comportamento di prima:
+      // questa callback è la GUI, e una prova automatica non deve restare appesa.
+      const answer = this.opts.onPlan
+        ? await this.opts.onPlan({ requestId, plan, ...(path ? { path } : {}) })
+        : { approved: true as const }
+      this.emit({ k: 'session.state', state: 'busy' })
+      if (!answer.approved) {
+        this.emit({
+          k: 'plan.replied', requestId, decision: 'rejected',
+          ...(answer.feedback ? { feedback: answer.feedback } : {}),
+        })
+        // Un rifiuto qui non è un errore: è «continua a pianificare», ed è così che
+        // il CLI lo intende. Il messaggio torna al modello come correzione.
+        return {
+          behavior: 'deny',
+          message: answer.feedback
+            ? `L'utente non ha approvato il piano. Cosa cambiare: ${answer.feedback}`
+            : "L'utente non ha approvato il piano. Continua a pianificare.",
+        }
+      }
+      this.emit({
+        k: 'plan.replied', requestId, decision: 'approved',
+        ...(answer.mode ? { mode: answer.mode } : {}),
+      })
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        // `setMode` è un aggiornamento dei permessi dell'SDK, non un comando nostro:
+        // arriva **insieme** all'approvazione, quindi non esiste l'istante in cui
+        // l'agent è ripartito ma la modalità è ancora `plan`.
+        //
+        // E **non** si semina il traduttore, di proposito: qui a cambiare modalità è
+        // il CLI, e il fatto che l'abbia davvero fatto lo deve dire lui. Misurato: lo
+        // dice nel suo `system:status` subito dopo. Scriverlo noi qui vorrebbe dire
+        // annunciare un cambiamento che abbiamo solo chiesto.
+        ...(answer.mode
+          ? { updatedPermissions: [{ type: 'setMode' as const, mode: answer.mode, destination: 'session' as const }] }
+          : {}),
       }
     }
 

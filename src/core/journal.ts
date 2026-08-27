@@ -5,7 +5,7 @@
 // stato che la UI mostrava; nel journal non entra nulla di nativo; ed è il punto unico
 // da cui passa tutto, cioè dove si aggancerà l'anonimizzazione.
 
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MODEL_VERSION, type CanonicalEvent, type Payload } from './events.ts'
 
@@ -69,6 +69,54 @@ export class Journal {
       out.push(JSON.parse(line) as CanonicalEvent)
     }
     return out
+  }
+
+  /**
+   * Solo ciò che è stato aggiunto dopo `offset`, con il byte da cui ripartire.
+   *
+   * Esiste perché il journal è **append-only**, e chi lo rilegge intero a ogni giro
+   * sta pagando tutta la storia per sapere l'ultima riga. L'elenco delle
+   * conversazioni faceva esattamente questo: `reduce(Journal.read(...))` su ogni
+   * file a ogni colpetto, fino a quattro volte al secondo mentre una chat streama.
+   * Misurato su un journal vero da 12 MB (25.143 eventi): 82 ms per **una** chat.
+   *
+   * L'offset avanza solo oltre le righe **complete**: una `writeSync` in corso può
+   * lasciare l'ultima riga a metà, e ripartire da dentro quella riga produrrebbe due
+   * frammenti che non sono JSON né l'uno né l'altro. Il resto monco si rilegge al
+   * giro dopo, quando sarà finito — costa una riga, non tutto il file.
+   *
+   * Chi la usa deve gestire il caso `offset > dimensione`: vuol dire che il file non
+   * è più quello di prima (cancellato e ricreato), e allora si rilegge da capo. Qui
+   * non si decide, si riporta: `from` dice da dove si è letto davvero.
+   */
+  static readFrom(path: string, offset: number): { events: CanonicalEvent[]; offset: number; from: number } {
+    if (!existsSync(path)) return { events: [], offset: 0, from: 0 }
+    const size = statSync(path).size
+    // Il file si è accorciato: non è una coda dello stesso file, è un altro file.
+    const from = offset > size ? 0 : offset
+    if (from === size) return { events: [], offset: size, from }
+
+    const fd = openSync(path, 'r')
+    let text: string
+    try {
+      const buf = Buffer.allocUnsafe(size - from)
+      const letti = readSync(fd, buf, 0, buf.length, from)
+      text = buf.subarray(0, letti).toString('utf8')
+    } finally { closeSync(fd) }
+
+    const events: CanonicalEvent[] = []
+    let consumati = 0
+    let a = 0
+    for (;;) {
+      const nl = text.indexOf('\n', a)
+      if (nl === -1) break            // resto senza newline: riga non ancora finita
+      const line = text.slice(a, nl)
+      a = nl + 1
+      consumati = a
+      if (!line.trim()) continue
+      events.push(JSON.parse(line) as CanonicalEvent)
+    }
+    return { events, offset: from + Buffer.byteLength(text.slice(0, consumati), 'utf8'), from }
   }
 }
 

@@ -29,6 +29,25 @@ export type ToolPartView = {
   /** Cio che il tool ha restituito, per intero. Arriva con `tool.ended`: prima di
    *  quel momento non esiste, e un tool bloccato non ce l'ha mai. */
   output?: string
+  /**
+   * Il lavoro che questa chiamata ha **avviato** e che è andato avanti per conto suo.
+   *
+   * Sta dentro la parte del tool e non in un elenco a parte perché è la stessa riga:
+   * un comando lanciato in background non è un secondo fatto, è ciò che si scopre
+   * dopo su un fatto già mostrato. E soprattutto: senza di questo la riga direbbe
+   * `done` — il `tool_result` del lancio arriva **subito** e ha esito positivo —
+   * mentre il lavoro sta ancora girando. Vedi `task.started` in `events.ts`.
+   */
+  task?: {
+    taskId: string
+    kind: 'command' | 'agent' | 'other'
+    description?: string
+    background: boolean
+    /** Assente finché non si sa: è la differenza fra «sta girando» e «è andata così». */
+    status?: 'completed' | 'failed'
+    summary?: string
+    outputFile?: string
+  }
 }
 /**
  * Una domanda sola dentro una risposta: com'era intitolata, cosa chiedeva, cosa si e
@@ -46,7 +65,7 @@ export type AnswerItemView = { header: string; asked: string; answer: string }
  * capire cosa si era deciso, e perche l'agent ha fatto in quel modo.
  */
 export type AnswerPartView = {
-  kind: 'answer'; partId: string; of: 'permission' | 'question'
+  kind: 'answer'; partId: string; of: 'permission' | 'question' | 'plan'
   /** Cosa era stato chiesto, come lo si era letto nel blocco in basso. */
   asked: string
   /** Cosa si e risposto. */
@@ -119,6 +138,15 @@ export type QuotaView = {
   status: string; kind: string; resetsAt: number; usingOverage: boolean
 }
 export type PendingQuestionView = { requestId: string; questions: AgentQuestion[] }
+/**
+ * Un piano in attesa di essere approvato.
+ *
+ * `plan` è markdown, e per intero: è un documento da **leggere**, non un soggetto da
+ * riconoscere. È la differenza per cui non è un permesso — e prima di questo tipo
+ * finiva in una card generica che di quel testo non mostrava niente, perché `plan`
+ * non è fra i campi in cui l'adapter cerca il soggetto di un'azione.
+ */
+export type PendingPlanView = { requestId: string; plan: string; path?: string }
 export type NoticeView = { level: 'info' | 'warn' | 'error'; text: string }
 export type BlockedView = {
   by: 'classifier' | 'denyRule'; callId?: string; reason: string; ts: number
@@ -153,6 +181,10 @@ export type SessionSnapshot = {
   shell: CommandRunView[]
   pendingPermissions: PendingPermissionView[]
   pendingQuestions: PendingQuestionView[]
+  /** I piani in attesa di approvazione. Una lista come le altre due, anche se in
+   *  pratica ne arriva uno alla volta: la forma uniforme è ciò che permette al blocco
+   *  in basso di trattarli con la stessa regola invece che con un caso speciale. */
+  pendingPlans: PendingPlanView[]
   blocked: BlockedView[]
   notices: NoticeView[]
   usage: Usage
@@ -196,7 +228,7 @@ function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
     models: [], modes: [], mcpServers: [],
-    turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
+    turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [], pendingPlans: [],
     blocked: [], notices: [], quotaWindows: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
     stateSince: 0,
@@ -360,6 +392,33 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     }
 
+    case 'task.started': {
+      // Senza `callId` non c'è niente a cui attaccarlo. Non si inventa una riga: una
+      // riga in più che dice «è partito qualcosa» senza poter dire da dove sarebbe
+      // rumore, e il caso non si è mai visto nei journal reali (279 task, tutti con
+      // il loro `tool_use_id`).
+      if (!p.callId) break
+      const part = findTool(s, p.callId)
+      if (!part) break
+      part.task = {
+        taskId: p.taskId, kind: p.kind, background: p.background,
+        ...(p.description !== undefined ? { description: p.description } : {}),
+      }
+      break
+    }
+    case 'task.ended': {
+      // Si cerca per `taskId` e **non** per `callId`, che qui non c'è: l'esito arriva
+      // molto dopo, spesso in un altro turno, e l'unica cosa che lega le due metà è
+      // l'id del lavoro. Per questo la ricerca risale tutta la conversazione.
+      const part = findTask(s, p.taskId)
+      if (part?.task) {
+        part.task.status = p.status
+        if (p.summary !== undefined) part.task.summary = p.summary
+        if (p.outputFile !== undefined) part.task.outputFile = p.outputFile
+      }
+      break
+    }
+
     case 'permission.asked':
       s.pendingPermissions.push({
         requestId: p.requestId, action: p.action, resources: p.resources,
@@ -380,6 +439,33 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         refused: p.decision === 'reject', at: e.ts,
       })
       if (s.pendingPermissions.length === 0 && s.state === 'awaiting') s.state = 'busy'
+      break
+    }
+    case 'plan.proposed':
+      s.pendingPlans.push({
+        requestId: p.requestId, plan: p.plan,
+        ...(p.path !== undefined ? { path: p.path } : {}),
+      })
+      s.state = 'awaiting'
+      break
+    case 'plan.replied': {
+      // Come per i permessi: la richiesta si legge PRIMA di toglierla, se no nel
+      // flusso resterebbe un «approvato» senza dire cosa.
+      const chiesto = s.pendingPlans.find(x => x.requestId === p.requestId)
+      s.pendingPlans = s.pendingPlans.filter(x => x.requestId !== p.requestId)
+      // Il piano **per intero** resta nel flusso, non un suo riassunto: è il documento
+      // su cui l'agent ha lavorato da lì in poi, ed è la cosa che si torna a rileggere
+      // due giorni dopo per capire perché ha fatto in quel modo. Riassumerlo qui
+      // vorrebbe dire perderlo, perché in nessun altro posto è scritto.
+      turn()?.parts.push({
+        kind: 'answer', partId: p.requestId, of: 'plan',
+        asked: chiesto?.plan ?? 'plan',
+        answer: p.decision === 'rejected'
+          ? (p.feedback ? `kept planning: ${p.feedback}` : 'kept planning')
+          : p.mode ? `approved, continuing in ${p.mode}` : 'approved',
+        refused: p.decision === 'rejected', at: e.ts,
+      })
+      if (s.pendingPlans.length === 0 && s.state === 'awaiting') s.state = 'busy'
       break
     }
     case 'question.asked':
@@ -503,6 +589,25 @@ function findReasoning(s: SessionSnapshot, partId: string): ReasoningPartView | 
     for (let j = parts.length - 1; j >= 0; j--) {
       const part = parts[j]
       if (part && part.kind === 'reasoning' && part.partId === partId) return part
+    }
+  }
+  return undefined
+}
+
+/**
+ * La chiamata a cui appartiene un lavoro, cercata per id del lavoro.
+ *
+ * Serve una funzione a sé, e non basta `findTool`, perché l'esito di un task arriva
+ * **senza** `tool_use_id`: il CLI manda solo `task_id`. Le due metà della stessa
+ * storia — «è partito» e «è andata così» — possono stare a centinaia di eventi e a
+ * più turni di distanza, quindi l'unica cosa che le lega è quell'id.
+ */
+function findTask(s: SessionSnapshot, taskId: string): ToolPartView | undefined {
+  for (let i = s.turns.length - 1; i >= 0; i--) {
+    const parts = s.turns[i]?.parts ?? []
+    for (let j = parts.length - 1; j >= 0; j--) {
+      const part = parts[j]
+      if (part && part.kind === 'tool' && part.task?.taskId === taskId) return part
     }
   }
   return undefined

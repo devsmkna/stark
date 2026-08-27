@@ -181,6 +181,14 @@ async function route(
       return send(res, 200, { sessions: registry.list() })
     }
 
+    // Cercare. Non è un comando di sessione (§18): non cambia niente e non riguarda
+    // una conversazione sola, quindi è una GET sul registro come `/api/sessions`.
+    // Non tiene stato fra una richiesta e l'altra — chi scrive nella casella ne manda
+    // una per pausa di digitazione, e ognuna deve poter essere l'ultima.
+    if (method === 'GET' && path === '/api/search') {
+      return send(res, 200, { results: registry.search(url.searchParams.get('q') ?? '') })
+    }
+
     // Il flusso dell'**elenco**, non di una sessione. Esiste perché senza, per sapere
     // che una chat diversa da quella aperta è cambiata, alla barra laterale non
     // restava che richiedere `/api/sessions` a ripetizione.

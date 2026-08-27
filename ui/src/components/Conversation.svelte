@@ -64,6 +64,13 @@
       // cosa avvenuta con quel contesto ancora in piedi.
       if (turn.clearedAt !== undefined) { cur.clearedAt = turn.clearedAt; cur = undefined }
     })
+    // Un `/clear` appena dato lascia `cur` vuoto: il capitolo vivo non esiste ancora
+    // perché non è successo ancora niente dentro di lui. Lo si apre lo stesso, vuoto,
+    // perché è **lui** a spingere i tagli sopra il bordo (vedi `.chapter.live` nel CSS):
+    // senza, subito dopo un `/clear` resterebbero le due righe a mezz'aria in cima a una
+    // schermata per il resto deserta — che è esattamente il caso da cui nasce questa
+    // regola. La conversazione appare vuota, ed è onesto: il contesto lo è.
+    if (!cur && out.length > 0) out.push({ key: 'ch:live', items: [] })
     return out
   })
   let openedChapters = $state<Set<string>>(new Set())
@@ -241,8 +248,52 @@
     void snap.turns.length; void misura
     if (stick && scrollerEl) {
       const el = scrollerEl
-      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+      // `stick` si rilegge **dentro** il frame, non solo qui fuori. Fra il momento in
+      // cui l'effetto gira e quello in cui il frame arriva, qualcun altro può aver
+      // deciso che non si sta più seguendo il fondo — è quello che fa l'effetto qui
+      // sotto, quando si arriva da un risultato di ricerca. Senza questa rilettura la
+      // pagina saltava in fondo **dopo** essersi portata sul turno trovato, e il salto
+      // sembrava non essere mai avvenuto (misurato: turno a -684px, scroll incollato
+      // al massimo).
+      requestAnimationFrame(() => { if (stick) el.scrollTop = el.scrollHeight })
     }
+  })
+
+  /**
+   * Arrivare da un risultato di ricerca: aprire il turno trovato e portarcisi.
+   *
+   * Tre cose insieme, e ognuna serve. Il turno va **aperto**, perché di default lo è
+   * solo l'ultimo e la corrispondenza sta quasi sempre dentro uno chiuso. Va aperto
+   * anche il suo **capitolo**, se sta sopra un `/clear`: quelli sono chiusi per scelta,
+   * e portare in vista qualcosa che non è renderizzato non porta in vista niente. E
+   * `stick` va spento, altrimenti l'effetto dell'auto-scroll — che gira subito dopo,
+   * perché il contenuto è appena cambiato — riporta in fondo cancellando il salto.
+   *
+   * Si aspetta un frame prima di misurare: il turno che si è appena aperto non ha
+   * ancora la sua altezza, e `scrollIntoView` su un elemento alto zero atterra nel
+   * punto sbagliato.
+   */
+  $effect(() => {
+    const turnId = store.mostra
+    if (!turnId) return
+    const i = snap.turns.findIndex(t => t.turnId === turnId)
+    if (i === -1) return          // snapshot non ancora arrivato: si riproverà
+    store.mostra = null
+    stick = false
+    opened = new Set(opened).add(turnId)
+    const ch = chapters.find(c => c.items.some(x => x.turn.turnId === turnId))
+    if (ch?.clearedAt !== undefined) openedChapters = new Set(openedChapters).add(ch.key)
+    requestAnimationFrame(() => {
+      const el = scrollerEl?.querySelector(`[data-turn="${CSS.escape(turnId)}"]`)
+      // Istantaneo e non `smooth`: un'animazione di scorrimento è interrompibile, e
+      // qui sotto continua ad arrivare contenuto dal flusso. Arrivare subito nel
+      // punto giusto è più utile che arrivarci con grazia e a volte no.
+      el?.scrollIntoView({ block: 'start' })
+      // Un lampo, non un colore che resta: dice «è questo» a chi è appena arrivato,
+      // e sparisce da sé perché da lì in poi sarebbe una marcatura senza significato.
+      el?.classList.add('found')
+      setTimeout(() => el?.classList.remove('found'), 1600)
+    })
   })
 
   /** Riportarsi in fondo e ricominciare a seguire. Le due cose insieme: scendere e basta
@@ -415,7 +466,15 @@
                  principale — dice dove sta andando, non solo cosa sta eseguendo. -->
             <span class="v" class:plain={!!part.intent}>{part.intent ?? subject(part)}</span>
             <span class="end">
-              {#if part.blocked}stopped for safety
+              <!-- Un lavoro che continua per conto suo **vince** sull'esito della
+                   chiamata, e non è un dettaglio di stile: il `tool_result` del
+                   lancio torna positivo subito, quindi senza questa riga si
+                   leggerebbe «✓» sopra un lavoro ancora in corso. Vedi `task` in
+                   `reduce.ts`. -->
+              {#if part.task && !part.task.status}
+                {part.task.kind === 'agent' ? 'agent running' : 'running'}
+              {:else if part.task?.status === 'failed'}failed
+              {:else if part.blocked}stopped for safety
               {:else if !part.done}…
               {:else if part.ok}✓{:else}✗{/if}
               {topen ? '▾' : '▸'}
@@ -426,6 +485,15 @@
                  motivazione: resta visibile, sotto e più piccolo — un tooltip
                  avrebbe richiesto di sapere che c'era prima di poterlo cercare. -->
             <div class="rsub">{subject(part)}</div>
+          {/if}
+          <!-- Il resoconto del lavoro, quando arriva. Su un sub-agent è **l'unica**
+               cosa che ne resta: il suo lavoro interno non passa da questo canale, e
+               il CLI ne manda solo il riassunto. Sta nella riga chiusa e non dentro
+               il dettaglio perché è la risposta alla domanda per cui si era guardata
+               quella riga — «com'è andata?» — e farla aprire vorrebbe dire nasconderla
+               proprio a chi era tornato apposta per leggerla. -->
+          {#if part.task?.summary}
+            <div class="tsum" class:bad={part.task.status === 'failed'}>{part.task.summary}</div>
           {/if}
         </button>
         {#if revealPath}
@@ -516,11 +584,25 @@
          riga di lato. Senza, quei turni tornerebbero identici a quelli veri, e sarebbe
          di nuovo impossibile vedere a occhio dove il contesto smette di valere — che è
          il motivo per cui esiste tutto questo. -->
-    <div class="chapter" class:past={ch.clearedAt !== undefined}>
+    <!-- `live` è il capitolo corrente quando sopra di lui c'è almeno un taglio: è quello
+         che si prende **tutta** l'altezza dello scroller, così i «Context cleared» finiscono
+         sopra il bordo e si vedono solo risalendo. Vedi `.chapter.live` nel CSS. -->
+    <div class="chapter" class:past={ch.clearedAt !== undefined}
+      class:live={ch.clearedAt === undefined && chapters.length > 1}>
+    {#if ch.items.length === 0}
+      <!-- Il capitolo vivo esiste ma è ancora vuoto: hai appena dato `/clear` e non hai
+           più scritto niente. Senza questa riga la schermata sarebbe **deserta** — i
+           tagli stanno sopra il bordo — e una schermata vuota si legge come un guasto,
+           non come «il contesto è vuoto». È anche l'unico posto in cui va detto che
+           sopra c'è ancora tutto: quando un turno c'è, è il turno stesso a dire dove
+           sei, e qui non c'è niente a dirlo. -->
+      <div class="mid">The context is empty from here. Scroll up for what came before.</div>
+    {/if}
     {#each ch.items as { turn, i } (turn.turnId)}
       {@const open = isOpen(turn, i)}
       {@const status = turnStatus(snap.turns, i)}
-      <div class="turn" class:open class:active={status === 'active'} class:queued={status === 'queued'}>
+      <div class="turn" data-turn={turn.turnId}
+        class:open class:active={status === 'active'} class:queued={status === 'queued'}>
         <!-- Il contenitore è un `div` e non più il bottone stesso: dentro ce ne stanno
              due, e un bottone dentro un bottone non è HTML valido. È la stessa forma di
              `.oprow`, dove la riga del tool e la lente per il file sono fratelli. -->
@@ -621,7 +703,28 @@
                   <!-- La richiesta non è passata di qui: si era espanso il blocco in
                        basso. Ciò che resta nel flusso è cosa hai risposto, dove è
                        successo, così che due giorni dopo si capisca cosa si era deciso. -->
-                  {#if part.items && part.items.length > 0}
+                  {#if part.of === 'plan'}
+                    <!-- Il piano approvato è l'unica «risposta» che vale la pena
+                         rileggere per intero: è il documento su cui l'agent ha
+                         lavorato da lì in poi, e nel journal non è scritto da
+                         nessun'altra parte. Quindi non è una riga con un testo
+                         tagliato, è un blocco che si apre — chiuso di default come
+                         tutto il resto, perché una volta approvato lo si rilegge
+                         solo quando ci si chiede *perché* ha fatto in quel modo. -->
+                    {@const pkey = `plan:${part.partId}`}
+                    {@const popen = blockOpen(pkey)}
+                    <button class="row clickable answer" onclick={() => toggleBlock(pkey)}>
+                      <Icon name="i-doc" />
+                      <span class="k">You</span>
+                      <span class="v">{part.refused ? 'sent the plan back' : 'approved the plan'}</span>
+                      <span class="end" class:no={part.refused}>
+                        {part.answer}{' '}{popen ? '▾' : '▸'}
+                      </span>
+                    </button>
+                    {#if popen}
+                      <div class="planread">{@html renderMarkdown(part.asked)}</div>
+                    {/if}
+                  {:else if part.items && part.items.length > 0}
                     <!-- Le domande erano più d'una, ed erano domande diverse: una riga
                          sola con le risposte incollate da `·` costringeva a indovinare
                          quale stesse a quale. Qui ogni domanda si porta dietro la
@@ -838,9 +941,16 @@
      netto: lì resta un riassunto, qui non resta niente. */
   .cleared {
     display: flex; align-items: center; gap: 8px; width: 100%;
-    margin: 14px 0; padding: 0; background: none; border: 0; cursor: pointer;
+    margin: 10px 0; padding: 0; background: none; border: 0; cursor: pointer;
     font: inherit; color: inherit;
   }
+  /* Due tagli di fila non sono due fatti da separare: sono la stessa cosa ripetuta, e
+     l'aria in mezzo la stava trattando come se in mezzo ci fosse qualcosa. Fra due
+     righe consecutive resta il solo `gap` di `.conv` (8px); il margine serve a
+     staccarle dai turni, non fra loro. In un flex i margini **non** collassano —
+     quindi vanno azzerati da tutte e due le parti, e non basta il `+`. */
+  .cleared + .cleared { margin-top: 0; }
+  .cleared:has(+ .cleared) { margin-bottom: 0; }
   .cleared .l { flex: 1; height: 1px; background: var(--line-2); }
   .cleared .t {
     font-size: 10.5px; color: var(--muted); white-space: nowrap;
@@ -852,6 +962,37 @@
   /* Aperto, il capitolo è un contenitore: la riga diventa la sua intestazione e i
      turni che seguono sono suoi, quindi il margine sotto si stringe. */
   .cleared.open { margin-bottom: 6px; }
+
+  /* Il lampo su un turno raggiunto dalla ricerca. Dura e sparisce: dice «è questo» a
+     chi è appena arrivato, e da lì in poi sarebbe un colore senza significato su una
+     riga come le altre. `outline` e non `border`: un bordo cambierebbe la geometria
+     del turno, e col prompt appiccicato in cima lo si vedrebbe saltare. */
+  /* Il resoconto di un lavoro finito da sé. Su più righe di proposito — è prosa, non
+     un'etichetta — ma con un tetto: un sub-agent può scrivere venti righe, e venti
+     righe dentro una riga di elenco non sono più una riga di elenco. */
+  .tsum {
+    margin: 3px 0 0 22px; font-size: 11px; line-height: 1.4; color: var(--muted);
+    border-left: 2px solid var(--line); padding-left: 8px;
+    display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
+    overflow: hidden; text-align: left; white-space: normal;
+  }
+  .tsum.bad { border-left-color: var(--bad, #d66); }
+
+  /* Il piano riaperto dal flusso. Rientrato come il corpo di un blocco aperto, e
+     senza tetto d'altezza: qui non c'è niente sotto da spingere fuori — a differenza
+     del blocco in basso, dove sotto ci sono i bottoni con cui si approva. */
+  .planread {
+    margin: 2px 0 4px 22px; padding: 4px 4px 4px 10px;
+    border-left: 2px solid var(--line);
+    font-size: 12px; line-height: 1.5; color: var(--ink);
+  }
+  .planread :global(h1), .planread :global(h2), .planread :global(h3) {
+    font-size: 12.5px; margin: 8px 0 3px;
+  }
+  .planread :global(p), .planread :global(ul), .planread :global(ol) { margin: 3px 0; }
+
+  .turn.found { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .turn { transition: outline-color .4s; }
 
   /* `.conv` è una colonna flex con `gap: 8px`: il capitolo la interrompe, quindi se la
      rifà uguale dentro di sé — senza, i turni si incollerebbero fra loro. */
@@ -873,6 +1014,19 @@
   .downb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .chapter { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  /* Il capitolo vivo è alto **almeno quanto lo scroller**, ed è tutto il meccanismo del
+     «nascosti sopra»: la conversazione parte già in fondo (vedi l'auto-scroll), quindi
+     con il capitolo corrente che riempie da solo la vista, tutto ciò che lo precede —
+     i tagli e i capitoli richiusi — sta sopra il bordo superiore. Non è nascosto: è
+     **più in alto**, e si risale a prenderlo come su WhatsApp o Telegram.
+     Perché `min-height: 100%` e non `flex-grow`: crescere distribuisce lo spazio
+     *avanzato*, quindi si fermerebbe a riempire la vista senza mai sfondarla — niente
+     spazio da scorrere, e le righe resterebbero in vista. Il 100% invece è alto quanto
+     il **content box** dello scroller a prescindere da ciò che c'è sopra, che quindi
+     eccede e diventa scorrimento. Il content box esclude i 12px di padding in basso di
+     `.conv`, ed è quello che fa cadere l'inizio del capitolo esattamente sul bordo
+     invece che dodici pixel sopra. */
+  .chapter.live { min-height: 100%; }
   .chapter.past {
     padding-left: 12px; border-left: 2px solid var(--line);
     margin-left: 2px; opacity: .72;

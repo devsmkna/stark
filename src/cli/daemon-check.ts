@@ -304,6 +304,52 @@ const dopo = await (await fetch(`${url}/api/sessions`, { headers: auth })).json(
 check('dopo il sonno resta nell\'elenco ma non è più viva',
   dopo.sessions.some(s => s.id === id && !s.live))
 
+// ─── cercare ────────────────────────────────────────────────────────────────
+//
+// Dopo il sonno di proposito: è il caso vero. Cercare deve funzionare **su una chat
+// che non ha più un processo dietro**, perché quelle sono la maggioranza di ciò che
+// si cerca — quella aperta ce l'hai già davanti. Qui la risposta arriva dagli
+// snapshot che il registro tiene per l'elenco, non da una rilettura del disco.
+type Ricerca = { results: { sessionId: string; title: string; total: number
+  matches: { snippet: string; at: number; len: number; turnId: string }[] }[] }
+const cercaTesto = async (q: string): Promise<Ricerca['results']> => {
+  const r = await fetch(`${url}/api/search?q=${encodeURIComponent(q)}`, { headers: auth })
+  return (await r.json() as Ricerca).results
+}
+// La parola sta nel prompt che questa prova ha davvero mandato, quindi non è una
+// stringa inventata: se il prompt cambia, la verifica lo dice.
+const trovate = await cercaTesto('una sola parola')
+check('la ricerca trova una chat che non è più viva',
+  trovate.some(r => r.sessionId === id), JSON.stringify(trovate.map(r => r.sessionId)))
+const mia = trovate.find(r => r.sessionId === id)
+check('e dice dove, con il ritaglio e il punto da evidenziare',
+  !!mia?.matches[0]?.turnId
+  && mia.matches[0].snippet.slice(mia.matches[0].at, mia.matches[0].at + mia.matches[0].len)
+    .toLowerCase() === 'una sola parola',
+  JSON.stringify(mia?.matches[0]))
+check('quello che non c\'è non si trova',
+  (await cercaTesto('zzz-parola-che-non-esiste-zzz')).length === 0)
+check('la ricerca è dietro il token come tutto il resto',
+  (await fetch(`${url}/api/search?q=pronto`)).status === 403)
+
+// ─── quale conversazione riprende un risveglio ────────────────────────────────
+//
+// Il bug che queste quattro righe tengono fermo (27 agosto 2026): `spec.resume.ref` fa
+// due mestieri — nome del journal e conversazione del CLI da riprendere — e un `/clear`
+// li fa divergere, perché il CLI sposta la conversazione su un id nuovo. Riprendere il
+// vecchio riportava indietro il contesto appena azzerato. Provato dal vivo con
+// `spike/risveglio-dopo-clear.ts` (costa quota); qui resta la regola, che è una scelta
+// fra due stringhe e non ha bisogno di una sessione vera per essere sbagliata.
+const { refDaRiprendere } = await import('../daemon/registry.ts')
+check('risveglio: senza un ref dal journal si riprende l\'id della chat',
+  refDaRiprendere({ ref: 'chat-1' }, undefined)?.ref === 'chat-1')
+check('risveglio: dopo un /clear vince il ref che il CLI ha dichiarato',
+  refDaRiprendere({ ref: 'chat-1' }, 'dopo-il-clear')?.ref === 'dopo-il-clear')
+check('risveglio: un fork resta dov\'è, il suo journal è un altro',
+  refDaRiprendere({ ref: 'chat-1', fork: true }, 'dopo-il-clear')?.ref === 'chat-1')
+check('aprire una chat nuova non riprende niente',
+  refDaRiprendere(undefined, 'dopo-il-clear') === undefined)
+
 await lettore.cancel().catch(() => {})
 await daemon.stop()
 

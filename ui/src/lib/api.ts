@@ -10,6 +10,9 @@
 import type { Activity } from '$core/activity.ts'
 import type { CanonicalEvent, Command } from '$core/events.ts'
 import type { SessionSnapshot } from '$core/reduce.ts'
+import type { Match, SessionMatches } from '$core/search.ts'
+
+export type { Match, SessionMatches }
 
 export type SessionRow = {
   id: string
@@ -231,6 +234,19 @@ export class Api {
     try {
       const r = await this.json<{ files: string[] }>(`/api/sessions/${id}/files?q=${encodeURIComponent(q)}`)
       return r.files
+    } catch { return [] }
+  }
+
+  /**
+   * Cercare in tutte le conversazioni. Come `files()`: una risposta che non arriva
+   * vale «niente», non un errore a schermo — si sta ancora digitando, e un avviso in
+   * mezzo a una parola è peggio di un elenco che tace.
+   */
+  async search(q: string): Promise<SessionMatches[]> {
+    try {
+      const r = await this.json<{ results: SessionMatches[] }>(
+        `/api/search?q=${encodeURIComponent(q)}`)
+      return r.results
     } catch { return [] }
   }
 

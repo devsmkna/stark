@@ -15,7 +15,7 @@ import { vigila, type Push, type PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
-import { intentOf } from '../adapters/claude-code/summary.ts'
+import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../daemon/memoria.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
@@ -23,6 +23,7 @@ import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../
 import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
+import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
   capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
@@ -793,6 +794,301 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   await new Promise(r => setTimeout(r, 400))
   check('§notifiche: stato invariato → nessuna seconda notifica', mandate.length === 1,
     `${mandate.length}`)
+}
+
+// ─── §5: la modalità la decide il CLI, non solo noi ─────────────────────────
+//
+// Trovato dal vivo il 27 agosto 2026, approvando un piano vero: il CLI passava
+// davvero ad `acceptEdits` (lo diceva nel suo `system:status`) e la barra di stato
+// continuava a mostrare `plan`, perché STARK emetteva `session.mode` solo quando
+// era **lui** a imporla. Vale anche per `EnterPlanMode`, che è un tool dell'agent:
+// l'agent può cambiare modalità da sé, e senza questo STARK mostrerebbe per sempre
+// quella di prima.
+{
+  const t3 = new Translator()
+  t3.seedMode('plan')
+  check('§5: ripetere la stessa modalità non produce eventi',
+    t3.handle({ type: 'system', subtype: 'status', status: 'idle',
+      permissionMode: 'plan' } as unknown as NativeEvent).length === 0)
+  const cambio = t3.handle({ type: 'system', subtype: 'status', status: 'idle',
+    permissionMode: 'acceptEdits' } as unknown as NativeEvent)
+  check('§5: una modalità cambiata dal CLI diventa un evento canonico',
+    cambio[0]?.k === 'session.mode' && cambio[0].mode === 'acceptEdits',
+    JSON.stringify(cambio))
+  // Il resto del messaggio non deve andare perso per strada: il cambio si aggiunge,
+  // non sostituisce.
+  const insieme = t3.handle({ type: 'system', subtype: 'status', status: 'requesting',
+    permissionMode: 'default' } as unknown as NativeEvent)
+  check('§5: il cambio di modalità non mangia il resto del messaggio',
+    insieme.length === 2 && insieme[0]?.k === 'session.mode'
+    && insieme[1]?.k === 'session.state', JSON.stringify(insieme.map(x => x.k)))
+}
+
+// ─── §8: il piano ───────────────────────────────────────────────────────────
+//
+// Verificato dal vivo il 27 agosto 2026: `ExitPlanMode` arriva come richiesta di
+// permesso, con `{plan, planFilePath}`. Ciò che queste verifiche tengono fermo è che
+// **non** ridiventi un permesso: il piano è un documento da leggere, e nella card
+// generica non si vedeva affatto — `plan` non è fra i campi in cui `summarize()`
+// cerca il soggetto di un'azione, quindi quella card mostrava il nome del tool e
+// nient'altro.
+{
+  check('§8: un piano non ha soggetto da mostrare come un\'azione qualunque',
+    resourcesOf('ExitPlanMode', { plan: '# Passo 1\nfare questo', planFilePath: '/p.md' })
+      .length === 0,
+    JSON.stringify(resourcesOf('ExitPlanMode', { plan: '# Passo 1' })))
+
+  const s = reduce([], 'piano')
+  let n = 0
+  const add = (payload: Parameters<typeof applyTo>[1]['payload']): void => {
+    applyTo(s, { v: MODEL_VERSION, seq: ++n, ts: 1000 + n, sessionId: 'piano', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'fai un piano' }] })
+  add({ k: 'plan.proposed', requestId: 'r1', plan: '# Piano\n1. leggere\n2. scrivere', path: '/tmp/p.md' })
+  check('§8: un piano proposto ferma la sessione', s.state === 'awaiting', s.state)
+  check('§8: il piano è in attesa con il suo testo per intero',
+    s.pendingPlans[0]?.plan.includes('2. scrivere') === true, JSON.stringify(s.pendingPlans[0]))
+  check('§8: un piano non finisce fra i permessi', s.pendingPermissions.length === 0)
+
+  add({ k: 'plan.replied', requestId: 'r1', decision: 'approved', mode: 'acceptEdits' })
+  check('§8: risposto, la sessione riparte', s.state === 'busy' && s.pendingPlans.length === 0,
+    `${s.state} · ${s.pendingPlans.length}`)
+  const risposta = s.turns[0]?.parts.find(p => p.kind === 'answer')
+  check('§8: nel flusso resta cosa si è deciso, e con quale modalità si riparte',
+    risposta?.kind === 'answer' && risposta.of === 'plan'
+    && risposta.answer === 'approved, continuing in acceptEdits',
+    JSON.stringify(risposta))
+  // Il piano **per intero** e non un riassunto: nel journal non è scritto da
+  // nessun'altra parte, quindi tagliarlo qui vorrebbe dire perderlo.
+  check('§8: il piano approvato resta rileggibile per intero',
+    risposta?.kind === 'answer' && risposta.asked.includes('2. scrivere'))
+
+  // Rimandare a pianificare non è un fallimento e non è un permesso negato: è una
+  // correzione, e il testo con cui la si dà deve restare.
+  add({ k: 'plan.proposed', requestId: 'r2', plan: '# Altro' })
+  add({ k: 'plan.replied', requestId: 'r2', decision: 'rejected', feedback: 'troppi passi' })
+  const seconda = s.turns[0]?.parts.filter(p => p.kind === 'answer')[1]
+  check('§8: «continua a pianificare» porta con sé cosa cambiare',
+    seconda?.kind === 'answer' && seconda.refused
+    && seconda.answer === 'kept planning: troppi passi', JSON.stringify(seconda))
+}
+
+// ─── §7: i lavori che continuano da soli ────────────────────────────────────
+//
+// Un comando lanciato in background risponde subito «lancio riuscito», quindi la sua
+// riga risulterebbe finita mentre il lavoro gira ancora. Le due metà della storia
+// stanno lontanissime: misurato su un journal reale, `tool_result` alla riga 53 ed
+// esito alla riga **810**, cioè in un altro turno. È il caso che queste verifiche
+// tengono fermo, perché è quello che si rompe per primo se qualcuno «semplifica»
+// cercando il task nel turno corrente.
+{
+  const t2 = new Translator()
+  const fatti = (n: NativeEvent): ReturnType<Translator['handle']> => t2.handle(n)
+
+  const avvio = fatti({
+    type: 'system', subtype: 'task_started', task_id: 'tk1', tool_use_id: 'toolu_bg',
+    description: 'Chi crea chat fantasma', is_backgrounded: true, task_type: 'local_bash',
+  } as unknown as NativeEvent)
+  check('§7: `task_started` diventa un evento canonico',
+    avvio[0]?.k === 'task.started', avvio[0]?.k ?? 'niente')
+  check('§7: il tipo del CLI è tradotto in vocabolario canonico',
+    avvio[0]?.k === 'task.started' && avvio[0].kind === 'command' && avvio[0].background,
+    JSON.stringify(avvio[0]))
+  // Un tipo che non conosciamo non deve sparire: `other` è la promessa che una
+  // versione futura del CLI si veda lo stesso, anche se non sappiamo chiamarla.
+  const ignoto = fatti({
+    type: 'system', subtype: 'task_started', task_id: 'tk9', tool_use_id: 'x',
+    task_type: 'qualcosa_di_nuovo',
+  } as unknown as NativeEvent)
+  check('§7: un tipo di lavoro sconosciuto si mostra come `other`, non sparisce',
+    ignoto[0]?.k === 'task.started' && ignoto[0].kind === 'other',
+    JSON.stringify(ignoto[0]))
+  // Uno stato intermedio ridirebbe «sta lavorando», che la riga dice già.
+  check('§7: uno stato non definitivo non produce eventi',
+    fatti({ type: 'system', subtype: 'task_notification', task_id: 'tk1',
+      status: 'in_progress' } as unknown as NativeEvent).length === 0)
+  const esito = fatti({
+    type: 'system', subtype: 'task_notification', task_id: 'tk1', tool_use_id: 'toolu_bg',
+    status: 'completed', summary: 'Ho letto tutto e verificato sul disco',
+  } as unknown as NativeEvent)
+  check('§7: `task_notification` porta l\'esito e il resoconto',
+    esito[0]?.k === 'task.ended' && esito[0].status === 'completed'
+    && esito[0].summary?.startsWith('Ho letto tutto') === true, JSON.stringify(esito[0]))
+
+  // E ora il giro completo nel reducer, con l'esito che arriva **in un altro turno**.
+  const s = reduce([], 'task')
+  let n = 0
+  const add = (payload: Parameters<typeof applyTo>[1]['payload']): void => {
+    applyTo(s, { v: MODEL_VERSION, seq: ++n, ts: 1000 + n, sessionId: 'task', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'lancia' }] })
+  add({ k: 'tool.started', callId: 'toolu_bg', name: 'Bash' })
+  add({ k: 'tool.input.ended', callId: 'toolu_bg', input: { command: 'npm test' } })
+  add({ k: 'task.started', taskId: 'tk1', callId: 'toolu_bg', kind: 'command',
+    description: 'Chi crea chat fantasma', background: true })
+  // Il `tool_result` del **lancio**: positivo, e subito. È la ragione per cui serve
+  // il task — senza, qui la riga direbbe già «✓».
+  add({ k: 'tool.ended', callId: 'toolu_bg', ok: true, output: 'Async agent launched' })
+  add({ k: 'turn.ended', turnId: 't1', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } })
+
+  const riga = s.turns[0]?.parts.find(p => p.kind === 'tool') as
+    { done: boolean; ok?: boolean; task?: { status?: string; summary?: string } } | undefined
+  check('§7: il lavoro si attacca alla riga che lo ha lanciato',
+    riga?.task !== undefined && riga.done && riga.ok === true)
+  check('§7: finché non si sa com\'è andata, l\'esito del lavoro è assente',
+    riga?.task?.status === undefined, String(riga?.task?.status))
+
+  // Turni dopo. Il collegamento è solo `taskId`: la notifica non porta `tool_use_id`
+  // in tutte le forme, e comunque la riga sta in un turno che non è più quello aperto.
+  add({ k: 'turn.started', turnId: 't2', prompt: [{ type: 'text', text: 'altro' }] })
+  add({ k: 'turn.ended', turnId: 't2', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } })
+  add({ k: 'task.ended', taskId: 'tk1', status: 'completed', summary: 'fatto tutto' })
+  check('§7: l\'esito trova la sua riga anche a turni di distanza',
+    riga?.task?.status === 'completed' && riga.task.summary === 'fatto tutto',
+    JSON.stringify(riga?.task))
+
+  // §4: se il replay non ricostruisse i task, una conversazione riaperta perderebbe
+  // proprio gli esiti che erano arrivati tardi — cioè quelli per cui si torna.
+  const j2 = new Journal(resolve(dir, 'task.jsonl'), 'task')
+  for (const e of [
+    { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'lancia' }] },
+    { k: 'tool.started', callId: 'c', name: 'Bash' },
+    { k: 'task.started', taskId: 'tk', callId: 'c', kind: 'agent', background: true },
+    { k: 'tool.ended', callId: 'c', ok: true },
+    { k: 'task.ended', taskId: 'tk', status: 'failed', summary: 'non ce l\'ha fatta' },
+  ] as Parameters<typeof applyTo>[1]['payload'][]) j2.append(e)
+  j2.close()
+  const riletto = reduce(Journal.read(resolve(dir, 'task.jsonl')), 'task')
+  const riga2 = riletto.turns[0]?.parts.find(p => p.kind === 'tool')
+  check('§4: i lavori sopravvivono al replay del journal',
+    riga2?.kind === 'tool' && riga2.task?.status === 'failed',
+    JSON.stringify(riga2?.kind === 'tool' ? riga2.task : null))
+}
+
+// ─── ricerca ────────────────────────────────────────────────────────────────
+//
+// Si prova qui e non nel browser perché è tutta aritmetica su stringhe: il ritaglio
+// attorno alla corrispondenza, e la posizione da evidenziare **dopo** che gli a capo
+// sono diventati spazi. Guardandolo si vede solo che «più o meno è lì».
+{
+  const s = reduce([], 'cerca')
+  const add = (payload: Parameters<typeof applyTo>[1]['payload'], seq: number): void => {
+    applyTo(s, { v: MODEL_VERSION, seq, ts: 1000 + seq, sessionId: 'cerca', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'sistema il parser JSON' }] }, 1)
+  add({ k: 'text.started', partId: 'p1' }, 2)
+  // Volutamente spezzato in tre delta: è il caso che una ricerca sul journal riga per
+  // riga NON troverebbe mai, perché la frase intera su disco non esiste da nessuna parte.
+  add({ k: 'text.delta', partId: 'p1', delta: 'Ho corretto il ' }, 3)
+  add({ k: 'text.delta', partId: 'p1', delta: 'parser' }, 4)
+  add({ k: 'text.delta', partId: 'p1', delta: ' e aggiunto i test.' }, 5)
+  add({ k: 'text.ended', partId: 'p1', text: 'Ho corretto il parser e aggiunto i test.' }, 6)
+  add({ k: 'turn.ended', turnId: 't1', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 7)
+  add({ k: 'turn.started', turnId: 't2', prompt: [{ type: 'text', text: 'grazie' }] }, 8)
+  add({ k: 'turn.ended', turnId: 't2', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 9)
+
+  const trovati = searchSnapshot(s, 'parser')
+  check('ricerca: trova nel prompt e nella risposta', trovati.length === 2,
+    JSON.stringify(trovati.map(m => m.kind)))
+  check('ricerca: una frase spezzata in più delta si trova comunque',
+    trovati.some(m => m.kind === 'answer' && m.snippet.includes('corretto il parser')),
+    JSON.stringify(trovati.find(m => m.kind === 'answer')?.snippet))
+  // Dentro un turno l'ordine è quello di lettura — prima cosa hai chiesto, poi cosa
+  // ti è stato risposto — ma i turni scorrono all'indietro: chi cerca in una
+  // conversazione lunga sta quasi sempre ritrovando qualcosa di poco fa, e con un
+  // tetto sui risultati tenere i primi vorrebbe dire mostrare l'inizio e nascondere
+  // la fine.
+  check('ricerca: dentro il turno, prima il prompt e poi la risposta',
+    trovati[0]?.kind === 'prompt' && trovati[1]?.kind === 'answer',
+    JSON.stringify(trovati.map(m => m.kind)))
+  // Il numero che la UI usa per evidenziare. Se fosse calcolato sul testo prima del
+  // ritaglio, l'evidenziazione cadrebbe su un'altra parola — e sembrerebbe giusta,
+  // perché è comunque *una* parola.
+  const m = trovati[0]!
+  check('ricerca: `at` cade davvero sulla corrispondenza dentro il ritaglio',
+    m.snippet.slice(m.at, m.at + m.len).toLowerCase() === 'parser',
+    `«${m.snippet.slice(m.at, m.at + m.len)}» in «${m.snippet}»`)
+  check('ricerca: non distingue maiuscole e minuscole',
+    searchSnapshot(s, 'PARSER').length === 2)
+  check('ricerca: una parentesi non è un\'espressione regolare',
+    searchSnapshot(s, 'parser)').length === 0)
+  check('ricerca: sotto i due caratteri non si cerca', searchSnapshot(s, 'p').length === 0)
+  check('ricerca: conta tutte le occorrenze, anche quelle non riportate',
+    countSnapshot(s, 'parser') === 2, String(countSnapshot(s, 'parser')))
+  // Un turno solo può contenere decine di corrispondenze: il tetto vale sui
+  // risultati, non sui turni. Senza questo, una conversazione con trenta righe di
+  // tool che nominano la stessa parola riempiva la barra laterale da sola.
+  for (let i = 0; i < 12; i++) {
+    add({ k: 'text.started', partId: `x${i}` }, 100 + i * 2)
+    add({ k: 'text.ended', partId: `x${i}`, text: `ancora il parser numero ${i}` }, 101 + i * 2)
+  }
+  check('ricerca: il tetto vale anche dentro un turno solo',
+    searchSnapshot(s, 'parser', 5).length === 5,
+    String(searchSnapshot(s, 'parser', 5).length))
+  // I turni scorrono all'indietro: una corrispondenza in un turno più recente sta
+  // sopra una identica in uno più vecchio.
+  add({ k: 'turn.started', turnId: 't4', prompt: [{ type: 'text', text: 'e il parser?' }] }, 20)
+  check('ricerca: il turno più recente sta sopra',
+    searchSnapshot(s, 'parser')[0]?.turnId === 't4',
+    searchSnapshot(s, 'parser')[0]?.turnId)
+  // Il ritaglio deve restare una riga: in un elenco, sei righe di risultato
+  // spingerebbero fuori vista tutti gli altri.
+  add({ k: 'turn.started', turnId: 't3', prompt: [{ type: 'text', text: 'a\n\n\nb parser c' }] }, 10)
+  check('ricerca: gli a capo diventano spazi, il ritaglio resta una riga',
+    !searchSnapshot(s, 'parser')[0]!.snippet.includes('\n'))
+}
+
+// ─── §13: leggere solo la coda di un journal ────────────────────────────────
+//
+// È ciò su cui poggia la cache dell'elenco: se «lo stato di prima più le righe
+// nuove» non fosse identico a «rileggere tutto», la barra laterale mostrerebbe
+// conversazioni ferme a uno stato vecchio, e nessuno se ne accorgerebbe subito.
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-coda-'))
+  const p = resolve(casa, 'j.jsonl')
+  const j = new Journal(p, 'coda')
+  j.append({ k: 'session.state', state: 'starting' })
+  j.append({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'ciao' }] })
+  const meta = Journal.readFrom(p, 0)
+  check('§13: readFrom(0) legge tutto', meta.events.length === 2, String(meta.events.length))
+
+  j.append({ k: 'text.started', partId: 'p1' })
+  j.append({ k: 'text.delta', partId: 'p1', delta: 'ok' })
+  const coda = Journal.readFrom(p, meta.offset)
+  check('§13: readFrom continua da dove era rimasto, senza rileggere il resto',
+    coda.events.length === 2 && coda.from === meta.offset,
+    `${coda.events.length} eventi da ${coda.from} (atteso ${meta.offset})`)
+
+  // L'invariante vera: incrementale === integrale. `reduce` non è che `applyTo`
+  // ripetuto, quindi continuare uno snapshot già fatto deve dare lo stesso oggetto.
+  const incrementale = reduce(meta.events, 'coda')
+  for (const e of coda.events) applyTo(incrementale, e)
+  check('§13: stato incrementale identico alla rilettura integrale',
+    JSON.stringify(incrementale) === JSON.stringify(reduce(Journal.read(p), 'coda')))
+
+  // Una riga a metà: `writeSync` scrive una riga alla volta, ma un journal copiato o
+  // troncato può finire dentro un JSON. Ripartire da dentro quella riga darebbe due
+  // frammenti che non sono JSON né l'uno né l'altro.
+  const dopoCoda = coda.offset
+  writeFileSync(p, readFileSync(p, 'utf8') + '{"v":1,"seq":99,"ts":0,"sessi', 'utf8')
+  const monca = Journal.readFrom(p, dopoCoda)
+  check('§13: una riga non ancora terminata non viene letta né consumata',
+    monca.events.length === 0 && monca.offset === dopoCoda,
+    `${monca.events.length} eventi, offset ${monca.offset} (atteso ${dopoCoda})`)
+  writeFileSync(p, readFileSync(p, 'utf8')
+    + 'onId":"coda","payload":{"k":"session.state","state":"idle"}}\n', 'utf8')
+  const finita = Journal.readFrom(p, dopoCoda)
+  check('§13: la stessa riga, una volta finita, si legge intera',
+    finita.events.length === 1 && finita.events[0]?.seq === 99,
+    JSON.stringify(finita.events[0]?.payload ?? null))
+
+  // Un file più corto dell'offset non è la coda dello stesso file: è un altro file.
+  // Continuare uno snapshot vecchio sopra una storia nuova darebbe uno stato che non
+  // è mai esistito, ed è il caso di una chat cancellata e ricreata con lo stesso id.
+  writeFileSync(p, '', 'utf8')
+  check('§13: un file accorciato fa ripartire da capo, non dalla coda',
+    Journal.readFrom(p, finita.offset).from === 0)
+  rmSync(casa, { recursive: true, force: true })
 }
 
 let failed = 0

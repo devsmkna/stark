@@ -9,7 +9,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
+import { ClaudeCodeAdapter, type PermissionAnswer, type PlanAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
 import { isRecent, listTranscripts, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
 import { importTranscript } from '../adapters/claude-code/import.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
@@ -17,6 +17,7 @@ import { activity, type Activity } from '../core/activity.ts'
 import { Journal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
+import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
 import type { AgentQuestion, Attachment, CanonicalEvent, Command, PermissionMode, PromptPart } from '../core/events.ts'
 
@@ -85,6 +86,7 @@ export type ImportableRow = TranscriptInfo & {
 type Pending =
   | { kind: 'permission'; resolve: (a: PermissionAnswer) => void }
   | { kind: 'question'; resolve: (a: QuestionAnswer) => void }
+  | { kind: 'plan'; resolve: (a: PlanAnswer) => void }
 
 type Live = {
   id: string
@@ -154,6 +156,22 @@ export type ImmagineSalvata = {
   data: string
 }
 
+/**
+ * Quale conversazione del CLI riprendere. È una funzione a parte, ed esportata, perché
+ * è l'unico pezzo di `open()` che si può provare **senza** aprire una sessione vera:
+ * la regola è una scelta fra due stringhe, e sbagliarla non si vede finché qualcuno non
+ * fa un `/clear` prima di uno Sleep (vedi il commento in `open()`).
+ *
+ * `spec.resume.ref` è l'id STARK, cioè il nome del journal. `resumeRef` è quello che il
+ * CLI ha dichiarato per ultimo nel suo `system:init`: coincidono sempre, tranne dopo un
+ * reset del contesto. Vince il secondo, quando c'è.
+ */
+export const refDaRiprendere = (
+  resume: { ref: string; fork?: boolean } | undefined,
+  resumeRef: string | undefined,
+): { ref: string; fork?: boolean } | undefined =>
+  resume && !resume.fork && resumeRef ? { ...resume, ref: resumeRef } : resume
+
 export class Registry {
   private readonly live = new Map<string, Live>()
   /**
@@ -164,6 +182,12 @@ export class Registry {
    * esattamente ciò che SSE esiste per non fare.
    */
   private readonly all = new Set<() => void>()
+  /**
+   * Quanto si è già letto del journal di ogni conversazione **ferma**, e lo stato a
+   * cui si era arrivati. Vedi `leggi()`: è la cache che toglie la rilettura integrale
+   * di tutta la storia a ogni aggiornamento dell'elenco.
+   */
+  private readonly letti = new Map<string, { offset: number; snap: SessionSnapshot }>()
   private readonly defaults: { model: string; mode: PermissionMode; configDir?: string }
 
   constructor(defaults: { model?: string; mode?: PermissionMode; configDir?: string } = {}) {
@@ -266,6 +290,22 @@ export class Registry {
     // chat che non è mai partita: qui sotto è già popolato da `session.created`.
     const model = spec.model ?? snapshot.model ?? this.defaults.model
 
+    // Terzo campo che il risveglio deve restituire com'era, e il più subdolo dei tre:
+    // **quale conversazione** riprendere. `spec.resume.ref` fa due mestieri — dà il
+    // nome al journal (qui sopra, `id`) e dice al CLI da dove ripartire — e di norma i
+    // due coincidono, perché all'apertura STARK passa il proprio id come `sessionId`.
+    // Un `/clear` li fa divergere: il CLI **sposta la conversazione su un id nuovo**, e
+    // lo dichiara nel `system:init` che segue (→ `session.resumeRef`). Riprendere il
+    // vecchio id riapre la conversazione di **prima** del taglio, cioè riporta indietro
+    // il contesto che l'utente aveva appena buttato via — misurato su una chat vera:
+    // 129.387 token prima del `/clear`, 57.748 dopo, e di nuovo **129.387** al
+    // risveglio. Il journal sapeva la risposta e nessuno gliela chiedeva.
+    //
+    // Solo per un risveglio vero: su un `fork` lo snapshot letto qui sopra è quello del
+    // journal **nuovo**, cioè vuoto, e `resumeRef` non c'è — la conversazione da cui si
+    // biforca è un'altra domanda, e la si lascia dov'è.
+    const resume = refDaRiprendere(spec.resume, snapshot.resumeRef)
+
     const adapter = new ClaudeCodeAdapter({
       cwd: spec.cwd,
       model,
@@ -278,7 +318,7 @@ export class Registry {
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.
       ...((spec.configDir ?? this.defaults.configDir) ? { configDir: spec.configDir ?? this.defaults.configDir } : {}),
-      ...(spec.resume ? { resume: spec.resume } : { sessionId: id }),
+      ...(resume ? { resume } : { sessionId: id }),
       // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
       // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo
       // fanno); tutti gli altri prendono la tabella, che è il pannello dei permessi.
@@ -299,6 +339,9 @@ export class Registry {
       }),
       onQuestion: r => new Promise<QuestionAnswer>(res => {
         pending.set(r.requestId, { kind: 'question', resolve: res })
+      }),
+      onPlan: r => new Promise<PlanAnswer>(res => {
+        pending.set(r.requestId, { kind: 'plan', resolve: res })
       }),
     })
     entry.adapter = adapter
@@ -366,13 +409,50 @@ export class Registry {
     for (const w of this.all) w()
   }
 
+  /**
+   * Lo stato di una conversazione **senza processo**, leggendo del suo journal solo
+   * ciò che non era già stato letto.
+   *
+   * Il journal è append-only (§13), e questa è la prima volta che quella invariante
+   * viene usata invece che solo rispettata: se il file è cresciuto di tre righe, lo
+   * stato di prima più quelle tre righe **è** lo stato di adesso — `reduce` non è
+   * altro che `applyTo` ripetuto su uno snapshot vuoto, quindi continuare da uno
+   * snapshot già fatto dà lo stesso identico oggetto.
+   *
+   * Prima si rileggeva tutto a ogni giro, e «ogni giro» sono fino a quattro volte al
+   * secondo mentre una chat streama: misurato, 82 ms per un journal da 12 MB, **per
+   * ciascuna** conversazione ferma. Con dieci conversazioni di quella taglia il
+   * daemon passava più tempo a rileggere la storia che a servire il presente, e
+   * `readFileSync` + `JSON.parse` sono sincroni: a fermarsi era tutto, SSE compreso.
+   */
+  private leggi(id: string, path: string): SessionSnapshot {
+    const prima = this.letti.get(id)
+    const { events, offset, from } = Journal.readFrom(path, prima?.offset ?? 0)
+    // `from` diverso da dove eravamo rimasti vuol dire che `readFrom` è ripartito da
+    // capo: il file si è accorciato, cioè non è più lo stesso file. Continuare uno
+    // snapshot vecchio sopra una storia nuova darebbe uno stato che non è mai esistito.
+    const snap = prima && from === prima.offset
+      ? prima.snap
+      : reduce([], id)
+    for (const e of events) applyTo(snap, e)
+    this.letti.set(id, { offset, snap })
+    return snap
+  }
+
   list(): SessionRow[] {
     const rows = new Map<string, SessionRow>()
     if (existsSync(SESSIONS)) {
+      const visti = new Set<string>()
       for (const f of readdirSync(SESSIONS)) {
         if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
         const id = f.replace(/\.jsonl$/, '')
-        const s = reduce(Journal.read(resolve(SESSIONS, f)), id)
+        visti.add(id)
+        // La riga di una sessione viva la scrive il processo, qui sotto, e sovrascrive
+        // comunque questa. Rileggerne il journal era lavoro buttato — e per giunta
+        // proprio quello della chat più grande e più spesso ricalcolata, perché è
+        // quella che sta streamando ed è la ragione per cui `list()` viene richiamata.
+        if (this.live.has(id)) continue
+        const s = this.leggi(id, resolve(SESSIONS, f))
         const state = settled(s.state)
         rows.set(id, {
           id, title: titleOf(s), state, turns: s.turns.length,
@@ -392,6 +472,9 @@ export class Registry {
           ...(s.quota && s.quota.status !== 'allowed' ? { quota: s.quota } : {}),
         })
       }
+      // Una conversazione cancellata non deve restare in memoria per sempre: la
+      // cache tiene uno snapshot intero per riga, cioè tutta la sua storia.
+      for (const id of this.letti.keys()) if (!visti.has(id)) this.letti.delete(id)
     }
     for (const [id, l] of this.live) {
       const s = l.snapshot
@@ -407,6 +490,48 @@ export class Registry {
       })
     }
     return [...rows.values()]
+  }
+
+  /**
+   * Cercare in tutte le conversazioni.
+   *
+   * Non è una rotta che scandisce il disco: passa dagli stessi snapshot che tiene
+   * l'elenco (`leggi()`), quindi su una macchina già accesa una ricerca non rilegge
+   * **niente**. È anche il motivo per cui trova ciò che la UI mostra e non ciò che sta
+   * scritto su disco: una risposta arrivata in trecento `text.delta` nel journal non
+   * esiste come frase intera in nessuna riga, e cercarla lì non la troverebbe mai.
+   *
+   * Due caratteri di soglia: con uno solo il risultato è «tutte», che non è una
+   * risposta — e costerebbe un ritaglio per ogni turno di ogni chat per dirlo.
+   */
+  search(query: string, limit = 5): SessionMatches[] {
+    const q = query.trim()
+    if (q.length < MINIMO) return []
+    const out: SessionMatches[] = []
+    const snapshots = new Map<string, SessionSnapshot>()
+    if (existsSync(SESSIONS)) {
+      for (const f of readdirSync(SESSIONS)) {
+        if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
+        const id = f.replace(/\.jsonl$/, '')
+        if (this.live.has(id)) continue
+        snapshots.set(id, this.leggi(id, resolve(SESSIONS, f)))
+      }
+    }
+    // Le vive dopo: il loro snapshot in memoria è più avanti di qualunque cosa il
+    // disco possa dire, perché il journal lo scrive lo stesso oggetto.
+    for (const [id, l] of this.live) snapshots.set(id, l.snapshot)
+
+    for (const [id, snap] of snapshots) {
+      const matches = searchSnapshot(snap, q, limit)
+      if (matches.length === 0) continue
+      out.push({
+        sessionId: id, title: titleOf(snap), total: countSnapshot(snap, q), matches,
+        ...(snap.cwd ? { cwd: snap.cwd } : {}),
+      })
+    }
+    // Per corrispondenza più recente, non per numero: chi cerca sta ritrovando
+    // qualcosa, e «quante volte l'ho detto» non aiuta a decidere quale aprire.
+    return out.sort((a, b) => (b.matches[0]?.ts ?? 0) - (a.matches[0]?.ts ?? 0))
   }
 
   // ─── conversazioni nate nel terminale ─────────────────────────────────────
@@ -670,6 +795,15 @@ export class Registry {
         if (p?.kind !== 'question') return { ok: false, error: 'domanda sconosciuta' }
         l.pending.delete(cmd.requestId)
         p.resolve({ answers: cmd.answers, ...(cmd.response !== undefined ? { response: cmd.response } : {}) })
+        return { ok: true }
+      }
+      case 'plan.reply': {
+        const p = l.pending.get(cmd.requestId)
+        if (p?.kind !== 'plan') return { ok: false, error: 'piano sconosciuto' }
+        l.pending.delete(cmd.requestId)
+        p.resolve(cmd.decision === 'approved'
+          ? { approved: true, ...(cmd.mode ? { mode: cmd.mode } : {}) }
+          : { approved: false, ...(cmd.feedback ? { feedback: cmd.feedback } : {}) })
         return { ok: true }
       }
       case 'question.reject': {

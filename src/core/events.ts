@@ -314,6 +314,39 @@ export type Payload =
   | { k: 'tool.input.ended'; callId: string; input: unknown; summary?: string; intent?: string }
   | { k: 'tool.ended'; callId: string; ok: boolean; output?: unknown; error?: string }
 
+  /**
+   * Un lavoro che l'agent ha avviato e che **il CLI segue per conto suo**, oltre la
+   * fine della chiamata che lo ha lanciato.
+   *
+   * Non è un doppione di `tool.started`, ed è la differenza che rende necessari questi
+   * due eventi. Un comando lanciato in background risponde **subito** — «Async agent
+   * launched successfully» — quindi il suo `tool.ended` arriva con esito positivo una
+   * riga dopo, e la conversazione lo mostra come finito. Non lo è: quello che è finito
+   * è il *lancio*. L'esito vero arriva molto più tardi, spesso in un altro turno.
+   * Misurato su un journal reale: `tool_result` alla riga 53, esito alla riga **810**.
+   * Senza questi due eventi quell'esito non esiste in STARK, e chi guarda vede una
+   * riga verde al posto di un lavoro ancora in corso — cioè la bugia peggiore, quella
+   * su cui si aspetta.
+   *
+   * `callId` è la chiamata che lo ha avviato: il task **non** è una riga nuova nel
+   * flusso, è ciò che si scopre dopo su una riga che c'è già. Attaccarlo lì invece di
+   * inventargli un posto è la stessa scelta della compattazione, che è una riga *nel*
+   * flusso perché nel flusso è avvenuta.
+   *
+   * `kind` è canonico: `local_bash`/`local_agent` sono vocabolario di Claude Code e
+   * restano nell'adapter (§1). `other` non è pigrizia — è la promessa che un tipo
+   * nuovo, aggiunto dal CLI domani, si mostri lo stesso invece di sparire.
+   */
+  | { k: 'task.started'; taskId: string; callId?: string
+      kind: 'command' | 'agent' | 'other'; description?: string; background: boolean }
+  /**
+   * Com'è andata, quando si sa. `summary` è scritto dal CLI, non da noi: su un
+   * sub-agent è il resoconto di cosa ha fatto, ed è l'unica cosa che ne resta —
+   * il suo lavoro interno non passa da questo canale.
+   */
+  | { k: 'task.ended'; taskId: string; status: 'completed' | 'failed'
+      summary?: string; outputFile?: string }
+
   // §8 richieste bloccanti — nel caso normale NON esistono affatto (ADR-008)
   | { k: 'permission.asked'; requestId: string; action: string; resources: string[]
       savable: string[]; source: { callId?: string } }
@@ -323,6 +356,37 @@ export type Payload =
   // `AskUserQuestion`. Non sono un canale a parte, ma restano un evento a parte: per
   // l'utente "scegli fra queste opzioni" e "posso eseguire questo comando?" sono due
   // cose diverse, e una UI che le mostrasse uguali mentirebbe.
+  /**
+   * L'agent ha finito di pianificare e chiede di partire.
+   *
+   * È un evento a sé e non un `permission.asked`, per la stessa ragione per cui lo
+   * sono le domande (§16.1): per chi guarda, «ho scritto un piano, lo approvi?» e
+   * «posso eseguire questo comando?» sono due cose diverse, e una UI che le mostrasse
+   * uguali mentirebbe. Qui la differenza è anche più netta — il permesso si concede
+   * guardando **un soggetto** (un comando, un percorso), il piano si approva
+   * **leggendolo**: è un documento, non una riga.
+   *
+   * Verificato dal vivo il 27 agosto 2026 (`spike/piano-todo-subagent.ts`): arriva
+   * come richiesta di permesso sul tool `ExitPlanMode`, con `{plan, planFilePath}`.
+   * Prima di questo evento finiva nella card generica, e siccome `plan` non è fra i
+   * campi in cui `summarize()` cerca un soggetto, quella card **non mostrava niente**:
+   * si approvava un piano che non si poteva leggere.
+   *
+   * `path` è il file in cui il CLI ha scritto il piano per conto suo. Si riporta e non
+   * si legge: dirlo permette di aprirlo, leggerlo qui vorrebbe dire preferire il disco
+   * a ciò che il protocollo ha già mandato.
+   */
+  | { k: 'plan.proposed'; requestId: string; plan: string; path?: string }
+  /**
+   * Cosa si è deciso. `mode` è la parte che non si può omettere: nel terminale
+   * approvare un piano vuol dire anche scegliere **come** proseguire — accettando le
+   * modifiche da sé o approvandole una per una — e senza quella scelta STARK potrebbe
+   * meno del CLI. `feedback` è cosa cambiare, quando si rimanda a pianificare: senza,
+   * «no» sarebbe un muro invece che una correzione.
+   */
+  | { k: 'plan.replied'; requestId: string; decision: 'approved' | 'rejected'
+      mode?: PermissionMode; feedback?: string }
+
   | { k: 'question.asked'; requestId: string; questions: AgentQuestion[] }
   | { k: 'question.replied'; requestId: string
       answers: Record<string, string | string[]>; response?: string }
@@ -457,6 +521,14 @@ export type Command =
   | { c: 'question.reply'; requestId: string
       answers: Record<string, string | string[]>; response?: string }
   | { c: 'question.reject'; requestId: string }
+  /**
+   * La risposta a un piano. `mode` viaggia con l'approvazione e non separatamente,
+   * perché nel terminale sono un gesto solo: approvare vuol dire anche dire **come**
+   * proseguire. Mandarli come due comandi lascerebbe una finestra in cui l'agent è
+   * già ripartito nella modalità di prima.
+   */
+  | { c: 'plan.reply'; requestId: string; decision: 'approved' | 'rejected'
+      mode?: PermissionMode; feedback?: string }
 
 export const EMPTY_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
