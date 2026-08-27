@@ -17,6 +17,7 @@ import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
+import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
@@ -701,6 +702,52 @@ check('diff: forma unificata, numeri di riga coerenti',
   ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
   check('§1: la sessione aperta dal backend implementa tutto il contratto',
     mancanti.length === 0, mancanti.join(','))
+}
+
+// ─── «Consenti sempre»: si scrive in un file DELL'UTENTE ────────────────────
+
+// Regola di condotta, la stessa di `memoria.ts`: quel file non e' nostro. Non si
+// riscrive, si aggiunge una voce e tutto il resto passa identico. Le prove qui sotto
+// tengono ferma proprio quella parte, che e' l'unica che puo' fare danno.
+
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-regole-'))
+  const dove = percorsoRegole(casa)
+
+  const primo = consentiSempre(casa, 'Bash')
+  check('sempre: il file nasce col formato che scrive l\'SDK',
+    primo.scritto && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow[0] === 'Bash',
+    readFileSync(dove, 'utf8').replace(/\s+/g, ' '))
+
+  const due = consentiSempre(casa, 'Write')
+  check('sempre: il secondo soggetto si aggiunge, non sostituisce',
+    due.scritto && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow.join(',') === 'Bash,Write')
+
+  const ripetuto = consentiSempre(casa, 'Bash')
+  check('sempre: due volte lo stesso soggetto non lo duplica',
+    ripetuto.giaPresente && !ripetuto.scritto
+    && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow.length === 2)
+
+  // La prova che conta davvero: quello che c'era prima deve restare.
+  writeFileSync(dove, JSON.stringify({
+    permissions: { allow: ['Bash'], deny: ['Read(secret)'] },
+    unaCosaSua: { tenuta: true },
+  }, null, 2))
+  consentiSempre(casa, 'Edit')
+  const dopo = JSON.parse(readFileSync(dove, 'utf8'))
+  check('sempre: NON si tocca nulla di cio\' che l\'utente aveva scritto',
+    dopo.unaCosaSua?.tenuta === true && dopo.permissions.deny?.[0] === 'Read(secret)'
+    && dopo.permissions.allow.join(',') === 'Bash,Edit')
+
+  // Un JSON rotto non si sovrascrive: sarebbe cancellare le regole di qualcuno per un
+  // suo errore di battitura. Si rifiuta e si dice perche'.
+  writeFileSync(dove, '{ questo non e json')
+  const rotto = consentiSempre(casa, 'Bash')
+  check('sempre: un file illeggibile si rifiuta invece di sovrascriverlo',
+    !rotto.scritto && !!rotto.error && readFileSync(dove, 'utf8').startsWith('{ questo'),
+    rotto.error ?? '')
+
+  rmSync(casa, { recursive: true, force: true })
 }
 
 // ─── il secondo adapter: il traduttore di OpenCode (§14-bis) ────────────────

@@ -941,6 +941,46 @@ nessuna riga: cercarla riga per riga non la troverebbe mai.
 | `quota.windows` | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`, chiesto da STARK |
 | `context.usage` | `getContextUsage()`, chiesto da STARK — stabile, non sperimentale |
 
+### «Consenti sempre» non consentiva niente — misurato il 27 agosto 2026
+
+Un bug vecchio quanto i toggle dei permessi, trovato mentre si verificava che il secondo
+adapter non avesse rotto il primo. Nessuna prova offline poteva vederlo, e nessuna prova viva
+lo cercava: **rompendosi non dà errore**.
+
+Il «Consenti sempre» non è emulato da STARK — si rimanda indietro una regola `addRules` e la
+scrive l'SDK (ADR-009), che è la cosa giusta. Solo che **non succedeva quasi mai**. Quattro giri
+su sessioni vere, con un `Write` (non un `echo`: i comandi innocui sono pre-approvati e non
+chiedono niente a nessuno — questa sonda ci è cascata una volta):
+
+| modalità | hook `PreToolUse` | chi decide | la regola viene scritta? |
+|---|---|---|---|
+| `default` | assente | `canUseTool` | **sì** — `{"permissions":{"allow":["Write"]}}` |
+| `default` | presente | `PreToolUse` | no |
+| `auto` | presente | `PreToolUse` | no |
+
+**L'hook `PreToolUse` scavalca `canUseTool`.** E `PreToolUseHookSpecificOutput` non ha alcun
+campo per ricordare qualcosa: solo `permissionDecision`, `permissionDecisionReason`,
+`additionalContext`. L'hook `PermissionRequest` — che nei tipi porta
+`decision.updatedPermissions` **e** riceve `permission_suggestions`, cioè sarebbe la porta
+giusta — **non scatta mai**, provato con e senza `matcher`. È la quarta volta in un giorno che
+un tipo dichiarato non è un fatto (le altre tre: l'hook `PermissionDenied`, `session.wait` di
+OpenCode, i `Task*` assenti dalla lista runtime).
+
+Ma l'hook è proprio la strada che STARK usa **sempre**: in `auto` mode il classificatore risolve
+prima e `canUseTool` non viene chiamata, quindi i toggle *devono* passare da lì (ADR-008).
+Conseguenza: ogni volta che una categoria è su «chiedi» — cioè l'unico caso in cui una card
+compare davvero — il bottone si comportava come «Consenti», **e il journal scriveva `always`**.
+Una bugia su disco, che si scopre solo la volta dopo, ed esattamente quella che il commento nel
+codice prometteva di evitare.
+
+Il Principio 5 dice che STARK non deve poter meno del CLI, e nella TUI il «sempre» funziona:
+quindi non si toglie il bottone, **si scrive la regola** (`adapters/claude-code/regole.ts`). Il
+formato non è inventato — è quello che ha scritto l'SDK stesso nel giro con `canUseTool`. Regola
+di condotta identica a `memoria.ts`: è un file **dell'utente**, non si riscrive, si aggiunge una
+voce e tutto il resto passa identico; un JSON illeggibile si rifiuta invece di sovrascriverlo.
+Cinque verifiche offline tengono ferma quella parte, più una viva (`spike/permesso-sempre.ts`)
+che guarda il file sul disco — perché è l'unico posto dove la verità si vede.
+
 > ⚠️ **Corretto dal codice.** Le sorgenti qui sopra non si leggono più a mano: le fornisce
 > l'Agent SDK (ADR-009), che emette le stesse forme di messaggio. Cambia **chi** trasporta, non
 > **cosa** viene tradotto — ed è il punto: senza quel confine il secondo adapter non esiste.

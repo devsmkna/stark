@@ -25,6 +25,7 @@ import {
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
 import { askToolsFor } from './permissions.ts'
+import { consentiSempre } from './regole.ts'
 import { quotaWindows } from './quota.ts'
 import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
@@ -98,6 +99,21 @@ export class ClaudeCodeAdapter implements AgentSession {
               String(input['tool_name'] ?? tool),
               (input['tool_input'] ?? {}) as Record<string, unknown>,
             )
+            // «Consenti sempre» **qui non passa dall'SDK**, e la ragione e' misurata:
+            // `PreToolUseHookSpecificOutput` non ha nessun campo per ricordare
+            // qualcosa, questo hook scavalca `canUseTool` (che invece saprebbe farlo),
+            // e l'hook `PermissionRequest` non scatta mai. Senza questa riga il
+            // bottone si comportava come «Consenti» mentre il journal scriveva
+            // `always`. Vedi `regole.ts` per la tabella delle misure.
+            if (verdict.allow && verdict.remember) {
+              const esito = consentiSempre(this.opts.cwd, verdict.remember)
+              if (esito.error) {
+                this.emit({
+                  k: 'notice', level: 'warn',
+                  text: `«Consenti sempre» non ha potuto scrivere la regola in ${esito.path}: ${esito.error}`,
+                })
+              }
+            }
             // `ask` qui non significa "chiedi": in headless non c'è nessuno a cui
             // chiedere e l'azione muore come errore di tool. Si risponde sempre
             // allow o deny, mai altro.
