@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   CATEGORY_DEFAULTS, PERMISSION_CATEGORIES,
-  type CategoryRules, type PermissionCategory,
+  type CategoryRules, type PermissionCategory, type PermissionMode,
 } from '../core/events.ts'
 
 /** Cosa STARK sa di un progetto, che è una cartella. */
@@ -48,11 +48,35 @@ export type Settings = {
    * un `grep` di trenta caratteri quello non dice niente a chi sta guardando.
    */
   toolDescriptions: boolean
+  /**
+   * In quale modalità permessi **partono le chat nuove**.
+   *
+   * Esiste perché era l'unica differenza strutturale fra STARK e la CLI nuda, e non si
+   * poteva toccare: `auto` era cablato nel registro. Misurato il 27 agosto 2026: la CLI
+   * senza `--permission-mode` parte in **`default`**, STARK chiedeva **`auto`**. Sono
+   * due comportamenti diversi — in `default` un'azione pericolosa **si ferma e chiede**,
+   * in `auto` decide un classificatore — e chi vuole esattamente ciò che avrebbe dal
+   * terminale deve poterlo dire.
+   *
+   * Il default resta `auto`, che è la scelta di ADR-008 e non viene rovesciata qui:
+   * quella decisione era sull'attrito (zero card), non sul costo, e il costo del
+   * classificatore misurato sulla quota del piano è risultato **sotto la risoluzione
+   * della misura** — 32 chiamate non spostano un punto percentuale.
+   */
+  defaultMode: PermissionMode
 }
 
 export const DEFAULTS: Settings = {
   permissions: { ...CATEGORY_DEFAULTS }, projects: {}, toolDescriptions: true,
+  defaultMode: 'auto',
 }
+
+/** Le sei che il CLI accetta. Una stringa fuori da qui torna al default invece di
+ *  arrivare al processo figlio, che la rifiuterebbe all'avvio. */
+const MODI: PermissionMode[] =
+  ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']
+const saneMode = (m: unknown): PermissionMode =>
+  MODI.includes(m as PermissionMode) ? m as PermissionMode : 'auto'
 
 const FILE = 'settings.json'
 
@@ -74,6 +98,7 @@ export function readSettings(home: string): Settings {
       // `!== false` e non `?? true`: un file scritto prima che questa voce esistesse
       // non ce l'ha, e per quel file la risposta giusta è il default, cioè accesa.
       toolDescriptions: raw.toolDescriptions !== false,
+      defaultMode: saneMode(raw.defaultMode),
     }
   } catch {
     return { ...DEFAULTS, projects: {} }
@@ -86,6 +111,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     permissions: sanePermissions(s.permissions),
     projects: saneProjects(s.projects),
     toolDescriptions: s.toolDescriptions !== false,
+    defaultMode: saneMode(s.defaultMode),
   }
   writeFileSync(resolve(home, FILE), `${JSON.stringify(pulito, null, 2)}\n`)
   return pulito

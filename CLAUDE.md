@@ -917,6 +917,39 @@ troverebbero le sessioni da riprendere. Se systemd non c'è o la chiamata fallis
 scope da cui scappare, quindi lì era già giusto. Verificato anche il giro completo: `stark stop`
 ferma l'unità, `--collect` la rimuove, e un riavvio subito dopo riparte.
 
+**Le due misure mai fatte, fatte** (27 agosto 2026, chieste dall'utente: «voglio lo stesso costo
+che avrei usando la CLI»).
+
+**La differenza vera non era il classificatore: era la modalità.** Misurato a costo zero (solo
+handshake): `claude` senza `--permission-mode` parte in **`default`**, STARK chiedeva **`auto`**.
+Era l'unica differenza strutturale fra i due, ed era **cablata** — nessun modo di toccarla.
+Adesso è un'impostazione (`Settings.defaultMode`, Permissions → «New chats start in…»), con
+`auto` ancora come default perché ADR-008 non viene rovesciata qui: quella decisione era
+sull'attrito (zero card), non sul costo. Provata da capo a fondo: cambiata, la chat nuova parte
+nella modalità scelta, e la scelta sopravvive su disco.
+
+**Il classificatore di `auto` (§16.6).** Nell'usage della sessione **non si vede**: stesso lavoro
+in `auto` e in `default` ha dato 190.163 contro 190.086 token, cioè rumore. Sulla quota del
+**piano** il primo giro sembrava dire +1% su cinque ore e settimana — ma il controllo **a ordine
+invertito** non ha mosso niente, quindi quel +1 era un attraversamento di soglia e non il
+classificatore. Conclusione onesta: su 32 chiamate di tool il costo resta **sotto la risoluzione
+della misura** (la utilization è un intero, e 4 giri da 190k token hanno spostato la finestra da
+5 ore di un solo punto). Non è zero, ma è perso nel rumore della conversazione stessa. Quello che
+cambia davvero fra le due modalità non è la bolletta: è **se ti interrompe**.
+
+**Il risveglio (P16).** La paura scritta in ADR-005 — «rilegge tutto il contesto, quindi costa
+quota» — è vera sul *cosa*, ma il *quanto* dipende dalla cache dei prompt, e non era mai stato
+guardato. Misurato: al risveglio la storia arriva come **`cache_read`**, non come input nuovo —
+`input 2` contro `cache-r 20.564` su una conversazione da 20k token. E regge l'attesa: dopo
+**420 secondi** di pausa è ancora cache (`cache-r 20.564`), non prezzo pieno. Oltre la TTL della
+cache tornerebbe input vero, e quello non è stato misurato — servirebbe un'ora di attesa.
+Nota che chiude il cerchio sulla domanda dell'utente: STARK risveglia con `--resume`, che è
+**esattamente** ciò che fa `claude --resume` dal terminale. Qualunque sia il numero, è lo stesso
+numero del CLI — non c'è un sovrapprezzo di STARK.
+
+Le sonde restano in `spike/`: `modo-default.ts`, `costo-classificatore.ts`, `costo-risveglio.ts`,
+`risveglio-freddo.ts`. Vanno rifatte a ogni salto di versione del CLI.
+
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
 chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera

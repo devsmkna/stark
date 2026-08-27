@@ -63,6 +63,9 @@ export type Settings = {
   /** Se l'agent deve scrivere **perché** lancia un comando. Vive nel `CLAUDE.md`
    *  globale dell'agent, quindi vale anche fuori da STARK. */
   toolDescriptions: boolean
+  /** In quale modalità permessi partono le chat nuove. La CLI nuda parte in `default`;
+   *  STARK propone `auto` (ADR-008), ma la scelta è tua. */
+  defaultMode: string
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */

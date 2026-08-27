@@ -269,7 +269,11 @@ export class Registry {
     const adapter = new ClaudeCodeAdapter({
       cwd: spec.cwd,
       model,
-      mode: spec.mode ?? this.defaults.mode,
+      // La modalità di partenza è un'**impostazione**, non un valore cablato: era
+      // l'unica differenza strutturale fra STARK e la CLI nuda (che parte in `default`,
+      // misurato) e non c'era modo di toccarla. Chi apre una chat con una modalità
+      // esplicita vince comunque — è il caso delle prove, e del risveglio.
+      mode: spec.mode ?? this.settings().defaultMode ?? this.defaults.mode,
       // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.

@@ -64,6 +64,14 @@
     await store.saveSettings({ ...s, toolDescriptions: v })
   }
 
+  /** La modalità con cui partono le chat nuove. Non tocca quelle già aperte: i loro
+   *  hook sono stati installati all'avvio, e rinegoziarli a metà turno non si può. */
+  async function salvaModo(m: string): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    await store.saveSettings({ ...s, defaultMode: m })
+  }
+
   // ─── progetti ─────────────────────────────────────────────────────────────
 
   /** I progetti sono le cartelle che hanno una conversazione, più quelle che hanno già
@@ -206,6 +214,28 @@
             <span><b>This applies to new chats.</b> A chat already open keeps the rules it started
             with — its checks are installed when the agent starts, not while it works.</span>
           </div>
+        </div>
+
+        <!-- La modalità di partenza. Era l'unica differenza strutturale fra STARK e il
+             terminale, e non si poteva toccare: `auto` era cablato nel registro.
+             Misurato il 27 agosto 2026 — `claude` senza `--permission-mode` parte in
+             `default`. Le due voci sono quelle vere, non un'astrazione nostra. -->
+        <div class="fgroup">
+          <div class="flabel">New chats start in…</div>
+          <div class="seg" role="group" aria-label="Permission mode for new chats">
+            <button class:on={(store.settings.defaultMode ?? 'auto') === 'auto'}
+              onclick={() => void salvaModo('auto')}>auto</button>
+            <button class:on={store.settings.defaultMode === 'default'}
+              onclick={() => void salvaModo('default')}>default</button>
+          </div>
+          <div class="hint"><b>auto</b> is STARK's default: a classifier decides every action, and
+          nothing stops to ask — that is the point of it. <b>default</b> is what
+          <code>claude</code> does when you start it from a terminal without options: a risky
+          action <b>stops and asks you</b>.
+          <br />Measured, so you can choose knowing: the same work in the two modes cost the same
+          tokens (190k against 190k), and the classifier did not move the plan quota by a single
+          percentage point over 32 tool calls — it is below what the meter can see. The real
+          difference is not the bill, it is whether you get interrupted.</div>
         </div>
 
         <div class="hard">
