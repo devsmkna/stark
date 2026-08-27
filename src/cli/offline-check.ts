@@ -27,7 +27,7 @@ import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
-import { Journal } from '../core/journal.ts'
+import { Journal, MemoryJournal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
@@ -1613,6 +1613,39 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('§13: un file accorciato fa ripartire da capo, non dalla coda',
     Journal.readFrom(p, finita.offset).from === 0)
   rmSync(casa, { recursive: true, force: true })
+}
+
+// ─── §17: il deposito in memoria dell'helper ────────────────────────────────
+//
+// Le invarianti del §13 valgono anche per una chat che non tocca il disco, e non per
+// gentilezza: `seq` senza buchi e nell'ordine dei fatti e' cio' che fa funzionare
+// `applyTo`, quindi la UI dell'helper ricostruisce lo stato con lo **stesso**
+// riduttore di tutte le altre. Se questa parte si rompesse, il sintomo non sarebbe un
+// errore ma una conversazione che si disegna sbagliata.
+{
+  const m = new MemoryJournal('helper-1')
+  check('§17: un deposito in memoria non dichiara un percorso', m.path === '' && m.lastSeq === 0)
+
+  const a = m.append({ k: 'session.state', state: 'starting' })
+  const b = m.append({ k: 'session.state', state: 'idle' })
+  check('§17: i seq crescono di uno, come sul disco', a.seq === 1 && b.seq === 2 && m.lastSeq === 2)
+  check('§17: ogni evento porta la sessione e la versione del modello',
+    a.sessionId === 'helper-1' && typeof a.v === 'number')
+
+  check('§17: `from` da\' solo cio\' che e\' successo dopo', m.from(1).length === 1 && m.from(1)[0]?.seq === 2)
+  check('§17: `from(0)` da\' tutto, come una rilettura', m.from(0).length === 2)
+  check('§17: `from` oltre la fine non da\' niente', m.from(9).length === 0)
+
+  // Lo stato ricostruito dev'essere lo stesso che si otterrebbe da un journal su file:
+  // e' l'invariante del §4, ed e' la ragione per cui l'helper non ha un secondo modello.
+  const daMemoria = reduce(m.from(0), 'helper-1')
+  check('§17: il riduttore ci lavora identico', daMemoria.state === 'idle' && daMemoria.lastSeq === 2)
+
+  m.close()
+  check('§17: chiudere svuota subito, non quando lo decide il GC', m.from(0).length === 0)
+  let esploso = false
+  try { m.append({ k: 'session.state', state: 'idle' }) } catch { esploso = true }
+  check('§17: scrivere su un deposito chiuso e\' un errore, non un silenzio', esploso)
 }
 
 let failed = 0

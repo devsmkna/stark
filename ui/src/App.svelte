@@ -1,6 +1,7 @@
 <script lang="ts">
   import Sprite from './components/Sprite.svelte'
   import Sidebar from './components/Sidebar.svelte'
+  import Helper from './components/Helper.svelte'
   import Conversation from './components/Conversation.svelte'
   import Effects from './components/Effects.svelte'
   import NewChat from './components/NewChat.svelte'
@@ -39,8 +40,12 @@
   // effetti, o «sta aprendo», o l'errore di collegamento) la sostituisce quando c'è.
   // Larga, invece, sono sempre affiancate: sono questi due booleani a fare tutta la
   // differenza, il resto del template sotto non cambia.
-  const showList = $derived(!store.narrow || (store.selected === null && !store.fatal))
-  const showRight = $derived(!store.narrow || store.selected !== null || !!store.fatal)
+  // Su schermo stretto l'helper e' una schermata, non una colonna: un sesto di
+  // telefono non e' una chat, e' una colonna di sillabe. Prende il posto di tutto,
+  // come le impostazioni. Su schermo largo si affianca e non toglie niente a nessuno.
+  const soloHelper = $derived(store.narrow && store.helperOn)
+  const showList = $derived(!soloHelper && (!store.narrow || (store.selected === null && !store.fatal)))
+  const showRight = $derived(!soloHelper && (!store.narrow || store.selected !== null || !!store.fatal))
 </script>
 
 <Sprite />
@@ -120,6 +125,15 @@
           </div>
         {:else}Pick a chat on the left.{/if}
       </div>
+    {/if}
+
+    <!-- L'helper: terzo figlio di `.shell`, **fuori** dall'albero dei pannelli. Non e'
+         una chat del lavoro — non si dispone, non si salva, non si ritrova — quindi
+         metterlo dentro `layout` avrebbe voluto dire insegnare all'albero un'eccezione.
+         Sotto la soglia stretta `soloHelper` ha gia' spento gli altri due, e questo
+         resta solo in scena. -->
+    {#if store.helperOn}
+      <Helper {store} />
     {/if}
   {/if}
 

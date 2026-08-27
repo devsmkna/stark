@@ -182,6 +182,14 @@
       <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
       {#if store.calls.on && store.calls.permission === 'default'}<i class="ask"></i>{/if}
     </button>
+    <!-- L'helper non e' di una chat: e' della macchina, come la campanella accanto.
+         Nella barra di una conversazione comparirebbe una volta **per pannello aperto**,
+         da quando le chat si affiancano. -->
+    <button class="bell" class:off={!store.helperOn}
+      title="Helper — a quick question, on the side" aria-label="Helper"
+      onclick={() => void store.toggleHelper()}>
+      <Icon name="i-chat" />
+    </button>
     <button class="plus" title="New chat" aria-label="New chat"
       onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
       <Icon name="i-plus" />

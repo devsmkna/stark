@@ -14,7 +14,7 @@ import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
-  type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
+  type AgentModels, type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
   type SessionRow, type Settings,
 } from './api.ts'
 import { Pane } from './pane.svelte.ts'
@@ -849,9 +849,142 @@ export class Store {
     if (this.panes.has(id)) this.closePane(id)
   }
 
+  // ─── l'helper (§17) ────────────────────────────────────────────────────────
+  //
+  // Una chat di lato, larga un sesto, per la domanda che arriva mentre ne stai
+  // seguendo un'altra. Sta **fuori** da `panes` e da `layout`, e non e' un dettaglio
+  // di implementazione: quelli sono le chat di un lavoro, disposte in un albero che si
+  // salva e si ricarica. L'helper non e' un lavoro, non si dispone e non si salva.
+  // Metterlo li' dentro avrebbe voluto dire insegnare all'albero un'eccezione.
+
+  /** La conversazione dell'helper. `Pane` e' la stessa unita' delle altre — snapshot,
+   *  flusso, riduttore — perche' l'invariante del §4 vale anche per una chat che non
+   *  esiste su disco: e' cio' che permette di disegnarla senza un secondo modello. */
+  helper = $state<Pane | null>(null)
+  /** Il pannello e' aperto. Separato da `helper`: si apre subito e la chat arriva dopo
+   *  un secondo e mezzo (l'handshake), e in mezzo bisogna pur mostrare qualcosa. */
+  helperOn = $state(false)
+  /** Sta aprendo, o sta cambiando agent. Blocca la casella senza svuotarla. */
+  helperBusy = $state(false)
+  /** Un rifiuto **dell'helper**, tenuto separato da `refused`: due riquadri diversi
+   *  non devono mostrarsi l'un l'altro gli errori. */
+  helperRefused = $state<string | null>(null)
+  /** Il catalogo dei modelli, chiesto alla prima apertura del selettore e non prima:
+   *  costa un handshake per agent, e la UI all'avvio non ne ha bisogno. */
+  catalogo = $state<AgentModels[] | null>(null)
+  /** Cosa e' stato scelto. Sopravvive a un cambio di chat perche' e' una preferenza
+   *  del pannello, non della conversazione che ci sta dentro adesso. */
+  helperPick = $state<{ agent: string; model: string } | null>(null)
+
+  static readonly #HELPER_W = 'stark.helper.width'
+
+  /**
+   * Quanto e' largo il pannello.
+   *
+   * Un sesto della finestra come default — la misura chiesta — e trascinabile, con la
+   * scelta ricordata **sul dispositivo**: quanto e' largo il monitor non e' un fatto
+   * del progetto, e portarsi la larghezza del 27 pollici sul portatile sarebbe la
+   * stessa distinzione che gia' separa tema e suoni dalle impostazioni di macchina.
+   */
+  helperW = $state<number>(0)
+
+  #larghezzaIniziale(): number {
+    const salvata = Number(localStorage.getItem(Store.#HELPER_W) ?? '')
+    if (Number.isFinite(salvata) && salvata > 0) return this.#limita(salvata)
+    return this.#limita(Math.round(innerWidth / 6))
+  }
+
+  /** Un minimo sotto cui il markdown non e' piu' leggibile ma diventa una colonna di
+   *  sillabe, e un tetto oltre il quale non sarebbe piu' un pannello di lato. */
+  #limita(px: number): number {
+    return Math.max(220, Math.min(px, Math.round(innerWidth / 2.5)))
+  }
+
+  setHelperW(px: number): void {
+    this.helperW = this.#limita(px)
+    localStorage.setItem(Store.#HELPER_W, String(this.helperW))
+  }
+
+  /** Apre o chiude il pannello. Chiudere **non** butta la conversazione: e' il cestino
+   *  a farlo, e sono due intenzioni diverse — «adesso non mi serve a schermo» non e'
+   *  «ho finito con questa domanda». */
+  async toggleHelper(): Promise<void> {
+    if (this.helperOn) { this.helperOn = false; return }
+    if (this.helperW === 0) this.helperW = this.#larghezzaIniziale()
+    this.helperOn = true
+    if (!this.helper) await this.apriHelper()
+  }
+
+  /** Apre una conversazione helper nuova. Chiude quella di prima, se c'era: ce n'e'
+   *  una sola, e il daemon lo impone dalla sua parte. */
+  async apriHelper(pick?: { agent: string; model: string }): Promise<void> {
+    this.helperBusy = true
+    this.helperRefused = null
+    const vecchio = this.helper
+    this.helper = null
+    vecchio?.close()
+    try {
+      const scelta = pick ?? this.helperPick ?? undefined
+      const { id } = await this.api.openHelper(scelta ?? {})
+      const pane = new Pane(id)
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.helperRefused = esito.error; return }
+      this.helper = pane
+      if (pick) this.helperPick = pick
+    } catch (e) {
+      this.helperRefused = (e as Error).message
+    } finally {
+      this.helperBusy = false
+    }
+  }
+
+  /** Butta la conversazione e ne apre una vuota. E' il cestino in cima al pannello. */
+  async svuotaHelper(): Promise<void> {
+    await this.apriHelper()
+  }
+
+  async helperPrompt(text: string): Promise<void> {
+    const id = this.helper?.chatId
+    if (!id || !text.trim()) return
+    this.helperRefused = null
+    const esito = await this.api.command(id, { c: 'session.prompt', text })
+    if (!esito.ok) this.helperRefused = esito.error ?? 'refused'
+  }
+
+  async helperStop(): Promise<void> {
+    const id = this.helper?.chatId
+    if (id) await this.api.command(id, { c: 'session.interrupt' })
+  }
+
+  /**
+   * Sceglie agent e modello.
+   *
+   * Cambiare **modello** dentro lo stesso agent e' un'opzione di sessione e la
+   * conversazione continua. Cambiare **agent** vuol dire un altro backend, quindi la
+   * chat riparte — su una chat usa-e-getta e' accettabile, ma il pannello lo dice
+   * invece di farlo di nascosto.
+   */
+  async scegliHelper(agent: string, model: string): Promise<void> {
+    const stessoAgent = this.helperPick?.agent === agent || (!this.helperPick && agent === this.helper?.snap?.agent)
+    if (stessoAgent && this.helper) {
+      this.helperPick = { agent, model }
+      await this.api.command(this.helper.chatId, { c: 'session.setOption', id: 'model', value: model })
+      return
+    }
+    await this.apriHelper({ agent, model })
+  }
+
+  /** Il catalogo, una volta sola per caricamento di pagina. */
+  async caricaCatalogo(): Promise<void> {
+    if (this.catalogo) return
+    try { this.catalogo = await this.api.models() }
+    catch { this.catalogo = [] }
+  }
+
   dispose(): void {
     removeEventListener('popstate', this.#popstate)
     for (const pane of this.panes.values()) pane.close()
+    this.helper?.close()
     this.#stopList?.()
   }
 }

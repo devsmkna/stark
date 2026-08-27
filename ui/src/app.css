@@ -620,3 +620,123 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .pjrow:last-child{border-bottom:0}
 .pjrow .pjn{flex:1;min-width:0}
 .pjrow .pjp{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
+
+/* ─── l'helper: la chat di lato, un sesto di schermo (§17) ─────────────────────
+   La larghezza la decide lo store (default un sesto, trascinabile, ricordata sul
+   dispositivo): qui c'è solo `flex:none`, che serve perché `.shell *{min-width:0}`
+   toglie a tutto il minimo naturale e senza il pannello verrebbe schiacciato a zero. */
+.helper{flex:none;display:flex;flex-direction:column;background:var(--surface);
+  border-left:1px solid var(--line-2);position:relative}
+.hgrip{position:absolute;left:-3px;top:0;bottom:0;width:7px;cursor:col-resize;
+  background:none;border:0;padding:0;z-index:2}
+.hgrip:hover{background:var(--accent-soft)}
+.hbar{display:flex;align-items:center;gap:6px;padding:8px 9px;flex:none;
+  border-bottom:1px solid var(--line)}
+.hbar>svg{width:13px;height:13px;color:var(--muted);flex:none}
+.hbar .t{font-weight:600;font-size:12.5px;flex:1;min-width:0}
+.hbar .hb{width:22px;height:22px;flex:none;color:var(--muted);display:grid;
+  place-items:center;background:none;border:0;padding:0;border-radius:6px}
+.hbar .hb:hover{background:var(--surface-2);color:var(--ink)}
+.hbar .hb svg{width:13px;height:13px}
+
+.hconv{flex:1;padding:10px 9px;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+/* Il blu vuol dire «qui parli tu», come ovunque in STARK. L'angolo vivo in basso a
+   sinistra àncora la bolla a chi l'ha scritta, senza aggiungere un'etichetta. */
+.hq{background:var(--user-bg);border-radius:8px 8px 8px 2px;padding:6px 8px;
+  color:var(--ink);align-self:flex-start;max-width:100%;white-space:pre-wrap;
+  overflow-wrap:anywhere}
+.ha{color:var(--ink-2);line-height:1.55;overflow-wrap:anywhere}
+.ha>*:first-child{margin-top:0}
+.ha>*:last-child{margin-bottom:0}
+.ha p{margin:0 0 7px}
+.ha pre{background:var(--surface-2);padding:7px 8px;border-radius:7px;overflow:auto;
+  font-size:11px}
+.ha code{font-family:var(--mono);font-size:.86em}
+.ha ul,.ha ol{margin:0 0 7px;padding-left:18px}
+/* Un tool: una riga sola, monospace, che non compete con la risposta. */
+.htool{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted);
+  font-family:var(--mono)}
+.htool svg{width:11px;height:11px;flex:none}
+.htool span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.htool.ko{color:var(--stop)}
+.hthink{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted);
+  background:none;border:0;padding:0;font-family:inherit;align-self:flex-start}
+.hthink:hover{color:var(--ink-2)}
+.hthink svg{width:11px;height:11px}
+.hthought{font-size:11px;color:var(--muted);border-left:2px solid var(--line-2);
+  padding-left:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.hbusy{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+.hbusy .hstop{margin-left:auto;width:20px;height:20px;color:var(--stop);background:none;
+  border:0;padding:0;display:grid;place-items:center}
+.hbusy .hstop svg{width:18px;height:18px}
+.hempty{color:var(--muted);font-size:11.5px;line-height:1.5}
+.hempty p{margin:0 0 7px;max-width:none}
+.hempty b{color:var(--ink-2)}
+.hwarn{font-size:11px;color:var(--stop);background:var(--surface-2);padding:5px 7px;
+  border-radius:6px}
+
+.hdock{border-top:1px solid var(--line);flex:none;position:relative}
+.hinput{display:block;width:calc(100% - 16px);margin:7px 8px 5px;resize:none;
+  border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;font:inherit;
+  font-size:12px;background:var(--surface);color:var(--ink);max-height:140px;overflow:auto}
+.hinput:focus{outline:none;border-color:var(--accent)}
+.hstatus{display:flex;align-items:center;gap:6px;padding:0 8px 7px;font-size:10px}
+/* `read-only` è un fatto e non un comando: niente bordo, niente fondo. Il chip del
+   modello accanto invece un comando lo è, e la differenza si deve vedere senza leggere. */
+.hstatus .ro{display:inline-flex;align-items:center;gap:3px;color:var(--muted);flex:none}
+.hstatus .ro svg{width:11px;height:11px}
+.hstatus .mdl{flex:1;min-width:0;display:inline-flex;align-items:center;gap:4px;
+  justify-content:space-between;border:1px solid var(--line-2);border-radius:6px;
+  padding:1px 5px;background:var(--surface);color:var(--ink);font:inherit;font-size:10px;
+  min-height:calc(1.45em + 4px)}
+.hstatus .mdl .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hstatus .mdl svg{width:10px;height:10px;flex:none;color:var(--muted)}
+
+/* Il menu è più largo del pannello e sfora a sinistra, sopra la conversazione:
+   `anthropic/claude-sonnet-5` dentro 240px non si legge, e un elenco di modelli
+   troncati non è un elenco di modelli. */
+.hpop{position:absolute;right:6px;bottom:calc(100% + 6px);width:min(300px,92vw);
+  background:var(--surface);border:1px solid var(--line-2);border-radius:9px;
+  box-shadow:0 8px 28px rgba(16,20,32,.18);padding:4px;z-index:6;max-height:62vh;
+  overflow:auto}
+.hpop .pg{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;padding:7px 8px 3px;display:flex;align-items:center;gap:6px}
+.hpop .pg .cnt{font-weight:500;letter-spacing:0;text-transform:none;opacity:.75}
+.hpop .mi{display:flex;align-items:center;gap:7px;padding:4px 8px;border-radius:6px;
+  font-size:11px;color:var(--ink);width:100%;background:none;border:0;font-family:inherit;
+  text-align:left}
+.hpop button.mi:hover{background:var(--surface-2)}
+.hpop .mi .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hpop .mi.on{background:var(--accent-soft);font-weight:600}
+.hpop .mi .tick{color:var(--accent);display:flex}
+.hpop .mi .tick svg{width:11px;height:11px}
+.hpop .mi .warn{color:var(--wait);display:flex;flex:none}
+.hpop .mi .warn svg{width:11px;height:11px}
+/* Spento con la ragione, mai nascosto: è la regola del progetto, non una cortesia. */
+.hpop .mi.off{color:var(--muted)}
+.hpop .mi.off .why,.hpop .mi .why{font-size:9.5px;color:var(--muted);flex:none}
+.hpop .mi.off svg{width:11px;height:11px;color:var(--muted);flex:none}
+
+/* Su schermo stretto un sesto non è una chat, è una colonna di sillabe: il pannello
+   prende tutto, come le impostazioni, e la larghezza trascinata non conta. */
+@media (max-width: 860px){
+  .helper{width:100% !important;border-left:none}
+  .hgrip{display:none}
+  /* Il menu si ancora ai due bordi invece di dichiarare una larghezza.
+     `width:min(300px,92vw)` sembrava prudente e non lo era: sotto la soglia stretta il
+     `Sizer` applica uno `zoom` ×1,35 al root, quindi 300 CSS px diventano **405 px
+     veri** su uno schermo da 390 — misurato, 66 voci su 66 fuori dallo schermo. `vw`
+     non aiuta, perché non risente dello zoom e quindi mente nella stessa direzione.
+     Due bordi invece di una misura: qualunque sia lo zoom, il menu finisce dove
+     finisce il pannello. È la stessa cura che le tendine della barra di stato hanno
+     già preso il 26 agosto, per la stessa ragione. */
+  .hpop{left:8px;right:8px;width:auto}
+  .helper{padding-left:max(0px,env(safe-area-inset-left));
+    padding-right:max(0px,env(safe-area-inset-right))}
+  .hdock{padding-bottom:env(safe-area-inset-bottom)}
+}
+/* L'avviso di un agent: una riga sotto l'intestazione del gruppo, non un triangolo
+   ripetuto su ognuno dei suoi modelli. Vedi `adapters/index.ts` per la ragione. */
+.hpop .pnote{display:flex;align-items:flex-start;gap:5px;margin:0 4px 4px;padding:5px 7px;
+  border-radius:6px;background:var(--wait-bg);color:var(--ink-2);font-size:10px;line-height:1.4}
+.hpop .pnote svg{width:11px;height:11px;flex:none;color:var(--wait);margin-top:1px}

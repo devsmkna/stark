@@ -8,7 +8,7 @@
 // `EventSource` farebbe con `Last-Event-ID` mentre il daemon legge `?from=`.
 
 import type { Activity } from '$core/activity.ts'
-import type { CanonicalEvent, Command } from '$core/events.ts'
+import type { CanonicalEvent, Command, ModelChoice } from '$core/events.ts'
 import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Match, SessionMatches } from '$core/search.ts'
 
@@ -104,6 +104,21 @@ export type TelegramInfo = {
   username?: string
   stato: BotStato
   chats?: { chatId: number; nome: string; da: number }[]
+}
+
+/** Un agent della macchina e i suoi modelli, come li elenca il selettore dell'helper. */
+export type AgentModels = {
+  id: string
+  label: string
+  /** Guidabile adesso. `false` non vuol dire nascosto: vuol dire mostrato con `reason`. */
+  available: boolean
+  /** Perche' non si puo' usare. Presente solo quando `available` e' `false`. */
+  reason?: string
+  /** Un avviso che vale per **tutto** l'agent — «qui la sola lettura non e'
+   *  garantita» — e che quindi si dice una volta sull'intestazione del gruppo, non
+   *  su ognuno dei suoi 61 modelli. */
+  note?: string
+  models: ModelChoice[]
 }
 
 export type SystemInfo = {
@@ -227,6 +242,32 @@ export class Api {
     return this.json(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
+
+  /**
+   * Tutti i modelli guidabili su questa macchina, per agent (§17).
+   *
+   * Costa un handshake per agent **la prima volta** e poi e' in cache nel daemon: chi
+   * apre il menu due volte non lo paga due volte. Si chiede quindi all'apertura del
+   * selettore e non all'avvio della UI, che di questa risposta non ha bisogno.
+   */
+  async models(): Promise<AgentModels[]> {
+    return (await this.json<{ agents: AgentModels[] }>('/api/models')).agents
+  }
+
+  /** Apre l'helper. Ne esiste **uno solo**: questa chiamata chiude quello di prima,
+   *  ed e' anche il modo in cui «muore col ricaricamento della pagina» diventa un
+   *  fatto invece di una speranza appesa a `beforeunload`. */
+  openHelper(pick: { agent?: string; model?: string } = {}): Promise<{ id: string }> {
+    return this.json('/api/helper', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(pick),
+    })
+  }
+
+  closeHelper(): Promise<{ ok: boolean }> {
+    return this.json('/api/helper', { method: 'DELETE' })
+  }
 
   // ── Telegram ────────────────────────────────────────────────────────────────
   //

@@ -166,6 +166,8 @@ export async function catalogoCompleto(profile?: string): Promise<{
   label: string
   available: boolean
   reason?: string
+  /** Un avviso su **tutto** l'agent, non su un suo modello. */
+  note?: string
   models: ModelChoice[]
 }[]> {
   const guidabili = await Promise.all(
@@ -176,15 +178,19 @@ export async function catalogoCompleto(profile?: string): Promise<{
       // non deve poter meno di quello che la macchina puo' fare. Ma la sola lettura li'
       // non c'e', e va detta — con una `note`, non un `reason`: la prima e' un avviso su
       // una scelta che si puo' fare, il secondo dice perche' una voce e' spenta.
-      const senzaDivieti = b.canDeny !== true
-      const grezzi = (await b.catalogue?.()) ?? []
-      const models = senzaDivieti
-        ? grezzi.map(m => ({ ...m, note: m.note ?? SENZA_SOLA_LETTURA }))
-        : grezzi
+      //
+      // E va detta **una volta sola, sull'agent**, non su ognuno dei suoi modelli: e' un
+      // fatto di chi li guida, non di quale si sceglie. Stamparla su tutti e 61 li
+      // avrebbe riempiti di triangoli identici — cioe' esattamente il difetto corretto
+      // il 27 agosto («I 61 modelli di OpenCode non hanno piu' 61 triangoli di avviso»),
+      // rifatto uguale un giorno dopo. Un avviso su ogni riga non e' un avviso: e' lo
+      // sfondo, e nasconde quello vero che sta su una riga sola.
+      const models = (await b.catalogue?.()) ?? []
       return {
         id: b.id, label: ETICHETTE[b.id] ?? b.id,
         available: models.length > 0,
         ...(models.length === 0 ? { reason: 'nessun modello: controlla il login di questo agent' } : {}),
+        ...(b.canDeny !== true ? { note: SENZA_SOLA_LETTURA } : {}),
         models,
       }
     }),
