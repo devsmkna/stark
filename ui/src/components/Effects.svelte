@@ -16,10 +16,10 @@
   import { hhmm } from '../lib/view.ts'
   import type { Store, View } from '../lib/store.svelte.ts'
 
-    // `id` non serve qui dentro — gli effetti si leggono tutti da `snap` — ma la firma
-  // è la stessa di `Conversation` di proposito: chi monta un pannello passa le stesse
-  // due prop a entrambe le letture, senza doversi ricordare quale delle due le vuole.
-  let { store, snap, id: _id, setView, onClose }:
+  // La firma è la stessa di `Conversation` di proposito: chi monta un pannello passa
+  // le stesse prop a entrambe le letture, senza doversi ricordare quale delle due le
+  // vuole. `id` serve per il trascinamento della barra, qui sotto.
+  let { store, snap, id, setView, onClose }:
     {
       store: Store; snap: SessionSnapshot
       id: string
@@ -27,6 +27,17 @@
       /** Vedi `Conversation.svelte`: il `×` del pannello, quando ce n'è più di uno. */
       onClose?: () => void
     } = $props()
+
+  // Vedi `Conversation.svelte`: la barra è la maniglia con cui si sposta il pannello,
+  // e solo quando i pannelli sono più d'uno. Le due letture della stessa chat si
+  // trascinano allo stesso modo — quale delle due si stia guardando non c'entra.
+  const dragHandle = $derived(onClose !== undefined)
+  function onDragStart(e: DragEvent): void {
+    e.dataTransfer?.setData('text/stark-chat-id', id)
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    store.draggingChat = id
+  }
+  const onDragEnd = (): void => { store.draggingChat = null }
 
   let mode = $state<'file' | 'time'>('file')
 
@@ -74,7 +85,8 @@
 </script>
 
 <div class="col">
-  <div class="bar">
+  <div class="bar" draggable={dragHandle ? 'true' : 'false'}
+    ondragstart={onDragStart} ondragend={onDragEnd}>
     <button class="iconb" title="Back to the conversation"
       onclick={() => setView('chat')}><Icon name="i-back" /></button>
     <div class="t">
@@ -131,6 +143,10 @@
 </div>
 
 <style>
+  /* Vedi `Conversation.svelte`: la barra sposta il pannello, ma solo quando ce n'è
+     più d'uno. I bottoni dentro tengono il proprio cursore. */
+  .bar[draggable='true'] { cursor: grab; }
+  .bar[draggable='true']:active { cursor: grabbing; }
   .iconb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .switch button {
     border: 0; background: none; font: inherit; font-size: 10px;
