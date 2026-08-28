@@ -128,6 +128,33 @@
        costruzione, sarebbe un contenitore con dentro un campo solo. -->
   {#if store.menu && menuRow}
     <div class="ctx-menu" style="left:{store.menu.x}px;top:{store.menu.y}px">
+      <!-- Sta in cima e ha una riga sua perché è l'unica voce che NON agisce su questa
+           chat: agisce sul suo progetto. Aprire la seconda conversazione su una cartella
+           su cui stai già lavorando non deve passare da «New chat» e da un percorso da
+           ritrovare — la cartella la sa già la riga su cui hai premuto. -->
+      <button class="mi" disabled={!menuRow.cwd}
+        title={menuRow.cwd ?? 'This chat has no folder: there is nothing to open another one in'}
+        onclick={() => {
+          const cwd = menuRow.cwd
+          store.menu = null
+          store.refused = null
+          if (!cwd) return
+          // Il profilo Claude del progetto lo rilegge `newChat` da sé, come fa `wake()`:
+          // senza, la seconda chat partirebbe con la `CLAUDE_CONFIG_DIR` di default e
+          // sembrerebbe rotta senza motivo apparente.
+          void store.newChat(cwd).then(() => {
+            // Se non si è aperta — la cartella è stata cancellata nel frattempo — il
+            // motivo va letto da qualche parte. `store.refused` si vede nel blocco di
+            // scrittura, che però esiste solo se una conversazione è aperta: senza
+            // questo, con l'elenco a fuoco e nessuna chat aperta, il clic non farebbe
+            // niente e non lo direbbe. La modale lo mostra, ed è anche il posto in cui
+            // si corregge il percorso.
+            if (store.refused) store.dialog = { kind: 'new' }
+          })
+        }}>
+        <Icon name="i-plus" /> New chat here
+      </button>
+      <hr />
       <button class="mi" onclick={() => { store.renaming = menuRow.id; store.menu = null }}>
         <Icon name="i-pencil" /> Rename
       </button>
