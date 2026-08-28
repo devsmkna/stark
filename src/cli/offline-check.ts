@@ -1965,6 +1965,64 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   }
 }
 
+// ─── dove si cerca Tailscale, per sistema ───────────────────────────────────
+//
+// Segnalato dall'utente il 28 agosto 2026: la ricerca guardava solo il `PATH`, che su
+// macOS e su Windows non contiene Tailscale quasi mai. Qui si prova la parte pura —
+// quale sistema guarda dove e in quale ordine — senza toccare il disco: `vieTailscale()`
+// applica sopra il sistema vero e il filtro sull'esistenza, e provare *quelli* darebbe
+// un risultato diverso a seconda della macchina che lancia la suite (è il difetto già
+// visto col `sub` della VAPID).
+{
+  const { vieTailscalePer } = await import('../daemon/tailscale.ts')
+  const cmd = (so: 'windows' | 'wsl' | 'macos' | 'linux'): string[] =>
+    vieTailscalePer(so).map(v => v.cmd)
+
+  check('§tailscale: su macOS si guarda anche dentro il bundle dell\'app',
+    cmd('macos').some(c => c.includes('Tailscale.app/Contents/MacOS')),
+    cmd('macos').join(' · '))
+  check('§tailscale: su macOS ci sono entrambi i prefissi Homebrew (Intel e Apple Silicon)',
+    cmd('macos').includes('/usr/local/bin/tailscale')
+    && cmd('macos').includes('/opt/homebrew/bin/tailscale'))
+
+  // Senza espressione regolare: un percorso Windows è pieno di backslash, e contarli
+  // dentro un regex dentro una stringa è il modo di scrivere una prova che fallisce per
+  // l'escaping invece che per il fatto. (Vista fallire proprio così.)
+  check('§tailscale: su Windows si guarda sotto Program Files',
+    cmd('windows').some(c => c.includes('Program Files') && c.endsWith('tailscale.exe')),
+    cmd('windows').join(' · '))
+  // La metà che l'utente ha chiesto per nome: da Windows si guarda **anche** dentro WSL.
+  check('§tailscale: da Windows si guarda anche dentro WSL',
+    vieTailscalePer('windows').some(v => v.dove === 'wsl' && v.cmd === 'wsl.exe'
+      && v.pre.join(' ') === '-- tailscale'))
+  // E l'altra metà: da WSL si guarda anche su Windows.
+  check('§tailscale: da WSL si guarda anche su Windows',
+    vieTailscalePer('wsl').some(v => v.dove === 'windows' && v.cmd.startsWith('/mnt/c/')))
+
+  // L'ordine non è estetica: vince il nativo, perché è il suo `serve` a raggiungere il
+  // loopback su cui STARK sta davvero ascoltando.
+  const vieWsl = vieTailscalePer('wsl')
+  check('§tailscale: da WSL il nativo viene prima di quello su Windows',
+    vieWsl.findIndex(v => v.dove === 'host') < vieWsl.findIndex(v => v.dove === 'windows'))
+  const vieWin = vieTailscalePer('windows')
+  check('§tailscale: su Windows il nativo viene prima di WSL',
+    vieWin.findIndex(v => v.dove === 'windows') < vieWin.findIndex(v => v.dove === 'wsl'))
+
+  check('§tailscale: su Linux si guarda anche in snap',
+    cmd('linux').includes('/snap/bin/tailscale'), cmd('linux').join(' · '))
+  // Il `PATH` resta la via normale su tutti e quattro: toglierlo sarebbe l'errore
+  // opposto a quello che si sta correggendo.
+  for (const so of ['windows', 'wsl', 'macos', 'linux'] as const) {
+    check(`§tailscale: ${so} tiene comunque il nome nudo dal PATH`,
+      cmd(so).some(c => c === 'tailscale' || c === 'tailscale.exe'), cmd(so).join(' · '))
+  }
+  // Solo il ramo che attraversa un confine porta argomenti davanti ai nostri: un `pre`
+  // di troppo altrove vorrebbe dire lanciare `tailscale` con una parola in più.
+  check('§tailscale: solo il ramo WSL da Windows porta argomenti davanti',
+    (['windows', 'wsl', 'macos', 'linux'] as const).every(so =>
+      vieTailscalePer(so).every(v => v.pre.length === 0 || v.dove === 'wsl')))
+}
+
 let failed = 0
 for (const [name, ok, detail] of checks) {
   if (!ok) failed++

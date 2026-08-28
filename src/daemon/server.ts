@@ -8,6 +8,7 @@
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { SO } from '../core/platform.ts'
 import { createGuard, type Perimetro } from './security.ts'
 import { Telefono } from './telefono.ts'
 import { collega, pubblica, statoTailscale } from './tailscale.ts'
@@ -441,6 +442,12 @@ async function route(
       const questo = mia ? telefono.idDi(mia) : null
       return send(res, 200, {
         tailscale: await statoTailscale(port()),
+        // Su che sistema gira **questa** macchina. Serve a una cosa sola: scegliere il
+        // comando di installazione giusto da mostrare quando Tailscale non c'è. Va qui
+        // e non nella UI perché il browser non lo sa — e non può dedurlo dal proprio
+        // `userAgent`, che dice del telefono da cui stai guardando, non del computer su
+        // cui STARK sta girando. Il daemon manda il fatto, la UI decide come si dice.
+        so: SO,
         codice: telefono.codiceVivo(),
         devices: telefono.dispositivi,
         questo,

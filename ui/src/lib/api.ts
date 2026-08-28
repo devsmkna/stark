@@ -44,8 +44,12 @@ export type PassoTelefono = {
   azione?: 'collega' | 'pubblica'
 }
 
+/** Su che sistema gira il **daemon** — non il browser da cui stai guardando. */
+export type SistemaOperativo = 'windows' | 'wsl' | 'macos' | 'linux'
+
 export type StatoTelefono = {
   tailscale: { passi: PassoTelefono[]; pronto: boolean; url?: string; host?: string }
+  so: SistemaOperativo
   codice: { scade: number } | null
   devices: { id: string; nome: string; da: number; visto: number }[]
   /** L'id del dispositivo da cui stai guardando, se ne sei uno. */
