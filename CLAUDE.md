@@ -194,8 +194,7 @@ e che non resti niente nell'elenco.
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
 quota — 71 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
-`npm run slice` apre una sessione vera; `npm run telegram` prova il bot contro un finto
-`api.telegram.org` (54 verifiche, zero quota); `npm run tunnel -- https://…` misura se un
+`npm run slice` apre una sessione vera; `npm run tunnel -- https://…` misura se un
 tunnel strozza il flusso.
 
 Per **guardare** la UI invece di descriverla:
@@ -1035,9 +1034,8 @@ destro (tre pannelli, 890/297/297 dopo il ridimensionamento), divisore trascinat
 genitore rimasto con un figlio solo, e a 390px `.split`, `.pane`, `.hdl` e `×` **tutti a zero**
 col layout salvato intatto. `npm run check` resta **109**, `npm run layout:check` è nuovo a
 **22**, `svelte-check` 0 errori su 107 file.
-**Si arriva da fuori casa senza Tailscale, e si guida da Telegram** (27 agosto 2026,
-chiesti dall'utente: «vorrei collegarmi anche fuori casa senza Tailscale, o integrare
-cose come Telegram — come fa happy.engineering»).
+**Si arriva da fuori casa senza Tailscale** (27 agosto 2026, chiesto dall'utente:
+«vorrei collegarmi anche fuori casa senza Tailscale»).
 
 Il perimetro ora si **dichiara**: `STARK_PUBLIC_HOST` si somma a Tailscale invece di
 sostituirlo, e senza niente il default resta byte per byte quello di prima. Il dettaglio
@@ -1048,55 +1046,23 @@ non quanti, usando i battiti da 15 secondi invece di un prompt — perché un pr
 bufferizza li consegna tutti, solo tutti insieme alla fine, e contarli non distingue un
 flusso vivo da uno morto.
 
-**Il bot Telegram guida una sessione per intero**: si scrive e quello che mandi diventa
-un prompt, si leggono le risposte, si risponde ai permessi e alle domande con una
-tastiera, si cambia modello e modalità, si apre e si rinomina. Sta **dentro** il daemon
-(`src/daemon/telegram/`) perché un processo separato sarebbe un secondo detentore di
-`~/.stark/token` e dovrebbe rifare parser SSE, riconnessione e `applyTo`. Nessuna
-dipendenza: Telegram non pubblica un SDK Node, quindi l'ufficiale **è** l'HTTP Bot API —
-`grammy`/`telegraf` sarebbero un intermediario non ufficiale davanti a un'API ufficiale
-che è sei endpoint JSON. Long polling e non webhook, e non per comodità: un webhook
-vorrebbe una connessione **entrante**, cioè proprio ciò che `security.ts` esiste per non
-dover fare. Per questo il bot funziona da fuori casa **senza** l'accesso remoto: sono due
-lavori indipendenti.
-Il costo è dichiarato dove si accende: quel testo passa **per intero dai server di
-Telegram**, cifrato in transito ma **non** da capo a fondo — è la prima cosa in STARK a
-non esserlo, e più di quanto esce col Web Push. Il bot è spento di default, e spento vuol
-dire **assente**: senza token il ciclo non apre nessuna connessione.
-Il perimetro prima della potenza: chat privata soltanto, `chat_id` nell'elenco, mittente
-uguale alla chat. **A uno sconosciuto non si risponde niente** — un «non sei autorizzato»
-confermerebbe che dietro quel bot c'è uno STARK vivo e direbbe quando la macchina è
-accesa. L'accoppiamento (codice di 8 caratteri, solo l'hash su disco, 5 minuti, uso
-singolo, 3 tentativi, confronto a tempo costante) esiste perché il `chat_id` non è una
-cosa che l'utente conosce, e chiederglielo obbligherebbe il bot a rispondere a un
-estraneo.
-**Il difetto più istruttivo di tutto il giro**, trovato scrivendo la prova e non
-leggendo il codice: il bot teneva un proprio `SessionSnapshot` e ci applicava sopra gli
-eventi con `applyTo` — ma per una sessione **viva** `registry.snapshot()` restituisce
-*l'oggetto interno del registro*, quello che il daemon aggiorna e la UI legge. La seconda
-applicazione lo corrompeva: ogni delta contato due volte, ogni `turn.started` che apriva
-un turno gemello, e il disegno che guardava il gemello vuoto mentre le parti finivano
-nell'altro. Ora il bot **rilegge** lo snapshot al momento di disegnare e il `subscribe`
-è solo un segnale: un `applyTo` solo, quello del registro. L'invariante §4 non si è
-allentata, si è stretta.
-Un altro che vale la pena ricordare: i bottoni di un permesso **non spariscono al
-click**, spariscono quando `permission.replied` torna dal flusso — che è la stessa cosa
-che li fa sparire quando hai risposto **dal browser**. La verità sono gli eventi, mai il
-click, e senza questo si risponderebbe due volte alla stessa richiesta.
 Nello stesso giro `vigila` esce da `push.ts` e diventa `chiamate.ts` con un elenco di
 `Canale`: **una** decisione (`callFor`, che sta in `core/` esattamente per questo) e N
 canali. Due osservatori indipendenti avrebbero due mappe e due debounce, e basta uno
-scarto di 250 ms perché Telegram dica «ha finito» e il push no. Nell'estrazione è caduto
+scarto di 250 ms perché un canale dica «ha finito» e l'altro no. Nell'estrazione è caduto
 un bug che c'era già: **un progetto silenziato taceva solo nella UI**, mentre il daemon
 mandava il push lo stesso. E `isDir` si è spostata da `server.ts` dentro
 `registry.open()`, dove nessun chiamante può saltarla.
-`npm run check` **133**, `npm run daemon` **52**, nuovo `npm run telegram` **54** contro
-un finto `api.telegram.org` (whitelist, accoppiamento, un turno che diventa un messaggio
-solo, permessi, domande, 429, 409, e che il bot token non torni mai indietro).
-Resta non fatto e dichiarato: mandare **foto** come allegati di un prompt; e la prova a
-mano dal telefono, che è l'unica che può dire come Telegram iOS mostra un messaggio
-modificato venti volte in un turno — l'incognita più grossa, col ripiego già progettato
-(`stream: 'a fine parte'`) se fosse insopportabile.
+`npm run check` **115**, `npm run daemon` **52**.
+
+**Telegram: bocciato e rimosso** (28 agosto 2026, decisione dell'utente). Un bot che
+guidava una sessione per intero era stato scritto e provato; è stato **tolto** perché la
+feature non ha senso per il prodotto. Via `src/daemon/telegram/`, le rotte
+`/api/telegram*`, la sezione nelle impostazioni, il client, `npm run telegram` e le 18
+verifiche del testo e della resa. Resta `chiamate.ts` con un canale solo (il Web Push):
+l'astrazione `Canale` è nata lì, ma regge da sé — è **una** decisione (`callFor`) e N
+canali, e il bug del progetto silenziato che taceva solo nella UI l'ha corretto quella
+estrazione, non il bot.
 
 Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
 risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
@@ -1201,10 +1167,6 @@ Decisioni già prese:
   scrivere verso un processo root. Costo accettato in cambio: il VPS entra nella TCB.
   (Cloudflare Tunnel sarebbe gratis — Zero Trust è libero fino a 50 utenti — quindi la
   scelta non è economica.)
-- **Telegram è un secondo modo di guidare STARK**, non un terzo canale di notifiche: per
-  questo ha una sezione sua nelle impostazioni e non un gruppo dentro Notifications.
-  Costo dichiarato dove si accende: è la prima cosa in STARK che esce dalla macchina
-  **non** cifrata da capo a fondo.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il

@@ -81,19 +81,6 @@ export type Storage = {
   bytes: number
 }
 
-/** Perché è spento, quando lo è: mai «non funziona» senza il motivo. */
-export type BotStato =
-  | { fase: 'spento' }
-  | { fase: 'in-ascolto' }
-  | { fase: 'errore'; motivo: string }
-
-export type TelegramInfo = {
-  hasToken: boolean
-  username?: string
-  stato: BotStato
-  chats?: { chatId: number; nome: string; da: number }[]
-}
-
 export type SystemInfo = {
   url: string
   port: number
@@ -206,28 +193,6 @@ export class Api {
     return this.json(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
-
-  // ── Telegram ────────────────────────────────────────────────────────────────
-  //
-  // Il bot token si manda e basta: non torna mai indietro. Chi ce l'ha può mettersi in
-  // ascolto al posto di questo STARK e **leggere** tutto quello che manda — non guidare,
-  // perché il suo chat_id non è nell'elenco, ma leggere è già la conversazione.
-  telegram(): Promise<TelegramInfo> { return this.json('/api/telegram') }
-  setTelegramToken(token: string): Promise<{ stato: BotStato; username?: string }> {
-    return this.json('/api/telegram', { method: 'PUT', body: JSON.stringify({ token }) })
-  }
-  forgetTelegram(): Promise<{ ok: boolean }> {
-    return this.json('/api/telegram', { method: 'DELETE' })
-  }
-  pairTelegram(): Promise<{ code: string; scade: number; username?: string }> {
-    return this.json('/api/telegram/pair', { method: 'POST' })
-  }
-  unpairTelegram(chatId: number): Promise<{ ok: boolean }> {
-    return this.json(`/api/telegram/chats/${chatId}`, { method: 'DELETE' })
-  }
-  testTelegram(): Promise<{ ok: boolean; chats: number }> {
-    return this.json('/api/telegram/test', { method: 'POST' })
-  }
 
   /** Apre il Finder di sistema sulla macchina del daemon. Annullo o fallimento
    *  tornano `{ok:false}`: non è un'eccezione, la UI resta ferma senza avvisi. */

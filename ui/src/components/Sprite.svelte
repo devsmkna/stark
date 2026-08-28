@@ -45,7 +45,4 @@
   <symbol id="i-open" viewBox="0 0 24 24"><path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /> <path d="M12 19V5" /></symbol>
-  <!-- Telegram. `i-send` è una freccia in su: accanto alla parola «Telegram» si legge
-       «invia», che è un'altra cosa. -->
-  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M21 3 3 10.5l6.5 2.8L21 3Z" /> <path d="M21 3 9.5 13.3l.7 6.7L21 3Z" /></symbol>
 </svg>
