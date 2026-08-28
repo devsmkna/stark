@@ -9,9 +9,13 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 
 import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard, type Perimetro } from './security.ts'
+import { Telefono } from './telefono.ts'
+import { collega, pubblica, statoTailscale } from './tailscale.ts'
+import { paginaAccoppiamento } from './pagina-pair.ts'
 import { serveUi, UI_DIR } from './static.ts'
 import { Registry, STARK_HOME, isDir, type OpenSpec } from './registry.ts'
 import { reveal } from './reveal.ts'
+import { ramoDi } from './git.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
@@ -19,7 +23,8 @@ import { Telegram } from './telegram/index.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { agentiDisponibili, backendFor, catalogoCompleto } from '../adapters/index.ts'
+import { agentiDisponibili, backendFor, catalogoCompleto, scaldaCatalogo } from '../adapters/index.ts'
+import { eseguiHandoff, type ViaBriefing } from './handoff.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 import type { MemoryOutcome } from '../core/adapter.ts'
@@ -93,7 +98,12 @@ function annunciaPerimetro(p: Perimetro): void {
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   let port = opts.port ?? PORTA
-  const guard = createGuard(() => port, opts.token ?? readToken(STARK_HOME), opts.publicHosts)
+  // Il telefono nasce **prima** della guardia: è la guardia a chiedergli se una
+  // credenziale vale, e se un codice è vivo.
+  const telefono = new Telefono(STARK_HOME)
+  const guard = createGuard(
+    () => port, opts.token ?? readToken(STARK_HOME), opts.publicHosts, telefono,
+  )
   annunciaPerimetro(guard.perimetro)
   const guardToken = guard.token
   const registry = new Registry({
@@ -109,6 +119,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
   backendFor().warmDiagnostics?.()
+
+  // Stessa idea, stesso momento: il catalogo dei modelli costa un handshake per agent
+  // (~3s in tutto) e la prima apertura del menu e' l'unica che lo pagherebbe intero.
+  // Si scalda adesso, che non lo sta aspettando nessuno.
+  scaldaCatalogo(opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'])
 
   // La regola sulle descrizioni dei comandi va riallineata **all'avvio**, non solo
   // quando si tocca l'impostazione: il `CLAUDE.md` globale è un file dell'utente, e
@@ -138,7 +153,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   vigila(registry, [push, telegram])
 
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telegram)
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telegram, telefono)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -165,6 +180,7 @@ async function route(
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
   port: () => number, configDir?: string, push?: Push, telegram?: Telegram,
+  telefono?: Telefono,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -332,6 +348,80 @@ async function route(
       // *quale* file è stato toccato, e se non si è potuto scriverlo.
       return send(res, 200, { settings: salvate, memoria })
     }
+    // Su quale ramo sta la cartella di una chat. Sta qui e non nel journal perché è un
+    // fatto del filesystem, non dell'agent: chi fa `git checkout` in un terminale
+    // accanto non manda nessun evento a STARK, quindi la risposta si chiede quando
+    // serve invece di ricordarla. La `cwd` arriva dal client e non ci si fida:
+    // `ramoDi` la passa a `isDir` prima di eseguire qualunque cosa.
+    // ─── collegare un telefono ───────────────────────────────────────────────
+    //
+    // Il giro completo sta in `telefono.ts`; qui c'è solo l'instradamento. Le due rotte
+    // che si attraversano **senza credenziale** sono `/pair` e `/api/phone/claim`, e
+    // solo mentre un codice è vivo: a deciderlo è il guard, non queste righe — se ne
+    // occupa `ROTTE_ACCOPPIAMENTO` in `security.ts`, perché una porta aperta va aperta
+    // in un posto solo.
+    if (method === 'GET' && path === '/pair') {
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'referrer-policy': 'no-referrer',
+      })
+      res.end(paginaAccoppiamento())
+      return
+    }
+    if (method === 'POST' && path === '/api/phone/claim') {
+      if (!telefono) return send(res, 503, { ok: false, error: 'non disponibile' })
+      const body = await readJson<{ code?: string }>(req)
+      const esito = telefono.riscatta(body?.code ?? '', String(req.headers['user-agent'] ?? ''))
+      if (!esito.ok) return send(res, 200, esito)   // 200: è una risposta, non un guasto
+      // Il cookie qui e non solo al caricamento della pagina: la richiesta subito dopo è
+      // `GET /`, cioè l'HTML nudo, che non ha né intestazioni né JavaScript — senza
+      // questo si becherebbe un 403 un istante dopo aver accoppiato.
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'set-cookie': `stark=${esito.token}; Path=/; SameSite=Strict; HttpOnly; Secure; Max-Age=${400 * 86400}`,
+      })
+      res.end(JSON.stringify(esito))
+      return
+    }
+
+    // Da qui in giù serve il token: sono le rotte che si usano **dal computer**.
+    if (method === 'GET' && path === '/api/phone') {
+      if (!telefono) return send(res, 503, { error: 'non disponibile' })
+      return send(res, 200, {
+        tailscale: await statoTailscale(port()),
+        codice: telefono.codiceVivo(),
+        devices: telefono.dispositivi,
+      })
+    }
+    if (method === 'POST' && path === '/api/phone/code') {
+      if (!telefono) return send(res, 503, { error: 'non disponibile' })
+      return send(res, 200, telefono.apri())
+    }
+    if (method === 'DELETE' && path === '/api/phone/code') {
+      telefono?.annulla()
+      return send(res, 200, { ok: true })
+    }
+    if (method === 'DELETE' && path === '/api/phone/device') {
+      const id = url.searchParams.get('id')
+      if (!id) return send(res, 400, { ok: false, error: 'id obbligatorio' })
+      return send(res, 200, { ok: telefono?.revoca(id) ?? false })
+    }
+    // I due passi che STARK può fare al posto tuo. Gli altri tre no, e non è una
+    // mancanza: abilitare i certificati è un'azione sulla console web del tuo account, e
+    // installare l'app sul telefono non si fa da qui.
+    if (method === 'POST' && path === '/api/phone/tailscale-up') {
+      return send(res, 200, await collega())
+    }
+    if (method === 'POST' && path === '/api/phone/publish') {
+      return send(res, 200, await pubblica(port()))
+    }
+
+    if (method === 'GET' && path === '/api/git') {
+      const cwd = url.searchParams.get('cwd')
+      if (!cwd) return send(res, 400, { error: 'cwd obbligatorio' })
+      return send(res, 200, await ramoDi(cwd))
+    }
     if (method === 'GET' && path === '/api/browse') {
       return send(res, 200, registry.browse(url.searchParams.get('path') ?? undefined))
     }
@@ -405,6 +495,36 @@ async function route(
     /** Tutti i modelli guidabili sulla macchina, per agent. Costa un handshake per
      *  agent la prima volta (misurato: ~1,6s Claude Code, ~1,5s OpenCode) e poi e'
      *  in cache: chi apre il menu due volte non lo paga due volte. */
+    /**
+     * Passare il lavoro da un agent a un altro.
+     *
+     * Rotta sua e non `session.setModel`: quel comando cambia un parametro dentro una
+     * conversazione, questo ne apre **un'altra** e ci travasa il lavoro con un file.
+     * Farli passare dalla stessa porta vorrebbe dire che «cambio modello» a volte costa
+     * un turno e apre una chat, e a volte no, a seconda di cosa hai scelto.
+     *
+     * `via` omesso su una chat che non ha un processo dietro non è un errore: torna
+     * `serveScelta`, perché svegliarla costa e la decisione è dell'utente.
+     */
+    if (method === 'POST' && path === '/api/handoff') {
+      const body = await readJson<{ id?: string; agent?: string; model?: string; via?: string }>(req)
+      if (!body?.id || !body.agent || !body.model) {
+        return send(res, 400, { error: 'id, agent e model obbligatori' })
+      }
+      if (body.via && body.via !== 'agent' && body.via !== 'journal') {
+        return send(res, 400, { error: `via sconosciuta: ${body.via}` })
+      }
+      const esito = await eseguiHandoff(registry, {
+        id: body.id, agent: body.agent, model: body.model,
+        ...(body.via ? { via: body.via as ViaBriefing } : {}),
+      })
+      if (esito.ok) return send(res, 201, { id: esito.id, file: esito.file, snapshot: registry.snapshot(esito.id) })
+      // `serveScelta` non è un fallimento: è una domanda. 409 e non 400, perché la
+      // richiesta è corretta — è lo stato della conversazione a non permetterla ancora.
+      if ('serveScelta' in esito) return send(res, 409, { serveScelta: true, state: esito.state })
+      return send(res, 400, { error: esito.error })
+    }
+
     if (method === 'GET' && path === '/api/models') {
       return send(res, 200, { agents: await catalogoCompleto() })
     }
@@ -551,7 +671,11 @@ async function route(
 
     // Tutto ciò che non è /api è la UI. Sta in fondo di proposito: l'API ha la
     // precedenza, così un file compilato non potrà mai oscurare una rotta vera.
-    if (!path.startsWith('/api/') && serveUi(req, res, token)) return
+    // La credenziale con cui si è entrati, non quella della macchina: vedi `serveUi`.
+    // `?? token` copre il caso in cui la pagina passi da una via che il guard non conta
+    // come credenziale — non succede oggi, ma un 403 silenzioso sarebbe peggio.
+    const mia = guard.credenziale(req) ?? token
+    if (!path.startsWith('/api/') && serveUi(req, res, mia, mia !== token)) return
 
     send(res, 404, { error: 'non trovato' })
   } catch (e) {

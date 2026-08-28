@@ -511,6 +511,99 @@ check('risveglio: un fork resta dov\'è, il suo journal è un altro',
 check('aprire una chat nuova non riprende niente',
   refDaRiprendere(undefined, 'dopo-il-clear') === undefined)
 
+// ─── il ramo git della cartella di una chat ─────────────────────────────────
+//
+// Costa zero quota: è una domanda sul filesystem, non un turno. La `cwd` arriva dal
+// client, quindi la prima cosa da provare è che una cartella inventata non faccia
+// eseguire niente — non che il ramo giusto torni indietro.
+check('senza token → 403 anche per /api/git',
+  (await fetch(`${url}/api/git?cwd=/tmp`)).status === 403)
+const gitSenzaCwd = await fetch(`${url}/api/git`, { headers: auth })
+check('senza `cwd` → 400', gitSenzaCwd.status === 400, String(gitSenzaCwd.status))
+
+const chiediRamo = async (cwd: string): Promise<{ repo: boolean; branch?: string; detached?: boolean }> =>
+  await (await fetch(`${url}/api/git?cwd=${encodeURIComponent(cwd)}`, { headers: auth })).json() as never
+const qui = resolve(import.meta.dirname, '..', '..')
+const ramoQui = await chiediRamo(qui)
+check('la cartella di questo repo dichiara un ramo',
+  ramoQui.repo === true && typeof ramoQui.branch === 'string' && ramoQui.branch.length > 0,
+  JSON.stringify(ramoQui))
+// Il caso che ha deciso di usare `git` invece di leggere `.git/HEAD` a mano: la cartella
+// di una chat può stare **sotto** la radice del repo, e lì `.git` non c'è.
+const ramoSotto = await chiediRamo(resolve(qui, 'src', 'daemon'))
+check('una sottocartella del repo dà lo stesso ramo della radice',
+  ramoSotto.branch === ramoQui.branch, JSON.stringify(ramoSotto))
+const ramoFuori = await chiediRamo(tmpdir())
+check('una cartella che non è un repo non inventa un ramo',
+  ramoFuori.repo === false && ramoFuori.branch === undefined, JSON.stringify(ramoFuori))
+// `isDir` prima di eseguire qualunque cosa: una cartella che non esiste non è un errore
+// da mostrare, è «non c'è un ramo».
+const ramoAssente = await chiediRamo('/non/esiste/davvero')
+check('una cartella inesistente torna «nessun repo», non un guasto',
+  ramoAssente.repo === false, JSON.stringify(ramoAssente))
+
+// ─── collegare un telefono ──────────────────────────────────────────────────
+//
+// Il giro intero senza un telefono vero: il codice si legge dal computer, si consegna,
+// e da lì in poi la credenziale del dispositivo vale quanto quella della macchina —
+// finché non la revochi. Costa zero quota: sono rotte di sistema, non turni.
+//
+// La cosa da tenere ferma non è che il codice funzioni: è che **fuori dai cinque
+// minuti la porta non esista**. È l'unico punto di STARK in cui si passa senza
+// credenziale, e una prova che guarda solo il caso felice non se ne accorgerebbe mai.
+const pair = (init?: RequestInit): Promise<Response> => fetch(`${url}/pair`, init)
+check('senza un codice vivo, /pair è 403 come tutto il resto',
+  (await pair()).status === 403)
+
+const codice = await (await fetch(`${url}/api/phone/code`, { method: 'POST', headers: auth }))
+  .json() as { codice: string; scade: number }
+check('il codice è 8 caratteri, senza quelli che si leggono male',
+  /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/.test(codice.codice), codice.codice)
+check('con un codice vivo, /pair si apre senza credenziale',
+  (await pair()).status === 200)
+
+const claim = (code: string): Promise<Response> => fetch(`${url}/api/phone/claim`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }),
+})
+const sbagliato = await (await claim('ZZZZZZZZ')).json() as { ok: boolean }
+check('un codice errato non accoppia', sbagliato.ok === false)
+
+const preso = await claim(codice.codice.toLowerCase())
+const dati = await preso.json() as { ok: boolean; token?: string }
+// Minuscolo di proposito: si ribatte da una tastiera di telefono, che parte minuscola.
+check('il codice si accetta anche scritto in minuscolo', dati.ok === true)
+check('accoppiando si riceve una credenziale, e un cookie che dura',
+  typeof dati.token === 'string' && dati.token.length === 64
+  && /Max-Age=34560000/.test(preso.headers.get('set-cookie') ?? ''),
+  preso.headers.get('set-cookie') ?? '')
+
+const suo = { authorization: `Bearer ${dati.token}` }
+check('la credenziale del telefono apre le rotte come quella della macchina',
+  (await fetch(`${url}/api/sessions`, { headers: suo })).status === 200)
+// **403**, non un `{ok:false}`: consumato il codice non c'è più nessuna finestra viva,
+// quindi la seconda richiesta non arriva nemmeno all'handler — la ferma il guard, che è
+// un passo prima. Scritta la prima volta aspettandosi la risposta dell'handler, questa
+// prova è nata rossa dicendo la verità: la porta si chiude più su di dove guardavo.
+check('un uso solo: lo stesso codice non accoppia due volte',
+  (await claim(codice.codice)).status === 403)
+check('consumato il codice, /pair torna 403', (await pair()).status === 403)
+
+const elenco = await (await fetch(`${url}/api/phone`, { headers: auth })).json() as
+  { devices: { id: string; nome: string }[] }
+check('il dispositivo compare nell\'elenco, con un nome leggibile',
+  elenco.devices.length === 1 && typeof elenco.devices[0]?.nome === 'string',
+  JSON.stringify(elenco.devices))
+// La revoca è la difesa che abbiamo scelto al posto della scadenza (28 agosto 2026):
+// se non ferma davvero il dispositivo, quella decisione non regge.
+await fetch(`${url}/api/phone/device?id=${elenco.devices[0]?.id}`, { method: 'DELETE', headers: auth })
+check('revocato, il telefono è fuori subito',
+  (await fetch(`${url}/api/sessions`, { headers: suo })).status === 403)
+
+// Tre tentativi e la finestra si chiude: cinque minuti basterebbero a provarli tutti.
+await fetch(`${url}/api/phone/code`, { method: 'POST', headers: auth })
+for (let i = 0; i < 3; i++) await claim('ZZZZZZZZ')
+check('dopo tre tentativi sbagliati la finestra si chiude', (await pair()).status === 403)
+
 await lettore.cancel().catch(() => {})
 await daemon.stop()
 

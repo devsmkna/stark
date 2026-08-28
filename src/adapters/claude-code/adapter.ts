@@ -18,7 +18,7 @@ import {
 } from '../../core/events.ts'
 import {
   optionsFrom,
-  type AdapterHooks, type AgentSession, type PermissionAnswer, type PromptImage,
+  type AdapterHooks, type AgentSession, type PermissionAnswer, type PromptFile,
   type SessionSpec,
 } from '../../core/adapter.ts'
 import {
@@ -27,6 +27,12 @@ import {
   type LaunchOptions, type ModoClaude,
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
+import { parteDi } from '../../core/allegati.ts'
+
+/** Un blocco di contenuto come lo vuole l'SDK. Non e' esportato da li': si ricava dal
+ *  messaggio utente, che e' l'unico posto in cui STARK ne costruisce. */
+type Blocco = Extract<SDKUserMessage['message']['content'], unknown[]>[number]
+type TipoImmagine = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
 import { askToolsFor } from './permissions.ts'
 import { consentiSempre } from './regole.ts'
 import { quotaWindows } from './quota.ts'
@@ -408,22 +414,23 @@ export class ClaudeCodeAdapter implements AgentSession {
   }
 
   /**
-   * Le immagini vanno **prima** del testo, ed è la disposizione che la documentazione
+   * Gli allegati vanno **prima** del testo, ed è la disposizione che la documentazione
    * dell'API raccomanda: il modello legge la domanda avendo già davanti ciò a cui si
    * riferisce. Nel journal finiscono con lo stesso ordine, ma **senza i byte**: quelli
    * stanno in un file, e qui viaggia il riferimento (vedi `PromptPart`).
    */
-  prompt(text: string, immagini: PromptImage[] = []): string {
+  prompt(text: string, allegati: PromptFile[] = []): string {
     const parts: PromptPart[] = [
-      ...immagini.map(i => ({
-        type: 'image' as const, ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
+      ...allegati.map(i => ({
+        // Immagine o file: la distinzione serve a chi disegna, non a chi manda.
+        type: parteDi(i.mediaType), ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
         ...(i.name ? { name: i.name } : {}),
       })),
       { type: 'text' as const, text },
     ]
 
     const turnId = randomUUID()
-    const msg = this.userMessage(text, immagini)
+    const msg = this.userMessage(text, allegati)
 
     // C'è già qualcosa in volo? Allora questo prompt **apre un turno suo e aspetta**:
     // non si piega dentro quello in corso e non parte adesso. È una coda FIFO, e le
@@ -501,16 +508,53 @@ export class ClaudeCodeAdapter implements AgentSession {
     }
   }
 
-  private userMessage(text: string, immagini: PromptImage[]): SDKUserMessage {
+  /**
+   * Da media type a blocco dell'API. Tre forme, non una, e nessuna e' dedotta dalla
+   * documentazione: sono state provate contro il CLI vero (`spike/allegato-pdf.ts`,
+   * un turno corto per caso), perche' quello che l'API accetta e quello che il CLI
+   * lascia passare sono due domande diverse — la seconda e' l'unica che ci riguarda.
+   *
+   * Il testo va in un `document` con sorgente `text`, e **non** infilato nel prompt:
+   * cosi' resta un allegato con un nome invece di diventare parte della domanda, che
+   * e' come lo si e' mandato e come va riletto due giorni dopo. `media_type` e'
+   * `text/plain` anche per un `.md` o un `.csv`, perche' e' l'unico che quella
+   * sorgente accetta — la scelta dell'utente resta piu' larga di cosi', vedi
+   * `ALLEGABILI` in `sdk-options.ts`.
+   */
+  private blocco(i: PromptFile): Blocco {
+    if (i.mediaType.startsWith('image/')) {
+      return {
+        type: 'image',
+        // Il cast e' sui quattro tipi di `IMMAGINI`, ed e' garantito a monte: il
+        // registro scrive su disco solo cio' che sta in `ESTENSIONE`, e un
+        // `image/*` che non e' fra quei quattro non arriva mai fin qui.
+        source: { type: 'base64', media_type: i.mediaType as TipoImmagine, data: i.data },
+      }
+    }
+    if (i.mediaType === 'application/pdf') {
+      return {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: i.data },
+        ...(i.name ? { title: i.name } : {}),
+      }
+    }
+    return {
+      type: 'document',
+      source: {
+        type: 'text', media_type: 'text/plain',
+        data: Buffer.from(i.data, 'base64').toString('utf8'),
+      },
+      ...(i.name ? { title: i.name } : {}),
+    }
+  }
+
+  private userMessage(text: string, allegati: PromptFile[]): SDKUserMessage {
     const msg: SDKUserMessage = {
       type: 'user',
       message: {
         role: 'user',
         content: [
-          ...immagini.map(i => ({
-            type: 'image' as const,
-            source: { type: 'base64' as const, media_type: i.mediaType, data: i.data },
-          })),
+          ...allegati.map(i => this.blocco(i)),
           { type: 'text' as const, text },
         ],
       },

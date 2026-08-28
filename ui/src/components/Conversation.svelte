@@ -304,6 +304,13 @@
    *  viste il modello. I byte non sono nel journal, quindi si chiedono al daemon. */
   const immaginiOf = (t: TurnView): Extract<TurnView['prompt'][number], { type: 'image' }>[] =>
     t.prompt.filter(p => p.type === 'image')
+  /** Gli altri allegati — un PDF, un testo. Non hanno un'anteprima da mostrare: hanno
+   *  un nome e un peso, ed è quello che dice cosa avevi mandato. */
+  const fileOf = (t: TurnView): Extract<TurnView['prompt'][number], { type: 'file' }>[] =>
+    t.prompt.filter(p => p.type === 'file')
+  /** 683131 → «683 kB». Su un allegato il peso è l'unica misura che si legge a colpo. */
+  const peso = (n: number): string =>
+    n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1000))} kB`
   // Sulla lista intera, non su questa sola riga: la tavolozza si assegna in ordine
   // alfabetico fra TUTTI i progetti, quindi calcolarla su un elenco di uno darebbe
   // sempre il primo colore — e lo stesso progetto avrebbe due colori diversi nelle
@@ -657,6 +664,21 @@
                         onerror={() => { persi = new SvelteSet([...persi, img.ref]) }} />
                     </a>
                   {/if}
+                {/each}
+              </div>
+            {/if}
+            {#if fileOf(turn).length > 0}
+              <!-- Stessa ragione delle immagini qui sopra, senza l'anteprima: un PDF
+                   non si guarda da 96px. Il link lo apre con l'applicazione del
+                   browser, che è ciò che serve per rileggerlo davvero. -->
+              <div class="pfiles">
+                {#each fileOf(turn) as f (f.ref)}
+                  <a class="pfile" href={`/api/sessions/${snap.sessionId}/blob/${f.ref}`}
+                    target="_blank" rel="noreferrer" title={f.name ?? f.mediaType}>
+                    <Icon name="i-file" />
+                    <span class="n">{f.name ?? f.mediaType}</span>
+                    <span class="b">{peso(f.bytes)}</span>
+                  </a>
                 {/each}
               </div>
             {/if}
@@ -1099,6 +1121,16 @@
     border: 1px solid var(--line-2); display: block;
   }
   .pimgs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pfiles { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  .pfile {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+    border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface-2);
+    font-size: 10.5px; color: var(--ink-2); text-decoration: none; max-width: 260px;
+  }
+  .pfile:hover { border-color: var(--accent); color: var(--ink); }
+  .pfile :global(svg) { width: 13px; height: 13px; flex: none; }
+  .pfile .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pfile .b { color: var(--muted); flex: none; }
   .persa {
     display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px;
     border: 1px dashed var(--line-2); border-radius: 7px;

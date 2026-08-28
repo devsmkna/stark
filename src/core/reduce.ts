@@ -199,6 +199,16 @@ export type SessionSnapshot = {
   options: SessionOption[]
   /** Il titolo scelto a mano. Se manca, lo si ricava dal primo prompt. */
   title?: string
+  /**
+   * Dove è andato a finire questo lavoro, se è stato consegnato a un altro agent.
+   *
+   * Sta nello snapshot e non in uno stato del browser perché il legame fra le due chat
+   * deve sopravvivere a un ricaricamento e valere anche dal telefono: è un fatto della
+   * conversazione, non della scheda che la sta guardando (§4).
+   */
+  handedOffTo?: { id: string; agent: string; model: string; file: string }
+  /** L'altra metà: da dove arriva questa conversazione. */
+  continuedFrom?: { id: string; file: string }
   state: SessionState
   stateReason?: string
   capabilities?: Capabilities
@@ -324,6 +334,10 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     }
     case 'session.renamed': s.title = p.title; break
+    case 'session.handedOff':
+      s.handedOffTo = { id: p.to, agent: p.agent, model: p.model, file: p.file }
+      break
+    case 'session.continued': s.continuedFrom = { id: p.from, file: p.file }; break
     case 'session.state':
       s.state = p.state
       if (p.reason !== undefined) s.stateReason = p.reason

@@ -14,11 +14,12 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import {
   optionsFrom,
-  type AdapterHooks, type AgentSession, type PromptImage, type SessionSpec,
+  type AdapterHooks, type AgentSession, type PromptFile, type SessionSpec,
 } from '../../core/adapter.ts'
 import type {
   Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
 } from '../../core/events.ts'
+import { IMMAGINI, parteDi } from '../../core/allegati.ts'
 import { clientLegacyPer, clientPer, lascia } from './host.ts'
 import { modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
 
@@ -484,12 +485,13 @@ export class OpenCodeAdapter implements AgentSession {
     })
   }
 
-  prompt(text: string, images: PromptImage[] = []): string {
+  prompt(text: string, allegati: PromptFile[] = []): string {
     const turnId = randomUUID()
     const parti: PromptPart[] = [
       { type: 'text', text },
-      ...images.map(i => ({
-        type: 'image' as const, ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
+      ...allegati.map(i => ({
+        // Immagine o file: la distinzione serve a chi disegna, non a chi manda.
+        type: parteDi(i.mediaType), ref: i.ref, mediaType: i.mediaType, bytes: i.bytes,
         ...(i.name ? { name: i.name } : {}),
       })),
     ]
@@ -503,7 +505,7 @@ export class OpenCodeAdapter implements AgentSession {
     const invio = {
       parts: [
         { type: 'text' as const, text },
-        ...images.map(i => ({
+        ...allegati.map(i => ({
           type: 'file' as const,
           mime: i.mediaType,
           url: `data:${i.mediaType};base64,${i.data}`,
@@ -697,6 +699,47 @@ function capacita(): Capabilities {
 }
 
 /**
+ * Cosa questo modello accetta come allegato, **come lo dichiara OpenCode**.
+ *
+ * Qui la domanda ha una risposta vera, a differenza di Claude Code dove l'handshake
+ * non dice niente: ogni modello porta `capabilities.input.{text,image,audio,video,pdf}`.
+ * Misurato sui 151 modelli dei provider autenticati di questa macchina — 61 con
+ * `image`, 4 con `pdf`, 10 con `audio`, 28 con `video` — e non letto nei tipi, che
+ * dichiarano un'altra forma: `ProviderConfig` promette `attachment` e `modalities`
+ * **piatti** sul modello, il filo manda `capabilities` annidato. E' la stessa trappola
+ * della P21 (`properties` contro `data`), e la sonda che aveva guardato nel posto
+ * sbagliato non era fallita: aveva risposto «zero modelli con allegati», che sembra un
+ * fatto. Si leggono quindi tutte e tre le forme, e a decidere e' quella che arriva.
+ *
+ * `attachment` da solo **non** vuol dire «accetta immagini»: sulla stessa macchina ci
+ * sono 67 modelli con `attachment: true` di cui sei con `image: false` — sono i modelli
+ * voce e video di nvidia. Dedurne le immagini avrebbe riacceso la graffetta proprio dove
+ * il modello ha appena detto di no. Resta come ripiego solo quando `input` non c'e'
+ * affatto, che e' il caso di un server piu' vecchio di questa forma.
+ *
+ * Cosa **non** si dichiara, e va detto invece che scoperto: `audio` e `video`. OpenCode
+ * li sa, e la sua `FilePart` porterebbe qualunque MIME — ma STARK non sa ancora
+ * trasportarli (`ESTENSIONE` in `core/allegati.ts` non li ha, quindi il registro li
+ * butterebbe in silenzio) ne' mostrarli in conversazione. Offrirli sarebbe un bottone
+ * che accetta un file e poi lo perde.
+ */
+export function allegabiliDi(m: Record<string, unknown>): string[] {
+  const cap = (m['capabilities'] ?? {}) as Record<string, unknown>
+  const input = cap['input'] as Record<string, boolean> | undefined
+  const modalita = (m['modalities'] ?? cap['modalities']) as { input?: string[] } | undefined
+  const ha = (k: string): boolean =>
+    input ? Boolean(input[k]) : Boolean(modalita?.input?.includes(k))
+
+  if (!input && !modalita) {
+    return (m['attachment'] ?? cap['attachment']) === true ? [...IMMAGINI] : []
+  }
+  return [
+    ...(ha('image') ? IMMAGINI : []),
+    ...(ha('pdf') ? ['application/pdf'] : []),
+  ]
+}
+
+/**
  * I modelli fra cui questa sessione puo' scegliere.
  *
  * Si leggono dai **provider autenticati** (`config.providers`), non dal catalogo
@@ -720,6 +763,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           // dirlo per tutti e' piu' onesto che lasciare il campo a caso.
           autoMode: false,
           contextWindow: typeof limit['context'] === 'number' ? limit['context'] : 0,
+          accepts: allegabiliDi(m),
         })
       }
     }

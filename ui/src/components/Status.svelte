@@ -9,10 +9,12 @@
   // Le voci che non si possono usare restano in elenco, spente, **con scritto chi le
   // rifiuta** (Principio 5). Nasconderle farebbe sembrare STARK meno capace del CLI.
   import Icon from './Icon.svelte'
+  import ModelPicker from './ModelPicker.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { QuotaWindow, SessionOption } from '$core/events.ts'
   import { optionsFrom } from '$core/adapter.ts'
-  import { MODE_BLURB, MODE_ICON, since, stamp, tilde, until } from '../lib/view.ts'
+  import { MODE_BLURB, MODE_ICON, project, since, stamp, tilde, until } from '../lib/view.ts'
+  import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
@@ -21,6 +23,40 @@
   // quali esistano: li dichiara l'agent (ADR-014).
   let open = $state<string | null>(null)
   let bar = $state<HTMLElement | null>(null)
+
+  /**
+   * Su quale ramo sta la cartella. Non è nel journal e non ha un evento canonico: è un
+   * fatto del **filesystem**, e chi fa `git checkout` in un terminale accanto non manda
+   * niente a STARK. Quindi si chiede, invece di ricordarlo.
+   *
+   * Si richiede quando cambia la cartella e a ogni **confine di turno** — gli stessi due
+   * momenti in cui STARK chiede già quota e contesto. Non è un orologio: leggere
+   * `snap.state` qui dentro fa ripartire l'effetto solo quando la sessione entra o esce
+   * dal lavoro, e su una chat ferma non parte più niente. È anche il momento giusto:
+   * se il ramo è cambiato, a cambiarlo è stato quasi sempre il turno appena finito.
+   */
+  let git = $state<GitInfo | null>(null)
+  /** Per quale cartella si è già chiesto. Non è `$state`: serve a **ricordare**, non a
+   *  ridisegnare — e leggere `git` qui dentro creerebbe un anello, perché è l'effetto
+   *  stesso a scriverlo. */
+  let chiesto = ''
+  $effect(() => {
+    const cwd = snap.cwd
+    // Letto **prima** di qualunque `await`, se no la dipendenza non verrebbe registrata
+    // e l'effetto non ripartirebbe al confine del turno.
+    const lavora = snap.state === 'busy' || snap.state === 'starting'
+    if (!cwd) { git = null; chiesto = ''; return }
+    // Un turno ne muove **due**, di confini: quando comincia e quando finisce. Chiedere
+    // su entrambi raddoppierebbe le richieste per sapere due volte la stessa cosa — se
+    // il ramo è cambiato, a cambiarlo è stato il turno, quindi la risposta che conta è
+    // quella dopo. Su una cartella di cui non si sa ancora niente si chiede lo stesso:
+    // una chat aperta **mentre** lavora resterebbe senza ramo fino a fine turno.
+    if (lavora && chiesto === cwd) return
+    chiesto = cwd
+    let vivo = true
+    void store.api.git(cwd).then(g => { if (vivo) git = g })
+    return () => { vivo = false }
+  })
 
 
   /**
@@ -237,6 +273,40 @@
    *  nome, perche' accende piu' cose insieme invece di sceglierne una. */
   function choose(what: string): void {
     open = open === what ? null : what
+    // Il catalogo si chiede aprendo, non prima: la barra si disegna su ogni chat e su
+    // ogni pannello, e chiederlo all'avvio vorrebbe dire pagarlo anche a chi il menu
+    // non lo apre mai. Costa comunque zero dopo la prima volta — il daemon lo tiene, e
+    // lo scalda da solo all'accensione.
+    if (open) void store.caricaCatalogo()
+    if (!open) { conferma = null; store.handoff = null }
+  }
+
+  // ─── passare a un altro agent ─────────────────────────────────────────────
+  //
+  // Dentro lo stesso agent cambiare modello e' un parametro. Fra due agent non lo e':
+  // la conversazione vive dentro il CLI (ADR-009), quindi si scrive un passaggio di
+  // consegne e se ne apre un'altra. La tendina e' la stessa, l'esito no — e per questo
+  // la seconda strada passa da una conferma che dice il costo prima di pagarlo.
+  let conferma = $state<{ agent: string; model: string; label: string } | null>(null)
+
+  function scegliModello(optId: string, agent: string, model: string): void {
+    if (agent === snap.agent) {
+      open = null
+      conferma = null
+      void store.setOption(optId, model)
+      return
+    }
+    conferma = { agent, model, label: model.split('/').pop() ?? model }
+  }
+
+  async function passa(via: 'agent' | 'journal'): Promise<void> {
+    const scelta = conferma ?? (store.handoff?.fase === 'chiede' ? store.handoff : null)
+    if (!scelta) return
+    await store.passaAdAltroAgent(scelta.agent, scelta.model, via)
+    // Andata: il pannello mostra gia' la chat nuova, e questa tendina appartiene alla
+    // vecchia. Se invece e' rimasto uno stato (`chiede`, `fallito`), il menu resta
+    // aperto apposta, perche' e' li' che c'e' la domanda o il motivo.
+    if (store.handoff === null) { conferma = null; open = null }
   }
 </script>
 
@@ -371,7 +441,27 @@
     <span class="cwd">
       <span class="sep">·</span>
       <Icon name="i-folder" style="flex:none" />
-      <span class="path" title={snap.cwd ?? ''}>{tilde(snap.cwd)}</span>
+      <!-- Il **nome** della cartella, non il percorso: quello è lungo, tutto uguale nei
+           primi due terzi fra un progetto e l'altro, e la parte che distingue è l'ultimo
+           pezzo — cioè la sola che veniva mangiata dall'ellissi quando lo spazio
+           stringeva. Il percorso intero resta a un passo, nel titolo. È la stessa parola
+           che l'elenco a sinistra usa per il progetto (`project`), e sono la stessa cosa:
+           averne due che si scrivono in modo diverso costringerebbe a tradurre fra le
+           due colonne per capire che è la stessa chat. -->
+      <span class="path" title={snap.cwd ?? ''}>{project(snap.cwd)}</span>
+      <!-- Il ramo, quando la cartella è dentro un repo. Non compare mai «no branch»: là
+           dove git non c'è, non c'è un fatto da riportare — sarebbe una riga in più su
+           ogni chat per dire niente. Testa staccata: si mostra la sigla del commit, che
+           è l'unica risposta vera alla domanda «dove sono». -->
+      {#if git?.branch}
+        <span class="branch"
+          title={git.detached
+            ? `Detached HEAD at ${git.branch}`
+            : `On branch ${git.branch}`}>
+          <Icon name="i-branch" style="flex:none" />
+          <span class="bname">{git.branch}</span>
+        </span>
+      {/if}
     </span>
   </div>
 
@@ -392,21 +482,57 @@
           {#if o.choices.length > 0}<Icon name="i-down" />{/if}
         </button>
         {#if open === o.id}
-          <div class="menu">
-            {#each o.choices as c (c.value)}
-              <button class="mi" class:on={c.value === o.value} class:dis={!c.available}
-                disabled={!c.available}
-                onclick={() => { open = null; void store.setOption(o.id, c.value) }}>
-                <!-- L'avviso c'è solo se l'agent l'ha scritto. Su OpenCode l'auto mode
-                     non esiste come concetto, e prima quella riga compariva su tutti e
-                     61 i modelli dicendo una cosa che lì non vuol dire niente. -->
-                {#if c.note}<Icon name="i-warn" style="color:var(--wait)" />{/if}
-                <span>{nome(c.value, c.label)}<span class="sub"
-                  >{c.reason ?? c.note ?? ''}</span></span>
-                {#if !c.available}<span class="tag">unavailable</span>
-                {:else if c.value === o.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
-              </button>
-            {/each}
+          <!-- Larghezza dichiarata, come la tendina MCP: senza, `.menu` si adatta al
+               contenuto e le righe vengono di larghezze diverse una dall'altra — con
+               151 modelli dai nomi di lunghezza qualunque, un bordo destro che balla a
+               ogni riga. Sotto la soglia stretta no: lì la tendina è già ancorata ai
+               due bordi. -->
+          <div class="menu" style={store.narrow ? '' : 'width:290px'}>
+            {#if conferma}
+              <!-- Il costo si dice **prima**, non dopo: questo clic apre un'altra
+                   conversazione e spende un turno, e sono le due cose che chi sceglie un
+                   modello da una tendina non si aspetta. -->
+              <div class="pg">Switch to {conferma.label}?</div>
+              <div class="pnote">
+                <Icon name="i-warn" />
+                {conferma.agent} can't continue this conversation: it lives inside
+                {snap.agent}. STARK will ask the current model to write a handoff file in
+                <code>.stark/</code> — that costs one turn — then open a new chat here, in
+                this same panel. This one stays in the list.
+              </div>
+              <div class="hrow">
+                <button class="mi" onclick={() => { conferma = null }}>Cancel</button>
+                <button class="mi on" onclick={() => void passa('agent')}>Write handoff</button>
+              </div>
+            {:else if store.handoff?.fase === 'chiede'}
+              <div class="pg">This chat is {store.handoff.state}</div>
+              <div class="pnote">
+                <Icon name="i-warn" />
+                Only a live session can write its own handoff. Waking it costs a wake plus
+                one turn; the journal version is free but says less — what happened, not
+                what's left to do.
+              </div>
+              <div class="hrow">
+                <button class="mi" onclick={() => void passa('journal')}>From journal (free)</button>
+                <button class="mi on" onclick={() => void passa('agent')}>Wake and write</button>
+              </div>
+            {:else if store.handoff?.fase === 'corso'}
+              <div class="pg">Handing off to {store.handoff.model}…</div>
+              <div class="pnote">The current model is writing the handoff file. This is a
+                real turn: it can take a while.</div>
+            {:else if store.handoff?.fase === 'fallito'}
+              <div class="pnote"><Icon name="i-warn" />{store.handoff.error}</div>
+              <div class="hrow">
+                <button class="mi" onclick={() => { store.handoff = null }}>Back</button>
+              </div>
+            {:else}
+              <!-- Lo **stesso** picker dell'helper: stessa regola su quale voce risulti
+                   selezionata, stesso raggruppamento per agent. Vedi ModelPicker. -->
+              <ModelPicker catalogo={store.catalogo} corrente={o.value}
+                agenteCorrente={snap.agent}
+                nota={a => (a === snap.agent ? null : 'handoff')}
+                onScegli={(agent, model) => scegliModello(o.id, agent, model)} />
+            {/if}
           </div>
         {/if}
       </span>
@@ -611,9 +737,7 @@
     }
   }
 
-  .mi { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
-  .mi[disabled] { cursor: default; }
-  .mi:not([disabled]):hover { background: var(--surface-2); }
-  .mi.on:hover { background: var(--accent-soft); }
-  .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Il reset e gli stati di `.mi` stavano qui, e qui valevano solo per le righe scritte
+     in questo file: `ModelPicker` disegna le stesse `.mi` e non le vedeva. Sono in
+     app.css, accanto alla definizione della classe. */
 </style>

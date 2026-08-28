@@ -202,6 +202,31 @@ export function resolveModel(models: unknown, requested: string): string {
  */
 const SENZA_AUTO = 'No auto mode — this chat would fall back and ask for everything'
 
+/**
+ * Cosa si puo' allegare a un prompt, su **qualunque** modello di questo agent.
+ *
+ * Uguale per tutti perche' l'handshake non dice niente in proposito: `ModelInfo` porta
+ * `supportsEffort`, `supportsAutoMode`, `supportsFastMode` e nient'altro — verificato
+ * sui cinque modelli veri di questo account, non letto nei tipi. E i modelli di Claude
+ * sono multimodali tutti, quindi una lista sola non nasconde nessuna differenza.
+ *
+ * L'elenco e' **misurato**, non dedotto dall'API (`spike/allegato-pdf.ts`, un turno per
+ * caso): un blocco `document` con un PDF in base64 e uno con testo semplice passano
+ * dal CLI e arrivano al modello, che li legge — la parola nascosta nel PDF e' tornata
+ * indietro. Le quattro immagini viaggiavano gia'.
+ *
+ * `text/markdown` e `text/csv` stanno qui pur non essendo media type che l'API accetta
+ * in un `document`: quello vuole `text/plain` e basta. La distinzione e' fra cosa
+ * l'utente puo' scegliere e cosa parte, e la seconda meta' la fa `userMessage()`, che
+ * manda il contenuto come testo semplice. Filtrare invece un `.csv` vorrebbe dire
+ * rifiutare un file che il modello legge, per una ragione che riguarda noi.
+ */
+export const ALLEGABILI = [
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+  'application/pdf',
+  'text/plain', 'text/markdown', 'text/csv',
+]
+
 export function modelChoices(raw: unknown, current: string): ModelChoice[] {
   const out: ModelChoice[] = []
   const seen = new Set<string>()
@@ -216,6 +241,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       out.push({
         id, autoMode: auto,
         contextWindow: contextWindowFor(resolved ?? id),
+        accepts: ALLEGABILI,
         // L'avviso lo scrive **questo** agent, e solo qui ha senso: su Claude Code
         // alcuni modelli reggono auto mode e altri no, quindi l'assenza distingue. Su
         // un agent senza classificatore non distinguerebbe niente — vedi `optionsFrom`.
@@ -231,6 +257,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
     out.unshift({
       id: current, autoMode: modelSupportsAutoMode(current),
       contextWindow: contextWindowFor(current),
+      accepts: ALLEGABILI,
       ...(modelSupportsAutoMode(current) ? {} : { note: SENZA_AUTO }),
     })
   }

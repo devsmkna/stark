@@ -10,7 +10,7 @@
   // perché cambiano cosa fa l'agent e devono valere da qualunque browser; il tema e i
   // suoni restano nel browser, perché sono del dispositivo.
   import Icon from './Icon.svelte'
-  import type { Storage, SystemInfo, TelegramInfo } from '../lib/api.ts'
+  import type { StatoTelefono, Storage, SystemInfo, TelegramInfo } from '../lib/api.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
@@ -20,7 +20,7 @@
 
   let { store }: { store: Store } = $props()
 
-  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'telegram' | 'appearance' | 'storage' | 'system'
+  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'phone' | 'telegram' | 'appearance' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
    *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
@@ -36,6 +36,7 @@
     // notifiche, è un **secondo modo di guidare STARK**, e metterlo lì direbbe una
     // cosa falsa. Dentro Notifications resta una riga che porta qui, perché è dove
     // uno lo cerca.
+    { id: 'phone', nome: 'Phone', icona: 'i-phone' },
     { id: 'telegram', nome: 'Telegram', icona: 'i-plane' },
     { id: 'appearance', nome: 'Appearance', icona: 'i-palette' },
     { id: 'storage', nome: 'Storage', icona: 'i-disk' },
@@ -88,6 +89,7 @@
   // `default` a mano nel browser — due parole di Claude Code, che su un altro agent non
   // vogliono dire niente.
   let agenti = $state<NonNullable<SystemInfo['agents']> | null>(null)
+  let telStato = $state<StatoTelefono | null>(null)
   $effect(() => {
     if (agenti === null) {
       void store.api.system().then(
@@ -152,6 +154,9 @@
     // Anche Notifications, perché lì c'è la riga che dice se il bot è acceso: senza
     // questa, quella riga direbbe «off» a un bot in ascolto finché non apri la sezione.
     if ((sez === 'telegram' || sez === 'notifications') && !tg) void ricaricaTg()
+    // Aprendo la sezione, non all'avvio: legge lo stato di Tailscale, che costa due
+    // `execFile`. Stessa condotta della diagnostica qui sotto.
+    if (sez === 'phone' && telStato === null) void store.api.phone().then(x => { telStato = x })
   })
 
   // ─── Telegram ─────────────────────────────────────────────────────────────
@@ -590,6 +595,44 @@
         </div>
 
       <!-- ─── Telegram ────────────────────────────────────────────────── -->
+      {:else if sez === 'phone'}
+        <!-- Qui c'è la **porta**, non una seconda copia del pannello. Il pannello vero è
+             `Phone.svelte`, e ci si arriva anche dall'icona in cima all'elenco: due
+             schermate che dicono la stessa cosa sono due schermate da tenere allineate,
+             e la prima volta che divergono nessuno sa quale ha ragione. Quello che sta
+             qui è ciò che una schermata di impostazioni deve dire da sé — a che punto
+             sei — più la via per andare avanti. -->
+        <div class="ssub">
+          A phone reaches STARK through your Tailscale network: nothing is published to
+          the internet, and the connection still arrives from this machine's loopback.
+        </div>
+        <div class="prow">
+          <div>
+            <div class="pn">Tailscale account</div>
+            <div class="pd">
+              {#if telStato === null}Checking…
+              {:else if telStato.tailscale.host}Signed in as {telStato.tailscale.host}
+              {:else}This machine is not signed in{/if}
+            </div>
+          </div>
+          <button class="btn" style="margin-left:auto"
+            onclick={() => { store.dialog = { kind: 'phone' } }}>
+            {telStato?.tailscale.host ? 'Open' : 'Connect Tailscale account'}
+          </button>
+        </div>
+        <div class="prow">
+          <div>
+            <div class="pn">Connected phones</div>
+            <div class="pd">
+              {#if telStato === null}—
+              {:else if telStato.devices.length === 0}None yet
+              {:else}{telStato.devices.map(d => d.nome).join(', ')}{/if}
+            </div>
+          </div>
+          <button class="btn" style="margin-left:auto"
+            onclick={() => { store.dialog = { kind: 'phone' } }}>Connect a phone</button>
+        </div>
+
       {:else if sez === 'telegram'}
         <div class="fgroup">
           <div class="flabel">Bot</div>

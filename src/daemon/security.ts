@@ -14,7 +14,41 @@ export type Guard = {
   perimetro: Perimetro
   /** Il motivo del rifiuto, oppure null se la richiesta può passare. */
   reject(req: IncomingMessage): string | null
+  /**
+   * Con quale credenziale è passata questa richiesta.
+   *
+   * Esiste per una trappola concreta: `serveUi` pianta un cookie a ogni caricamento
+   * della pagina, e finché la credenziale era una sola poteva piantare quella. Da
+   * quando un telefono ne ha una **sua** (`telefono.ts`), piantare sempre quella
+   * globale vorrebbe dire consegnare la chiave maestra al primo dispositivo che carica
+   * la pagina — cioè annullare la revoca prima ancora di scriverla. Si ripianta quella
+   * con cui si è entrati, non un'altra.
+   */
+  credenziale(req: IncomingMessage): string | null
 }
+
+/**
+ * Cosa il perimetro deve sapere dei telefoni collegati. È un'interfaccia e non la
+ * classe: qui dentro non entra la gestione dell'accoppiamento, entra solo la domanda
+ * «questa credenziale vale?» — vedi `telefono.ts` per la risposta.
+ */
+export type Telefoni = {
+  riconosce(token: string): boolean
+  codiceVivo(): { scade: number } | null
+}
+
+/**
+ * Le due sole rotte che si possono attraversare **senza credenziale**, e soltanto nei
+ * cinque minuti in cui un codice è vivo: la pagina in cui si scrive il codice, e la
+ * richiesta che lo consegna. Fuori da quella finestra rispondono 403 come tutto il
+ * resto, quindi la superficie non autenticata non è accesa in permanenza — esiste solo
+ * quando l'hai chiesta tu premendo il bottone. Decisione dell'utente, 28 agosto 2026.
+ *
+ * Le difese 1, 2 e 3 valgono lo stesso: anche per accoppiare bisogna arrivare dal
+ * loopback, con un `Host` che è questa macchina e un `Origin` nostro. A cadere è solo
+ * la quarta, che è l'unica che il telefono non può ancora soddisfare.
+ */
+const ROTTE_ACCOPPIAMENTO = new Set(['/pair', '/api/phone/claim'])
 
 /** Un nome che questa macchina accetta oltre a localhost. */
 export type Ammesso = {
@@ -42,7 +76,9 @@ export type Perimetro = {
  * alle prove, che non devono dipendere dall'ordine in cui i moduli leggono l'ambiente.
  * Assente (non `[]`) vuol dire «leggi l'ambiente»; `[]` vuol dire «nessuno».
  */
-export function createGuard(port: () => number, dato?: string, extraHosts?: string[]): Guard {
+export function createGuard(
+  port: () => number, dato?: string, extraHosts?: string[], telefoni?: Telefoni,
+): Guard {
   const token = dato ?? randomBytes(32).toString('hex')
   // Misurato dal vivo il 26 agosto (pagina Notion "Continua da telefono" §3 e §5.1):
   // con un mesh Tailscale privato, `tailscale serve` termina il TLS e fa da proxy
@@ -90,9 +126,25 @@ export function createGuard(port: () => number, dato?: string, extraHosts?: stri
       }
 
       // 4. Token. È ciò che distingue STARK da qualunque altro processo sulla macchina.
-      if (!hasToken(req, token)) return 'token mancante o errato'
+      //    Ce n'è più d'uno: quello della macchina, e uno per ogni telefono collegato.
+      //    Sono equivalenti qui e diversi altrove — quello di un telefono si revoca da
+      //    Impostazioni, quello della macchina no.
+      const dato = presentato(req)
+      if (dato && (pari(dato, token) || telefoni?.riconosce(dato))) return null
 
-      return null
+      // L'accoppiamento: senza credenziale si passa solo qui, e solo mentre un codice è
+      // vivo. Sta **dopo** il controllo del token e non prima, perché non è una
+      // scorciatoia — è l'ultima porta, e se ne apre una sola.
+      if (ROTTE_ACCOPPIAMENTO.has(percorso(req)) && telefoni?.codiceVivo()) return null
+
+      return 'token mancante o errato'
+    },
+
+    credenziale(req) {
+      const dato = presentato(req)
+      if (!dato) return null
+      if (pari(dato, token)) return token
+      return telefoni?.riconosce(dato) ? dato : null
     },
   }
 }
@@ -231,7 +283,12 @@ function isOurOrigin(origin: string, port: number, ammessi: Ammesso[]): boolean 
   return ammessi.some(a => a.origin === origin.toLowerCase())
 }
 
-function hasToken(req: IncomingMessage, token: string): boolean {
+const percorso = (req: IncomingMessage): string =>
+  new URL(req.url ?? '/', 'http://x').pathname
+
+/** La credenziale che la richiesta porta, da qualunque delle tre vie. Non dice se è
+ *  valida: dice cosa è stato presentato. */
+function presentato(req: IncomingMessage): string {
   const auth = req.headers.authorization
   const given = typeof auth === 'string' && auth.startsWith('Bearer ')
     ? auth.slice(7)
@@ -244,7 +301,11 @@ function hasToken(req: IncomingMessage, token: string): boolean {
     // per il primo caricamento della pagina, che non ha ancora il cookie.
     // Sconsigliato in generale: le query string finiscono nei log e nella cronologia.
     ?? new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? ''
-  if (given.length !== token.length) return false
-  // Confronto a tempo costante: un `===` perde la partita un carattere alla volta.
-  return timingSafeEqual(Buffer.from(given), Buffer.from(token))
+  return given
+}
+
+/** Confronto a tempo costante: un `===` perde la partita un carattere alla volta. */
+function pari(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }

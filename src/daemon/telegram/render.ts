@@ -25,7 +25,11 @@ export function turno(t: TurnView): string {
 }
 
 function intestazione(t: TurnView): string {
-  const chiesto = t.prompt.map(p => (p.type === 'text' ? p.text : '🖼')).join(' ').trim()
+  // Un'icona per ciascuno dei tre: il testo, l'immagine, e l'allegato che immagine
+  // non e' — su Telegram non c'e' niente da aprire, quindi almeno si vede che c'era.
+  const chiesto = t.prompt
+    .map(p => (p.type === 'text' ? p.text : p.type === 'image' ? '🖼' : '📎'))
+    .join(' ').trim()
   const capo = t.ended ? esito(t) : '▶'
   const durata = t.ended && t.endedAt ? ` · ${Math.round((t.endedAt - t.startedAt) / 1000)}s` : ''
   return `${capo} <b>${escapa(taglia(chiesto, 120))}</b>${durata}`

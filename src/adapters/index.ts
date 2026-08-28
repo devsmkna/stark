@@ -153,15 +153,8 @@ export async function agentiNonSupportati(): Promise<{ id: string; label: string
   return nonAncora
 }
 
-/**
- * Tutti i modelli guidabili su questa macchina, per agent, piu' chi e' installato e
- * non lo e' ancora.
- *
- * Un agent che c'e' ma non risponde compare **con la sua ragione** invece che sparire:
- * «nessun modello» detto da un agent presente e' un'informazione (login scaduto, chiave
- * assente), mentre farlo sparire dall'elenco lo farebbe sembrare non installato.
- */
-export async function catalogoCompleto(profile?: string): Promise<{
+/** Un agent della macchina e i modelli che sa guidare. */
+export type AgentModels = {
   id: string
   label: string
   available: boolean
@@ -169,11 +162,95 @@ export async function catalogoCompleto(profile?: string): Promise<{
   /** Un avviso su **tutto** l'agent, non su un suo modello. */
   note?: string
   models: ModelChoice[]
-}[]> {
+}
+
+/**
+ * Per quanto ci si fida di un elenco gia' preso.
+ *
+ * Cinque minuti e non «per sempre» perche' i modelli **cambiano davvero** mentre STARK
+ * e' acceso: un piano che scade, un login diverso, un modello nuovo pubblicato. E non
+ * cinque secondi, perche' ogni scadenza costa un processo per agent.
+ *
+ * La cache sta **qui** e non dentro i singoli adapter, dove per Claude Code stava
+ * prima, per una ragione misurata: OpenCode non ce l'aveva, e il menu pagava ~2,3s a
+ * ogni apertura anche subito dopo la precedente (misurato: claude-code 3233 → 0 → 0 ms,
+ * opencode 3165 → 2316 → 2824). Due cache scritte da due parti sono due TTL che
+ * divergono; una sola, sul punto d'ingresso, vale per qualunque agent venga dopo senza
+ * che debba ricordarsi di averla.
+ */
+const VALIDA_MS = 5 * 60 * 1000
+
+const cache = new Map<string, { quando: number; dati: AgentModels[] }>()
+const inVolo = new Map<string, Promise<AgentModels[]>>()
+
+/** Solo per le prove, e per chi cambia login senza aspettare cinque minuti. */
+export function scordaCatalogo(): void { cache.clear(); inVolo.clear() }
+
+/**
+ * Scalda il catalogo senza che nessuno lo stia aspettando.
+ *
+ * Chiamato all'avvio del daemon accanto a `warmDiagnostics`: la prima apertura del menu
+ * e' quella che si nota, ed e' l'unica che pagherebbe i tre secondi per intero.
+ * Non si aspetta e non si segnala: se fallisce, la prima domanda vera riprovera'.
+ */
+export function scaldaCatalogo(profile?: string): void {
+  void catalogoCompleto(profile).catch(() => { /* riprovera' chi la chiede davvero */ })
+}
+
+/**
+ * Si risponde **subito con quello che si ha**, anche se scaduto, e si va a riprendere
+ * l'elenco nuovo di lato (stale-while-revalidate). Un catalogo di cinque minuti fa e'
+ * quasi sempre identico a quello di adesso, e farlo aspettare tre secondi per
+ * scoprirlo e' il costo che questa funzione esiste per non far pagare. Chi apre il
+ * menu vede i modelli; se nel frattempo ne e' comparso uno, arriva alla prossima.
+ *
+ * Tutti i modelli guidabili su questa macchina, per agent, piu' chi e' installato e
+ * non lo e' ancora.
+ *
+ * Un agent che c'e' ma non risponde compare **con la sua ragione** invece che sparire:
+ * «nessun modello» detto da un agent presente e' un'informazione (login scaduto, chiave
+ * assente), mentre farlo sparire dall'elenco lo farebbe sembrare non installato.
+ */
+export async function catalogoCompleto(profile?: string): Promise<AgentModels[]> {
+  const chiave = profile ?? ''
+  const avuto = cache.get(chiave)
+  if (avuto) {
+    // Scaduto non vuol dire inutile: si restituisce lo stesso e si aggiorna dietro.
+    if (Date.now() - avuto.quando >= VALIDA_MS) void aggiorna(chiave, profile).catch(() => {})
+    return avuto.dati
+  }
+  return aggiorna(chiave, profile)
+}
+
+/**
+ * Una richiesta sola per chiave, anche se in dieci la chiedono insieme.
+ *
+ * Senza questo, aprire il menu in tre pannelli affiancati farebbe partire tre handshake
+ * per agent — che e' esattamente il costo che la cache toglie, rimesso dalla porta di
+ * servizio il primo giro, quando la cache e' ancora vuota.
+ */
+function aggiorna(chiave: string, profile?: string): Promise<AgentModels[]> {
+  const gia = inVolo.get(chiave)
+  if (gia) return gia
+  const p = componi(profile)
+    .then(dati => { cache.set(chiave, { quando: Date.now(), dati }); return dati })
+    .finally(() => { inVolo.delete(chiave) })
+  inVolo.set(chiave, p)
+  return p
+}
+
+/**
+ * Il `profile` arriva fino all'adapter, e prima non ci arrivava: `catalogoCompleto` lo
+ * prendeva come parametro e poi chiamava `b.catalogue?.()` **senza**, nonostante il
+ * contratto del §1 lo dichiari (`catalogue?(profile?: string)`). Su una macchina con un
+ * profilo Claude per progetto l'elenco era quindi sempre quello del profilo di default,
+ * in silenzio. Non lo nota nessuno finche' i due profili hanno gli stessi modelli.
+ */
+async function componi(profile?: string): Promise<AgentModels[]> {
   const guidabili = await Promise.all(
     Object.values(BACKENDS).map(async b => {
       const c = (await b.available?.()) ?? true
-      if (!c) return { id: b.id, label: ETICHETTE[b.id] ?? b.id, available: false, reason: 'non installato', models: [] }
+      if (!c) return { id: b.id, label: ETICHETTE[b.id] ?? b.id, available: false, reason: 'not installed', models: [] }
       // Un agent che non sa imporre un divieto **non** viene spento: funziona, e STARK
       // non deve poter meno di quello che la macchina puo' fare. Ma la sola lettura li'
       // non c'e', e va detta — con una `note`, non un `reason`: la prima e' un avviso su
@@ -185,11 +262,11 @@ export async function catalogoCompleto(profile?: string): Promise<{
       // il 27 agosto («I 61 modelli di OpenCode non hanno piu' 61 triangoli di avviso»),
       // rifatto uguale un giorno dopo. Un avviso su ogni riga non e' un avviso: e' lo
       // sfondo, e nasconde quello vero che sta su una riga sola.
-      const models = (await b.catalogue?.()) ?? []
+      const models = (await b.catalogue?.(profile)) ?? []
       return {
         id: b.id, label: ETICHETTE[b.id] ?? b.id,
         available: models.length > 0,
-        ...(models.length === 0 ? { reason: 'nessun modello: controlla il login di questo agent' } : {}),
+        ...(models.length === 0 ? { reason: 'no models — check this agent\'s login' } : {}),
         ...(b.canDeny !== true ? { note: SENZA_SOLA_LETTURA } : {}),
         models,
       }
@@ -197,14 +274,14 @@ export async function catalogoCompleto(profile?: string): Promise<{
   )
   const spenti = (await agentiNonSupportati()).map(a => ({
     id: a.id, label: a.label, available: false,
-    reason: 'installato, ma STARK non lo sa ancora guidare',
+    reason: 'installed, but STARK can\'t drive it yet',
     models: [] as ModelChoice[],
   }))
   return [...guidabili, ...spenti]
 }
 
 /** Detto una volta sola, perche' e' la stessa frase su ogni modello di quell'agent. */
-const SENZA_SOLA_LETTURA = 'Su questo agent la sola lettura non e\' ancora garantita: potrebbe modificare file.'
+const SENZA_SOLA_LETTURA = 'Read-only isn\'t enforced on this agent yet: it could modify files.'
 
 /** Come si chiama un agent a schermo. La UI non deve conoscerne i nomi (§1). */
 const ETICHETTE: Record<string, string> = {

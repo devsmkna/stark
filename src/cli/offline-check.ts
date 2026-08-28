@@ -29,6 +29,9 @@ import { askCategories, readSettings, writeSettings } from '../daemon/settings.t
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal, MemoryJournal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
+import {
+  briefingDalJournal, percorsoHandoff, promptBriefing, promptRipresa,
+} from '../core/handoff.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
@@ -871,9 +874,9 @@ check('diff: forma unificata, numeri di riga coerenti',
 
   check('OpenCode: il carico utile si legge sia in `data` sia in `properties`',
     tipi(oc.translate(chi('m0', 'assistant'))) === ''
-    && tipi({ type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } } as never
-      ? oc.translate({ type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } })
-      : []) === '')
+    && tipi(oc.translate(
+      { type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } },
+    )) === '')
 
   // ─── la trappola numero uno ───────────────────────────────────────────────
   //
@@ -1691,6 +1694,68 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   let esploso = false
   try { m.append({ k: 'session.state', state: 'idle' }) } catch { esploso = true }
   check('§17: scrivere su un deposito chiuso e\' un errore, non un silenzio', esploso)
+}
+
+// ─── §18 il passaggio di consegne fra due agent ──────────────────────────────
+//
+// Solo la parte pura: nomi e parole. L'orchestrazione (prompt, attesa del turno,
+// apertura della chat nuova) vuole processi veri e sta in `npm run daemon`.
+{
+  const quando = new Date(2026, 7, 28, 9, 5)   // 28 agosto 2026, 09:05 locale
+  const file = percorsoHandoff(quando)
+  check('§18: il nome del file porta data e ora, dentro .stark del progetto',
+    file === '.stark/handoff-2026-08-28-0905.md', file)
+  check('§18: il percorso e\' relativo, mai assoluto',
+    !file.startsWith('/'), file)
+
+  const briefing = promptBriefing(file)
+  check('§18: a chi lascia si dice **dove** scrivere', briefing.includes(file))
+  check('§18: gli si chiede cosa manca, non un riassunto della chat',
+    briefing.includes('Da fare') && briefing.includes('Non riassumere la conversazione'))
+
+  const ripresa = promptRipresa(file, 'claude-code')
+  check('§18: chi arriva **cita** il file con @, cosi\' lo espande il CLI',
+    ripresa.includes(`@${file}`))
+  check('§18: chi arriva sa da quale agent viene il lavoro',
+    ripresa.includes('claude-code'))
+  check('§18: senza agent precedente la frase resta corretta',
+    !promptRipresa(file).includes('undefined'))
+
+  // Il briefing meccanico, su uno snapshot costruito a mano.
+  const vuoto = reduce([])
+  const meccanico = briefingDalJournal(vuoto, quando)
+  check('§18: il briefing dal journal dichiara di NON sapere cosa manca',
+    meccanico.includes('cosa manca') && meccanico.includes('quel giudizio non'),
+    meccanico.slice(0, 120))
+  // Non deve **affermare** perche' e' stato composto cosi': la via `journal` si puo'
+  // scegliere anche su una chat viva, e «la sua sessione non era viva» sarebbe una
+  // frase falsa scritta con sicurezza dentro il documento su cui l'altro agent lavora.
+  check('§18: non inventa il motivo per cui l\'ha scritto STARK',
+    !meccanico.includes('non era viva'))
+  check('§18: su una conversazione vuota non inventa sezioni',
+    !meccanico.includes('## File toccati') && !meccanico.includes('## Cosa era stato chiesto'))
+
+  const pieno = reduce([
+    { k: 'session.created', agent: 'claude-code', cwd: '/p', model: 'opus',
+      capabilities: { interrupt: true, switchModel: true, switchMode: true, autoMode: true,
+        permissionAlways: true, questions: true, revert: false, toolProgress: false,
+        fileBrowser: false, pty: false } },
+    { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'sistema il parser' }] },
+    { k: 'file.edited', path: 'src/a.ts', created: false, hunks: [] },
+    { k: 'file.edited', path: 'src/a.ts', created: false, hunks: [] },
+    { k: 'file.edited', path: 'src/b.ts', created: false, hunks: [] },
+    { k: 'text.started', partId: 'x' },
+    { k: 'text.delta', partId: 'x', delta: 'fatto meta\' del lavoro' },
+    { k: 'text.ended', partId: 'x', text: 'fatto meta\' del lavoro' },
+    { k: 'turn.ended', turnId: 't1', reason: 'completed' },
+  ].map((p, i) => ({ v: MODEL_VERSION, seq: i + 1, ts: 1, sessionId: 's', payload: p as never })))
+  const b2 = briefingDalJournal(pieno, quando)
+  check('§18: riporta cosa era stato chiesto', b2.includes('sistema il parser'))
+  check('§18: un file toccato due volte e\' UNA riga, non due',
+    (b2.match(/src\/a\.ts/g) ?? []).length === 1, b2)
+  check('§18: riporta l\'ultima cosa detta dall\'agent', b2.includes('fatto meta\' del lavoro'))
+  check('§18: dice da quale agent e modello veniva',
+    b2.includes('claude-code') && b2.includes('opus'))
 }
 
 let failed = 0
