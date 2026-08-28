@@ -36,7 +36,7 @@ import { STARK_HOME } from '../daemon/registry.ts'
 import {
   clearPid, ensureHome, logPath, pidPath, readToken, runningPid, tokenPath, writePid, writeToken,
 } from '../daemon/identity.ts'
-import { controlla, passaAllaRelease } from '../daemon/aggiornamenti.ts'
+import { controlla, passaAllaRelease, riallinea } from '../daemon/aggiornamenti.ts'
 import { ambienteSystemd } from '../daemon/riavvio.ts'
 
 /** La radice del repo: questo file sta in `src/cli/`, due livelli sotto. */
@@ -644,6 +644,11 @@ if (comando === 'run') {
   // `npm install` e non `ci`: `ci` cancella `node_modules` e riscarica tutto, compresi i
   // ~340 MB del binario di Claude Code, ogni volta. Il lockfile lo rispettano entrambi.
   if (npm(['install']).status !== 0) { console.error('`npm install` è fallito.'); process.exit(1) }
+  // …ma `npm install` **sporca l'albero**: riscrive `package-lock.json` e `yarn.lock` a
+  // ogni esecuzione. Senza questa riga l'aggiornamento si chiuderebbe la porta alle
+  // spalle, e il prossimo si rifiuterebbe per modifiche locali che sono nostre. Vedi
+  // `riallinea()`: è sicura qui e solo qui, perché la partenza era pulita per costruzione.
+  await riallinea(RADICE)
   if (npm(['run', 'ui:build']).status !== 0) { console.error('`npm run ui:build` è fallito.'); process.exit(1) }
 
   // Il lanciatore va riscritto: `process.execPath` può essere cambiato (un Node nuovo

@@ -147,18 +147,28 @@ esiste "$NPM" || [ -x "$NPM" ] || NPM="$(command -v npm)" || muori "Trovato node
 titolo "Codice"
 if [ -d "$APP/.git" ]; then
   echo "c'è già: aggiorno ($APP)"
-  git -C "$APP" fetch --quiet origin "$RAMO"
-  git -C "$APP" checkout --quiet "$RAMO"
-  # `--ff-only`: se qualcuno ci ha lavorato dentro, questo si ferma invece di
-  # sovrascrivere. È il suo lavoro, e cancellarlo non è una decisione dell'installer.
-  git -C "$APP" merge --ff-only --quiet "origin/$RAMO" \
-    || muori "Ci sono modifiche locali in $APP. Risolvile a mano, poi rilancia."
 else
   mkdir -p "$(dirname "$APP")"
   git clone --quiet --branch "$RAMO" --depth 1 "$REPO" "$APP" \
     || muori "Non sono riuscito a clonare $REPO (ramo $RAMO).
 Se il repo è privato, servono le tue credenziali git su questa macchina."
 fi
+
+# Ci si mette sull'ultima **release**, non sulla punta del ramo: si installa una
+# versione che qualcuno ha dichiarato pronta, non l'ultima cosa scritta. Il clone qui
+# sopra prende `main` perché serve un punto da cui partire — la regola vera è la riga
+# qui sotto, e se non c'è ancora nessuna release lo dice e resta sul ramo.
+#
+# È TypeScript e non shell perché la stessa regola serve a `stark update`, e due copie
+# in due linguaggi sono il modo in cui una delle due resta indietro. Gira **prima** di
+# `npm install`, quindi quel file e tutto ciò che importa non devono dipendere da
+# `node_modules`: è una proprietà dichiarata in testa a `src/cli/release.ts`.
+#
+# `--ff-only` dentro: se qualcuno ha messo mano al repo, si ferma invece di
+# sovrascrivere. È il suo lavoro, e cancellarlo non è una decisione dell'installer.
+"$NODE" "$APP/src/cli/release.ts" checkout "$APP" \
+  || muori "Non sono riuscito a mettere $APP sull'ultima release.
+Se ci hai lavorato dentro, le modifiche locali vanno risolte a mano."
 grigio "$(git -C "$APP" log --oneline -1)"
 
 # Da qui in poi il `npm` che gira deve trovare **questo** node, non quello di sistema:
@@ -170,6 +180,10 @@ export PATH
 titolo "Dipendenze"
 echo "(la prima volta ci mette qualche minuto: dentro c'è il binario di Claude Code, ~340 MB)"
 ( cd "$APP" && "$NPM" install --no-fund --no-audit ) || muori "npm install è fallito."
+# `npm install` riscrive `package-lock.json` e `yarn.lock` a ogni esecuzione (misurato).
+# Senza questo, l'installazione lascerebbe l'albero sporco e il rilancio dell'installer —
+# o il primo `stark update` — si rifiuterebbe per «modifiche locali» che sono nostre.
+"$NODE" "$APP/src/cli/release.ts" riallinea "$APP" || true
 
 titolo "Interfaccia"
 ( cd "$APP" && "$NPM" run ui:build ) >/dev/null 2>&1 || muori "La compilazione della UI è fallita.

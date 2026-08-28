@@ -4,9 +4,20 @@
 // si prova con `node` puro, questa parla con `git` e con la rete. Il confine è lo
 // stesso di `core/quota.ts` contro il pannellino che la disegna.
 //
-// `execFile`, non `exec`: gli argomenti viaggiano come array e mai come stringa di
-// shell, quindi un nome di tag strano è un argomento e non un'iniezione. Stessa regola
-// di `reveal.ts` e `git.ts`.
+// Si passa da `esegui` di `core/platform.ts` e non da `execFile` nudo, e non è
+// pignoleria: su Windows il daemon non ha una console (nasce `DETACHED_PROCESS`),
+// quindi ogni comando lanciato senza `windowsHide` se ne prende una **nuova** — cioè
+// una finestra nera che lampeggia addosso a chi non ha chiesto niente. Questo modulo
+// lancia `git` a ogni accensione e a ogni controllo dell'albero, quindi senza il punto
+// unico sarebbe il difetto del 28 agosto daccapo.
+//
+// Vale la pena saperlo: la guardia statica in `npm run check` **non** l'avrebbe preso.
+// Cerca `execFile(`, e `promisify(execFile)` non è una chiamata — una prova che guarda
+// il posto giusto con la forma sbagliata non fallisce, tace.
+//
+// Di riflesso arriva anche l'altra garanzia: gli argomenti viaggiano come array e mai
+// come stringa di shell, quindi un nome di tag strano è un argomento e non
+// un'iniezione. Stessa regola di `reveal.ts` e `git.ts`.
 //
 // Due cose che si scoprono solo provandolo, e che qui sono scritte invece che dedotte:
 //
@@ -165,4 +176,26 @@ export function controllaAllAvvio(radice: string): void {
     if (s.errore) console.error(`[update] controllo non riuscito: ${s.errore}`)
     else if (s.disponibile) console.log(`[update] disponibile la ${s.ultima} (hai la ${s.installata})`)
   })
+}
+
+/**
+ * Rimette a posto i file tracciati che **l'aggiornamento stesso** ha sporcato.
+ *
+ * Misurato, ed è un difetto che si vede solo aggiornando due volte: `npm install`
+ * riscrive `package-lock.json` (ci tiene dentro la `version`) e **anche `yarn.lock`**,
+ * a ogni esecuzione, su questo repo. L'aggiornamento si chiudeva quindi la porta alle
+ * spalle: finiva lasciando l'albero sporco, e il successivo si rifiutava con «ci sono
+ * modifiche locali» — modifiche che non erano di nessuno, se non nostre.
+ *
+ * Buttarle via è sicuro per un motivo preciso, e solo per quello: `passaAllaRelease`
+ * **si rifiuta di partire** su un albero sporco. Quindi quando si arriva qui la
+ * partenza era pulita per costruzione, e tutto ciò che è cambiato da allora l'abbiamo
+ * cambiato noi. Chiamarla in un altro momento vorrebbe dire cancellare il lavoro di
+ * qualcuno, ed è la ragione per cui questa funzione non va usata altrove.
+ *
+ * Solo i file **tracciati**: quelli non tracciati non li ha messi lì `npm install`.
+ */
+export async function riallinea(radice: string): Promise<void> {
+  await git(radice, ['checkout', '--', '.'], 60_000)
+    .catch(() => { /* niente da rimettere a posto, o non è un repo: va bene così */ })
 }

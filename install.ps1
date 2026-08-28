@@ -121,18 +121,27 @@ Poi apri un terminale nuovo e rilancia questo comando."
 Titolo 'Codice'
 if (Test-Path (Join-Path $App '.git')) {
   Write-Host "c'e' gia': aggiorno ($App)"
-  & git -C $App fetch --quiet origin $Ramo
-  & git -C $App checkout --quiet $Ramo
-  # `--ff-only`: se qualcuno ci ha lavorato dentro, questo si ferma invece di
-  # sovrascrivere. E' il suo lavoro, e cancellarlo non e' una decisione dell'installer.
-  & git -C $App merge --ff-only --quiet "origin/$Ramo"
-  if ($LASTEXITCODE -ne 0) { Muori "Ci sono modifiche locali in $App. Risolvile a mano, poi rilancia." }
 } else {
   New-Item -ItemType Directory -Path (Split-Path $App) -Force | Out-Null
   & git clone --quiet --branch $Ramo --depth 1 $Repo $App
   if ($LASTEXITCODE -ne 0) { Muori "Non sono riuscito a clonare $Repo (ramo $Ramo).
 Se il repo e' privato, servono le tue credenziali git su questa macchina." }
 }
+
+# Ci si mette sull'ultima **release**, non sulla punta del ramo: si installa una
+# versione che qualcuno ha dichiarato pronta, non l'ultima cosa scritta. Il clone qui
+# sopra prende il ramo perche' serve un punto da cui partire — la regola vera e' la riga
+# qui sotto, e se non c'e' ancora nessuna release lo dice e resta sul ramo.
+#
+# E' TypeScript e non PowerShell perche' la stessa regola serve a `stark update` e a
+# `install.sh`: tre copie in tre linguaggi sono tre modi di restare indietro. Gira
+# **prima** di `npm install`, quindi quel file non dipende da `node_modules`.
+#
+# `--ff-only` dentro: se qualcuno ha messo mano al repo, si ferma invece di
+# sovrascrivere. E' il suo lavoro, e cancellarlo non e' una decisione dell'installer.
+& $NodeExe (Join-Path $App 'src/cli/release.ts') checkout $App
+if ($LASTEXITCODE -ne 0) { Muori "Non sono riuscito a mettere $App sull'ultima release.
+Se ci hai lavorato dentro, le modifiche locali vanno risolte a mano." }
 Grigio (& git -C $App log --oneline -1)
 
 # Da qui in poi `npm` deve trovare **questo** node: npm e' uno script che invoca `node`
@@ -146,6 +155,11 @@ Push-Location $App
 try {
   & $Npm install --no-fund --no-audit
   if ($LASTEXITCODE -ne 0) { Muori 'npm install e'' fallito.' }
+  # `npm install` riscrive `package-lock.json` e `yarn.lock` a ogni esecuzione
+  # (misurato). Senza questo, l'installazione lascerebbe l'albero sporco e il rilancio
+  # dell'installer — o il primo `stark update` — si rifiuterebbe per «modifiche locali»
+  # che sono nostre.
+  & $NodeExe (Join-Path $App 'src/cli/release.ts') riallinea $App
 
   Titolo 'Interfaccia'
   & $Npm run ui:build | Out-Null

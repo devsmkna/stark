@@ -22,6 +22,15 @@ node_modules/
 dist/
 build/
 .vite/
+# Il lockfile del progetto e` `package-lock.json`: e` quello che usano l'installer e
+# `stark update`. Un `yarn.lock` era entrato per sbaglio (56db151, generato su un Mac
+# installando con yarn invece che con npm) e non portava niente che il primo non
+# avesse gia` — le 17 dipendenze c'erano tutte. Faceva pero` danno: npm tiene in
+# sincrono un `yarn.lock` se lo trova, quindi lo riscriveva a **ogni** `npm install` e
+# per giunta secondo la piattaforma di chi lo eseguiva (darwin-arm64 ↔ linux-x64-musl),
+# lasciando in `git status` modifiche che non erano di nessuno. Chi preferisce yarn
+# sulla propria macchina puo` continuare: il file resta, semplicemente non viaggia.
+yarn.lock
 
 # --- Rumore ---
 *.log

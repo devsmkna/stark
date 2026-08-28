@@ -188,13 +188,27 @@
       <!-- Il testo era «The daemon is not answering: the daemon is not answering»: il
            motivo dal negozio ripeteva la frase del riquadro. Qui la frase sta in un
            posto solo, e dice anche cosa fare — che è l'unica cosa utile in quel momento. -->
+      <!-- Durante un aggiornamento il daemon **deve** essere giù: è il momento in cui si
+           spegne per riaccendersi col codice nuovo. Il testo di sotto manderebbe a
+           riavviarlo a mano, cioè a fare esattamente la cosa sbagliata proprio mentre
+           tutto sta funzionando. Trovato guardando lo screenshot del giro vero, non
+           leggendo il codice: la banda in cima diceva «STARK restarts», e due righe
+           sotto la pagina diceva il contrario. -->
       <div class="mid">
-        <div>
-          <p><b>The daemon is not answering.</b></p>
-          <p>STARK keeps trying. If you stopped it, start it again with
-          <code>npm run stark:start</code>: this tab reconnects on its own, and the
-          address stays the same.</p>
-        </div>
+        {#if store.aggiornamentoInCorso}
+          <div>
+            <p><b>Updating.</b></p>
+            <p>STARK is off for a moment — it comes back on its own, and this tab
+            reloads. Nothing to do.</p>
+          </div>
+        {:else}
+          <div>
+            <p><b>The daemon is not answering.</b></p>
+            <p>STARK keeps trying. If you stopped it, start it again with
+            <code>npm run stark:start</code>: this tab reconnects on its own, and the
+            address stays the same.</p>
+          </div>
+        {/if}
       </div>
     <!-- Schermo largo: il posto della conversazione lo prende l'albero, **anche con
          una foglia sola**. Non è una cornice in più — con un pannello solo `Workspace`
