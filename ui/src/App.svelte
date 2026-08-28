@@ -9,9 +9,47 @@
   import Todo from './components/Todo.svelte'
   import Icon from './components/Icon.svelte'
   import Workspace from './components/Workspace.svelte'
+  import Palette from './components/Palette.svelte'
   import { Store } from './lib/store.svelte.ts'
+  import { AZIONI, combos } from './lib/actions.ts'
+  import { matches, parse } from './lib/shortcuts.ts'
 
   const store = new Store()
+
+  /**
+   * L'unico gancio da tastiera dell'app: guarda il registro delle azioni e, se la
+   * combinazione corrisponde, la esegue.
+   *
+   * La regola che vale più del codice: dentro una casella di testo una scorciatoia
+   * **senza `mod` non scatta**. Una lettera nuda è testo, e prendersela vorrebbe dire
+   * che scrivendo un prompt si aprono finestre da sole; con `mod` invece deve scattare
+   * eccome, se no ⌘K morirebbe proprio dove si sta il 90% del tempo — nella casella.
+   */
+  function scorciatoia(e: KeyboardEvent): void {
+    const dentroTesto = (() => {
+      const t = e.target as HTMLElement | null
+      if (!t) return false
+      const tag = t.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable
+    })()
+    const mappa = combos(store.settings?.shortcuts)
+    for (const a of AZIONI) {
+      const c = parse(mappa[a.id])
+      if (!c) continue
+      if (dentroTesto && !c.mod) continue
+      if (!matches(e, c)) continue
+      e.preventDefault()
+      esegui(a.id)
+      return
+    }
+  }
+
+  function esegui(id: string): void {
+    if (id !== 'palette') return
+    // Premerla di nuovo mentre è aperta la chiude: è la stessa combinazione, e
+    // riaprirla sopra sé stessa non vuol dire niente.
+    store.dialog = store.dialog?.kind === 'palette' ? null : { kind: 'palette' }
+  }
 
   $effect(() => {
     void store.start()
@@ -196,7 +234,9 @@
       oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
   {/if}
 
-  {#if store.dialog?.kind === 'settings'}
+  {#if store.dialog?.kind === 'palette'}
+    <Palette {store} />
+  {:else if store.dialog?.kind === 'settings'}
     <Settings {store} />
   {:else if store.dialog?.kind === 'new'}
     <NewChat {store} />
@@ -233,9 +273,12 @@
   onpointerdown={() => store.calls.unlock()}
   onkeydown={e => {
     store.calls.unlock()
-    if (e.key !== 'Escape') return
-    if (store.menu) store.menu = null
-    else if (store.dialog) store.dialog = null
+    if (e.key === 'Escape') {
+      if (store.menu) store.menu = null
+      else if (store.dialog) store.dialog = null
+      return
+    }
+    scorciatoia(e)
   }} />
 
 <style>

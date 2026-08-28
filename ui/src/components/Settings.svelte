@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Le impostazioni: un riquadro quasi a tutto schermo, sette sezioni.
+  // Le impostazioni: un riquadro quasi a tutto schermo, nove sezioni.
   //
   // La regola che le tiene insieme: **ogni voce dice la verità su cosa fa**. Dove STARK
   // non sa ancora fare una cosa, la voce resta in elenco spenta e con scritto perché
@@ -11,16 +11,20 @@
   // suoni restano nel browser, perché sono del dispositivo.
   import Icon from './Icon.svelte'
   import type { Storage, SystemInfo } from '../lib/api.ts'
+  import type { Stats } from '$core/stats.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
   import type { FontFamily } from '../lib/fontfamily.svelte.ts'
   import { MODE_BLURB, MODE_ICON, project } from '../lib/view.ts'
+  import { AZIONI, combos } from '../lib/actions.ts'
+  import { conflicts, format, fromEvent, parse, stringify } from '../lib/shortcuts.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
 
-  type Sezione = 'permissions' | 'agent' | 'projects' | 'notifications' | 'appearance' | 'storage' | 'system'
+  type Sezione = 'permissions' | 'agent' | 'shortcuts' | 'projects' | 'notifications'
+    | 'appearance' | 'usage' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
    *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
@@ -30,12 +34,60 @@
   const SEZIONI: { id: Sezione; nome: string; icona: string }[] = [
     { id: 'permissions', nome: 'Permissions', icona: 'i-shield' },
     { id: 'agent', nome: 'Agent', icona: 'i-brain' },
+    { id: 'shortcuts', nome: 'Shortcuts', icona: 'i-bolt' },
     { id: 'projects', nome: 'Projects', icona: 'i-folder' },
     { id: 'notifications', nome: 'Notifications', icona: 'i-bell' },
     { id: 'appearance', nome: 'Appearance', icona: 'i-palette' },
+    { id: 'usage', nome: 'Usage', icona: 'i-chart' },
     { id: 'storage', nome: 'Storage', icona: 'i-disk' },
     { id: 'system', nome: 'System', icona: 'i-monitor' },
   ]
+
+  // ─── scorciatoie ──────────────────────────────────────────────────────────
+
+  /** Quale azione sta aspettando una combinazione. Una alla volta: due catture insieme
+   *  vorrebbero dire non sapere a chi assegnare il tasto che arriva. */
+  let catturo = $state<string | null>(null)
+
+  const mappa = $derived(combos(store.settings?.shortcuts))
+  const scontri = $derived(conflicts(mappa))
+
+  /**
+   * Registra la combinazione **premendola**, non scrivendola.
+   *
+   * Scriverla a parole è il modo più facile per salvarne una che non esiste — `ctlr+k`
+   * non dà errore, semplicemente non scatta mai. Premendola, ciò che si salva è
+   * esattamente ciò che il browser vedrà arrivare.
+   */
+  async function cattura(id: string, e: KeyboardEvent): Promise<void> {
+    e.preventDefault()
+    // E si ferma **qui**: senza, lo stesso evento sale fino al gancio globale, che nel
+    // frattempo ha già la combinazione appena salvata (il salvataggio aggiorna lo
+    // stato prima di sentire il daemon) — e assegnare una scorciatoia la eseguiva
+    // all'istante. Visto succedere guidando la UI: registrata ⌘⇧P, si apriva la
+    // palette sopra le impostazioni.
+    e.stopPropagation()
+    // Esc annulla la cattura invece di essere assegnato: è l'unica via d'uscita che
+    // vale ovunque in STARK, e prendersela qui la toglierebbe proprio a chi si è
+    // appena infilato in una modalità che aspetta un tasto.
+    if (e.key === 'Escape') { catturo = null; return }
+    const c = fromEvent(e)
+    if (!c) return                       // un modificatore da solo non è una scorciatoia
+    catturo = null
+    await salvaCombo(id, stringify(c))
+  }
+
+  async function salvaCombo(id: string, valore: string | null): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    const next = { ...(s.shortcuts ?? {}) }
+    // Tornare al default vuol dire **togliere** la voce, non scriverci sopra il valore
+    // di partenza: se un domani il default cambia, chi non l'ha mai toccata deve
+    // prendersi quello nuovo invece di restare inchiodata al vecchio.
+    if (valore === null) delete next[id]
+    else next[id] = valore
+    await store.saveSettings({ ...s, shortcuts: next })
+  }
 
   // ─── permessi ─────────────────────────────────────────────────────────────
 
@@ -132,6 +184,59 @@
   let system = $state<SystemInfo | null>(null)
   let errore = $state('')
   let erroreStorage = $state('')
+
+  // ─── uso ──────────────────────────────────────────────────────────────────
+  //
+  // Non c'è niente da salvare qui: sono venti numeri **derivati** dai journal che ci
+  // sono già. Quindi nessun contatore da scrivere, nessun evento nuovo, e la risposta
+  // vale anche per tutto il passato — comprese le conversazioni di prima che questa
+  // schermata esistesse.
+
+  const PERIODI: { id: string; nome: string; giorni?: number }[] = [
+    { id: 'today', nome: 'Today', giorni: 0 },
+    { id: '7d', nome: '7 days', giorni: 7 },
+    { id: '30d', nome: '30 days', giorni: 30 },
+    { id: 'all', nome: 'All' },
+  ]
+  let periodo = $state('7d')
+  let uso = $state<Stats | null>(null)
+  let erroreUso = $state('')
+
+  /** L'inizio del periodo scelto, a **mezzanotte**: «7 days» vuol dire sette giornate,
+   *  non sette volte ventiquattr'ore a partire da adesso — se no la barra di oggi
+   *  sarebbe mezza e quella di sette giorni fa pure. */
+  function daQuando(id: string): number | undefined {
+    const p = PERIODI.find(x => x.id === id)
+    if (!p || p.giorni === undefined) return undefined
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d.getTime() - p.giorni * 86_400_000
+  }
+
+  $effect(() => {
+    // Rileggere a ogni cambio di periodo: il filtro lo applica il daemon, che è
+    // l'unico ad avere gli snapshot — mandarli qui per tagliarli nel browser vorrebbe
+    // dire spedire la storia intera di ogni conversazione per calcolare venti numeri.
+    if (sez !== 'usage') return
+    const p = periodo
+    const from = daQuando(p)
+    void store.api.stats(from === undefined ? {} : { from }).then(
+      s => { if (periodo === p) { uso = s; erroreUso = '' } },
+      e => { if (periodo === p) { erroreUso = String(e.message ?? e) } })
+  })
+
+  const migliaia = (n: number): string => n.toLocaleString()
+
+  /** Un tempo che si legge a colpo d'occhio. I secondi spariscono oltre l'ora: su
+   *  quaranta ore di lavoro non dicono niente e allungano la riga. */
+  function durata(ms: number): string {
+    const s = Math.round(ms / 1000)
+    if (s < 60) return `${s}s`
+    const m = Math.round(s / 60)
+    if (m < 60) return `${m}m`
+    const h = Math.floor(m / 60)
+    return `${h}h ${m % 60}m`
+  }
 
   $effect(() => {
     // Si chiedono aprendo la sezione, non all'avvio: la diagnostica lancia un processo
@@ -351,6 +456,51 @@
               <span><b>That file could not be written.</b> {store.memoria.error}</span>
             </div>
           {/if}
+        </div>
+
+      <!-- ─── Shortcuts ───────────────────────────────────────────────── -->
+      {:else if sez === 'shortcuts'}
+        <div class="fgroup">
+          <div class="flabel">Keyboard</div>
+          <div>
+            {#each AZIONI as a (a.id)}
+              {@const combo = parse(mappa[a.id])}
+              {@const scontro = combo ? scontri[stringify(combo)] : undefined}
+              <div class="prow">
+                <div>
+                  <div class="pn">{a.label}</div>
+                  <div class="pd">{a.hint}</div>
+                </div>
+                <span class="kbrow">
+                  <button class="kb" class:cap={catturo === a.id}
+                    onclick={() => { catturo = catturo === a.id ? null : a.id }}
+                    onkeydown={e => { if (catturo === a.id) void cattura(a.id, e) }}>
+                    {catturo === a.id ? 'Press a key…' : format(combo)}
+                  </button>
+                  {#if mappa[a.id] !== a.default}
+                    <button class="lnk" onclick={() => void salvaCombo(a.id, null)}>reset</button>
+                  {/if}
+                </span>
+              </div>
+              {#if scontro && scontro.length > 1}
+                <div class="notice">
+                  <Icon name="i-warn" />
+                  <span><b>Two actions share this shortcut.</b> The first one in this list wins:
+                  {scontro.map(id => AZIONI.find(x => x.id === id)?.label ?? id).join(', ')}.</span>
+                </div>
+              {/if}
+            {/each}
+          </div>
+          <div class="hint">Shortcuts live on this machine, with the rest of the settings — so
+            they follow you across browsers. What is saved says <code>mod</code>, not ⌘ or Ctrl:
+            each device resolves it to the key it actually has, which is why the same setting
+            works on a Mac and on a PC.</div>
+          <div class="notice">
+            <Icon name="i-bolt" />
+            <span>While you are typing, only shortcuts that use <code>mod</code> fire — a bare
+            letter is text, and taking it would open windows while you write a prompt.
+            <b>Esc can't be assigned</b>: it is how everything closes, this capture included.</span>
+          </div>
         </div>
 
       <!-- ─── Projects ────────────────────────────────────────────────── -->
@@ -576,6 +726,120 @@
         </div>
 
       <!-- ─── Storage ─────────────────────────────────────────────────── -->
+      <!-- ─── Usage ───────────────────────────────────────────────────── -->
+      {:else if sez === 'usage'}
+        <div class="fgroup">
+          <div class="seg">
+            {#each PERIODI as p (p.id)}
+              <button class:on={periodo === p.id} onclick={() => { periodo = p.id }}>{p.nome}</button>
+            {/each}
+          </div>
+        </div>
+
+        {#if erroreUso}
+          <!-- Un errore si dice. Disegnare degli zeri al suo posto direbbe «non l'hai
+               mai usato», che è la bugia peggiore proprio su questa schermata. -->
+          <div class="hint">{erroreUso}</div>
+        {:else if !uso}
+          <div class="hint">Reading the journals…</div>
+        {:else}
+          <div class="fgroup">
+            <div class="ugrid">
+              <div class="ucell"><b>{migliaia(uso.totale.prompts)}</b><span>prompts</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.chars)}</b><span>characters typed</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.conversations)}</b><span>conversations</span></div>
+              <div class="ucell"><b>{durata(uso.totale.agentMs)}</b><span>agent working</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.tools)}</b><span>operations</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.files)}</b><span>files touched</span></div>
+            </div>
+            <div class="hint">
+              «Agent working» is the time the agent spent on your turns — not the time you
+              spent in STARK, which nobody measures and which it would be wrong to claim.
+            </div>
+          </div>
+
+          <div class="fgroup">
+            <div class="flabel">Tokens</div>
+            <div class="ugrid">
+              <div class="ucell"><b>{migliaia(uso.totale.tokens.input)}</b><span>input</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.tokens.output)}</b><span>output</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.tokens.cacheRead)}</b><span>cache read</span></div>
+              <div class="ucell"><b>{migliaia(uso.totale.tokens.cacheWrite)}</b><span>cache write</span></div>
+            </div>
+            <!-- Niente dollari, di proposito: su un abbonamento a quota fissa quello è
+                 un prezzo di listino API, non una spesa, e in una schermata di
+                 statistiche si leggerebbe come denaro uscito. -->
+            <div class="hint">No cost in dollars: on a fixed-quota plan that number is an API
+            list price, not money you spent. What runs out is quota, and the status bar tracks it.</div>
+          </div>
+
+          {#if uso.totale.aborted + uso.totale.errored + uso.totale.interrupted > 0}
+            <div class="fgroup">
+              <div class="flabel">Turns that ended badly</div>
+              <div class="hint">
+                {uso.totale.aborted} stopped by you · {uso.totale.errored} errored ·
+                {uso.totale.interrupted} cut short by a crash
+              </div>
+            </div>
+          {/if}
+
+          {#if uso.perGiorno.length > 1}
+            <div class="fgroup">
+              <div class="flabel">By day</div>
+              <!-- Nessuna libreria di grafici: sono N div con un'altezza in percentuale.
+                   Aggiungere una dipendenza per un istogramma sarebbe sproporzionato. -->
+              <div class="ubars">
+                {#each uso.perGiorno as g (g.day)}
+                  {@const max = Math.max(...uso.perGiorno.map(x => x.c.prompts), 1)}
+                  <div class="ubar" title="{g.day} · {g.c.prompts} prompts · {durata(g.c.agentMs)}">
+                    <div style="height:{Math.max(2, (g.c.prompts / max) * 100)}%"></div>
+                  </div>
+                {/each}
+              </div>
+              <div class="hint">{uso.perGiorno[0]?.day} → {uso.perGiorno[uso.perGiorno.length - 1]?.day}
+              · tallest bar is {Math.max(...uso.perGiorno.map(x => x.c.prompts))} prompts</div>
+            </div>
+          {/if}
+
+          <div class="fgroup">
+            <div class="flabel">By project</div>
+            <div>
+              {#each uso.perProgetto as r (r.key)}
+                <div class="nrow">
+                  <div>
+                    <div class="nn">{r.key === 'unknown' ? 'no folder' : project(r.key)}</div>
+                    <div class="nd">{migliaia(r.c.prompts)} prompts · {migliaia(r.c.chars)} chars</div>
+                  </div>
+                  <span class="rt"><span class="mt">{durata(r.c.agentMs)}</span></span>
+                </div>
+              {/each}
+            </div>
+          </div>
+
+          <div class="fgroup">
+            <div class="flabel">By agent and model</div>
+            <div>
+              {#each [...uso.perAgent, ...uso.perModello] as r (r.key)}
+                <div class="nrow">
+                  <div><div class="nn">{r.key}</div>
+                    <div class="nd">{migliaia(r.c.prompts)} prompts</div></div>
+                  <span class="rt"><span class="mt">{durata(r.c.agentMs)}</span></span>
+                </div>
+              {/each}
+            </div>
+            <!-- Il modello è quello **attuale** della chat, non quello di ogni turno, che
+                 nel journal per turno non c'è: una chat spostata a metà strada finisce
+                 tutta sull'ultimo. È il dato che esiste; l'alternativa è inventarlo. -->
+            <div class="hint">A chat counts under the model it is on <b>now</b> — the journal does
+            not record a model per turn.</div>
+          </div>
+
+          <div class="fgroup">
+            <div class="hint">Counted from the conversations on <b>this machine</b>. Journals do not
+            sync between machines, so your other computer has its own numbers.</div>
+          </div>
+        {/if}
+
       {:else if sez === 'storage'}
         <div class="fgroup">
           <div class="flabel">Journals</div>
@@ -764,12 +1028,41 @@
   .chip { padding: 3.5px 8px; }
   .tog[disabled] { opacity: .4; cursor: default; }
   .lnk { color: var(--accent); font-weight: 600; font-family: var(--sans); font-size: 10px; }
+
+  /* La combinazione si legge come un tasto, non come un'etichetta: è la stessa cosa
+     che si preme, quindi somigliargli aiuta a riconoscerla in mezzo al testo. */
+  .kbrow { display: flex; align-items: center; gap: 8px; flex: none; }
+  .kb {
+    min-width: 78px; padding: 3px 9px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2);
+    color: inherit; font-family: var(--mono); font-size: 11px;
+  }
+  .kb.cap { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   /* Forma e misura vengono da app.css: qui solo ciò che serve perché sia un pulsante,
      e il segno di quale hai scelto. */
   .sw { padding: 0; }
   .sw.on { outline: 2px solid var(--ink); outline-offset: 1px; }
   .chip.on { border-color: var(--accent); color: var(--accent); }
   .mt { font-size: 10px; color: var(--muted); }
+
+  /* I numeri dell'uso. `auto-fill` invece di un numero di colonne: la stessa griglia
+     serve su schermo largo e sotto gli 860px, dove ci stanno due celle invece di tre,
+     e una media query direbbe la stessa cosa in due posti. */
+  .ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+  .ucell {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface-2);
+  }
+  .ucell b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .ucell span { font-size: 10px; color: var(--muted); }
+
+  /* L'istogramma: le barre crescono dal basso, quindi `align-items:flex-end`. Il
+     contenitore ha un'altezza fissa perché una percentuale ha bisogno di qualcosa di
+     cui essere una percentuale. */
+  .ubars { display: flex; align-items: flex-end; gap: 2px; height: 64px; }
+  .ubar { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
+  .ubar > div { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; }
   /* ─── Le modalità di partenza ──────────────────────────────────────────────
      Il pannello è quello globale — `.menu` e `.mi` in `app.css`, gli stessi che la
      barra della chat apre col chip della modalità — così le due schermate che
