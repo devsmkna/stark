@@ -26,6 +26,17 @@ export const WSL = (() => {
   try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false }
 })()
 
+/**
+ * Windows **nativo**, cioè Node che gira su `win32` — non WSL, che è Linux con Windows
+ * sotto. Le due cose vanno tenute separate ovunque, e sono mutuamente esclusive: su
+ * `win32` non esiste `/proc/version`, quindi `WSL` è già `false` qui.
+ *
+ * A distinguerle è **come si raggiunge Windows**, non se Windows c'è: da WSL si passa
+ * per l'interop (`cmd.exe`, `wslpath`, percorsi da tradurre), da `win32` si chiamano
+ * gli stessi programmi diretti, con i percorsi già nella forma giusta.
+ */
+export const WIN = process.platform === 'win32'
+
 /** La cartella da cui `cmd.exe` accetta di partire — vedi `openInBrowser`. */
 export const CWD_WINDOWS = '/mnt/c/Windows'
 
@@ -41,6 +52,17 @@ export type OpenResult = { ok: true } | { ok: false; error: string }
  */
 export async function openInBrowser(url: string): Promise<OpenResult> {
   try {
+    if (WIN) {
+      // Stessa riga del ramo WSL — `start` con il titolo vuoto — ma senza interop e
+      // senza `cwd`: qui `cmd.exe` parte già da un percorso Windows, quindi la trappola
+      // dell'UNC non esiste. Il titolo vuoto invece resta necessario per la stessa
+      // ragione: `start` legge il primo argomento fra virgolette come titolo della
+      // finestra, e senza scambierebbe l'URL per il titolo.
+      //
+      // Non verificato dal vivo: nessuna delle macchine di sviluppo è Windows nativo.
+      await run('cmd.exe', ['/c', 'start', '', url])
+      return { ok: true }
+    }
     if (WSL) {
       // Le due trappole verificate dal vivo su WSL2 (26 agosto 2026), entrambe
       // silenziose se sbagliate:

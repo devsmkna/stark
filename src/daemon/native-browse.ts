@@ -9,16 +9,23 @@
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { promisify } from 'node:util'
-import { WSL } from '../core/platform.ts'
+import { WIN, WSL } from '../core/platform.ts'
 
 const run = promisify(execFile)
 
 export type NativePickResult = { ok: true; path: string } | { ok: false }
 
-/** Il comando esiste nel PATH di questo processo? Non lancia mai un'eccezione. */
+/**
+ * Il comando esiste nel PATH di questo processo? Non lancia mai un'eccezione.
+ *
+ * `where` invece di `which` su Windows nativo: `which` lì non esiste, e chiederlo
+ * comunque non darebbe «comando assente» ma un errore su `which` stesso — cioè la
+ * risposta giusta per il motivo sbagliato, che regge finché qualcuno non installa
+ * Git for Windows e si porta dietro un `which` che risponde di tutt'altro PATH.
+ */
 export async function commandExists(name: string): Promise<boolean> {
   try {
-    await run('which', [name])
+    await run(WIN ? 'where' : 'which', [name])
     return true
   } catch {
     return false
@@ -33,9 +40,28 @@ export async function commandExists(name: string): Promise<boolean> {
  * daemon acceso, e qui il costo di ricontrollare è un solo `execFile` veloce.
  */
 export async function nativeFolderPickerAvailable(): Promise<boolean> {
+  if (WIN) return true // PowerShell fa parte di Windows dal 7 in poi
   if (WSL) return commandExists('powershell.exe')
   if (process.platform === 'darwin') return true // osascript è di sistema su macOS
   return commandExists('zenity')
+}
+
+/**
+ * Il PowerShell che apre il dialogo, con `dove` come cartella di partenza (un percorso
+ * **Windows**: chi chiama lo traduce se serve). Sta in una funzione perché i due rami
+ * che lo usano — Windows nativo e WSL — differiscono solo per come arrivano a quel
+ * percorso, e due copie divergerebbero alla prima correzione fatta su una sola.
+ *
+ * `-STA`: `FolderBrowserDialog` è un dialogo WinForms e richiede un thread STA,
+ * altrimenti PowerShell lancia un'eccezione COM prima di mostrare qualunque cosa.
+ */
+function scriptDialogo(dove: string): string {
+  return [
+    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+    '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
+    `$f.SelectedPath = '${dove.replace(/'/g, "''")}'`,
+    'if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }',
+  ].join('\n')
 }
 
 /**
@@ -48,20 +74,25 @@ export async function pickFolderNative(
   exec: typeof run = run,
 ): Promise<NativePickResult> {
   try {
+    if (WIN) {
+      // Windows nativo: lo stesso `FolderBrowserDialog` del ramo WSL, senza i due
+      // `wslpath` — la home è già un percorso Windows e la risposta pure. `-STA` resta
+      // obbligatorio: è un dialogo WinForms, e senza thread STA PowerShell lancia
+      // un'eccezione COM prima di mostrare qualunque cosa.
+      //
+      // Non verificato dal vivo: nessuna delle macchine di sviluppo è Windows nativo.
+      const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command',
+        scriptDialogo(homedir())])
+      const scelta = stdout.trim()
+      return scelta ? { ok: true, path: scelta } : { ok: false }
+    }
     if (WSL) {
       // `wslpath -w` traduce la home (sia sotto `/mnt/`, DrvFs, sia nativa ext4) nel
       // percorso Windows che `FolderBrowserDialog` sa capire — stessa funzione già
       // usata al contrario in `reveal.ts`.
       const { stdout: winHome } = await exec('wslpath', ['-w', homedir()])
-      // `-STA`: `FolderBrowserDialog` è un dialogo WinForms e richiede un thread STA,
-      // altrimenti PowerShell lancia un'eccezione COM prima di mostrare qualunque cosa.
-      const script = [
-        'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
-        '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
-        `$f.SelectedPath = '${winHome.trim().replace(/'/g, "''")}'`,
-        'if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }',
-      ].join('\n')
-      const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command', script])
+      const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command',
+        scriptDialogo(winHome.trim())])
       const win = stdout.trim()
       if (!win) return { ok: false } // annullato: nessuna riga in output
       const { stdout: posix } = await exec('wslpath', ['-u', win])

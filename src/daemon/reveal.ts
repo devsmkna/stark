@@ -22,7 +22,7 @@ import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 // `WSL` sta in `core/platform.ts`: era la stessa costante, con lo stesso commento,
 // anche in `launch.ts` e serviva a un terzo posto (il CLI, per aprire il browser).
-import { WSL } from '../core/platform.ts'
+import { WIN, WSL } from '../core/platform.ts'
 
 const run = promisify(execFile)
 
@@ -38,6 +38,17 @@ export async function reveal(path: string): Promise<RevealResult> {
   if (!existsSync(p)) return { ok: false, error: 'file not found on this machine' }
 
   try {
+    if (WIN) {
+      // Windows nativo: `resolve()` ha già dato un percorso Windows, quindi non c'è
+      // niente da tradurre — è tutto il ramo WSL meno `wslpath`. Resta identico il
+      // motivo per cui l'esito si ignora: `explorer.exe /select,` esce con un codice
+      // diverso da zero **anche quando ha funzionato**, ed è un comportamento noto
+      // dell'eseguibile, non un errore di STARK.
+      //
+      // Non verificato dal vivo: nessuna delle macchine di sviluppo è Windows nativo.
+      await run('explorer.exe', [`/select,${p}`]).catch(() => { /* vedi sopra */ })
+      return { ok: true }
+    }
     if (WSL) {
       // `wslpath -w` traduce da solo sia un percorso sotto `/mnt/` (DrvFs, come sul
       // fisso) sia uno nativo ext4 (come sul portatile, verificato il 26 agosto

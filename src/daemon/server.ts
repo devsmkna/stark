@@ -229,6 +229,31 @@ async function route(
   try {
     if (method === 'GET' && path === '/api/health') return send(res, 200, { ok: true })
 
+    // Spegnersi con garbo, chiesto dal di dentro invece che con un segnale.
+    //
+    // Esiste per **Windows**, dove `process.kill(pid, 'SIGTERM')` non consegna un
+    // segnale: Node lo traduce in `TerminateProcess`, che ammazza il daemon senza far
+    // girare nessun handler. Costo reale, non teorico: i journal restano aperti a metà
+    // turno e i processi degli agent restano orfani, perché su Windows i figli non
+    // muoiono col padre. Su POSIX il segnale funziona ed è la via provata, quindi lì
+    // `stark stop` non passa di qui.
+    //
+    // `process.emit('SIGTERM')` e non una seconda procedura di chiusura: il codice che
+    // chiude gli agent e i journal è quello registrato in `stark.ts`, e averne due
+    // vorrebbe dire che un giorno divergono e una delle due chiusure perde qualcosa.
+    //
+    // La rotta sta dietro le stesse quattro difese di ogni altra — token, `Origin`,
+    // `Host`, bind sul loopback — e non allarga niente: chi ha il token può già far
+    // eseguire comandi arbitrari all'agent, cioè può già fermare questo processo.
+    if (method === 'POST' && path === '/api/shutdown') {
+      send(res, 200, { ok: true })
+      // Dopo la risposta, non prima: chi ha chiesto lo spegnimento deve ricevere il 200
+      // da un socket ancora vivo, se no `stark stop` legge un errore di rete e lo
+      // riporta come un fallimento di una cosa che invece sta funzionando.
+      setTimeout(() => { process.emit('SIGTERM' as NodeJS.Signals, 'SIGTERM' as NodeJS.Signals) }, 50)
+      return
+    }
+
     // ─── notifiche sul telefono ──────────────────────────────────────────────
     //
     // Tre rotte e nient'altro: dire la chiave pubblica, prendere un'iscrizione,

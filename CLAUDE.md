@@ -1612,6 +1612,150 @@ dell'utente: PDF allegato nella UI, mandato, letto dall'agent — e nel flusso l
 nome e il peso, che si apre.
 `npm run check` cresce di **14** verifiche.
 
+**Si installa con un comando, e gira anche su Windows nativo** (28 agosto 2026, chiesto
+dall'utente: «se oggi volessi far installare STARK a un collega cosa devo fare?»).
+`curl -fsSL …/install.sh | sh` su Linux, WSL2 e macOS; `irm …/install.ps1 | iex` su
+Windows. Poi `stark`, e basta.
+
+**La domanda che ha deciso tutto è stata quella dell'utente su `sudo`**: «se non è sudo,
+può lanciare il claude installato da un utente sudo? quell'istanza ha i permessi di
+sudo?». La risposta separa due cose che sembrano una sola, ed è stata **verificata, non
+dedotta**: il `claude` bundled è `-rwxr-xr-x root root` e **non ha il bit setuid**
+(`find -perm /6000` non trova niente), e in `src/` non c'è una riga che cambi utente
+(`sudo`, `setuid`, `uid:` → zero). Quindi `sudo` serve **solo a scrivere il file** del
+lanciatore e non lascia dietro nessun privilegio: a decidere cosa l'agent può fare è
+**chi digita `stark`**, sempre, perché il daemon fa `spawn` del CLI e quello eredita uid
+e gid. Il requisito dell'utente — «gli stessi permessi che avrebbe da terminale» — è
+soddisfatto *per costruzione*, non da una regola da mantenere.
+Da lì la scelta di installare **per utente** (`~/.local/bin`, `~/.local/share/stark`), e
+i due argomenti che la reggono sono a favore, non un ripiego: `/usr/local/bin/stark` è
+condiviso ma i due percorsi assoluti che contiene no — un altro utente lo troverebbe nel
+`PATH` e prenderebbe un errore di permessi sul repo; e inviterebbe a lanciarlo con
+`sudo`, che non è «lo stesso STARK con più poteri» ma **un altro STARK**, perché
+`~/.claude` e `~/.stark` seguono l'utente e cambierebbero login, journal, token e
+impostazioni tutti insieme. `--system` resta, spento e con la ragione scritta.
+
+**Il bug che quella scelta ha scoperto, e che c'era già**: `avviaConSystemd()` chiamava
+`systemd-run` **di sistema**, che vuole root. Per un utente normale falliva e si
+ripiegava su `spawn(detached)` — cioè esattamente il caso documentato come rotto il 27
+agosto, con logind che ferma lo scope del terminale e porta via tutto il cgroup. La
+protezione scritta quel giorno valeva quindi **solo per chi gira da root**, e per tutti
+gli altri il bug era ancora lì, silenzioso. Ora da utente si usa `systemd-run --user`,
+verificato dal vivo sul manager utente di questa macchina (unità `active`, `--setenv`
+propagato, `--property=StandardOutput=append:` che scrive davvero). Il limite è scritto
+invece di essere scoperto: senza `loginctl enable-linger` il manager utente muore
+all'**ultimo logout** — chiudere una finestra di terminale va bene, disconnettersi
+dall'ultima sessione SSH no.
+
+**Windows nativo, non WSL** (scelta dell'utente, contro la mia raccomandazione). Il
+pezzo che lo rendeva possibile andava verificato per primo: l'Agent SDK **pubblica**
+`claude-agent-sdk-win32-x64` e `win32-arm64` fra le sue `optionalDependencies`, quindi
+lassù c'è un `claude` vero da lanciare. Senza quello non ci sarebbe stato niente da
+portare. Il porting tocca cinque punti, e sono tutti dichiarati sul posto:
+`core/platform.ts` prende una costante `WIN` accanto a `WSL` — sono **mutuamente
+esclusive**, e la differenza non è «c'è Windows» ma **come lo si raggiunge**: da WSL per
+interop (`cmd.exe`, `wslpath`, percorsi da tradurre), da `win32` diretto. `reveal.ts`,
+`launch.ts` e `native-browse.ts` prendono ciascuno un ramo `win32` che è il proprio ramo
+WSL meno la traduzione dei percorsi — e in `native-browse.ts` il PowerShell del dialogo
+è diventato una funzione sola (`scriptDialogo`), perché due copie divergono alla prima
+correzione fatta su una. `commandExists` passa a `where`: `which` lassù non esiste, e
+chiederlo comunque non darebbe «comando assente» ma un errore su `which` stesso — la
+risposta giusta per il motivo sbagliato, che regge finché qualcuno non installa Git for
+Windows e si porta dietro un `which` che risponde di tutt'altro `PATH`.
+
+**Le tre cose di Windows che non si indovinano**, e che hanno prodotto codice nuovo:
+1. **`process.kill(pid, 'SIGTERM')` non consegna un segnale.** Node lo traduce in
+   `TerminateProcess`, che è la `kill -9` di lassù: nessun handler gira, i journal
+   restano aperti a metà turno e i processi degli agent restano **orfani**, perché su
+   Windows i figli non muoiono col padre. Da qui `POST /api/shutdown`, che risponde 200
+   e poi fa `process.emit('SIGTERM')` — cioè fa girare **lo stesso** handler registrato
+   in `stark.ts`, invece di una seconda procedura di chiusura che un giorno divergerebbe.
+   Su POSIX il segnale funziona ed è la via provata, quindi lì `stark stop` non passa di
+   qui. Verificato dal vivo su Linux (la rotta è cross-platform anche se la usa solo
+   Windows): 200, «chiusura…» nel log, pid file rimosso, porta chiusa, unità raccolta —
+   e **403 su tutte e quattro** le difese (niente token, token sbagliato, `Origin`
+   estraneo, `Host` estraneo), col daemon vivo dopo ognuna.
+2. **`detached: true` lassù non è `setsid()`** ma il flag `DETACHED_PROCESS`: il figlio
+   non eredita la console, quindi non riceve il `CTRL_CLOSE_EVENT` che il sistema manda
+   a chi è attaccato a una finestra che si chiude. È la stessa garanzia del ramo systemd,
+   ottenuta dal meccanismo che offre Windows. Con `windowsHide`, se no resterebbe lì una
+   finestra di console vuota.
+3. **`npm` è `npm.cmd`**, e dal 2024 Node **rifiuta** di eseguire un `.cmd` senza
+   `shell: true` (CVE-2024-27980).
+
+**Il difetto più istruttivo è saltato fuori solo dall'installazione vera**, non dal
+codice: `stark update` chiamava `npm` **dal `PATH`**, mentre il lanciatore pinna il Node
+con un percorso assoluto. Su una macchina in cui il `PATH` porta un Node vecchio — che è
+esattamente la condizione del collega, ed è questa macchina: `/usr/bin/node` è un
+**Node 12** — moriva su «npm install è fallito» senza nominare il colpevole. Servono
+**tutte e due** le metà, e la seconda si dimentica: il percorso assoluto a `npm`, e la
+sua cartella in testa al `PATH` del figlio, perché npm è uno script che a sua volta
+invoca `node`. Trovato eseguendo l'installer per davvero, non leggendolo.
+
+**La regola del verbo di default è uscita dal lanciatore ed è entrata nel CLI.** Stava
+scritta in `sh` (`case "${1-}" in ""|-*) set -- up "$@"`), e su Windows sarebbe servita
+una seconda volta in `cmd`, dove «il primo argomento è un'opzione, non un verbo» costa
+sei righe di `findstr`. Ora il lanciatore dichiara `STARK_DEFAULT_VERB=up` e la regola
+sta in tre righe di TypeScript, in un posto solo. `npm run stark` resta su `run`.
+
+**Cosa è stato provato dal vivo, e cosa no.** Provato: il giro completo dell'installer in
+una `HOME` isolata e con `PATH=/usr/bin:/bin` — così è scattato anche il ramo «Node
+troppo vecchio», che ha scaricato la 24.13.1 dentro la cartella di STARK; poi clone,
+`npm install`, `ui:build`, lanciatore generato col Node **suo**, daemon acceso staccato,
+UI servita **200**, `status`, `stop`, e un `stark update` che prende un commit nuovo,
+ricompila, riscrive il lanciatore e riavvia il daemon conservando il token. Provata anche
+l'idempotenza del blocco nel `.bashrc` (due installazioni, **un** blocco), con la stessa
+condotta di `memoria.ts`: è un file dell'utente, non si riscrive, si aggiunge in fondo un
+blocco riconoscibile. La sintassi di `install.ps1` è validata dal parser di un
+**PowerShell 5.1 vero** (raggiunto per percorso assoluto: su questa macchina l'interop
+WSL c'è ma `powershell.exe` non è nel `PATH`), e la manipolazione del `PATH` utente è
+stata eseguita in sola lettura sul registro vero — 10 voci, che è il motivo per cui si
+usa `[Environment]::SetEnvironmentVariable` e **mai `setx`**, che tronca a 1024 caratteri
+e cancellerebbe in silenzio metà del `PATH` di chi ce l'ha lungo.
+**Non** provato, e va detto: i rami `win32` di `reveal`, `launch` e `native-browse`, e
+`install.ps1` eseguito per intero — non c'è una macchina Windows nativa qui, e il codice
+lo dice riga per riga invece di lasciarlo dedurre. Non provato nemmeno `systemd-run
+--user` da un utente **non** root con una sessione logind vera: è stato verificato il
+meccanismo, non quel caso.
+
+Le suite dopo il giro: `npm run check` **243**, `npm run daemon` **91**,
+`npm run layout:check` 22, `npm run gruppi:check` 24, `typecheck` pulito.
+
+**Il menu del tasto destro cadeva lontano dalla riga premuta** (28 agosto 2026, segnalato
+con uno screenshot: «troppo spostato rispetto all'elemento su cui ho premuto»). Non era un
+offset da correggere a occhio: era una **conversione mancante**. `Sizer` applica uno `zoom`
+al `documentElement`, e lo zoom ridisegna il layout — quindi un `left` scritto su un figlio
+del root vale `zoom` pixel veri, mentre `clientX`/`clientY` di un evento del puntatore sono
+già pixel veri della finestra. Scriverli tali e quali moltiplicava la distanza dall'angolo
+per il fattore di zoom, e `position:fixed` non salva: il suo blocco contenitore è la
+finestra **misurata nelle unità del root**. Misurato in Chromium prima di scrivere una riga:
+clic a (189, 290) → elemento disegnato a (255, 391), cioè esattamente ×1,35. Sul desktop non
+si vedeva perché lì lo zoom è 1: il difetto compare sotto gli 860px, dove il fattore ×1,35
+degli schermi stretti si somma alla preferenza di dimensione testo.
+Fix: `ui/src/lib/zoom.ts`, che **misura** il fattore invece di ricalcolarlo dal `Sizer` —
+due sorgenti di verità sullo stesso numero divergerebbero al primo fattore nuovo, e il
+`Sizer` moltiplica già la scelta dell'utente per la soglia stretta.
+`getComputedStyle(root).zoom` è la fonte (verificato esatto a 80/100/135/150/202%), col
+rapporto fra rettangolo e `offsetWidth` come rete di sicurezza per un motore che non la
+esponga — quello arrotonda (1,3493 invece di 1,35), quindi è il secondo e non il primo. Un
+motore che non conosce `zoom` non lo applica nemmeno: lì 1 è la risposta giusta.
+Nello stesso giro il menu smette di sfondare il bordo: aperto in fondo all'elenco le ultime
+voci finivano fuori schermo e non si potevano premere. Il ritocco usa il rettangolo vero
+dell'elemento (già in pixel veri, quindi il confronto con la finestra è diretto) e la
+divisione arriva **una volta sola** alla fine; la prima posizione disegnata è già quella
+giusta rispetto al cursore, così non c'è un fotogramma in cui il menu compare nell'angolo
+sbagliato.
+Verificato **A/B nella UI vera** su un daemon di prova con journal finti (costo zero di
+quota), non a occhio: stesso clic a 390px, scarto **(5,3 · 79,4)** prima contro **(0 · 0)**
+dopo; a 1400px **(0 · 0)** in entrambi i casi, cioè il desktop non è cambiato. Controllato
+anche che lo strato che chiude il menu (`.catch`, `fixed; inset:0`) copra ancora tutta la
+finestra sotto zoom — `inset:0` è ancorato ai due bordi, quindi non risente della stessa
+malattia: 390×844 pieni, e un clic nell'angolo in basso a destra chiude.
+**Un'altra misura sfalsata dalla stessa causa, non corretta qui**: il trascinamento che
+allarga l'helper (`Helper.svelte:135`) somma un delta di `clientX` — pixel veri — a una
+larghezza in unità del root, quindi sotto zoom la colonna segue il dito più veloce del dito.
+Stessa cura, `zoomRoot()`, quando si toccherà quel punto.
+
 Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
 seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
 giusto).
@@ -1766,6 +1910,21 @@ Decisioni già prese:
   allegati spegne la graffetta **con la ragione scritta**, mai nascondendola; un tipo
   rifiutato lo dice invece di sparire. Il filtro per tipo e' un'offerta, non una difesa:
   quella resta la tabella del registro, che scrive solo cio' che sa nominare.
+- **si installa per utente, senza `sudo`**, e la ragione non è l'attrito: `sudo`
+  servirebbe solo a *scrivere* il lanciatore, che non ha il bit setuid — quindi non
+  darebbe all'agent nessun permesso in più. A decidere cosa l'agent può fare è **chi
+  digita `stark`**, esattamente come chi digita `claude`. Installare di sistema
+  inviterebbe a lanciarlo da root, che non è lo stesso STARK con più poteri ma **un
+  altro STARK**: `~/.claude` e `~/.stark` seguono l'utente.
+- **niente avvio automatico al boot**, per scelta: il daemon tiene in piedi processi di
+  agent, e uno che riparte da solo è uno che lavora senza che nessuno gliel'abbia
+  chiesto. Restare acceso alla chiusura del terminale sì (unità transiente di systemd,
+  `DETACHED_PROCESS` su Windows); sopravvivere allo spegnimento no.
+- **l'installer non tocca il Node di sistema**: se quello che c'è è troppo vecchio se ne
+  scarica uno ufficiale dentro la cartella di STARK, e ci punta solo il lanciatore con
+  percorso assoluto. Corollario imparato sbagliando: allora **anche `npm` va pinnato**,
+  con la sua cartella in testa al `PATH` del figlio — se no npm risale al Node del
+  `PATH`, che è il Node che si era appena deciso di non usare.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il

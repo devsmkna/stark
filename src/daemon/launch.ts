@@ -19,7 +19,7 @@ import { promisify } from 'node:util'
 // La whitelist qui sotto resta **qui**, non in `platform.ts`: quella difende una rotta
 // HTTP, cioè un input che arriva dalla rete. In `platform.ts` c'è solo il *come* si
 // apre qualcosa, che è conoscenza sull'ambiente e non un permesso da concedere.
-import { CWD_WINDOWS, WSL } from '../core/platform.ts'
+import { CWD_WINDOWS, WIN, WSL } from '../core/platform.ts'
 
 const run = promisify(execFile)
 
@@ -35,6 +35,13 @@ export type LaunchResult = { ok: true } | { ok: false; error: string }
  */
 async function hasHandler(scheme: string): Promise<boolean> {
   try {
+    if (WIN) {
+      // Windows nativo: la stessa domanda al registro del ramo WSL, senza interop.
+      // Il motivo per cui si **chiede prima** invece di tentare vale identico, ed è
+      // anzi nato qui: Windows non avvisa chi lancia un protocollo non registrato.
+      await run('reg.exe', ['query', `HKCR\\${scheme}`])
+      return true
+    }
     if (WSL) {
       // Verificato dal vivo (26 agosto 2026): uno schema non registrato fa uscire
       // `reg.exe` con codice 1 e un messaggio d'errore chiaro; uno registrato (letto
@@ -70,6 +77,13 @@ export async function openApp(url: string, scheme: string): Promise<LaunchResult
     return { ok: false, error: `no app registered for ${scheme}:// on this machine` }
   }
   try {
+    if (WIN) {
+      // Senza `cwd`: qui siamo già dentro Windows, quindi la trappola dell'UNC che
+      // costringe il ramo WSL a partire da `C:\Windows` non si presenta. Il titolo
+      // vuoto resta, per la ragione spiegata sotto.
+      await run('cmd.exe', ['/c', 'start', '', url])
+      return { ok: true }
+    }
     if (WSL) {
       // `cwd` **deve** essere un percorso Windows nativo: lanciato dalla cwd del
       // daemon (un percorso WSL, `\\wsl.localhost\…`), `cmd.exe` si lamenta di UNC
