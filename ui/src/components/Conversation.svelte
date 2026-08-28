@@ -15,6 +15,9 @@
   import { promptText } from '$core/events.ts'
   import { colours, hhmm, project, since, toolIcon, turnStatus } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import {
+    conta, groupParts, isLive, keyOf, type Grp, type OpPart,
+  } from '../lib/gruppi.ts'
   import type { Store, View } from '../lib/store.svelte.ts'
 
   // `id` e `setView` invece di `store.selected`/`store.show()`: con più pannelli
@@ -118,59 +121,12 @@
     return part.inputRaw
   }
 
-  // ─── raggruppare le operazioni: solo quella in corso resta in vista ────────
+  // ─── raggruppare il lavoro: fra il prompt e la risposta c'è UN blocco ──────
   //
-  // Bash, Read, il reasoning: non sono scritti per l'utente, sono il *come*. Uno
-  // via l'altro diventano un muro che nasconde proprio il poco che è scritto per
-  // lui — la risposta. Resta in piena vista solo l'operazione ancora in corso;
-  // quelle finite si accorpano in «N operations», chiuso di default, che si apre
-  // sull'elenco esatto di prima (ogni riga resta cliccabile per il suo dettaglio).
-  //
-  // «Consecutive» è la parola che conta: se in mezzo l'agent scrive del testo,
-  // quel testo è la prova che si è fermato a dire qualcosa — accorpare oltre
-  // quel punto nasconderebbe dove finiva un pensiero e cominciava il prossimo.
-  type OpPart = Extract<PartView, { kind: 'tool' | 'reasoning' }>
-  type Grp =
-    | { kind: 'solo'; key: string; part: PartView }
-    | { kind: 'live'; key: string; part: OpPart }
-    | { kind: 'done'; key: string; parts: OpPart[] }
-
-  const isOp = (p: PartView): p is OpPart => p.kind === 'tool' || p.kind === 'reasoning'
-  const isLive = (p: OpPart): boolean => p.kind === 'tool' ? !p.done : p.open
-  const keyOf = (p: PartView): string => p.kind === 'tool' ? p.callId : p.partId
-
-  // Un `thinking` che Claude ha chiuso senza avere emesso un solo delta non è un
-  // pensiero corto: è vuoto. Aprirlo mostrerebbe solo «…», che non è un contenuto,
-  // è l'assenza travestita da riga cliccabile. Mentre è ancora aperto resta invece
-  // in vista: lì il segnale «sta pensando» vale anche a zero caratteri, perché dice
-  // che il turno è vivo.
-  const isEmptyReasoning = (p: PartView): boolean =>
-    p.kind === 'reasoning' && !p.open && p.text.trim() === ''
-
-  function groupParts(parts: PartView[]): Grp[] {
-    const out: Grp[] = []
-    let buf: OpPart[] = []
-    const flush = (): void => {
-      if (buf.length === 0) return
-      const last = buf[buf.length - 1]!
-      if (isLive(last)) {
-        const fatte = buf.slice(0, -1)
-        if (fatte.length > 0) out.push({ kind: 'done', key: `d:${keyOf(fatte[0]!)}`, parts: fatte })
-        out.push({ kind: 'live', key: `l:${keyOf(last)}`, part: last })
-      } else {
-        out.push({ kind: 'done', key: `d:${keyOf(buf[0]!)}`, parts: buf })
-      }
-      buf = []
-    }
-    for (const p of parts) {
-      if (isEmptyReasoning(p)) continue
-      if (isOp(p)) { buf.push(p); continue }
-      flush()
-      out.push({ kind: 'solo', key: keyOf(p), part: p })
-    }
-    flush()
-    return out
-  }
+  // La regola sta in `lib/gruppi.ts` — cosa entra nel gruppo, cosa lo spezza, cos'è il
+  // recap — perché è la parte che si sbaglia davvero e lì si prova con `node` puro
+  // (`npm run gruppi:check`). Qui resta solo il *come si disegna*: una riga chiusa che
+  // conta cosa c'è dentro, e l'operazione in corso che le resta fuori.
 
   /**
    * L'ultima cosa scritta per l'utente finisce con un punto di domanda? È il
@@ -288,6 +244,16 @@
    * Si aspetta un frame prima di misurare: il turno che si è appena aperto non ha
    * ancora la sua altezza, e `scrollIntoView` su un elemento alto zero atterra nel
    * punto sbagliato.
+   *
+   * Quarta cosa, arrivata col raggruppamento del lavoro: vanno aperti anche i
+   * **gruppi** del turno. Da quando i testi ci finiscono dentro, la corrispondenza
+   * può stare lì — e portare in vista un turno in cui la frase cercata è dentro una
+   * riga chiusa è di nuovo «non portare in vista niente», la stessa malattia del
+   * capitolo qui sopra. Si aprono tutti e non quello giusto perché una `Match` porta
+   * il `turnId` e non la parte (`core/search.ts`): dirlo con precisione vorrebbe
+   * dire allargare il contratto della ricerca fin dal daemon. E chi arriva da una
+   * ricerca ha chiesto di vedere, non di stare calmo — è l'unico posto in cui il
+   * muro è la risposta giusta.
    */
   $effect(() => {
     const turnId = store.mostra
@@ -299,6 +265,9 @@
     opened = new Set(opened).add(turnId)
     const ch = chapters.find(c => c.items.some(x => x.turn.turnId === turnId))
     if (ch?.clearedAt !== undefined) openedChapters = new Set(openedChapters).add(ch.key)
+    const blocchi = new Set(openedBlocks)
+    for (const g of groupParts(snap.turns[i]!.parts)) if (g.kind === 'done') blocchi.add(g.key)
+    openedBlocks = blocchi
     requestAnimationFrame(() => {
       const el = scrollerEl?.querySelector(`[data-turn="${CSS.escape(turnId)}"]`)
       // Istantaneo e non `smooth`: un'animazione di scorrimento è interrompibile, e
@@ -807,15 +776,39 @@
                      *cosa* è successo, a meno che non lo si chieda apposta. -->
                 {@const gkey = g.key}
                 {@const gopen = blockOpen(gkey)}
+                {@const c = conta(g.parts)}
+                {@const nOps = c.ops}
+                {@const nNote = c.note}
                 <button class="row clickable ops" onclick={() => toggleBlock(gkey)}>
                   <Icon name="i-bars" />
-                  <span class="k">{g.parts.length} {g.parts.length === 1 ? 'operation' : 'operations'}</span>
+                  <!-- Le note stanno nello stesso `.k` delle operazioni, non nel `.v`
+                       spento accanto: sono due conteggi della stessa cosa — cosa c'è
+                       qui dentro — e darne uno in tono minore direbbe che uno dei due
+                       vale meno. Quando i tool sono zero il conteggio è uno solo:
+                       «0 operations · 2 notes» è una riga che parla del nulla. -->
+                  <span class="k">
+                    {#if nOps > 0}{nOps} {nOps === 1 ? 'operation' : 'operations'}{/if}
+                    {#if nOps > 0 && nNote > 0}&nbsp;· {/if}
+                    {#if nNote > 0}{nNote} {nNote === 1 ? 'note' : 'notes'}{/if}
+                  </span>
                   <span class="end">{gopen ? '▾' : '▸'}</span>
                 </button>
                 {#if gopen}
                   <div class="opgroup">
-                    {#each g.parts as part (part.kind === 'tool' ? part.callId : part.partId)}
-                      {@render opRow(part)}
+                    {#each g.parts as part (keyOf(part))}
+                      {#if part.kind === 'text'}
+                        <!-- La narrazione al suo posto cronologico, in tono minore:
+                             è la didascalia di ciò che le sta sotto, non una risposta.
+                             Stesso Markdown di ogni altro testo — dentro ci finiscono
+                             `codice` e liste, e renderlo grezzo qui lo farebbe leggere
+                             peggio proprio dove si è aperto per capire cos'è successo. -->
+                        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text)}</div>
+                      {:else if part.kind === 'tool' || part.kind === 'reasoning'}
+                        {@render opRow(part)}
+                      {/if}
                     {/each}
                   </div>
                 {/if}
@@ -941,6 +934,20 @@
     display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px 8px;
     padding-left: 8px; border-left: 2px solid var(--line-2);
   }
+  /* La narrazione dentro il gruppo. Stesso testo di sempre, tono minore: è la
+     didascalia delle righe che le stanno sotto, e messa allo stesso peso della
+     risposta finale tornerebbe a competere con lei, che è la ragione per cui il
+     gruppo esiste. La barretta a sinistra la stacca dalle righe dei tool, che
+     sono rettangoli pieni: senza, un paragrafo in mezzo a loro sembra un errore
+     di impaginazione. */
+  .opgroup .prose.note {
+    font-size: .92em; color: var(--muted);
+    margin: 4px 0 6px; padding-left: 8px; border-left: 2px solid var(--line-2);
+  }
+  .opgroup .prose.note :global(p) { margin: .3em 0; }
+  .opgroup .prose.note :global(h1),
+  .opgroup .prose.note :global(h2),
+  .opgroup .prose.note :global(h3) { font-size: 1em; margin: .4em 0 .2em; }
   .row.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .blockbody {
     white-space: pre-wrap; word-break: break-word; font-family: var(--mono);

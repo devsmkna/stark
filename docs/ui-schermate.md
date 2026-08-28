@@ -266,6 +266,37 @@ Il turno intero si può **richiudere**. La conversazione diventa così una lista
 che si sono chieste — tredici titoli invece di quattrocento blocchi — e si tiene aperto solo
 quello a cui si sta lavorando.
 
+### Dentro il turno: il lavoro sta in un blocco solo (27 agosto 2026)
+
+Aperto un turno, fra la richiesta e la risposta c'è **una riga sola**: `259 operations ·
+51 notes`, chiusa, che si apre sull'elenco esatto di prima. Ci finisce tutto ciò che è il
+*come* — i comandi, le modifiche, i ragionamenti — e con loro le **narrazioni di servizio**,
+cioè le righe con cui l'agent racconta quello che sta per fare («ora guardo il CSS»).
+
+Ne restano fuori tre cose, e sono le tre volte in cui l'agent smette di raccontare e si
+rivolge a te: la **risposta finale**; una **domanda o un permesso** con la risposta data; e
+il **testo che introduce quella domanda**, perché è quello che ti serve per scegliere.
+Insieme a loro restano fuori la compattazione e i retry, che non sono lavoro ma tagli del
+flusso. Resta fuori anche l'**operazione in corso**, l'unica di cui ha senso chiedersi a che
+punto è.
+
+Perché non basta raggruppare le operazioni (com'era fino a ieri): l'agent scrive una nota
+ogni tre o quattro comandi, e un testo in mezzo spezzava il gruppo. Su un turno vero da 418
+parti restavano **103 blocchi** in colonna; adesso ne fa **2**, e il turno intero sta in una
+schermata. La media su 48 turni veri passa da **29,6 blocchi a 2,5**.
+
+Il taglio si decide per **posizione**, non per lunghezza: sui journal veri una narrazione ha
+mediana **131 caratteri** (710 casi, solo 2 sopra gli 800), il testo che introduce una
+domanda **2631**, il recap finale **2487**. Sono due specie, e la posizione le separa senza
+soglie da tarare.
+
+Arrivando da una **ricerca** il turno si apre con i gruppi **aperti**: chi cerca ha chiesto di
+vedere, e portare in vista un turno in cui la frase trovata è dentro una riga chiusa sarebbe
+come non portare in vista niente.
+
+La regola sta in `ui/src/lib/gruppi.ts`, fuori dal componente, e si prova con `node` puro:
+`npm run gruppi:check`, 24 verifiche.
+
 ### Cosa resta sempre sotto gli occhi
 
 Tre cose, e solo queste:
@@ -287,6 +318,7 @@ Sono **quattordici**, e nel terminale hanno tutte lo stesso aspetto. Qui devono 
 | **la risposta a parole** | il testo dell'assistente | formattato per davvero: titoli, elenchi, tabelle. **Sempre per intero**, non si richiude mai |
 | **il ragionamento** | il pensiero prima di rispondere | **chiuso**, con l'indicazione di quanto ha pensato. Si apre per capire una scelta |
 | **un'operazione** | un comando, una modifica a un file, una ricerca | una riga sola: *cosa* ha fatto e *su cosa*, più l'esito. Il risultato resta **chiuso** |
+| **il lavoro accorpato** | tutte le operazioni e le narrazioni di un tratto di turno | una riga che le conta (`46 operations · 3 notes`), chiusa, che si apre sull'elenco di prima |
 | **il risultato di un comando** | ciò che il comando ha stampato | separato fra output normale, errori, ed esito |
 | **un file modificato** | il file e quante righe sono cambiate | un blocco cliccabile che apre il confronto |
 | **una richiesta di permesso** | vuole fare qualcosa e chiede | riquadro in basso, ferma **solo questa** conversazione |

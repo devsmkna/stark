@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "node src/cli/offline-check.ts",
     "layout:check": "tsc -p tools/tsconfig.json --noEmit && node tools/layout-check.ts",
+    "gruppi:check": "tsc -p tools/tsconfig.json --noEmit && node tools/gruppi-check.ts",
     "slice": "node src/cli/vertical-slice.ts",
     "build": "tsc -p tsconfig.json",
     "resume": "node src/cli/resume-check.ts",

@@ -1440,6 +1440,59 @@ ora un `Perimetro` sintetico invece di chiederlo alla macchina, così misura la 
 Quale dei due host debba avere la precedenza quando ci sono entrambi resta una domanda
 aperta, e adesso è una domanda sul comportamento invece che un rosso da interpretare.
 
+**Il lavoro di un turno sta in un blocco solo** (27 agosto 2026, chiesto dall'utente: «gli
+agent passano molto tempo a informare cosa stanno facendo, e solo alla fine fanno un recap —
+raggrupperei tutto prima del blocco finale»). Aperto un turno, fra la richiesta e la risposta
+c'è una riga sola — `259 operations · 51 notes` — che si apre sull'elenco esatto di prima.
+Dentro ci vanno tool, ragionamenti e le **narrazioni di servizio**; fuori restano la risposta
+finale, le domande/permessi con la risposta data, il testo che introduce una domanda, la
+compattazione, i retry e l'operazione in corso.
+
+Un raggruppamento c'era già, e non serviva quasi a niente: accorpava tool e reasoning
+**consecutivi**, e un testo qualunque lo spezzava. La premessa era scritta a mano lì accanto —
+«se in mezzo l'agent scrive del testo, quel testo è la prova che si è fermato a dire
+qualcosa» — sembrava ovvia, ed è caduta alla prima misura. Sui journal veri di questa
+macchina un testo interstiziale ha **mediana 131 caratteri** (710 casi, solo 2 sopra gli 800):
+è la didascalia di ciò che sta per fare, non un pensiero che finisce. E siccome l'agent ne
+scrive uno ogni tre o quattro tool, spezzare lì voleva dire **non raggruppare mai**: un turno
+vero da 418 parti restava **103 blocchi** in colonna. Adesso ne fa **2**, e il turno intero —
+53 minuti di lavoro — sta in una schermata. Media su 48 turni veri: da **29,6 a 2,5** blocchi.
+
+Il pezzo che non si indovina è **dove tagliare**, e non è una soglia di lunghezza: è la
+posizione. Il testo scritto **subito prima di una domanda** ha mediana **2631** caratteri,
+cioè la taglia del recap finale (**2487**), perché è la stessa cosa — l'agent che smette di
+raccontare e si rivolge a te. Nasconderlo dentro il gruppo avrebbe lasciato nel flusso una
+risposta senza la domanda a cui rispondeva. Sono due specie nette (interstiziali: p90 245
+caratteri), e si separano per posizione senza niente da tarare. Il recap si riconosce così:
+l'ultimo testo **e** ultima parte del turno — su un turno interrotto quel testo non c'è, e
+prendere «il testo più in basso» direbbe che una risposta c'è quando non c'è (la coda è lunga
+esattamente 1 in 46 turni su 48, 0 negli altri due: non serve un caso generale).
+
+Deciso con l'utente, non da sola: **il gruppo resta chiuso anche mentre l'agent lavora** («mi
+va bene più calmo») — si vede il contatore salire e l'operazione in corso, non il muro che
+scorre. E niente conteggio dei falliti nell'intestazione, che avevo proposto e non è stato
+voluto. Il conteggio delle note sta nello **stesso** `.k` delle operazioni, non nel `.v`
+spento accanto: sono due conti della stessa cosa, e darne uno in tono minore direbbe che vale
+meno.
+
+Una conseguenza andava chiusa nello stesso giro: da quando i testi stanno dentro il gruppo, un
+risultato di **ricerca** può cadere lì — e portare in vista un turno in cui la frase trovata è
+dentro una riga chiusa è di nuovo «non portare in vista niente», la stessa malattia del
+capitolo di `/clear` già corretta a suo tempo. Arrivando da una ricerca i gruppi si aprono
+tutti: una `Match` porta il `turnId` e non la parte (`core/search.ts`), e dirlo con precisione
+vorrebbe dire allargare il contratto della ricerca fin dal daemon.
+
+La regola è uscita dal componente: sta in **`ui/src/lib/gruppi.ts`**, pura, e si prova con
+`node` come già fa `layout.ts` per i pannelli — `npm run gruppi:check`, **24** verifiche
+(il recap, il turno che finisce su un tool, il testo che introduce una domanda a una e a tre
+parti di distanza, il ragionamento vuoto, la chiave del gruppo che non cambia mentre il lavoro
+cresce). Una di quelle prove è nata **rossa dicendo la verità**: l'attesa che avevo scritto era
+di prima della regola sul testo-che-introduce, e il codice aveva ragione lui.
+Verificato **guidando la UI vera** su conversazioni reali, non solo per esito: A/B a 1280×900
+sugli stessi turni prima e dopo (418 parti: 103 blocchi/3452px → 2/694px; 48 parti con una
+domanda in mezzo: 26/1800 → 6/1219), a 390px che la riga non sfondi, e il salto da un
+risultato di ricerca che apre davvero il gruppo (`gruppiAperti: 1, gruppiChiusi: 0`).
+
 Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
 seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
 giusto).
@@ -1571,6 +1624,13 @@ Decisioni già prese:
   questo ha una sezione sua nelle impostazioni e non un gruppo dentro Notifications.
   Costo dichiarato dove si accende: è la prima cosa in STARK che esce dalla macchina
   **non** cifrata da capo a fondo.
+- **dentro un turno, il lavoro sta in un blocco solo**: operazioni e narrazioni di servizio
+  insieme, chiuso anche mentre l'agent lavora. Restano fuori le tre volte in cui l'agent si
+  rivolge all'utente — il recap finale, la domanda/permesso con la sua risposta, e il testo
+  che introduce la domanda — più i tagli del flusso (compattazione, retry) e l'operazione in
+  corso. Il confine è **la posizione, non la lunghezza**: misurato, un testo di servizio ha
+  mediana 131 caratteri e uno rivolto all'utente 2500 e passa, ma una soglia sarebbe da
+  tarare e la posizione no.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il
