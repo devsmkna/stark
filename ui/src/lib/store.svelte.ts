@@ -53,7 +53,7 @@ export type Dialog =
  * perché la seconda porta va **vista** per essere usata: chi non sa che esiste non la
  * cerca in una tendina.
  */
-export type NewTab = 'new' | 'import' | 'resume'
+export type NewTab = 'new' | 'import'
 
 /** Il menu del tasto destro su una riga dell'elenco. */
 export type ContextMenu = { id: string; x: number; y: number } | null
