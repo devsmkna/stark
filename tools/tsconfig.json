@@ -16,6 +16,7 @@
   },
   "include": [
     "layout-check.ts", "../ui/src/lib/layout.ts",
-    "gruppi-check.ts", "../ui/src/lib/gruppi.ts"
+    "gruppi-check.ts", "../ui/src/lib/gruppi.ts",
+    "shortcuts-check.ts", "../ui/src/lib/shortcuts.ts", "../ui/src/lib/actions.ts"
   ]
 }

@@ -19,15 +19,17 @@ import { ramoDi } from './git.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
-import { leggiTodo, guardaTodo } from './todo.ts'
+import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
 import { agentiDisponibili, backendFor, catalogoCompleto, scaldaCatalogo } from '../adapters/index.ts'
+import { logPath, readToken } from './identity.ts'
+import { avviaRicambio } from './riavvio.ts'
 import { eseguiHandoff, type ViaBriefing } from './handoff.ts'
-import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
 import type { MemoryOutcome } from '../core/adapter.ts'
+import type { Periodo } from '../core/stats.ts'
 
 /**
  * «Scrivi una `description` quando lanci un comando», chiesto all'agent.
@@ -307,6 +309,23 @@ async function route(
     // una conversazione sola, quindi è una GET sul registro come `/api/sessions`.
     // Non tiene stato fra una richiesta e l'altra — chi scrive nella casella ne manda
     // una per pausa di digitazione, e ognuna deve poter essere l'ultima.
+    // Quanto è stato usato STARK. Gli estremi sono in ms; assenti vuol dire «da
+    // sempre», che è la domanda a cui la schermata risponde di default. Un numero
+    // illeggibile si ignora invece di rifiutare la richiesta: il peggio che può fare
+    // è allargare il periodo, e una schermata di sole letture non ha niente da
+    // proteggere da un parametro storto.
+    if (method === 'GET' && path === '/api/stats') {
+      const ms = (k: string): number | undefined => {
+        const n = Number(url.searchParams.get(k))
+        return Number.isFinite(n) && n > 0 ? n : undefined
+      }
+      const p: Periodo = {}
+      const from = ms('from'); const to = ms('to')
+      if (from !== undefined) p.from = from
+      if (to !== undefined) p.to = to
+      return send(res, 200, { stats: registry.stats(p) })
+    }
+
     if (method === 'GET' && path === '/api/search') {
       return send(res, 200, { results: registry.search(url.searchParams.get('q') ?? '') })
     }
@@ -316,6 +335,16 @@ async function route(
     // restava che richiedere `/api/sessions` a ripetizione.
     if (method === 'GET' && path === '/api/stream') {
       return listStream(req, res, registry)
+    }
+
+    // Le liste di **tutti** i progetti conosciuti, per il toggle «All» della colonna.
+    // I percorsi non arrivano dal browser: li deriva il daemon dalle conversazioni che
+    // ha, esattamente come fa `/api/sessions/<id>/todo` con una sola.
+    if (method === 'GET' && path === '/api/todos') {
+      return send(res, 200, { projects: leggiTodoDiTutti(cartelleNote(registry)) })
+    }
+    if (method === 'GET' && path === '/api/todostream') {
+      return todosStream(req, res, registry)
     }
 
     // Le conversazioni nate nella CLI. Non è una rotta sulle sessioni di STARK: sono
@@ -494,6 +523,39 @@ async function route(
         // (stessa regola del profilo in «New chat»).
         agents: await agentiDisponibili(),
       })
+    }
+
+    /**
+     * Riavvia il daemon — è come si prende un aggiornamento senza tornare al terminale.
+     *
+     * Tre cose in un ordine che non è scambiabile. Si risponde **prima** di morire: se
+     * il daemon si spegnesse qui dentro, il browser vedrebbe cadere la connessione
+     * senza sapere se il riavvio era partito o se era esploso qualcosa. Si accende il
+     * ricambio **prima** di fermarsi, perché un processo non può riaccendere sé stesso.
+     * E ci si ferma **dopo** aver risposto, con un respiro, se no la risposta resta nel
+     * socket di un processo che non c'è più.
+     *
+     * Chi preme sa cosa costa: la UI lo chiede dicendo quante conversazioni si fermano
+     * (i processi agent sono figli di questo, quindi muoiono tutti). La scheda aperta
+     * si ricollega da sola, che è la stessa cosa che fa dopo un riavvio da terminale.
+     */
+    if (method === 'POST' && path === '/api/restart') {
+      const body = await readJson<{ rebuildUi?: boolean }>(req)
+      const esito = avviaRicambio(STARK_HOME, {
+        rebuildUi: body?.rebuildUi !== false,
+        log: logPath(STARK_HOME),
+      })
+      if (!esito.ok) return send(res, 500, { error: esito.error })
+      send(res, 200, { ok: true, ...(esito.pid ? { pid: esito.pid } : {}) })
+      // Il ritardo non è scaramanzia: `send` scrive nel socket, e chiudere subito il
+      // server strapperebbe la connessione prima che il corpo arrivi davvero.
+      setTimeout(() => {
+        void (async () => {
+          try { await registry.shutdown() } catch { /* stiamo morendo comunque */ }
+          process.exit(0)
+        })()
+      }, 250)
+      return
     }
 
     // ─── l'helper (§17) ──────────────────────────────────────────────────────
@@ -789,6 +851,69 @@ function todoStream(req: IncomingMessage, res: ServerResponse, cwd: string): voi
     clearInterval(battito)
     if (timer) clearTimeout(timer)
     stacca()
+  })
+}
+
+/** Le cartelle distinte delle conversazioni che il registro conosce. */
+function cartelleNote(registry: Registry): string[] {
+  return [...new Set(registry.list().flatMap(r => (r.cwd ? [r.cwd] : [])))]
+}
+
+/**
+ * Il flusso dei todo di **tutti** i progetti.
+ *
+ * Un watcher per cartella, e l'elenco delle cartelle si rilegge a ogni giro: aprire una
+ * chat su un progetto nuovo mentre la colonna è su «All» deve farlo comparire, e senza
+ * questo il flusso resterebbe fermo all'insieme di cartelle che c'era all'iscrizione.
+ * Il costo è un `registry.list()` in più per cambio di file, che dopo la cache dell'elenco
+ * è una lettura in memoria.
+ *
+ * Come per il flusso di un progetto solo si manda lo stato **intero**: qui vale ancora di
+ * più, perché un protocollo di differenze su N progetti sarebbe N volte l'occasione di
+ * restare disallineati.
+ */
+function todosStream(req: IncomingMessage, res: ServerResponse, registry: Registry): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  })
+  res.write(': collegato\n\n')
+
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let staccati: (() => void)[] = []
+  let chiuso = false
+
+  const invia = (): void => {
+    res.write(`event: todo\ndata: ${JSON.stringify({ projects: leggiTodoDiTutti(cartelleNote(registry)) })}\n\n`)
+  }
+  const cambiato = (): void => {
+    if (chiuso || timer !== null) return
+    timer = setTimeout(() => { timer = null; riaggancia(); invia() }, 120)
+  }
+  /** Riattacca i watcher sull'insieme corrente di cartelle. */
+  function riaggancia(): void {
+    for (const s of staccati) s()
+    staccati = chiuso ? [] : cartelleNote(registry).map(cwd => guardaTodo(cwd, cambiato))
+  }
+
+  riaggancia()
+  invia()
+
+  // L'insieme delle cartelle cambia quando nasce o muore una conversazione, e quello non
+  // tocca nessun `.stark/`: senza questo giro, una chat aperta su un progetto nuovo non
+  // comparirebbe finché qualcuno non scrive in un todo.json di un altro progetto.
+  const ripassa = setInterval(() => { if (!chiuso) { riaggancia(); invia() } }, 10000)
+  ripassa.unref?.()
+
+  const battito = setInterval(() => res.write(': .\n\n'), 15000)
+  req.on('close', () => {
+    chiuso = true
+    clearInterval(battito)
+    clearInterval(ripassa)
+    if (timer) clearTimeout(timer)
+    for (const s of staccati) s()
+    staccati = []
   })
 }
 

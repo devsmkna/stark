@@ -73,6 +73,20 @@ export type Settings = {
    */
   defaultMode: PermissionMode
   defaultModes?: Record<string, PermissionMode>
+  /**
+   * Le scorciatoie da tastiera, per id di azione: `{ "palette": "mod+k" }`.
+   *
+   * Stanno qui e non nel browser perché sono una preferenza **dell'utente**, non del
+   * dispositivo — chi ne cambia una vuole ritrovarla anche riaprendo da un'altra
+   * scheda. Il prezzo di tenerle sul daemon è che una macchina sola descrive tastiere
+   * diverse, ed è per questo che il valore salvato dice `mod` e non `cmd`: a
+   * risolverlo in ⌘ o Ctrl è il browser che le legge (`ui/src/lib/shortcuts.ts`).
+   *
+   * Il daemon non le interpreta e non le convalida contro un elenco di azioni: quali
+   * azioni esistono lo sa la UI, e un daemon che rifiutasse un id sconosciuto
+   * cancellerebbe la scorciatoia di una versione più nuova di sé.
+   */
+  shortcuts?: Record<string, string>
 }
 
 export const DEFAULTS: Settings = {
@@ -110,6 +124,21 @@ function sanePerAgent(v: unknown): { defaultModes?: Record<string, PermissionMod
   return Object.keys(out).length > 0 ? { defaultModes: out } : {}
 }
 
+/**
+ * Le scorciatoie ripulite. Stessa disciplina delle modalità per agent: una voce
+ * scritta male si butta da sola invece di far tornare tutto ai default. Non si
+ * convalida la *forma* della combinazione — quella la legge `parse()` nel browser, che
+ * su una stringa illeggibile risponde «nessuna scorciatoia» invece di rompersi.
+ */
+function saneShortcuts(v: unknown): { shortcuts?: Record<string, string> } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, s] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof s === 'string' && s.trim().length > 0 && s.length < 64) out[k] = s.trim()
+  }
+  return Object.keys(out).length > 0 ? { shortcuts: out } : {}
+}
+
 const FILE = 'settings.json'
 
 /**
@@ -132,6 +161,7 @@ export function readSettings(home: string): Settings {
       toolDescriptions: raw.toolDescriptions !== false,
       defaultMode: saneMode(raw.defaultMode),
       ...(sanePerAgent(raw['defaultModes'])),
+      ...(saneShortcuts(raw['shortcuts'])),
     }
   } catch {
     return { ...DEFAULTS, projects: {} }
@@ -146,6 +176,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     toolDescriptions: s.toolDescriptions !== false,
     defaultMode: saneMode(s.defaultMode),
     ...(sanePerAgent(s.defaultModes)),
+    ...(saneShortcuts(s.shortcuts)),
   }
   writeFileSync(resolve(home, FILE), `${JSON.stringify(pulito, null, 2)}\n`)
   return pulito

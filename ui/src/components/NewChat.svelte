@@ -107,6 +107,11 @@
     cwd.trim().length > 0 && !savedProfile && (profiles?.length ?? 0) > 1
     && (effectiveAgent === null || effectiveAgent === 'claude-code'),
   )
+  // `--continue` è una cosa **di Claude Code**: sull'adapter OpenCode il campo del
+  // contratto (§1, `SessionSpec.continue`) c'è ma non è implementato, quindi la spunta
+  // prometterebbe di riprendere una conversazione che parte comunque da zero. Finché
+  // non lo implementa, la domanda non si fa — come già per il profilo qui sopra.
+  const showContinue = $derived(effectiveAgent === null || effectiveAgent === 'claude-code')
   const effectiveProfile = $derived(
     profilePick ?? profiles?.find(p => p.current)?.path ?? profiles?.[0]?.path ?? null,
   )
@@ -172,7 +177,7 @@
       void store.newChat(cwd.trim(), {
         ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
         ...(showAgents && effectiveAgent ? { agent: effectiveAgent } : {}),
-        ...(continua ? { continue: true } : {}),
+        ...(showContinue && continua ? { continue: true } : {}),
       })
     }
   }
@@ -315,6 +320,7 @@
         {/if}
       </div>
 
+      {#if showContinue}
       <div class="fgroup">
         <div class="flabel">Start</div>
         <label class="chk">
@@ -327,6 +333,7 @@
           for the model, not on screen. If that folder has no earlier conversation, this
           starts a new chat.</div>
       </div>
+      {/if}
 
       {#if showProfiles}
         <div class="fgroup">

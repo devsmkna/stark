@@ -465,6 +465,67 @@ check('una sessione che non esiste torna vuoto, non un\'eccezione',
   check('§todo: la rotta è dietro il token come tutto il resto',
     (await fetch(`${url}/api/sessions/${tid}/todo`)).status === 403)
 
+  // ─── e l'ambito «All»: le liste di tutti i progetti conosciuti ────────────
+  //
+  // «Conosciuti» è la parte che vale la pena tenere ferma: i percorsi li deriva il daemon
+  // dalle conversazioni che ha, e non arrivano mai dal browser. Un progetto che non ha
+  // niente da mostrare si salta, se no la colonna sarebbe metà intestazioni vuote.
+  writeFileSync(resolve(prog, '.stark', 'todo.json'), JSON.stringify({
+    a: { title: 'viva', __status: 'active', tasks: [{ id: 't1', text: 'x', state: 'todo' }] },
+  }))
+  const tutti = async (): Promise<{ projects: { cwd: string; lists: unknown[] }[] }> =>
+    (await fetch(`${url}/api/todos`, { headers: auth })).json() as Promise<{ projects: { cwd: string; lists: unknown[] }[] }>
+
+  const p1 = (await tutti()).projects
+  check('§todo/all: il progetto della chat compare fra tutti',
+    p1.some(x => x.cwd === prog), p1.map(x => x.cwd).join(','))
+  check('§todo/all: e porta le sue liste, non solo il percorso',
+    (p1.find(x => x.cwd === prog)?.lists.length ?? 0) === 1)
+  // La cartella di un'altra sessione non ha nessun `.stark/`: non deve comparire. È la
+  // metà che si dimentica — «li elenca tutti» sarebbe verde anche elencando cartelle
+  // vuote, e la colonna diventerebbe illeggibile proprio su una macchina molto usata.
+  const altro = resolve(tmpdir(), 'stark-daemon-check-todo-vuoto')
+  rmSync(altro, { recursive: true, force: true })
+  mkdirSync(altro, { recursive: true })
+  const r2 = await fetch(`${url}/api/sessions`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ cwd: altro }),
+  })
+  const vid = ((await r2.json()) as { id: string }).id
+  check('§todo/all: un progetto senza liste non compare',
+    !(await tutti()).projects.some(x => x.cwd === altro))
+  check('§todo/all: la rotta è dietro il token come tutto il resto',
+    (await fetch(`${url}/api/todos`)).status === 403)
+  check('§todo/all: e anche il flusso',
+    (await fetch(`${url}/api/todostream`)).status === 403)
+
+  const visti2: { projects?: { cwd: string }[] }[] = []
+  const ta = await fetch(`${url}/api/todostream`, { headers: auth })
+  const ra = ta.body!.getReader()
+  const d2 = new TextDecoder()
+  let b2 = ''
+  void (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await ra.read()
+        if (done) break
+        b2 += d2.decode(value, { stream: true })
+        let j: number
+        while ((j = b2.indexOf('\n\n')) >= 0) {
+          const blocco = b2.slice(0, j); b2 = b2.slice(j + 2)
+          const riga = blocco.split('\n').find(x => x.startsWith('data: '))
+          if (riga) visti2.push(JSON.parse(riga.slice(6)) as { projects?: { cwd: string }[] })
+        }
+      }
+    } catch { /* il daemon si ferma alla fine: atteso */ }
+  })()
+  await new Promise(r3 => setTimeout(r3, 300))
+  check('§todo/all: il flusso manda subito lo stato di partenza',
+    (visti2[0]?.projects ?? []).some(x => x.cwd === prog), `${visti2.length}`)
+  await ra.cancel().catch(() => {})
+  await fetch(`${url}/api/sessions/${vid}`, { method: 'DELETE', headers: auth })
+  rmSync(altro, { recursive: true, force: true })
+
   await tl.cancel().catch(() => {})
   await fetch(`${url}/api/sessions/${tid}`, { method: 'DELETE', headers: auth })
   rmSync(prog, { recursive: true, force: true })
@@ -586,6 +647,34 @@ check('quello che non c\'è non si trova',
   (await cercaTesto('zzz-parola-che-non-esiste-zzz')).length === 0)
 check('la ricerca è dietro il token come tutto il resto',
   (await fetch(`${url}/api/search?q=pronto`)).status === 403)
+
+// ─── le statistiche d'uso ─────────────────────────────────────────────────────
+//
+// Dopo la ricerca e per la stessa ragione: passano dagli stessi snapshot, quindi
+// devono contare anche una chat che non ha più un processo dietro — che è la
+// maggioranza di ciò che si è usato. Il **conteggio** è provato in `npm run check`
+// su snapshot sintetici; qui si prova che la rotta esista, che sia dietro il token
+// e che il periodo arrivi fino in fondo invece di essere ignorato per strada.
+type Uso = { stats: { totale: { prompts: number; chars: number; conversations: number }
+  perGiorno: { day: string }[]; perProgetto: { key: string }[] } }
+const uso = async (qs = ''): Promise<Uso['stats']> => {
+  const r = await fetch(`${url}/api/stats${qs}`, { headers: auth })
+  return (await r.json() as Uso).stats
+}
+const tutto = await uso()
+check('le statistiche contano la chat che questa prova ha usato',
+  tutto.totale.prompts > 0 && tutto.totale.conversations > 0, JSON.stringify(tutto.totale))
+check('e i caratteri sono quelli dei prompt, non zero', tutto.totale.chars > 0)
+check('con la cartella fra le righe per progetto', tutto.perProgetto.length > 0)
+// Un periodo che comincia domani non può contenere niente: è il modo più economico
+// di verificare che `from` non venga buttato via fra la query e `statsFrom`.
+const domani = Date.now() + 86_400_000
+check('un periodo che comincia domani non conta niente',
+  (await uso(`?from=${domani}`)).totale.prompts === 0)
+check('un `from` illeggibile allarga il periodo invece di rompere la richiesta',
+  (await uso('?from=pippo')).totale.prompts === tutto.totale.prompts)
+check('le statistiche sono dietro il token come tutto il resto',
+  (await fetch(`${url}/api/stats`)).status === 403)
 
 // ─── quale conversazione riprende un risveglio ────────────────────────────────
 //

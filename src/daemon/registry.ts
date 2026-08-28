@@ -19,6 +19,7 @@ import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
 import { DA_ESTENSIONE, ESTENSIONE } from '../core/allegati.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
+import { statsFrom, type Periodo, type Stats } from '../core/stats.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
 import type {
   AgentQuestion, Attachment, CanonicalEvent, Command, Payload, PermissionCategory, PermissionMode,
@@ -591,10 +592,15 @@ export class Registry {
    * Due caratteri di soglia: con uno solo il risultato è «tutte», che non è una
    * risposta — e costerebbe un ritaglio per ogni turno di ogni chat per dirlo.
    */
-  search(query: string, limit = 5): SessionMatches[] {
-    const q = query.trim()
-    if (q.length < MINIMO) return []
-    const out: SessionMatches[] = []
+  /**
+   * Lo stato di **tutte** le conversazioni, senza rileggere niente di già letto.
+   *
+   * Sta in un metodo suo perché a chiederlo sono in due — la ricerca e le statistiche
+   * — e le tre regole qui sotto vanno decise una volta sola. Con due copie basterebbe
+   * che una dimenticasse di saltare gli effimeri perché le due schermate dicessero
+   * cose diverse sulla stessa macchina.
+   */
+  private tuttiGliSnapshot(): Map<string, SessionSnapshot> {
     const snapshots = new Map<string, SessionSnapshot>()
     if (existsSync(SESSIONS)) {
       for (const f of readdirSync(SESSIONS)) {
@@ -612,8 +618,23 @@ export class Registry {
       if (l.ephemeral) continue
       snapshots.set(id, l.snapshot)
     }
+    return snapshots
+  }
 
-    for (const [id, snap] of snapshots) {
+  /**
+   * Quanto è stato usato STARK. La regola sta in `core/stats.ts`: qui c'è solo da
+   * dove arrivano gli snapshot. Nessuna scrittura, nessun evento, niente nel journal
+   * — è una lettura, e per questo è retroattiva su tutto lo storico.
+   */
+  stats(p: Periodo): Stats {
+    return statsFrom(this.tuttiGliSnapshot().values(), p)
+  }
+
+  search(query: string, limit = 5): SessionMatches[] {
+    const q = query.trim()
+    if (q.length < MINIMO) return []
+    const out: SessionMatches[] = []
+    for (const [id, snap] of this.tuttiGliSnapshot()) {
       const matches = searchSnapshot(snap, q, limit)
       if (matches.length === 0) continue
       out.push({

@@ -10,7 +10,8 @@ const ICONS = {
   'i-globe': 'globe', 'i-plug': 'plug', 'i-block': 'ban', 'i-ask': 'circle-question-mark',
   'i-mail': 'mail', 'i-cut': 'scissors', 'i-bolt': 'zap', 'i-branch': 'git-branch',
   'i-folder': 'folder', 'i-gear': 'settings', 'i-back': 'chevron-left', 'i-stop': 'circle-stop',
-  'i-bars': 'align-justify', 'i-plus': 'plus', 'i-check': 'check', 'i-down': 'chevron-down',
+  'i-bars': 'align-justify', 'i-chart': 'chart-column', 'i-plus': 'plus',
+  'i-check': 'check', 'i-down': 'chevron-down', 'i-clip': 'paperclip', 'i-send': 'arrow-up',
   'i-warn': 'triangle-alert', 'i-trash': 'trash-2', 'i-moon': 'moon', 'i-pencil': 'pencil',
   'i-shield': 'shield', 'i-palette': 'palette', 'i-monitor': 'monitor', 'i-search': 'search',
   'i-bell': 'bell', 'i-bell-off': 'bell-off', 'i-disk': 'hard-drive',
@@ -21,6 +22,27 @@ const ICONS = {
   'i-reveal': 'folder-open',
   'i-open': 'external-link',
 }
+
+/**
+ * Le due che Lucide non ha, disegnate a mano — con la ragione accanto, perché senza
+ * questa mappa rigenerare lo sprite le cancellerebbe. È già successo: erano state
+ * aggiunte direttamente nel file generato, che l'intestazione dice di non toccare.
+ */
+const CUSTOM = {
+  'i-circle': {
+    nota: `Un task ancora da fare: un cerchio vuoto. \`i-check\` è quello spuntato, e
+       serviva il suo contrario — senza, un task «todo» resterebbe senza segno e le
+       righe non si allineerebbero con le altre.`,
+    inner: '<circle cx="12" cy="12" r="8" />',
+  },
+  'i-dot': {
+    nota: "Quello in corso. `i-bolt` c'era ma vuol dire un'altra cosa (la modalità auto).",
+    inner: '<circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" fill="currentColor" />',
+  },
+}
+
+const custom = Object.entries(CUSTOM).map(([id, { nota, inner }]) =>
+  `  <!-- ${nota} -->\n  <symbol id="${id}" viewBox="0 0 24 24">${inner}</symbol>`).join('\n')
 
 const symbols = Object.entries(ICONS).map(([id, name]) => {
   const src = readFileSync(resolve(DIR, `${name}.svg`), 'utf8')
@@ -34,6 +56,7 @@ writeFileSync('ui/src/components/Sprite.svelte', `<!-- GENERATO da tools/gen-ico
 
 <svg style="display:none" aria-hidden="true">
 ${symbols}
+${custom}
 </svg>
 `)
-console.log(`Sprite.svelte: ${Object.keys(ICONS).length} icone da Lucide ${version}`)
+console.log(`Sprite.svelte: ${Object.keys(ICONS).length} icone da Lucide ${version}, piu' ${Object.keys(CUSTOM).length} disegnate a mano`)

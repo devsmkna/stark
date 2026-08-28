@@ -169,3 +169,36 @@ export function guardaTodo(cwd: string, quando: () => void): () => void {
     w?.close()
   }
 }
+
+/** Le liste di un progetto, con la cartella da cui vengono. */
+export type TodoProject = TodoFile & { cwd: string }
+
+/**
+ * Le liste di **tutti** i progetti conosciuti.
+ *
+ * «Conosciuti» vuol dire: le cartelle delle conversazioni che il registro ha. Non è una
+ * scelta di comodo — è l'unica fonte che il daemon possiede senza farsi dare un percorso
+ * dal browser, che resterebbe «leggi un file in qualunque cartella di questa macchina»
+ * (la stessa ragione per cui `/todo` risolve il `cwd` dall'id della sessione).
+ *
+ * I progetti **senza** liste si saltano: una colonna che deve dire «cosa resta» non può
+ * essere metà intestazioni vuote. Restano invece quelli con un `todo.json` illeggibile,
+ * perché quello è un errore da mostrare a chi può correggerlo.
+ */
+export function leggiTodoDiTutti(cwds: readonly string[]): TodoProject[] {
+  const visti = new Set<string>()
+  const out: TodoProject[] = []
+  for (const cwd of cwds) {
+    if (!cwd || visti.has(cwd)) continue
+    visti.add(cwd)
+    const f = leggiTodo(cwd)
+    if (f.assente || (f.lists.length === 0 && !f.motivo)) continue
+    out.push({ cwd, ...f })
+  }
+  // Prima chi ha qualcosa di vivo, poi in ordine di nome: la colonna si legge dall'alto
+  // e la domanda che vi si porta è «dove sono rimasto», non «quanti progetti ho».
+  const vive = (p: TodoProject): number =>
+    p.lists.some(l => l.status === 'active' || l.status === 'paused') ? 0 : 1
+  out.sort((a, b) => vive(a) - vive(b) || a.cwd.localeCompare(b.cwd))
+  return out
+}

@@ -11,6 +11,7 @@ import type { Activity } from '$core/activity.ts'
 import type { CanonicalEvent, Command, ModelChoice } from '$core/events.ts'
 import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Match, SessionMatches } from '$core/search.ts'
+import type { Periodo, Stats } from '$core/stats.ts'
 
 export type { Match, SessionMatches }
 
@@ -108,6 +109,9 @@ export type Settings = {
   defaultMode: string
   /** La modalità di partenza **per agent** (ADR-014): le voci non sono universali. */
   defaultModes?: Record<string, string>
+  /** Le scorciatoie da tastiera, per id di azione. Il valore dice `mod`, non `cmd`:
+   *  a risolverlo in ⌘ o Ctrl è il dispositivo (`lib/shortcuts.ts`). */
+  shortcuts?: Record<string, string>
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */
@@ -149,6 +153,12 @@ export type Todos = {
   motivo?: string
   assente: boolean
 }
+
+/** Le liste di un progetto, quando se ne guarda più d'uno insieme. */
+export type TodoProject = Todos
+
+/** Tutti i progetti conosciuti che hanno qualcosa da mostrare. */
+export type AllTodos = { projects: TodoProject[] }
 
 /** Un agent della macchina e i suoi modelli, come li elenca il selettore dell'helper. */
 export type AgentModels = {
@@ -333,6 +343,18 @@ export class Api {
     })
   }
 
+  /**
+   * Riavvia il daemon. La risposta arriva **prima** che si spenga: dopo, il flusso
+   * cade e la pagina si ricollega da sé, come dopo un riavvio da terminale.
+   */
+  restart(rebuildUi = true): Promise<{ ok: boolean; pid?: number }> {
+    return this.json('/api/restart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rebuildUi }),
+    })
+  }
+
   closeHelper(): Promise<{ ok: boolean }> {
     return this.json('/api/helper', { method: 'DELETE' })
   }
@@ -430,6 +452,19 @@ export class Api {
     } catch { return [] }
   }
 
+  /**
+   * Quanto è stato usato STARK. A differenza di `search()`, un errore qui **non** si
+   * ingoia: la schermata esiste per mostrare dei numeri, e disegnarne zero al posto
+   * di un guasto direbbe «non l'hai mai usato».
+   */
+  async stats(p: Periodo): Promise<Stats> {
+    const q = new URLSearchParams()
+    if (p.from !== undefined) q.set('from', String(p.from))
+    if (p.to !== undefined) q.set('to', String(p.to))
+    const r = await this.json<{ stats: Stats }>(`/api/stats?${q}`)
+    return r.stats
+  }
+
   importable(): Promise<{ sessions: ImportableRow[] }> {
     return this.json('/api/importable')
   }
@@ -504,6 +539,21 @@ export class Api {
     return this.sse(
       () => `/api/sessions/${id}/todostream`,
       data => onTodo(JSON.parse(data) as Todos),
+      onStatus,
+    )
+  }
+
+  /** Le liste di tutti i progetti conosciuti. I percorsi li deriva il daemon. */
+  todos(): Promise<AllTodos> { return this.json('/api/todos') }
+
+  /** Lo stesso, in flusso: stato intero a ogni cambio, come quello di un progetto solo. */
+  todosStream(
+    onTodos: (t: AllTodos) => void,
+    onStatus: (s: LinkStatus) => void,
+  ): () => void {
+    return this.sse(
+      () => '/api/todostream',
+      data => onTodos(JSON.parse(data) as AllTodos),
       onStatus,
     )
   }

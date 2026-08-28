@@ -46,6 +46,9 @@ export type Dialog =
   | { kind: 'new' }
   | { kind: 'delete'; row: SessionRow }
   | { kind: 'settings' }
+  /** La palette: si scrive un pezzo di nome e si salta lì (`lib/shortcuts.ts`). È un
+   *  dialogo come gli altri, quindi `Escape` la chiude senza codice in più. */
+  | { kind: 'palette' }
   | { kind: 'phone' }
   | null
 
@@ -150,6 +153,24 @@ export class Store {
     this.todoOpen = !this.todoOpen
     try { localStorage.setItem('stark.todo', this.todoOpen ? '1' : '0') } catch { /* modalità privata */ }
   }
+  /**
+   * Cosa mostra la colonna dei todo: le liste del progetto della chat a fuoco, o quelle
+   * di tutti i progetti conosciuti.
+   *
+   * Nel browser insieme all'altra, e per la stessa ragione: è una preferenza di lettura,
+   * non un fatto del progetto. Default `project`, perché è la domanda che ci si porta
+   * dentro una chat — «dove sono rimasto qui» — mentre «All» è il giro largo che si
+   * chiede apposta.
+   */
+  todoScope = $state<'project' | 'all'>(
+    (() => { try { return localStorage.getItem('stark.todoScope') === 'all' ? 'all' : 'project' } catch { return 'project' } })(),
+  )
+
+  setTodoScope(s: 'project' | 'all'): void {
+    this.todoScope = s
+    try { localStorage.setItem('stark.todoScope', s) } catch { /* modalità privata */ }
+  }
+
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
   renaming = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */

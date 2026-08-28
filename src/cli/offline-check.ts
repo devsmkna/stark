@@ -38,6 +38,7 @@ import {
 } from '../core/handoff.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
+import { giorno, IGNOTO, statsFrom } from '../core/stats.ts'
 import {
   ALLEGABILI, buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel,
   slashCommands,
@@ -1050,6 +1051,26 @@ check('§16.5: si salva ciò che si riconosce, e si butta il resto',
 check('§16.5: le categorie da chiedere si rileggono da disco',
   askCategories(readSettings(casa)).join(',') === 'shell')
 
+// Le scorciatoie: il daemon le tiene e non le interpreta. Quali azioni esistano lo sa
+// la UI, quindi un id sconosciuto **non** si butta — buttarlo cancellerebbe la
+// scorciatoia di una versione più nuova di sé aprendo le impostazioni con una vecchia.
+{
+  const conScorciatoie = writeSettings(casa, {
+    ...readSettings(casa),
+    shortcuts: { palette: 'mod+k', futura: 'mod+shift+p', rotta: 42, vuota: '  ' },
+  } as never)
+  check('§16.5: le scorciatoie si salvano e si rileggono',
+    readSettings(casa).shortcuts?.['palette'] === 'mod+k', JSON.stringify(conScorciatoie.shortcuts))
+  check('§16.5: un id che il daemon non conosce resta comunque',
+    readSettings(casa).shortcuts?.['futura'] === 'mod+shift+p')
+  check('§16.5: una voce che non è una stringa utile si butta da sola',
+    readSettings(casa).shortcuts?.['rotta'] === undefined
+    && readSettings(casa).shortcuts?.['vuota'] === undefined)
+  writeSettings(casa, { ...readSettings(casa), shortcuts: {} } as never)
+  check('§16.5: senza scorciatoie salvate il campo non c\'è, e valgono i default',
+    readSettings(casa).shortcuts === undefined)
+}
+
 // ─── §8 una richiesta con più domande ────────────────────────────────────────
 // Lo stepper mostra una domanda per volta, e nel flusso resta un blocco con tutte:
 // il rischio è di perdere l'accoppiamento fra domanda e risposta, che è l'unica cosa
@@ -1604,43 +1625,162 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('§17: scrivere su un deposito chiuso e\' un errore, non un silenzio', esploso)
 }
 
-// ─── §18 il passaggio di consegne fra due agent ──────────────────────────────
+// ─── §18: quanto e' stato usato STARK ───────────────────────────────────────
+//
+// Le statistiche non hanno una rotta da provare — hanno un **conteggio**, ed e' li'
+// che si sbagliano: cosa conta come prompt, un turno appena fuori dal bordo del
+// periodo, una chiave che manca. Sono tutte domande su una funzione pura, quindi si
+// rispondono qui invece che mettendo in scena un browser.
+{
+  const GIORNO = 86_400_000
+  const T0 = new Date(2026, 7, 20, 10, 0, 0).getTime()
+
+  const finto = (id: string, campi: Partial<SessionSnapshot>): SessionSnapshot =>
+    ({ ...reduce([], id), ...campi })
+
+  const turno = (at: number, testo: string, extra: Partial<SessionSnapshot['turns'][number]> = {}) => ({
+    turnId: `t-${at}-${testo.length}`,
+    prompt: [{ type: 'text' as const, text: testo }],
+    parts: [], steps: 1, startedAt: at, ended: true, endedAt: at + 1000,
+    reason: 'completed' as const, ...extra,
+  })
+
+  const uno = finto('s1', {
+    cwd: '/progetti/alfa', agent: 'claude-code', model: 'claude-opus-5[1m]',
+    turns: [turno(T0, 'ciao'), turno(T0 + GIORNO, 'ancora qui')],
+  })
+
+  const tutto = statsFrom([uno], {})
+  check('§18: un prompt per turno', tutto.totale.prompts === 2)
+  check('§18: i caratteri sono quelli del testo scritto', tutto.totale.chars === 'ciao'.length + 'ancora qui'.length)
+  check('§18: una conversazione usata due giorni resta una sola', tutto.totale.conversations === 1)
+  check('§18: il tempo di lavoro somma i turni finiti', tutto.totale.agentMs === 2000)
+
+  // Il periodo si applica al **turno**: una chat vecchia usata oggi conta oggi.
+  const soloSecondo = statsFrom([uno], { from: T0 + GIORNO })
+  check('§18: il periodo taglia i turni, non le conversazioni',
+    soloSecondo.totale.prompts === 1 && soloSecondo.totale.conversations === 1)
+  // `to` e' escluso: senza questo due periodi adiacenti conterebbero due volte il
+  // turno che cade sul confine.
+  check('§18: `to` e\' escluso, quindi due periodi adiacenti non si sovrappongono',
+    statsFrom([uno], { to: T0 + GIORNO }).totale.prompts === 1)
+  check('§18: fuori dal periodo non resta niente', statsFrom([uno], { from: T0 + 10 * GIORNO }).totale.conversations === 0)
+
+  // Un turno in corso non ha una durata: sommarne una parziale farebbe salire il
+  // totale mentre lo si guarda.
+  const aperto = finto('s2', { turns: [{ ...turno(T0, 'in corso'), ended: false, endedAt: undefined, reason: undefined }] })
+  check('§18: un turno in corso non porta tempo', statsFrom([aperto], {}).totale.agentMs === 0)
+  check('§18: ma il suo prompt e\' gia\' stato scritto, quindi conta', statsFrom([aperto], {}).totale.prompts === 1)
+
+  // Le immagini non sono caratteri digitati.
+  const conFoto = finto('s3', { turns: [{ ...turno(T0, 'guarda'),
+    prompt: [{ type: 'text', text: 'guarda' }, { type: 'image', ref: 'r', mediaType: 'image/png', bytes: 999 }] }] })
+  check('§18: un allegato non e\' un carattere digitato', statsFrom([conFoto], {}).totale.chars === 'guarda'.length)
+
+  // Una chiave che manca e' una riga `unknown`, non una riga scartata: se sparisse,
+  // la somma delle righe non tornerebbe col totale.
+  const senzaNiente = finto('s4', { turns: [turno(T0, 'x')] })
+  const misto = statsFrom([uno, senzaNiente], {})
+  check('§18: una chiave mancante diventa `unknown`, non sparisce',
+    misto.perProgetto.some(r => r.key === IGNOTO) && misto.perAgent.some(r => r.key === IGNOTO))
+  check('§18: le righe sommate danno il totale',
+    misto.perProgetto.reduce((n, r) => n + r.c.prompts, 0) === misto.totale.prompts)
+
+  // I turni finiti male sono tre cose diverse.
+  const rotti = finto('s5', { turns: [
+    turno(T0, 'a', { reason: 'aborted' }), turno(T0, 'b', { reason: 'error' }),
+    turno(T0, 'c', { reason: 'interrupted' }),
+  ] })
+  const r = statsFrom([rotti], {}).totale
+  check('§18: Stop, errore e crash si contano separati',
+    r.aborted === 1 && r.errored === 1 && r.interrupted === 1)
+
+  // I token si prendono dal **turno**, non dalla sessione: `snapshot.usage` e' il
+  // totale di sempre, e su «oggi» direbbe tutto.
+  const conToken = finto('s6', { turns: [
+    { ...turno(T0, 'vecchio'), usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 } },
+    { ...turno(T0 + GIORNO, 'nuovo'), usage: { input: 5, output: 2, cacheRead: 7, cacheWrite: 0 } },
+  ] })
+  const oggi = statsFrom([conToken], { from: T0 + GIORNO }).totale.tokens
+  check('§18: i token seguono il periodo perche\' sono del turno',
+    oggi.input === 5 && oggi.output === 2 && oggi.cacheRead === 7)
+
+  // Gli effetti hanno un'ora loro: un file toccato oggi in una chat di marzo va
+  // contato oggi.
+  const effetti = finto('s7', { turns: [turno(T0, 'q')],
+    files: [{ path: '/a', created: false, hunks: [], ts: T0 + GIORNO }],
+    shell: [{ command: 'ls', interrupted: false, stdoutBytes: 0, stderrBytes: 0, ts: T0 }] })
+  check('§18: i file e i comandi si filtrano con la loro ora',
+    statsFrom([effetti], { from: T0 + GIORNO }).totale.files === 1 &&
+    statsFrom([effetti], { from: T0 + GIORNO }).totale.commands === 0)
+
+  // Gli effetti vanno nel secchiello del **loro** giorno: un comando lanciato dopo
+  // mezzanotte appartiene alla notte in cui e' girato, non al turno che l'ha aperto.
+  const notturno = finto('s8', { turns: [turno(T0, 'q')],
+    shell: [{ command: 'ls', interrupted: false, stdoutBytes: 0, stderrBytes: 0, ts: T0 + GIORNO }] })
+  const gg = statsFrom([notturno], {}).perGiorno
+  check('§18: un comando conta nel giorno in cui e\' girato, non in quello del turno',
+    gg.length === 2 && gg[0]!.c.commands === 0 && gg[1]!.c.commands === 1)
+  check('§18: e la somma dei giorni torna col totale',
+    gg.reduce((n, g) => n + g.c.commands, 0) === statsFrom([notturno], {}).totale.commands)
+
+  // Il grafico per giorno conta le conversazioni **dove si guarda**: una chat usata in
+  // due giorni e' una nel totale e una in ciascuno dei due. Sommare la colonna del
+  // grafico non deve dare il totale.
+  const perGiorno = tutto.perGiorno
+  check('§18: un giorno per data, in ordine',
+    perGiorno.length === 2 && perGiorno[0]!.day === giorno(T0) && perGiorno[1]!.day === giorno(T0 + GIORNO))
+  check('§18: la stessa chat conta in entrambi i giorni in cui l\'hai usata',
+    perGiorno.every(g => g.c.conversations === 1))
+  check('§18: `giorno` e\' locale, non UTC', giorno(new Date(2026, 7, 20, 23, 30).getTime()) === '2026-08-20')
+
+  // `Map.values()` e' un iteratore a perdere: scorrerlo due volte darebbe zero al
+  // secondo giro, in silenzio. E' esattamente come lo chiama il registro.
+  const daMappa = statsFrom(new Map([['s1', uno]]).values(), {})
+  check('§18: un iteratore a perdere non svuota il secondo giro',
+    daMappa.totale.prompts === 2 && daMappa.perGiorno.length === 2)
+
+  check('§18: una conversazione senza niente nel periodo non fa una riga vuota',
+    statsFrom([uno], { from: T0 + 10 * GIORNO }).perProgetto.length === 0)
+}
+
+// ─── §19: il passaggio di consegne fra due agent ─────────────────────────────
 //
 // Solo la parte pura: nomi e parole. L'orchestrazione (prompt, attesa del turno,
 // apertura della chat nuova) vuole processi veri e sta in `npm run daemon`.
 {
   const quando = new Date(2026, 7, 28, 9, 5)   // 28 agosto 2026, 09:05 locale
   const file = percorsoHandoff(quando)
-  check('§18: il nome del file porta data e ora, dentro .stark del progetto',
+  check('§19: il nome del file porta data e ora, dentro .stark del progetto',
     file === '.stark/handoff-2026-08-28-0905.md', file)
-  check('§18: il percorso e\' relativo, mai assoluto',
+  check('§19: il percorso e\' relativo, mai assoluto',
     !file.startsWith('/'), file)
 
   const briefing = promptBriefing(file)
-  check('§18: a chi lascia si dice **dove** scrivere', briefing.includes(file))
-  check('§18: gli si chiede cosa manca, non un riassunto della chat',
+  check('§19: a chi lascia si dice **dove** scrivere', briefing.includes(file))
+  check('§19: gli si chiede cosa manca, non un riassunto della chat',
     briefing.includes('Da fare') && briefing.includes('Non riassumere la conversazione'))
 
   const ripresa = promptRipresa(file, 'claude-code')
-  check('§18: chi arriva **cita** il file con @, cosi\' lo espande il CLI',
+  check('§19: chi arriva **cita** il file con @, cosi\' lo espande il CLI',
     ripresa.includes(`@${file}`))
-  check('§18: chi arriva sa da quale agent viene il lavoro',
+  check('§19: chi arriva sa da quale agent viene il lavoro',
     ripresa.includes('claude-code'))
-  check('§18: senza agent precedente la frase resta corretta',
+  check('§19: senza agent precedente la frase resta corretta',
     !promptRipresa(file).includes('undefined'))
 
   // Il briefing meccanico, su uno snapshot costruito a mano.
   const vuoto = reduce([])
   const meccanico = briefingDalJournal(vuoto, quando)
-  check('§18: il briefing dal journal dichiara di NON sapere cosa manca',
+  check('§19: il briefing dal journal dichiara di NON sapere cosa manca',
     meccanico.includes('cosa manca') && meccanico.includes('quel giudizio non'),
     meccanico.slice(0, 120))
   // Non deve **affermare** perche' e' stato composto cosi': la via `journal` si puo'
   // scegliere anche su una chat viva, e «la sua sessione non era viva» sarebbe una
   // frase falsa scritta con sicurezza dentro il documento su cui l'altro agent lavora.
-  check('§18: non inventa il motivo per cui l\'ha scritto STARK',
+  check('§19: non inventa il motivo per cui l\'ha scritto STARK',
     !meccanico.includes('non era viva'))
-  check('§18: su una conversazione vuota non inventa sezioni',
+  check('§19: su una conversazione vuota non inventa sezioni',
     !meccanico.includes('## File toccati') && !meccanico.includes('## Cosa era stato chiesto'))
 
   const pieno = reduce([
@@ -1658,11 +1798,11 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
     { k: 'turn.ended', turnId: 't1', reason: 'completed' },
   ].map((p, i) => ({ v: MODEL_VERSION, seq: i + 1, ts: 1, sessionId: 's', payload: p as never })))
   const b2 = briefingDalJournal(pieno, quando)
-  check('§18: riporta cosa era stato chiesto', b2.includes('sistema il parser'))
-  check('§18: un file toccato due volte e\' UNA riga, non due',
+  check('§19: riporta cosa era stato chiesto', b2.includes('sistema il parser'))
+  check('§19: un file toccato due volte e\' UNA riga, non due',
     (b2.match(/src\/a\.ts/g) ?? []).length === 1, b2)
-  check('§18: riporta l\'ultima cosa detta dall\'agent', b2.includes('fatto meta\' del lavoro'))
-  check('§18: dice da quale agent e modello veniva',
+  check('§19: riporta l\'ultima cosa detta dall\'agent', b2.includes('fatto meta\' del lavoro'))
+  check('§19: dice da quale agent e modello veniva',
     b2.includes('claude-code') && b2.includes('opus'))
 }
 
