@@ -30,6 +30,8 @@ export type OpenSpec = {
   model?: string
   mode?: PermissionMode
   resume?: { ref: string; fork?: boolean }
+  /** Riprendere l'ultima conversazione di `cwd` (`--continue`). Vedi core/adapter.ts. */
+  continue?: boolean
   /**
    * Su cosa chiedere conferma: **categorie**, non nomi di tool. Fino ad ADR-012 questo
    * campo era `askTools: string[]` e portava `Bash` e `mcp__*` — vocabolario di Claude
@@ -379,7 +381,9 @@ export class Registry {
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.
       ...((spec.profile ?? this.defaults.profile) ? { profile: spec.profile ?? this.defaults.profile } : {}),
-      ...(resume ? { resume } : { sessionId: id }),
+      ...(resume ? { resume }
+        : spec.continue ? { continue: true }
+        : { sessionId: id }),
       // Chi apre con categorie esplicite sa cosa sta facendo (le prove lo fanno);
       // tutti gli altri prendono la tabella, che è il pannello dei permessi.
       ...(ask.length ? { ask } : {}),

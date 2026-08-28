@@ -92,6 +92,16 @@ export type SessionSpec = {
   mode: PermissionMode
   /** Riprendere una conversazione esistente. `ref` è opaco: lo interpreta l'adapter. */
   resume?: { ref: string; fork?: boolean }
+  /**
+   * Riprendere **l'ultima** conversazione di `cwd` senza saperne il riferimento
+   * (`claude --continue`). È il gemello povero di `resume`: dice *quale* senza dire
+   * *chi*, quindi chi la usa rinuncia anche a imporre `sessionId` — l'id vero si
+   * scopre all'handshake e arriva come `session.resumeRef`. Conseguenza da sapere,
+   * perché non è un dettaglio di implementazione: il journal STARK nasce **vuoto**,
+   * quindi i turni precedenti contano per il modello ma non si vedono a schermo.
+   * Un agent che non sa farlo la ignora, e ne nasce una conversazione nuova.
+   */
+  continue?: boolean
   /** Imporre l'id invece di scoprirlo: così STARK sa come risvegliare già in partenza. */
   sessionId?: string
   /**

@@ -1,0 +1,11 @@
+{
+  "eval_id": 1,
+  "prompt": "a che punto siamo con le cose aperte su questo progetto?",
+  "assertions": [
+    "Il file .stark/todo.json è rimasto identico byte per byte",
+    "Non ha creato liste nuove",
+    "La risposta cita la lista attiva e non quella già chiusa come se fosse aperta",
+    "La risposta dice quanti task sono fatti e qual è quello in corso"
+  ],
+  "eval_name": "1-riassume-senza-riscrivere"
+}

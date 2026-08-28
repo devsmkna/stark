@@ -19,7 +19,7 @@ import { ramoDi } from './git.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
-import { Telegram } from './telegram/index.ts'
+import { leggiTodo, guardaTodo } from './todo.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -144,16 +144,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // spento nella scheda del browser non gira niente. Senza iscrizioni non fa nulla e
   // non costa nulla — vedi `push.ts`.
   const push = new Push(STARK_HOME, guard.perimetro)
-  // Il secondo canale, e il primo che serve anche a *guidare*. Spento vuol dire assente:
-  // senza un bot token `avvia()` non apre nessuna connessione. Vedi `telegram/index.ts`.
-  const telegram = new Telegram(STARK_HOME, registry)
-  void telegram.avvia()
 
   // Un osservatore solo, e i canali dentro — vedi `chiamate.ts`.
-  vigila(registry, [push, telegram])
+  vigila(registry, [push])
 
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telegram, telefono)
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telefono)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -179,8 +175,7 @@ async function route(
   guard: ReturnType<typeof createGuard>, registry: Registry, token: string,
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
-  port: () => number, configDir?: string, push?: Push, telegram?: Telegram,
-  telefono?: Telefono,
+  port: () => number, configDir?: string, push?: Push, telefono?: Telefono,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -243,56 +238,6 @@ async function route(
         body: 'Se leggi questo, le notifiche sul telefono funzionano.', sessionId: '',
       })
       return send(res, 200, { ok: true, iscritti: push.quanti })
-    }
-
-    // ── Telegram ─────────────────────────────────────────────────────────────
-    //
-    // Il bot token **non torna mai indietro**: chi ce l'ha può mettersi in ascolto al
-    // posto di questo STARK e leggere tutto quello che manda. Si scrive, non si rilegge.
-    if (method === 'GET' && path === '/api/telegram') {
-      if (!telegram) return send(res, 200, { hasToken: false, stato: { fase: 'spento' } })
-      return send(res, 200, {
-        hasToken: telegram.haToken,
-        username: telegram.username,
-        stato: telegram.situazione,
-        chats: telegram.accoppiate,
-      })
-    }
-    if (method === 'PUT' && path === '/api/telegram') {
-      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
-      const b = await readJson<{ token?: string }>(req)
-      if (!b?.token?.trim()) return send(res, 400, { error: 'token obbligatorio' })
-      // Risponde con quello che è successo davvero — `getMe` è già stata chiamata —
-      // invece di un `ok` che rimanderebbe a scoprire un token sbagliato la prima volta
-      // che serviva. Stessa idea del «Send a test» delle notifiche.
-      const stato = await telegram.imposta(b.token.trim())
-      return send(res, 200, { stato, username: telegram.username })
-    }
-    if (method === 'DELETE' && path === '/api/telegram') {
-      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
-      await telegram.dimentica()
-      return send(res, 200, { ok: true })
-    }
-    if (method === 'POST' && path === '/api/telegram/pair') {
-      if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
-      if (!telegram.disponibile) return send(res, 409, { error: 'il bot non è in ascolto' })
-      return send(res, 200, { ...telegram.creaCodice(), username: telegram.username })
-    }
-    if (method === 'POST' && path === '/api/telegram/test') {
-      if (!telegram?.disponibile) return send(res, 503, { error: 'il bot non è in ascolto' })
-      await telegram.manda({
-        kind: 'done', title: 'STARK · prova',
-        body: 'Se leggi questo, il bot è collegato a questa macchina.', sessionId: '',
-      })
-      return send(res, 200, { ok: true, chats: telegram.accoppiate.length })
-    }
-    {
-      const m = /^\/api\/telegram\/chats\/(-?\d+)$/.exec(path)
-      if (m && method === 'DELETE') {
-        if (!telegram) return send(res, 503, { error: 'telegram non disponibile' })
-        telegram.revoca(Number(m[1]))
-        return send(res, 200, { ok: true })
-      }
     }
 
     if (method === 'GET' && path === '/api/sessions') {
@@ -620,6 +565,19 @@ async function route(
         const from = Number(url.searchParams.get('from') ?? 0)
         return stream(req, res, registry, id, Number.isFinite(from) ? from : 0)
       }
+      // Le liste di task del **progetto** di questa chat. Il `cwd` lo risolve il daemon
+      // dall'id: una rotta che accettasse un percorso dal browser sarebbe «leggi un file
+      // in qualunque cartella di questa macchina» (stessa ragione di `/files`).
+      if (method === 'GET' && sub === '/todo') {
+        const cwd = registry.snapshot(id)?.cwd
+        if (!cwd) return send(res, 404, { error: 'questa conversazione non ha una cartella' })
+        return send(res, 200, { cwd, ...leggiTodo(cwd) })
+      }
+      if (method === 'GET' && sub === '/todostream') {
+        const cwd = registry.snapshot(id)?.cwd
+        if (!cwd) return send(res, 404, { error: 'questa conversazione non ha una cartella' })
+        return todoStream(req, res, cwd)
+      }
       if (method === 'DELETE' && sub === '') {
         const esito = await registry.remove(id)
         return send(res, esito.ok ? 200 : 404, esito)
@@ -724,6 +682,50 @@ function stream(
  * e ognuno cambia `lastSeq`. Senza, si ricalcolerebbe l'elenco — che rilegge da disco
  * i journal delle sessioni non vive — a ogni delta di testo.
  */
+/**
+ * Il flusso dei todo di un progetto.
+ *
+ * Un flusso **suo**, e non un evento in più dentro quello della sessione: là dentro
+ * passano eventi canonici con un `seq` che nasce dal journal, e questo file nel journal
+ * non c'è (vedi `todo.ts`). Infilarcelo vorrebbe dire mettere in quel flusso qualcosa
+ * che il journal non può ricostruire — cioè rompere il §4 nell'unico punto in cui è
+ * comodo farlo.
+ *
+ * Si manda lo stato **intero** a ogni cambio, come fa il flusso dell'elenco: un file di
+ * qualche riga non vale un protocollo di differenze, e mandare tutto rende impossibile
+ * che il client resti disallineato dopo una riconnessione.
+ */
+function todoStream(req: IncomingMessage, res: ServerResponse, cwd: string): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  })
+  res.write(': collegato\n\n')
+
+  const invia = (): void => {
+    res.write(`event: todo\ndata: ${JSON.stringify({ cwd, ...leggiTodo(cwd) })}\n\n`)
+  }
+  invia()
+
+  // Il watcher spara più volte per una scrittura sola (il temporaneo che compare, il
+  // rename che lo sostituisce): senza questa attesa la barra si ridisegnerebbe due o tre
+  // volte per ogni modifica, e con essa si legge una volta a file fermo.
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stacca = guardaTodo(cwd, () => {
+    if (timer === null) timer = setTimeout(() => { timer = null; invia() }, 120)
+  })
+
+  // Stesso battito del flusso degli eventi, e per la stessa ragione: un proxy con un
+  // timeout corto chiuderebbe una connessione che sta solo aspettando.
+  const battito = setInterval(() => res.write(': .\n\n'), 15000)
+  req.on('close', () => {
+    clearInterval(battito)
+    if (timer) clearTimeout(timer)
+    stacca()
+  })
+}
+
 function listStream(req: IncomingMessage, res: ServerResponse, registry: Registry): void {
   res.writeHead(200, {
     'content-type': 'text/event-stream',

@@ -1,0 +1,26 @@
+{
+  "expectations": [
+    {
+      "text": "Il file .stark/todo.json è rimasto identico byte per byte",
+      "passed": true,
+      "evidence": "identico"
+    },
+    {
+      "text": "Non ha creato liste nuove",
+      "passed": true,
+      "evidence": "2 liste"
+    },
+    {
+      "text": "La risposta cita la lista attiva e non quella già chiusa come se fosse aperta",
+      "passed": true,
+      "evidence": "cita=True chiusa_distinta=True"
+    },
+    {
+      "text": "La risposta dice quanti task sono fatti e qual è quello in corso",
+      "passed": true,
+      "evidence": "ok"
+    }
+  ],
+  "passed": 4,
+  "total": 4
+}

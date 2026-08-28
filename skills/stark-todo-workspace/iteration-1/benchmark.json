@@ -1,0 +1,395 @@
+{
+  "metadata": {
+    "skill_name": "stark-todo",
+    "skill_path": "/Users/veenz/Documents/projects/stark/skills/stark-todo",
+    "executor_model": "claude-opus-5[1m]",
+    "timestamp": "2026-08-28T09:05:00Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "crea-una-lista-da-un-piano-a-voce",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 27.2,
+        "tokens": 92072,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Crea .stark/todo.json ed è JSON valido",
+          "passed": true,
+          "evidence": "ok"
+        },
+        {
+          "text": "Contiene esattamente una lista",
+          "passed": true,
+          "evidence": "1 liste"
+        },
+        {
+          "text": "La chiave della lista è un UUID",
+          "passed": true,
+          "evidence": "['77f11f0f-4cfa-4f0e-aea7-68a26623f65f']"
+        },
+        {
+          "text": "La lista ha title, created, __status e tasks",
+          "passed": true,
+          "evidence": "['__status', 'created', 'tasks', 'title']"
+        },
+        {
+          "text": "__status è \"active\"",
+          "passed": true,
+          "evidence": "active"
+        },
+        {
+          "text": "Ci sono tre task, uno per passo descritto",
+          "passed": true,
+          "evidence": "3 task"
+        },
+        {
+          "text": "Tutti i task partono in stato \"todo\"",
+          "passed": true,
+          "evidence": "['todo', 'todo', 'todo']"
+        },
+        {
+          "text": "Gli id dei task sono unici dentro la lista",
+          "passed": true,
+          "evidence": "['t1', 't2', 't3']"
+        },
+        {
+          "text": "Non ha eseguito il lavoro: nessun file di configurazione creato",
+          "passed": true,
+          "evidence": "[]"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "crea-una-lista-da-un-piano-a-voce",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.1111111111111111,
+        "passed": 1,
+        "failed": 8,
+        "total": 9,
+        "time_seconds": 23.9,
+        "tokens": 89134,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Crea .stark/todo.json ed è JSON valido",
+          "passed": false,
+          "evidence": "assente"
+        },
+        {
+          "text": "Contiene esattamente una lista",
+          "passed": false,
+          "evidence": "0 liste"
+        },
+        {
+          "text": "La chiave della lista è un UUID",
+          "passed": false,
+          "evidence": "[]"
+        },
+        {
+          "text": "La lista ha title, created, __status e tasks",
+          "passed": false,
+          "evidence": "[]"
+        },
+        {
+          "text": "__status è \"active\"",
+          "passed": false,
+          "evidence": "None"
+        },
+        {
+          "text": "Ci sono tre task, uno per passo descritto",
+          "passed": false,
+          "evidence": "0 task"
+        },
+        {
+          "text": "Tutti i task partono in stato \"todo\"",
+          "passed": false,
+          "evidence": "[]"
+        },
+        {
+          "text": "Gli id dei task sono unici dentro la lista",
+          "passed": false,
+          "evidence": "[]"
+        },
+        {
+          "text": "Non ha eseguito il lavoro: nessun file di configurazione creato",
+          "passed": true,
+          "evidence": "['accesso-da-fuori-casa.md']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "riassume-senza-riscrivere",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 25.6,
+        "tokens": 91976,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Il file .stark/todo.json è rimasto identico byte per byte",
+          "passed": true,
+          "evidence": "identico"
+        },
+        {
+          "text": "Non ha creato liste nuove",
+          "passed": true,
+          "evidence": "2 liste"
+        },
+        {
+          "text": "La risposta cita la lista attiva e non quella già chiusa come se fosse aperta",
+          "passed": true,
+          "evidence": "cita=True chiusa_distinta=True"
+        },
+        {
+          "text": "La risposta dice quanti task sono fatti e qual è quello in corso",
+          "passed": true,
+          "evidence": "ok"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "riassume-senza-riscrivere",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 16.1,
+        "tokens": 88784,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Il file .stark/todo.json è rimasto identico byte per byte",
+          "passed": true,
+          "evidence": "identico"
+        },
+        {
+          "text": "Non ha creato liste nuove",
+          "passed": true,
+          "evidence": "2 liste"
+        },
+        {
+          "text": "La risposta cita la lista attiva e non quella già chiusa come se fosse aperta",
+          "passed": true,
+          "evidence": "cita=True chiusa_distinta=True"
+        },
+        {
+          "text": "La risposta dice quanti task sono fatti e qual è quello in corso",
+          "passed": true,
+          "evidence": "ok"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "aggiorna-stato-e-blocco",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 31.8,
+        "tokens": 93152,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Il task t2 (Traefik) passa a \"done\"",
+          "passed": true,
+          "evidence": "done"
+        },
+        {
+          "text": "Il task t3 (tunnel) passa a \"blocked\"",
+          "passed": true,
+          "evidence": "blocked"
+        },
+        {
+          "text": "Il task t3 ha una note che spiega il DNS proxied su Cloudflare",
+          "passed": true,
+          "evidence": "il dns sul vps punta a cloudflare in modalità proxied: da sistemare prima di poter misurare"
+        },
+        {
+          "text": "La seconda lista (bugfix barra di stato) è rimasta intatta",
+          "passed": true,
+          "evidence": "intatta"
+        },
+        {
+          "text": "__status della lista attiva resta \"active\": non è finita",
+          "passed": true,
+          "evidence": "active"
+        },
+        {
+          "text": "Il campo created non è stato toccato",
+          "passed": true,
+          "evidence": "1787900000000"
+        },
+        {
+          "text": "Gli id dei task non sono stati rinumerati",
+          "passed": true,
+          "evidence": "['t1', 't2', 't3', 't4']"
+        },
+        {
+          "text": "Il file è ancora JSON valido",
+          "passed": true,
+          "evidence": "ok"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "aggiorna-stato-e-blocco",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 27.9,
+        "tokens": 90718,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Il task t2 (Traefik) passa a \"done\"",
+          "passed": true,
+          "evidence": "done"
+        },
+        {
+          "text": "Il task t3 (tunnel) passa a \"blocked\"",
+          "passed": true,
+          "evidence": "blocked"
+        },
+        {
+          "text": "Il task t3 ha una note che spiega il DNS proxied su Cloudflare",
+          "passed": true,
+          "evidence": "bloccato: sul vps il dns punta ancora a cloudflare in modalità proxied. finché il record non passa a dns-only (grigio) il tunnel non è misurabile."
+        },
+        {
+          "text": "La seconda lista (bugfix barra di stato) è rimasta intatta",
+          "passed": true,
+          "evidence": "intatta"
+        },
+        {
+          "text": "__status della lista attiva resta \"active\": non è finita",
+          "passed": true,
+          "evidence": "active"
+        },
+        {
+          "text": "Il campo created non è stato toccato",
+          "passed": true,
+          "evidence": "1787900000000"
+        },
+        {
+          "text": "Gli id dei task non sono stati rinumerati",
+          "passed": true,
+          "evidence": "['t1', 't2', 't3']"
+        },
+        {
+          "text": "Il file è ancora JSON valido",
+          "passed": true,
+          "evidence": "ok"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 28.2,
+        "stddev": 2.628,
+        "min": 25.6,
+        "max": 31.8
+      },
+      "tokens": {
+        "mean": 92400,
+        "stddev": 533.187,
+        "min": 91976,
+        "max": 93152
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.704,
+        "stddev": 0.419,
+        "min": 0.1111111111111111,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 22.633,
+        "stddev": 4.9,
+        "min": 16.1,
+        "max": 27.9
+      },
+      "tokens": {
+        "mean": 89545.333,
+        "stddev": 841.422,
+        "min": 88784,
+        "max": 90718
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.30",
+      "time_seconds": "+5.6",
+      "tokens": "+2855"
+    }
+  },
+  "analysis": {
+    "observations": [
+      "eval-0 è l'unico che discrimina: 9/9 con la skill contro 1/9 senza. Senza, l'agent si inventa un file suo (`accesso-da-fuori-casa.md`) — utile per un umano, invisibile per la sidebar.",
+      "eval-1 ed eval-2 NON discriminano (4/4 e 8/8 in entrambe le configurazioni): la fixture insegna il formato da sé, quindi misurano la capacità di imitare un JSON, non la skill.",
+      "Il costo è reale ma piccolo: +3.5% di token e +5.5s in media, che è il prezzo di leggere SKILL.md e chiamare lo script.",
+      "Da verificare con casi nuovi: cosa succede quando l'ultimo task si chiude (__status deve passare a done), e se una riscrittura a mano perde campi non documentati. Sono le due cose che il file non può insegnare da solo."
+    ]
+  }
+}

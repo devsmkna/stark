@@ -1,0 +1,42 @@
+{
+  "9f1c2a4e-6b31-4d0a-9f28-5c7ab0e14d33": {
+    "title": "Accesso da fuori casa senza Tailscale",
+    "created": 1787900000000,
+    "__status": "active",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "Dichiarare il perimetro con STARK_PUBLIC_HOST",
+        "state": "done"
+      },
+      {
+        "id": "t2",
+        "text": "Traefik sul VPS con Let's Encrypt e mTLS",
+        "state": "done"
+      },
+      {
+        "id": "t3",
+        "text": "Misurare il tunnel con npm run tunnel",
+        "state": "blocked",
+        "note": "Il DNS sul VPS punta a Cloudflare in modalità proxied: da sistemare prima di poter misurare"
+      },
+      {
+        "id": "t4",
+        "text": "Il DNS del VPS risolve diretto, senza proxy Cloudflare",
+        "state": "todo"
+      }
+    ]
+  },
+  "2b7d0f81-4c19-4a55-8e0b-1d3f6a9c7e20": {
+    "title": "Bugfix della barra di stato da telefono",
+    "created": 1787800000000,
+    "__status": "done",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "I tre chip alti uguali",
+        "state": "done"
+      }
+    ]
+  }
+}

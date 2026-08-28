@@ -21,6 +21,12 @@
   <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <rect x="9" y="9" width="6" height="6" rx="1" /></symbol>
   <symbol id="i-bars" viewBox="0 0 24 24"><path d="M3 5h18" /> <path d="M3 12h18" /> <path d="M3 19h18" /></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
+  <!-- Un task ancora da fare: un cerchio vuoto. `i-check` è quello spuntato, e serviva
+       il suo contrario — senza, un task «todo» resterebbe senza segno e le righe non si
+       allineerebbero con le altre. -->
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /></symbol>
+  <!-- Quello in corso. `i-bolt` c'era ma vuol dire un'altra cosa (la modalità auto). -->
+  <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" fill="currentColor" /></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
   <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
@@ -48,7 +54,4 @@
   <symbol id="i-send" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /> <path d="M12 19V5" /></symbol>
   <!-- L'allegato che non è un'immagine: al posto dell'anteprima che non c'è. -->
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /> <path d="M14 2v4a2 2 0 0 0 2 2h4" /></symbol>
-  <!-- Telegram. `i-send` è una freccia in su: accanto alla parola «Telegram» si legge
-       «invia», che è un'altra cosa. -->
-  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M21 3 3 10.5l6.5 2.8L21 3Z" /> <path d="M21 3 9.5 13.3l.7 6.7L21 3Z" /></symbol>
 </svg>

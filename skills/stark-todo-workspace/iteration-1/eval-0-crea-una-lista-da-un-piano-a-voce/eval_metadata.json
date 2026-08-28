@@ -1,0 +1,16 @@
+{
+  "eval_id": 0,
+  "prompt": "ok allora facciamo così per l'accesso da fuori casa: prima dichiariamo il perimetro con STARK_PUBLIC_HOST, poi metto su traefik sul vps con let's encrypt e mtls, poi misuriamo il tunnel per vedere se strozza l'SSE. tienimi traccia di dove siamo che poi mi perdo",
+  "assertions": [
+    "Crea .stark/todo.json ed è JSON valido",
+    "Contiene esattamente una lista",
+    "La chiave della lista è un UUID",
+    "La lista ha title, created, __status e tasks",
+    "__status è \"active\"",
+    "Ci sono tre task, uno per passo descritto",
+    "Tutti i task partono in stato \"todo\"",
+    "Gli id dei task sono unici dentro la lista",
+    "Non ha eseguito il lavoro: nessun file di configurazione creato"
+  ],
+  "eval_name": "0-crea-una-lista-da-un-piano-a-voce"
+}

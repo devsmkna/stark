@@ -228,6 +228,16 @@
       <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
       {#if store.calls.on && store.calls.permission === 'default'}<i class="ask"></i>{/if}
     </button>
+    <!-- L'interruttore della colonna dei task. Sta qui e non nella barra della chat
+         perché la colonna è **una sola** per tutta la finestra: coi pannelli affiancati
+         un bottone per pannello lascerebbe credere che ognuno abbia la sua. -->
+    <button class="iconb" class:on={store.todoOpen}
+      title={store.todoOpen ? 'Hide the todo column' : 'Show the todo column'}
+      aria-label="Todo column" aria-pressed={store.todoOpen}
+      onclick={() => store.toggleTodo()}>
+      <Icon name="i-check" />
+    </button>
+
     <!-- L'helper non e' di una chat: e' della macchina, come la campanella accanto.
          Nella barra di una conversazione comparirebbe una volta **per pannello aperto**,
          da quando le chat si affiancano. -->

@@ -1,0 +1,15 @@
+{
+  "eval_id": 2,
+  "prompt": "traefik è a posto, l'ho finito ieri. il tunnel invece è fermo: sul vps il dns punta ancora a cloudflare in modalità proxied, quindi non posso misurarlo finché non lo sistemo",
+  "assertions": [
+    "Il task t2 (Traefik) passa a \"done\"",
+    "Il task t3 (tunnel) passa a \"blocked\"",
+    "Il task t3 ha una note che spiega il DNS proxied su Cloudflare",
+    "La seconda lista (bugfix barra di stato) è rimasta intatta",
+    "__status della lista attiva resta \"active\": non è finita",
+    "Il campo created non è stato toccato",
+    "Gli id dei task non sono stati rinumerati",
+    "Il file è ancora JSON valido"
+  ],
+  "eval_name": "2-aggiorna-stato-e-blocco"
+}

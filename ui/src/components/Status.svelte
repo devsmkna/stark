@@ -17,7 +17,8 @@
   import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
-  let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
+  // `live` per pannello, non `live`: vedi Dock.svelte.
+  let { store, snap, live }: { store: Store; snap: SessionSnapshot; live: boolean } = $props()
 
   // Era un elenco chiuso di tre. Ora e' l'`id` del selettore aperto, e la UI non sa
   // quali esistano: li dichiara l'agent (ADR-014).
@@ -77,7 +78,7 @@
 
   /** Si può cambiare adesso? La capability è dell'agent, `live` è dello stato. */
   function modificabile(o: SessionOption): boolean {
-    if (!store.live) return false
+    if (!live) return false
     if (o.kind === 'mode') return snap.capabilities?.switchMode !== false
     if (o.kind === 'model') return snap.capabilities?.switchModel !== false
     return true
@@ -397,8 +398,8 @@
            conversazione che ereditasse tutti i server della macchina costerebbe circa
            5× di contesto per turno, cioè quota, e aprirebbe una via d'uscita ai dati
            che nessuno ha chiesto. Spenti è il default, non il limite: qui si accendono. -->
-      <button class="tune" onclick={() => choose('mcp')} disabled={!store.live}
-        title={store.live ? 'External tool servers, for this chat'
+      <button class="tune" onclick={() => choose('mcp')} disabled={!live}
+        title={live ? 'External tool servers, for this chat'
           : 'Wake this chat to change its tool servers'}>
         <span style="color:var(--muted)">MCP</span>{mcpLabel}<Icon name="i-down" />
       </button>
@@ -607,7 +608,7 @@
 
         {#if stale}
           <div class="tr"><small class="faint">read {since(stale, clock)} ago{
-            store.live ? '' : ' — this chat has no process behind it now'}</small></div>
+            live ? '' : ' — this chat has no process behind it now'}</small></div>
         {/if}
       </span>
     </button>
@@ -643,7 +644,7 @@
     <!-- Non è un guasto e non è uno zero: è che nessuno l'ha ancora chiesto al piano,
          o il piano non lo dice (chiave API, Bedrock, Vertex). Dirlo è meglio di
          disegnare una barra vuota, che si leggerebbe come «non hai consumato niente». -->
-    <div class="tr"><small>{store.live
+    <div class="tr"><small>{live
       ? 'the plan has not reported this window yet'
       : 'wake this chat to read it — a sleeping chat has no one to ask'}</small></div>
   {/if}
