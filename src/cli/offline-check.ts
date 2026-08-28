@@ -15,6 +15,10 @@ import { vigila, type Canale } from '../daemon/chiamate.ts'
 import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
+import {
+  ESTENSIONE, filtroFile, IMMAGINI, parteDi, tipiAccettati, tipoDi,
+} from '../core/allegati.ts'
+import { allegabiliDi } from '../adapters/opencode/adapter.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
@@ -35,7 +39,8 @@ import {
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
-  buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel, slashCommands,
+  ALLEGABILI, buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel,
+  slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -1756,6 +1761,72 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('§18: riporta l\'ultima cosa detta dall\'agent', b2.includes('fatto meta\' del lavoro'))
   check('§18: dice da quale agent e modello veniva',
     b2.includes('claude-code') && b2.includes('opus'))
+}
+
+// ─── allegati: cosa si puo' attaccare a un prompt, e chi lo decide ──────────
+//
+// La regola in una riga: **lo dichiara il modello**, e chi disegna la casella non
+// conosce nessun tipo per nome. Prima era una costante di quattro immagini ripetuta
+// in due file, quindi la graffetta si offriva anche dove non c'era niente da allegare.
+{
+  check('allegati: un modello che non dichiara niente vale come prima (le immagini)',
+    JSON.stringify(tipiAccettati({})) === JSON.stringify(IMMAGINI))
+  // I due casi non si fondono: vuoto e' una risposta, assente e' un'assenza di
+  // risposta. Fonderli spegnerebbe la graffetta su meta' dei journal gia' scritti.
+  check('allegati: un elenco vuoto e\' un no, non un «non lo so»',
+    tipiAccettati({ accepts: [] }).length === 0)
+  check('allegati: quello che il modello dichiara arriva intatto',
+    JSON.stringify(tipiAccettati({ accepts: ['application/pdf'] })) === '["application/pdf"]')
+
+  // Il browser lascia `type` vuoto sui tipi che il suo sistema non conosce — `.md` e
+  // `.csv` capitano di continuo. Fidarsi solo di quello rifiuterebbe un file che il
+  // modello legge, con un messaggio che dice «e' un », cioe' che non dice niente.
+  check('allegati: senza tipo dal browser decide l\'estensione',
+    tipoDi({ type: '', name: 'note.md' }) === 'text/markdown')
+  check('allegati: un tipo dichiarato e riconosciuto vince sull\'estensione',
+    tipoDi({ type: 'image/png', name: 'schermata.jpg' }) === 'image/png')
+  check('allegati: un tipo che non sappiamo trasportare resta quello che era',
+    tipoDi({ type: 'application/zip', name: 'roba.zip' }) === 'application/zip')
+
+  check('allegati: il filtro del selettore porta anche le estensioni',
+    filtroFile(['text/markdown']) === 'text/markdown,.md')
+  check('allegati: solo un\'immagine si disegna come immagine',
+    parteDi('image/webp') === 'image' && parteDi('application/pdf') === 'file')
+  // `ESTENSIONE` e' anche il cancello del registro: un tipo dichiarato da un agent e
+  // assente li' verrebbe offerto e poi buttato in silenzio.
+  check('allegati: tutto cio\' che Claude Code offre, il registro lo sa scrivere',
+    ALLEGABILI.every(t => Boolean(ESTENSIONE[t])), ALLEGABILI.join(' '))
+
+  // Claude Code non dichiara niente sulla multimodalita' (misurato sull'handshake
+  // vero: cinque modelli, nessun campo), quindi l'elenco lo scrive l'adapter — ed e'
+  // uguale per tutti perche' i modelli di Claude sono multimodali tutti.
+  check('Claude Code: ogni modello dichiara cosa accetta, PDF compreso',
+    modelChoices(HANDSHAKE.models, 'default')
+      .every(m => (m.accepts ?? []).includes('application/pdf')
+        && (m.accepts ?? []).includes('image/png')))
+
+  // OpenCode invece lo dichiara modello per modello, ed e' la forma **del filo** che
+  // conta: i tipi promettono `attachment`/`modalities` piatti, il server manda
+  // `capabilities` annidato (stessa trappola della P21, `properties` contro `data`).
+  const cap = (input: Record<string, boolean>, attachment = true) =>
+    ({ capabilities: { attachment, input } })
+  check('OpenCode: un modello che legge immagini le accetta',
+    JSON.stringify(allegabiliDi(cap({ text: true, image: true }))) === JSON.stringify(IMMAGINI))
+  check('OpenCode: chi legge anche i PDF li accetta',
+    allegabiliDi(cap({ text: true, image: true, pdf: true })).includes('application/pdf'))
+  // Il caso per cui esiste la meta' del lavoro: un modello di solo testo.
+  check('OpenCode: un modello di solo testo non accetta niente',
+    allegabiliDi(cap({ text: true })).length === 0)
+  // Misurato: 67 modelli con `attachment: true`, sei dei quali con `image: false` —
+  // sono i modelli voce e video. Dedurre le immagini da quel flag riaccenderebbe la
+  // graffetta proprio dove il modello ha appena detto di no.
+  check('OpenCode: `attachment` da solo non vuol dire immagini',
+    allegabiliDi(cap({ text: true, audio: true, image: false })).length === 0)
+  check('OpenCode: si legge anche la forma piatta dei tipi',
+    allegabiliDi({ modalities: { input: ['text', 'image'] } }).length === IMMAGINI.length)
+  check('OpenCode: senza niente da leggere, `attachment` resta l\'ultimo indizio',
+    allegabiliDi({ attachment: true }).length === IMMAGINI.length
+    && allegabiliDi({ attachment: false }).length === 0)
 }
 
 let failed = 0
