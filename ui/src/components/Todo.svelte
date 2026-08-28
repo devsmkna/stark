@@ -39,6 +39,18 @@
   const fatti = (l: { tasks: TodoTask[] }): number => l.tasks.filter(t => t.state === 'done').length
 </script>
 
+{#snippet righe(tasks: TodoTask[])}
+  {#each tasks as t (t.id)}
+    <div class="tk s-{t.state}">
+      <Icon name={SEGNO[t.state]} />
+      <div>
+        <div class="tx">{t.text}</div>
+        {#if t.note}<div class="nt">{t.note}</div>{/if}
+      </div>
+    </div>
+  {/each}
+{/snippet}
+
 <aside class="todocol">
   <div class="th">
     <span class="tt">Todo</span>
@@ -70,15 +82,7 @@
             <span class="cnt">{fatti(l)}/{l.tasks.length}</span>
           </div>
           {#if l.status === 'paused'}<div class="pau">paused</div>{/if}
-          {#each l.tasks as t (t.id)}
-            <div class="tk s-{t.state}">
-              <Icon name={SEGNO[t.state]} />
-              <div>
-                <div class="tx">{t.text}</div>
-                {#if t.note}<div class="nt">{t.note}</div>{/if}
-              </div>
-            </div>
-          {/each}
+          {@render righe(l.tasks)}
         </div>
       {/each}
 
@@ -92,7 +96,8 @@
           {#each chiuse as l (l.id)}
             <div class="lst closed">
               <div class="lh"><span class="lt">{l.title}</span>
-                <span class="cnt">{l.status}</span></div>
+                <span class="cnt">{fatti(l)}/{l.tasks.length} · {l.status}</span></div>
+              {@render righe(l.tasks)}
             </div>
           {/each}
         {/if}
