@@ -11,6 +11,9 @@
   import Status from './Status.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { Attachment, SlashCommand } from '$core/events.ts'
+  import {
+    filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
+  } from '$core/allegati.ts'
   import { activity } from '$core/activity.ts'
   import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -63,19 +66,43 @@
   /** Quello che parte insieme al testo. Vuoto quasi sempre; non vuoto quando serve. */
   let allegati = $state<Attachment[]>([])
 
-  /** I quattro tipi che il modello accetta. Gli altri non si accodano in silenzio. */
-  const TIPI = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-  /** Oltre questo, l'immagine non parte. Il numero è nostro, e il messaggio lo dice. */
+  /**
+   * Cosa accetta il modello in uso — non cosa accetta STARK.
+   *
+   * Qui c'era una costante di quattro tipi immagine, uguale per ogni modello: la
+   * graffetta si offriva anche dove non c'era niente da allegare e rifiutava un PDF
+   * che sarebbe passato. Adesso la domanda la fa il modello (`ModelChoice.accepts`,
+   * dichiarato dall'agent) e questo file non conosce nessun tipo per nome.
+   */
+  const modello = $derived(modelloInUso(snap.models, snap.model))
+  const tipi = $derived(tipiAccettati(modello))
+  const puoAllegare = $derived(tipi.length > 0)
+  /**
+   * Come si chiama il modello quando glielo si rinfaccia.
+   *
+   * Il nome risolto e non l'etichetta della voce: `snap.model` è esattamente ciò che
+   * la barra di stato mostra due centimetri più sotto. L'etichetta sarebbe «Default
+   * (recommended)», che in mezzo a un rifiuto è una frase invece di un nome.
+   */
+  const nomeModello = $derived(snap.model ?? modello?.label ?? 'this model')
+  /** Oltre questo, l'allegato non parte. Il numero è nostro, e il messaggio lo dice. */
   const MASSIMO = 10 * 1024 * 1024
 
   async function aggiungi(file: File | null): Promise<void> {
     if (!file) return
-    if (!TIPI.includes(file.type)) {
-      store.refused = `${file.name || 'that file'} is a ${file.type || 'file'} — only PNG, JPEG, GIF and WebP can be sent`
+    if (!puoAllegare) {
+      store.refused = `${nomeModello} doesn't read attachments — switch model to send files`
+      return
+    }
+    // Non `file.type`: su `.md` e `.csv` il browser lo lascia spesso vuoto. Vedi `tipoDi`.
+    const mediaType = tipoDi(file)
+    if (!tipi.includes(mediaType)) {
+      const che = mediaType ? ` (${mediaType})` : ''
+      store.refused = `${file.name || 'That file'}${che} — ${nomeModello} takes ${nomiBrevi(tipi)}`
       return
     }
     if (file.size > MASSIMO) {
-      store.refused = `${file.name || 'that image'} is ${Math.round(file.size / 1e6)} MB — the limit is 10 MB`
+      store.refused = `${file.name || 'that file'} is ${Math.round(file.size / 1e6)} MB — the limit is 10 MB`
       return
     }
     // `readAsDataURL` e non `btoa` su un ArrayBuffer: quest'ultimo, su un'immagine
@@ -88,8 +115,8 @@
       r.readAsDataURL(file)
     })
     allegati = [...allegati, {
-      type: 'image',
-      mediaType: file.type as Attachment['mediaType'],
+      type: parteDi(mediaType),
+      mediaType,
       data: dataUrl.slice(dataUrl.indexOf(',') + 1),
       ...(file.name ? { name: file.name } : {}),
     }]
@@ -456,8 +483,14 @@
     <div class="allegati">
       {#each allegati as a, i (a.data.slice(0, 32) + i)}
         <div class="all">
-          <img src={`data:${a.mediaType};base64,${a.data}`} alt={a.name ?? 'attachment'} />
-          <span class="n">{a.name ?? 'pasted image'}</span>
+          <!-- Un'immagine si guarda, un file si legge per nome: mettere un `<img>` su
+               un PDF darebbe l'icona di immagine rotta su un allegato arrivato bene. -->
+          {#if a.type === 'image'}
+            <img src={`data:${a.mediaType};base64,${a.data}`} alt={a.name ?? 'attachment'} />
+          {:else}
+            <span class="doc"><Icon name="i-file" /></span>
+          {/if}
+          <span class="n">{a.name ?? (a.type === 'image' ? 'pasted image' : 'pasted file')}</span>
           <button class="x" aria-label="Remove"
             onclick={() => { allegati = allegati.filter((_, j) => j !== i) }}>✕</button>
         </div>
@@ -469,9 +502,14 @@
     <div class="row-input">
       <!-- Nascosto apposta: è il bottone vestito da graffetta a fare da etichetta,
            non i controlli grigi di sistema che un <input type=file> porta di suo. -->
-      <input class="filepick" type="file" accept={TIPI.join(',')} multiple
+      <input class="filepick" type="file" accept={filtroFile(tipi)} multiple
         bind:this={fileInput} onchange={scegli} tabindex="-1" aria-hidden="true" />
-      <button class="iconb attach" title="Attach an image" type="button"
+      <!-- Spento, non nascosto: un modello che non legge allegati è un fatto da dire,
+           e la graffetta che sparisce sembrerebbe un pezzo di STARK che manca. -->
+      <button class="iconb attach" type="button" disabled={!puoAllegare}
+        title={puoAllegare
+          ? `Attach a file — ${nomiBrevi(tipi)}`
+          : `${nomeModello} doesn't read attachments`}
         onclick={() => fileInput?.click()}>
         <Icon name="i-clip" />
       </button>
@@ -581,6 +619,17 @@
     font-size: 10px; max-width: 240px;
   }
   .all img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; flex: none; }
+  /* Il posto dell'anteprima quando non c'è niente da vedere: stessa misura, così una
+     fila mista di immagini e documenti resta una fila e non una scala. */
+  .all .doc {
+    width: 26px; height: 26px; border-radius: 5px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface); color: var(--muted);
+  }
+  .all .doc :global(svg) { width: 13px; height: 13px; }
+  /* Un bottone spento continua a dire cosa sarebbe: il `title` spiega perché non si può. */
+  .row-input .attach:disabled { opacity: .45; cursor: default; }
+  .row-input .attach:disabled:hover { background: none; color: var(--muted); }
   .all .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
   .all .x {
     border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px;

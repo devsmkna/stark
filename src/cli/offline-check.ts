@@ -15,6 +15,10 @@ import { vigila, type Canale } from '../daemon/chiamate.ts'
 import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
+import {
+  ESTENSIONE, filtroFile, IMMAGINI, parteDi, tipiAccettati, tipoDi,
+} from '../core/allegati.ts'
+import { allegabiliDi } from '../adapters/opencode/adapter.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
@@ -29,11 +33,15 @@ import { askCategories, readSettings, writeSettings } from '../daemon/settings.t
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal, MemoryJournal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
+import {
+  briefingDalJournal, percorsoHandoff, promptBriefing, promptRipresa,
+} from '../core/handoff.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import { giorno, IGNOTO, statsFrom } from '../core/stats.ts'
 import {
-  buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel, slashCommands,
+  ALLEGABILI, buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel,
+  slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -1734,6 +1742,134 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
 
   check('§18: una conversazione senza niente nel periodo non fa una riga vuota',
     statsFrom([uno], { from: T0 + 10 * GIORNO }).perProgetto.length === 0)
+}
+
+// ─── §19: il passaggio di consegne fra due agent ─────────────────────────────
+//
+// Solo la parte pura: nomi e parole. L'orchestrazione (prompt, attesa del turno,
+// apertura della chat nuova) vuole processi veri e sta in `npm run daemon`.
+{
+  const quando = new Date(2026, 7, 28, 9, 5)   // 28 agosto 2026, 09:05 locale
+  const file = percorsoHandoff(quando)
+  check('§19: il nome del file porta data e ora, dentro .stark del progetto',
+    file === '.stark/handoff-2026-08-28-0905.md', file)
+  check('§19: il percorso e\' relativo, mai assoluto',
+    !file.startsWith('/'), file)
+
+  const briefing = promptBriefing(file)
+  check('§19: a chi lascia si dice **dove** scrivere', briefing.includes(file))
+  check('§19: gli si chiede cosa manca, non un riassunto della chat',
+    briefing.includes('Da fare') && briefing.includes('Non riassumere la conversazione'))
+
+  const ripresa = promptRipresa(file, 'claude-code')
+  check('§19: chi arriva **cita** il file con @, cosi\' lo espande il CLI',
+    ripresa.includes(`@${file}`))
+  check('§19: chi arriva sa da quale agent viene il lavoro',
+    ripresa.includes('claude-code'))
+  check('§19: senza agent precedente la frase resta corretta',
+    !promptRipresa(file).includes('undefined'))
+
+  // Il briefing meccanico, su uno snapshot costruito a mano.
+  const vuoto = reduce([])
+  const meccanico = briefingDalJournal(vuoto, quando)
+  check('§19: il briefing dal journal dichiara di NON sapere cosa manca',
+    meccanico.includes('cosa manca') && meccanico.includes('quel giudizio non'),
+    meccanico.slice(0, 120))
+  // Non deve **affermare** perche' e' stato composto cosi': la via `journal` si puo'
+  // scegliere anche su una chat viva, e «la sua sessione non era viva» sarebbe una
+  // frase falsa scritta con sicurezza dentro il documento su cui l'altro agent lavora.
+  check('§19: non inventa il motivo per cui l\'ha scritto STARK',
+    !meccanico.includes('non era viva'))
+  check('§19: su una conversazione vuota non inventa sezioni',
+    !meccanico.includes('## File toccati') && !meccanico.includes('## Cosa era stato chiesto'))
+
+  const pieno = reduce([
+    { k: 'session.created', agent: 'claude-code', cwd: '/p', model: 'opus',
+      capabilities: { interrupt: true, switchModel: true, switchMode: true, autoMode: true,
+        permissionAlways: true, questions: true, revert: false, toolProgress: false,
+        fileBrowser: false, pty: false } },
+    { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'sistema il parser' }] },
+    { k: 'file.edited', path: 'src/a.ts', created: false, hunks: [] },
+    { k: 'file.edited', path: 'src/a.ts', created: false, hunks: [] },
+    { k: 'file.edited', path: 'src/b.ts', created: false, hunks: [] },
+    { k: 'text.started', partId: 'x' },
+    { k: 'text.delta', partId: 'x', delta: 'fatto meta\' del lavoro' },
+    { k: 'text.ended', partId: 'x', text: 'fatto meta\' del lavoro' },
+    { k: 'turn.ended', turnId: 't1', reason: 'completed' },
+  ].map((p, i) => ({ v: MODEL_VERSION, seq: i + 1, ts: 1, sessionId: 's', payload: p as never })))
+  const b2 = briefingDalJournal(pieno, quando)
+  check('§19: riporta cosa era stato chiesto', b2.includes('sistema il parser'))
+  check('§19: un file toccato due volte e\' UNA riga, non due',
+    (b2.match(/src\/a\.ts/g) ?? []).length === 1, b2)
+  check('§19: riporta l\'ultima cosa detta dall\'agent', b2.includes('fatto meta\' del lavoro'))
+  check('§19: dice da quale agent e modello veniva',
+    b2.includes('claude-code') && b2.includes('opus'))
+}
+
+// ─── allegati: cosa si puo' attaccare a un prompt, e chi lo decide ──────────
+//
+// La regola in una riga: **lo dichiara il modello**, e chi disegna la casella non
+// conosce nessun tipo per nome. Prima era una costante di quattro immagini ripetuta
+// in due file, quindi la graffetta si offriva anche dove non c'era niente da allegare.
+{
+  check('allegati: un modello che non dichiara niente vale come prima (le immagini)',
+    JSON.stringify(tipiAccettati({})) === JSON.stringify(IMMAGINI))
+  // I due casi non si fondono: vuoto e' una risposta, assente e' un'assenza di
+  // risposta. Fonderli spegnerebbe la graffetta su meta' dei journal gia' scritti.
+  check('allegati: un elenco vuoto e\' un no, non un «non lo so»',
+    tipiAccettati({ accepts: [] }).length === 0)
+  check('allegati: quello che il modello dichiara arriva intatto',
+    JSON.stringify(tipiAccettati({ accepts: ['application/pdf'] })) === '["application/pdf"]')
+
+  // Il browser lascia `type` vuoto sui tipi che il suo sistema non conosce — `.md` e
+  // `.csv` capitano di continuo. Fidarsi solo di quello rifiuterebbe un file che il
+  // modello legge, con un messaggio che dice «e' un », cioe' che non dice niente.
+  check('allegati: senza tipo dal browser decide l\'estensione',
+    tipoDi({ type: '', name: 'note.md' }) === 'text/markdown')
+  check('allegati: un tipo dichiarato e riconosciuto vince sull\'estensione',
+    tipoDi({ type: 'image/png', name: 'schermata.jpg' }) === 'image/png')
+  check('allegati: un tipo che non sappiamo trasportare resta quello che era',
+    tipoDi({ type: 'application/zip', name: 'roba.zip' }) === 'application/zip')
+
+  check('allegati: il filtro del selettore porta anche le estensioni',
+    filtroFile(['text/markdown']) === 'text/markdown,.md')
+  check('allegati: solo un\'immagine si disegna come immagine',
+    parteDi('image/webp') === 'image' && parteDi('application/pdf') === 'file')
+  // `ESTENSIONE` e' anche il cancello del registro: un tipo dichiarato da un agent e
+  // assente li' verrebbe offerto e poi buttato in silenzio.
+  check('allegati: tutto cio\' che Claude Code offre, il registro lo sa scrivere',
+    ALLEGABILI.every(t => Boolean(ESTENSIONE[t])), ALLEGABILI.join(' '))
+
+  // Claude Code non dichiara niente sulla multimodalita' (misurato sull'handshake
+  // vero: cinque modelli, nessun campo), quindi l'elenco lo scrive l'adapter — ed e'
+  // uguale per tutti perche' i modelli di Claude sono multimodali tutti.
+  check('Claude Code: ogni modello dichiara cosa accetta, PDF compreso',
+    modelChoices(HANDSHAKE.models, 'default')
+      .every(m => (m.accepts ?? []).includes('application/pdf')
+        && (m.accepts ?? []).includes('image/png')))
+
+  // OpenCode invece lo dichiara modello per modello, ed e' la forma **del filo** che
+  // conta: i tipi promettono `attachment`/`modalities` piatti, il server manda
+  // `capabilities` annidato (stessa trappola della P21, `properties` contro `data`).
+  const cap = (input: Record<string, boolean>, attachment = true) =>
+    ({ capabilities: { attachment, input } })
+  check('OpenCode: un modello che legge immagini le accetta',
+    JSON.stringify(allegabiliDi(cap({ text: true, image: true }))) === JSON.stringify(IMMAGINI))
+  check('OpenCode: chi legge anche i PDF li accetta',
+    allegabiliDi(cap({ text: true, image: true, pdf: true })).includes('application/pdf'))
+  // Il caso per cui esiste la meta' del lavoro: un modello di solo testo.
+  check('OpenCode: un modello di solo testo non accetta niente',
+    allegabiliDi(cap({ text: true })).length === 0)
+  // Misurato: 67 modelli con `attachment: true`, otto dei quali senza ne' immagini ne'
+  // PDF — sono i modelli voce e video. Dedurre le immagini da quel flag riaccenderebbe
+  // la graffetta proprio dove il modello ha appena detto di no.
+  check('OpenCode: `attachment` da solo non vuol dire immagini',
+    allegabiliDi(cap({ text: true, audio: true, image: false })).length === 0)
+  check('OpenCode: si legge anche la forma piatta dei tipi',
+    allegabiliDi({ modalities: { input: ['text', 'image'] } }).length === IMMAGINI.length)
+  check('OpenCode: senza niente da leggere, `attachment` resta l\'ultimo indizio',
+    allegabiliDi({ attachment: true }).length === IMMAGINI.length
+    && allegabiliDi({ attachment: false }).length === 0)
 }
 
 let failed = 0

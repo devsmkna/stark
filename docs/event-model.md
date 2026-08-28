@@ -224,7 +224,12 @@ ciò che precede in un capitolo chiuso (`docs/ui-schermate.md`).
 type PromptPart =
   | { type: 'text',  text: string }
   | { type: 'image', ref: string, mediaType: string, bytes: number, name?: string }
+  | { type: 'file',  ref: string, mediaType: string, bytes: number, name?: string }
 ```
+
+`image` e `file` hanno la stessa forma e sono due casi apposta: la differenza e' di chi
+disegna — un'immagine si mostra, un file si nomina. Fonderli avrebbe messo un `<img>` su un
+PDF, cioe' l'icona di immagine rotta su un allegato arrivato benissimo.
 
 `ref` è lo **sha256 dei byte**, che stanno in un file sotto `~/.stark/allegati/<sessione>/`.
 Nel journal ci va il riferimento e non il contenuto, e non è un dettaglio di efficienza: il
@@ -236,8 +241,8 @@ Il comando porta invece i byte, perché è il viaggio dal browser al daemon:
 
 ```ts
 type Attachment = {
-  type: 'image'
-  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  type: 'image' | 'file'
+  mediaType: string
   data: string   // base64
   name?: string
 }
@@ -248,9 +253,32 @@ in stream-json, e il modello lo vede (ha descritto il logo di STARK). Le immagin
 del testo, come raccomanda la documentazione dell'API: il modello legge la domanda avendo già
 davanti ciò a cui si riferisce.
 
-I quattro tipi sono quelli che il modello accetta. Un **file di testo non è un allegato**: si
-incolla, o si nomina per percorso — l'agent sa leggerlo da solo, ed è il motivo per cui non
-serve spedirglielo.
+**Quali tipi si possano allegare non sta qui: lo dichiara il modello.** `ModelChoice.accepts`
+e' l'elenco dei MIME che *quel* modello accetta, e la casella di scrittura filtra con quello
+senza conoscere nessun tipo per nome — stessa forma di ADR-014 per le modalita'. Vuoto vuol
+dire no (la graffetta si spegne **con la ragione scritta**, mai nascosta); assente vuol dire
+«non lo so», e li' si torna alle quattro immagini di sempre, che e' cio' che i journal scritti
+prima di questo campo si aspettano. La tabella dei tipi che STARK sa trasportare — e con quale
+estensione li scrive su disco — sta in `core/allegati.ts`, ed e' anche il cancello del registro:
+un tipo dichiarato da un agent e assente li' verrebbe offerto e poi buttato in silenzio.
+
+Cosa dichiara ciascun agent, **misurato** (`spike/allegati-dichiarati.ts`, costo zero):
+
+- **Claude Code** non dichiara niente: `list_models` porta `supportsEffort`,
+  `supportsAutoMode`, `supportsFastMode` e nient'altro — nessun campo sulla multimodalita',
+  sui cinque modelli veri dell'account. L'elenco lo scrive quindi l'adapter, ed e' quello che
+  il CLI lascia passare: le quattro immagini, `application/pdf` e il testo semplice. Le due
+  aggiunte sono provate dal vivo (`spike/allegato-pdf.ts`, un turno per caso) — un blocco
+  `document` con sorgente `base64`/`application/pdf` e uno con sorgente `text`/`text/plain`
+  arrivano al modello, che li legge.
+- **OpenCode** lo dichiara modello per modello: `capabilities.input.{text,image,audio,video,pdf}`.
+  Su questa macchina 151 modelli, 61 con immagini e 4 con PDF. `attachment: true` da solo **non**
+  vuol dire immagini: otto modelli ce l'hanno senza leggere ne' immagini ne' PDF (voce e video).
+
+Cade con questo la frase che stava qui, e vale la pena dire perche' era sbagliata: «un file di
+testo non e' un allegato, si nomina per percorso — l'agent sa leggerlo da solo». E' vera per un
+file **del progetto**, che infatti si cita con `@`, ed e' falsa per un file che arriva da fuori:
+dal telefono un percorso da nominare non c'e'.
 
 **`session.commands` — aggiunto collegando i comandi slash.**
 
@@ -1418,9 +1446,10 @@ cui `Capabilities` dovrà lavorare davvero.
 2. ~~**Identità stabile delle parti.**~~ **Risolto dal codice.** Il `partId` è
    `${messageId}#${index}`: l'indice si ricicla a ogni messaggio, l'id del messaggio no.
    Verificato che i partId restano distinti attraverso più messaggi dello stesso turno.
-3. ~~**Rappresentazione del prompt utente.**~~ **Risolto per le immagini** (vedi `PromptPart`
-   nel §6): si incollano e si trascinano, viaggiano come blocchi `image` verso l'agent e come
-   riferimento nel journal. Resta fuori il **riferimento a un file per percorso**, che però non
+3. ~~**Rappresentazione del prompt utente.**~~ **Risolto per gli allegati** (vedi `PromptPart`
+   nel §6): si incollano e si trascinano, viaggiano come blocchi `image` o `document` verso
+   l'agent e come riferimento nel journal, e **quali tipi** sia lecito allegare lo dichiara il
+   modello (`ModelChoice.accepts`) invece di essere una costante di STARK. Resta fuori il **riferimento a un file per percorso**, che però non
    ha bisogno di un tipo nuovo: l'agent legge un percorso scritto nel testo. Va deciso se serve
    un modo per *scegliere* quel file invece di scriverlo, e quello sì che tocca la UI.
 4. **L'hook `PermissionDenied`.** Esiste e servirebbe a intercettare i blocchi del classificatore

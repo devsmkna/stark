@@ -12,7 +12,7 @@
   import Icon from './Icon.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { AgentQuestion } from '$core/events.ts'
-  import { permissionHeadline, tilde } from '../lib/view.ts'
+  import { label, permissionHeadline, tilde } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -118,23 +118,37 @@
   const complete = $derived(qs.length > 0 && qs.every(q => answered(q)))
 
   /**
-   * Il caso in cui la scelta È la conferma: una domanda sola, a scelta singola,
-   * risposta premendo un'opzione. Non c'è niente da rivedere e niente da confermare,
-   * quindi non compare nemmeno un Send. Scrivere la propria risposta o chiedere di
-   * parlarne no: lì un momento per ripensarci serve.
+   * «Send answer» c'è sempre, anche su una domanda sola — scelta dell'utente, 28 agosto
+   * 2026, insieme al ridisegno.
+   *
+   * Prima, su una domanda sola a scelta singola, cliccare un'opzione inviava di colpo:
+   * la scelta *era* la conferma, e il bottone non compariva nemmeno. Risparmiava un
+   * clic, e con le opzioni disegnate come pillole in fila era coerente — si premeva un
+   * bottone, e premere un bottone fa succedere qualcosa. Con le opzioni a pallini no:
+   * un pallino dice «questa è selezionata», non «è partita», e chi lo preme si aspetta
+   * ancora un momento per rileggere prima di mandare.
    */
-  const autoSends = $derived(
-    qs.length === 1 && !qs[0]?.multiSelect
-    && (choice(qs[0]!)?.mode ?? 'pick') === 'pick',
-  )
-
-  /** Sull'ultimo passo, o appena c'è una risposta per tutte: si può aver girato indietro. */
-  const showSend = $derived(!autoSends && (step === qs.length - 1 || complete))
-
   function advance(): void {
-    if (step < qs.length - 1) { step += 1; return }
-    if (autoSends) void reply()
+    if (step < qs.length - 1) step += 1
   }
+
+  /**
+   * La raccomandazione non è un campo del protocollo: sta **dentro l'etichetta**. Il CLI
+   * lo dice al modello alla lettera — «make that the first option in the list and add
+   * "(Recommended)" at the end of the label», letto nel binario 2.1.241 bundled — quindi
+   * si riconosce lì e non si aspetta un `recommended: true` che non arriverà.
+   *
+   * Mostrata si toglie dal testo, perché il badge la dice meglio e lasciarla anche
+   * nell'etichetta la direbbe due volte. **Rimandata indietro no**: `answers` è indicizzato
+   * per etichetta esatta, e ripulirla vorrebbe dire rispondere una cosa che non era fra
+   * le opzioni. Per questo `clean` vive solo nel disegno e mai in `reply()`.
+   *
+   * Le due forme italiane sono una cortesia, non il contratto: il contratto è la parola
+   * inglese, e l'agent che risponde in italiano a volte traduce anche quella.
+   */
+  const RECO = /\s*[(\[](?:recommended|consigliat[ao]|raccomandat[ao])[)\]]\s*$/i
+  const isReco = (label: string): boolean => RECO.test(label)
+  const clean = (label: string): string => label.replace(RECO, '')
 
   function pick(q: AgentQuestion, label: string): void {
     const c = choice(q)
@@ -151,9 +165,34 @@
     advance()
   }
 
-  function typeIn(q: AgentQuestion): void {
-    if (choice(q)?.mode !== 'typed') set(q, { mode: 'typed', text: '' })
+  /**
+   * La casella di testo c'è **sempre** e parte vuota. Non è una preferenza di
+   * disposizione: il contratto del tool la promette al modello — «AskUserQuestion always
+   * includes a Skip button and a free-text input box for custom answers, so do not
+   * include `None` or `Other` as options» — quindi l'agent *omette apposta* l'opzione
+   * «nessuna di queste», contando su di lei. Tenerla dietro un bottone la rendeva una
+   * via da scoprire proprio mentre l'agent dava per scontato che fosse aperta.
+   *
+   * Svuotarla torna a «non ho ancora risposto» invece di lasciare una risposta vuota:
+   * una scelta che non si può disfare è una trappola, e vale anche per questa.
+   */
+  function onType(q: AgentQuestion, text: string): void {
+    if (text.length === 0) {
+      const rest = { ...draft }
+      delete rest[q.question]
+      draft = rest
+      return
+    }
+    set(q, { mode: 'typed', text })
   }
+
+  /** Il testo scritto per QUESTA domanda, e vuoto in ogni altro caso: scegliere
+   *  un'opzione o «parliamone» svuota la casella, perché sono tre strade e non tre
+   *  campi da riempire insieme. */
+  const typedNow = $derived.by(() => {
+    const c = cur ? choice(cur) : undefined
+    return c?.mode === 'typed' ? c.text : ''
+  })
 
   function discuss(q: AgentQuestion): void {
     // Premuto due volte torna indietro: è una scelta come le altre, e una scelta
@@ -295,10 +334,15 @@
 
 {:else if question && cur}
   <div class="askbox q">
-    <div class="h">
+    <div class="qhead">
       <Icon name="i-ask" style="color:var(--wait)" />
-      {cur.header || 'A question'}
-      {#if qs.length > 1}<span class="stepn">{step + 1} of {qs.length}</span>{/if}
+      <span class="qtitle">
+        {qs.length > 1 ? `Question ${step + 1} of ${qs.length}` : (cur.header || 'A question')}
+      </span>
+      <!-- Quante ne arrivano in tutto, detto in cima: una domanda alla volta è la forma
+           giusta per rispondere, ma da sola nasconde quanto è lunga la richiesta — e
+           saperlo cambia se ci si mette adesso o dopo. -->
+      {#if qs.length > 1}<span class="qtot">{qs.length} answers total</span>{/if}
       {#if canStop}
         <button class="stopb" title="Stop" onclick={() => void store.stop()}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
@@ -306,12 +350,15 @@
       {/if}
     </div>
 
-    <!-- I passi non sono una decorazione di avanzamento: sono la mappa della richiesta.
-         Dicono quante domande sono in tutto — cosa che una domanda alla volta
-         nasconderebbe — e si premono, perché rivedere la prima dopo aver letto la terza
-         è esattamente ciò che si vuole fare. -->
-    {#if qs.length > 1}
-      <div class="steps">
+    <!-- Lo stato con la stessa parola dell'elenco (`label`), non una scritta apposta per
+         qui: se la riga a sinistra dice «asking», dirlo in un altro modo qui obbligherebbe
+         a tradurre fra due vocabolari per capire che è la stessa chat.
+         I passi non sono una decorazione di avanzamento: sono la mappa della richiesta —
+         dicono quante domande sono in tutto e si premono, perché rivedere la prima dopo
+         aver letto la terza è esattamente ciò che si vuole fare. -->
+    <div class="qmeta">
+      <span class="st"><span class="dot"></span>{label(snap.state)}</span>
+      {#if qs.length > 1}
         {#each qs as q, i (q.question)}
           <button class="stp" class:on={i === step} class:ok={answered(q)}
             title={q.question} aria-current={i === step ? 'step' : undefined}
@@ -319,60 +366,65 @@
             <span class="d"></span><span class="t">{q.header || `Question ${i + 1}`}</span>
           </button>
         {/each}
-      </div>
-    {/if}
-
-    <div class="s">{cur.question}</div>
-
-    <div class="opts">
-      {#each cur.options as o (o.label)}
-        <button class="opt" class:pri={picked(cur, o.label)}
-          title={o.description} onclick={() => pick(cur, o.label)}>{o.label}</button>
-      {/each}
-
-      <!-- Le due strade in più ci sono SEMPRE, anche quando le opzioni sembrano
-           coprire tutto: che le coprano lo ha deciso l'agent, e chi risponde deve
-           poter dire sia «nessuna di queste» sia «non ho abbastanza per scegliere». -->
-      <button class="opt alt" class:pri={choice(cur)?.mode === 'typed'}
-        title="Answer this one in your own words" onclick={() => typeIn(cur)}>
-        <Icon name="i-pencil" /> Type in your answer
-      </button>
-      <button class="opt alt" class:pri={choice(cur)?.mode === 'discuss'}
-        title="Send the other answers, and have the agent walk you through this one"
-        onclick={() => discuss(cur)}>
-        <Icon name="i-chat" /> Chat about this
-      </button>
+      {/if}
     </div>
 
-    {#if choice(cur)?.mode === 'typed'}
-      {@const c = choice(cur)}
-      <!-- svelte-ignore a11y_autofocus -->
-      <input class="typed" autofocus placeholder="Your answer to this question…"
-        value={c?.mode === 'typed' ? c.text : ''}
-        oninput={e => set(cur, { mode: 'typed', text: e.currentTarget.value })}
-        onkeydown={e => {
-          if (e.key !== 'Enter' || !answered(cur)) return
-          e.preventDefault()
-          if (step < qs.length - 1) step += 1
-          else if (complete) void reply()
-        }} />
-    {/if}
+    <div class="qtext">{cur.question}</div>
 
-    {#if choice(cur)?.mode === 'discuss'}
-      <!-- Cosa succederà, detto adesso: «parliamone» non è un annulla, e non ferma le
-           altre risposte. Senza dirlo si scoprirebbe dopo aver premuto Send. -->
-      <div class="hintline">
-        <Icon name="i-chat" />
-        The other answers go through as they are. This one comes back as a question to
-        talk about, and the agent asks you again after.
+    <!-- Righe piene con un pallino, non pillole in fila. La forma dice da sé «una di
+         queste» — o «quante vuoi», col quadrato, quando la domanda è a scelta multipla —
+         e in una riga piena ci sta anche la `description`, che prima l'agent scriveva e
+         STARK nascondeva in un tooltip: cioè la sola cosa che spiega *cosa costa* una
+         scelta era raggiungibile solo fermandoci sopra il mouse, e da telefono per niente. -->
+    <div class="qopts">
+      {#each cur.options as o (o.label)}
+        <button class="qopt" class:on={picked(cur, o.label)}
+          onclick={() => pick(cur, o.label)}>
+          <span class="mk" class:sq={cur.multiSelect}></span>
+          <span class="bd">
+            <span class="lb">{clean(o.label)}</span>
+            {#if o.description}<span class="ds">{o.description}</span>{/if}
+          </span>
+          {#if isReco(o.label)}<span class="reco">Recommended</span>{/if}
+        </button>
+      {/each}
+
+      <!-- Le due strade in più ci sono SEMPRE, anche quando le opzioni sembrano coprire
+           tutto: che le coprano lo ha deciso l'agent, e chi risponde deve poter dire sia
+           «nessuna di queste» sia «non ho abbastanza per scegliere». Stanno nella stessa
+           lista e non in un angolo a parte, perché sono risposte quanto le altre. -->
+      <button class="qopt" class:on={choice(cur)?.mode === 'discuss'}
+        onclick={() => discuss(cur)}>
+        <span class="mk"></span>
+        <span class="bd">
+          <span class="lb"><Icon name="i-chat" /> Chat about this</span>
+          <span class="ds">
+            The other answers go through as they are. This one comes back as a question
+            to talk about, and the agent asks you again after.
+          </span>
+        </span>
+      </button>
+
+      <div class="qwrite" class:on={choice(cur)?.mode === 'typed'}>
+        <span class="mk"></span>
+        <Icon name="i-pencil" />
+        <input class="qin" placeholder="Type in your answer"
+          value={typedNow}
+          oninput={e => onType(cur, e.currentTarget.value)}
+          onkeydown={e => {
+            if (e.key !== 'Enter' || !answered(cur)) return
+            e.preventDefault()
+            if (step < qs.length - 1) step += 1
+            else if (complete) void reply()
+          }} />
       </div>
-    {/if}
+    </div>
 
     {#if preview}
       <pre class="prev">{preview}</pre>
     {/if}
 
-    <div class="opts" style="margin-top:8px">
+    <div class="qfoot">
       {#if qs.length > 1}
         <button class="opt" disabled={step === 0} onclick={() => { step -= 1 }}>
           <Icon name="i-back" /> Back
@@ -383,11 +435,9 @@
           </button>
         {/if}
       {/if}
-      {#if showSend}
-        <button class="opt pri" disabled={!complete} onclick={() => void reply()}>
-          {qs.length > 1 ? `Send ${qs.length} answers` : 'Send'}
-        </button>
-      {/if}
+      <button class="opt pri" disabled={!complete} onclick={() => void reply()}>
+        {qs.length > 1 ? `Send ${qs.length} answers` : 'Send answer'}
+      </button>
       <!-- Chiudere non è «nessuna risposta»: è una risposta vera, e l'agent la riceve
            come rifiuto e può cambiare strada. -->
       <button class="opt" onclick={() => void store.send({
@@ -438,4 +488,100 @@
     background: var(--surface); color: var(--ink);
   }
   .typed:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  /* ── il box delle domande ─────────────────────────────────────────────────
+     Ridisegnato il 28 agosto 2026 su un riferimento portato dall'utente.
+     Il fondo resta giallo — è l'identità del blocco «tocca a te», e la si
+     riconosce prima di leggere — e ambra restano titolo e icona. Il blu è
+     riservato a ciò che si tocca: l'opzione scelta, il badge, «Send answer».
+     Due colori con due mestieri, invece di uno solo che li fa entrambi. */
+  .qhead {
+    display: flex; align-items: center; gap: 7px;
+    font-weight: 700; font-size: 11.5px; color: var(--wait);
+  }
+  .qtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qtot {
+    margin-left: auto; flex: none; padding: 2px 8px; border-radius: 20px;
+    border: 1px solid var(--line-2); background: var(--surface);
+    font-size: 9.5px; font-weight: 500; color: var(--muted);
+  }
+  /* Lo Stop va a destra di tutto. `margin-left:auto` sta su chi viene prima: con il
+     conteggio presente ce l'ha già lui, e metterlo su entrambi spingerebbe i due
+     lontani l'uno dall'altro invece che il gruppo a destra. */
+  .qhead .stopb { margin-left: auto; }
+  .qtot + .stopb { margin-left: 6px; }
+
+  .qmeta {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin: 3px 0 8px;
+  }
+  .st { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
+  .st .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--wait); flex: none; }
+  /* I passi diventano pastiglie con un bordo. Senza, su fondo giallo restavano un
+     pallino e una parola — cioè la stessa forma delle opzioni qui sotto, a mezzo
+     centimetro di distanza: due cose che si premono, disegnate uguali, che vogliono
+     dire l'una «di cosa stiamo parlando» e l'altra «cosa rispondo». */
+  .qmeta .stp { border: 1px solid var(--line-2); background: var(--surface); }
+  .qmeta .stp.on { border-color: var(--wait); }
+  .qtext { font-size: 11.5px; line-height: 1.45; color: var(--ink); }
+
+  /* Il tetto è in `vh` e non in pixel per la stessa ragione del corpo di un piano: la
+     cosa da non superare è **lo schermo**, e da telefono è un altro numero. I 7px sopra
+     non sono aria: è lo spazio in cui sporge il badge della prima opzione. */
+  .qopts {
+    display: flex; flex-direction: column; gap: 6px;
+    margin-top: 9px; padding-top: 7px; max-height: 42vh; overflow: auto;
+  }
+  .qopt, .qwrite {
+    position: relative; display: flex; align-items: flex-start; gap: 9px;
+    width: 100%; text-align: left; font: inherit; color: var(--ink);
+    border: 1px solid var(--line-2); border-radius: 9px;
+    background: var(--surface); padding: 8px 11px;
+  }
+  .qopt { cursor: pointer; }
+  .qopt:hover { background: var(--surface-2); }
+  .qopt.on, .qwrite.on { border-color: var(--accent); background: var(--accent-soft); }
+  .qopt:focus-visible, .qwrite:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* Il segno di scelta. Tondo quando se ne prende una, quadrato quando se ne possono
+     prendere quante si vuole: `multiSelect` è un fatto della domanda che prima non si
+     vedeva da nessuna parte — lo si scopriva premendo due opzioni e vedendole restare
+     accese entrambe. La forma lo dice prima di provare. */
+  .mk {
+    width: 13px; height: 13px; flex: none; margin-top: 1.5px;
+    border: 1.5px solid var(--line-2); border-radius: 50%; background: var(--surface);
+  }
+  .mk.sq { border-radius: 4px; }
+  .qopt.on .mk, .qwrite.on .mk {
+    border-color: var(--accent); background: var(--accent);
+    box-shadow: inset 0 0 0 2.5px var(--surface);
+  }
+
+  .bd { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .lb { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+  .lb :global(svg.ic) { width: 12px; height: 12px; flex: none; }
+  .ds { font-size: 10px; line-height: 1.4; color: var(--muted); }
+
+  /* Il badge sporge **sul** bordo, non dentro il riquadro: dentro sarebbe una riga in
+     più da leggere in mezzo alle altre, sul bordo è un'etichetta appiccicata sopra —
+     si vede scorrendo con l'occhio senza entrare nel testo dell'opzione. */
+  .reco {
+    position: absolute; top: -7px; right: 10px;
+    padding: 1.5px 7px; border-radius: 20px;
+    background: var(--accent); color: #fff;
+    font-size: 8.5px; font-weight: 700; letter-spacing: .03em; line-height: 1.55;
+  }
+  :root[data-theme="dark"] .reco { color: #0E1118; }
+  @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) .reco { color: #0E1118; } }
+
+  .qwrite { border-style: dashed; align-items: center; }
+  .qwrite.on { border-style: solid; }
+  .qwrite :global(svg.ic) { width: 12px; height: 12px; flex: none; color: var(--muted); }
+  .qin {
+    flex: 1; min-width: 0; border: 0; background: none; padding: 0;
+    font: inherit; font-size: 11px; color: var(--ink);
+  }
+  .qin:focus { outline: none; }
+
+  .qfoot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 </style>

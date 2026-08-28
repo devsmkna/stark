@@ -34,8 +34,15 @@ import type {
   SessionOption,
 } from './events.ts'
 
-/** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
-export type PromptImage = {
+/**
+ * Un allegato pronto da mandare: i byte per l'agent, il riferimento per il journal.
+ *
+ * Si chiamava `PromptImage` finche' le immagini erano l'unica cosa allegabile. Adesso
+ * cosa lo sia lo dichiara il modello (`ModelChoice.accepts`), e a decidere come parte
+ * un tipo — blocco immagine, documento, testo — e' l'adapter: qui viaggiano byte e
+ * media type, senza sapere in cosa diventeranno.
+ */
+export type PromptFile = {
   ref: string
   mediaType: string
   bytes: number
@@ -255,7 +262,7 @@ export function optionsFrom(
  */
 export interface AgentSession {
   start(): Promise<void>
-  prompt(text: string, images?: PromptImage[]): string
+  prompt(text: string, allegati?: PromptFile[]): string
   interrupt(): Promise<void>
   /**
    * Cambia una delle scelte che l'agent ha dichiarato (ADR-014).

@@ -24,6 +24,13 @@
   --user:#0284C7; --user-bg:#E0F2FE;
   /* un colore per progetto, non per sezione */
   --p1:#3B5BF5; --p2:#D97706; --p3:#0F9D76; --p4:#8B5CF6; --p5:#DB2777; --p6:#0891B2; --p7:#65A30D;
+  /* I colori della sintassi. Sei e non venti: highlight.js emette una trentina di
+     classi, ma raggrupparle per **ruolo** (parola chiave, stringa, numero, commento,
+     nome, variabile) è ciò che rende un blocco leggibile a colpo d'occhio — venti tinte
+     diverse sono di nuovo un muro, solo colorato. I valori sono presi dalla tavolozza
+     che c'è già, quindi sono gli stessi hue tarati per entrambi i temi. */
+  --syn-key:#8B5CF6; --syn-str:#186A3B; --syn-num:#B45309;
+  --syn-com:#767D90; --syn-fn:#3B5BF5; --syn-var:#0891B2;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
@@ -40,6 +47,8 @@
   --del:#F09A92; --del-bg:#3A1A17;
   --user:#38BDF8; --user-bg:#123247;
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
+  --syn-key:#A78BFA; --syn-str:#7BC79B; --syn-num:#FBBF24;
+  --syn-com:#8A91A2; --syn-fn:#7A92FF; --syn-var:#22D3EE;
 }}
 :root[data-theme="dark"]{
   --ground:#0E1118; --surface:#161A23; --surface-2:#1C212C; --surface-3:#232936;
@@ -54,6 +63,8 @@
   --del:#F09A92; --del-bg:#3A1A17;
   --user:#38BDF8; --user-bg:#123247;
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
+  --syn-key:#A78BFA; --syn-str:#7BC79B; --syn-num:#FBBF24;
+  --syn-com:#8A91A2; --syn-fn:#7A92FF; --syn-var:#22D3EE;
 }
 
 /* ── guscio dell'app ───────────────────────────────────────────────────────
@@ -105,12 +116,29 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    stessa di `store.narrow` in App.svelte: quel booleano decide SE mostrarla, questa
    regola SOLO quanto è larga quando App.svelte ha già deciso di mostrarla da sola. */
 @media (max-width: 860px) { .side{width:100%;border-right:none} }
-.sidetop{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
+/* Padding destro 8 invece di 12, e verticale 6 invece di 10: i tre bottoni hanno ora
+   un'area premibile che sporge di 4px oltre l'icona (22x22 invece di 14x14), quindi
+   8+4 rimette il **disegno** dell'ultima icona esattamente dove stava — il margine
+   ottico è quello dell'icona, non quello del riquadro — e 6+4 lascia la testata alta
+   35px come prima. Bersagli più grandi senza spendere un pixel di altezza. */
+.sidetop{display:flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-bottom:1px solid var(--line);flex:none}
 /* il nome in cima è il marchio vettoriale, non testo: vedi Logo.svelte */
 .sidetop{color:var(--ink)}
-.sidetop .bell{margin-left:auto;color:var(--muted);display:flex}
+/* I tre comandi sono **un gruppo**, e stanno in un contenitore loro.
+   Prima `margin-left:auto` era su `.bell` — che però sono due (notifiche e helper), e
+   due margini automatici nella stessa riga flex si **spartiscono** lo spazio libero
+   invece di spingere tutto a destra: misurato 23.9px fra logo e campanella, altri
+   23.9 fra campanella e helper, e 7 fra helper e più. Segnalato dall'utente come
+   «lo spacing tra icone non è uguale», ed è esattamente quello. */
+.sidetop .acts{margin-left:auto;display:flex;align-items:center;gap:2px}
+.sidetop .bell,.sidetop .plus{
+  color:var(--muted);display:flex;padding:4px;border-radius:6px;
+}
+/* Prima non avevano nessuna risposta al passaggio del mouse: tre icone nude in cui si
+   scopre che si premono solo premendole. */
+.sidetop .bell:hover,.sidetop .plus:hover{background:var(--surface-3);color:var(--ink)}
 .sidetop .bell.off{opacity:.45}
-.sidetop .plus{color:var(--muted);display:flex}
+.sidetop .bell.off:hover{opacity:1}
 .gstate{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:11px 10px 4px}
 .gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px;border-left:3px solid transparent}
@@ -303,8 +331,6 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .opt.alt{display:inline-flex;align-items:center;gap:5px;border-style:dashed;color:var(--ink-2)}
 .opt.alt svg.ic{width:11px;height:11px}
 .opt.alt.pri{border-style:solid}
-.hintline{display:flex;align-items:flex-start;gap:6px;margin-top:8px;font-size:10px;line-height:1.45;color:var(--ink-2)}
-.hintline svg.ic{width:12px;height:12px;margin-top:1px;color:var(--wait)}
 /* Cosa hai risposto, domanda per domanda. Non una riga sola: erano domande diverse. */
 /* Stesso blu-azzurro del blocco del prompt: è di nuovo l'utente a parlare —
    qui rispondendo, là chiedendo — e riconoscerlo scorrendo senza doverlo
@@ -337,6 +363,12 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    figlio flex non eredita quello del genitore: senza, `.path` non avrebbe più margine
    per restringersi, e tornerebbe il taglio a metà parola che il commento sopra descrive. */
 .status .cwd{display:inline-flex;align-items:center;gap:9px;min-width:0}
+/* Il ramo. Il gap è 5 e non i 9 della riga: icona e nome sono **una cosa sola**, e a
+   distanza di riga si sarebbero letti come due voci separate della barra. Cede prima
+   della cartella (`flex` con base 0 contro il `min-width:0` di `.path`) perché fra le
+   due è il nome della cartella a dire di quale chat si tratta. */
+.status .branch{display:inline-flex;align-items:center;gap:5px;min-width:0;color:var(--muted)}
+.status .branch .bname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Sotto gli 860px (la stessa soglia di `store.narrow`) la barra sta su **una riga
    sola**, e ci sta perché prima le si toglie di dosso ciò che non è un valore:
    il percorso per intero (`.cwd` — il nome del progetto resta nell'intestazione della
@@ -439,6 +471,25 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .slider{width:100%;accent-color:var(--accent)}
 .menu{position:relative;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);box-shadow:0 8px 28px rgba(16,20,32,.16);padding:4px;display:flex;flex-direction:column;gap:1px;width:250px}
 .mi{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;font-size:10.5px;color:var(--ink)}
+/* Il reset e gli stati di una voce di menu.
+   Stavano nello <style> **scoped** di Status.svelte, quindi valevano solo per le righe
+   scritte dentro quel file: le stesse righe disegnate da un componente figlio restavano
+   col bordo di default del browser (`2px outset rgb(0,0,0)`, misurato — non dedotto),
+   larghe quanto il proprio contenuto invece che quanto il menu, e senza evidenziazione
+   al passaggio del mouse. È la terza volta che lo scoping di Svelte morde qui dentro
+   (`.seg button` in Settings, il menu dei comandi in Dock): una regola che descrive una
+   classe **condivisa** va nel foglio condiviso, se no vale solo per chi l'ha scritta.
+   `width:100%` non è pignoleria: `.mi` è un `<button>`, e un form control si dimensiona
+   a contenuto anche con `display:flex`. Misurato sul picker: righe da 95 a 329px dentro
+   un menu da 290, undici delle quali sbordavano.
+   `button.mi.on:hover` e non `.mi.on:hover`: la riga dell'hover porta un `[disabled]`
+   dentro un `:not()`, che conta come un selettore d'attributo — quindi è più specifica,
+   e senza pareggiarla la voce selezionata perderebbe il proprio colore al passaggio. */
+.mi{border:0;width:100%;text-align:left}
+button.mi[disabled]{cursor:default}
+button.mi:not([disabled]):hover{background:var(--surface-2)}
+button.mi.on:hover{background:var(--accent-soft)}
+.mi:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .mi.on{background:var(--accent-soft)}
 .mi .tag{margin-left:auto;font-size:9.5px;color:var(--muted);flex:none}
 .mi.dis{color:var(--muted)}
@@ -558,7 +609,12 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    crocetta si lascia comprimere. Misurato con la modale rientrata nello schermo: il
    bottone finiva a 9px con dentro un'icona da 14, cioè la X veniva tagliata. A cedere
    dev'essere il titolo, che è testo e sa andare a capo. */
-.dlgh .x{margin-left:auto;flex:none;color:var(--muted);display:flex}
+/* `border:0;padding:0` qui e non nel componente: il reset globale dei `button` tocca
+   font, cursore, colore e fondo ma **non** il bordo, quindi una crocetta nuova nasce col
+   bordo `outset 2px` del browser finché qualcuno non se lo azzera in casa propria. Era
+   già così, e non si vedeva perché ogni modale esistente aveva la sua regola locale: la
+   prima aggiunta senza ha mostrato il difetto (misurato, non notato a occhio). */
+.dlgh .x{margin-left:auto;flex:none;color:var(--muted);display:flex;border:0;padding:0}
 .dlgb{padding:13px;overflow:auto;display:flex;flex-direction:column;gap:15px;flex:1}
 .dlgf{padding:9px 13px;border-top:1px solid var(--line);display:flex;gap:7px;justify-content:flex-end;flex:none;background:var(--surface-2)}
 .dlgcol{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -740,3 +796,62 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .hpop .pnote{display:flex;align-items:flex-start;gap:5px;margin:0 4px 4px;padding:5px 7px;
   border-radius:6px;background:var(--wait-bg);color:var(--ink-2);font-size:10px;line-height:1.4}
 .hpop .pnote svg{width:11px;height:11px;flex:none;color:var(--wait);margin-top:1px}
+
+/* La riga di bottoni in fondo a una tendina che sta facendo una domanda: conferma del
+   passaggio a un altro agent, o scelta di come scriverne il briefing. Non è un menu di
+   voci — sono due strade fra cui scegliere, quindi stanno affiancate e non impilate. */
+.hrow { display: flex; gap: 6px; padding: 6px 8px 8px; }
+.hrow .mi { flex: 1; justify-content: center; border: 1px solid var(--line); border-radius: 6px; }
+.hrow .mi.on { background: var(--accent); color: var(--on-accent, #fff); border-color: transparent; }
+.menu .pnote { white-space: normal; line-height: 1.45; }
+
+/* La casella di ricerca in fondo alla tendina dei modelli.
+   `sticky` e non semplicemente ultima: l'elenco scorre, e una casella che scorre via
+   con lui sarebbe raggiungibile solo arrivando in fondo a 151 righe — cioè assente
+   proprio nel caso in cui serve. Il bordo sopra la separa dalle voci, se no sembra una
+   riga dell'elenco su cui si può cliccare. */
+.msearch{position:sticky;bottom:0;display:flex;align-items:center;gap:7px;padding:6px 8px;
+  margin-top:2px;border-top:1px solid var(--line);background:var(--surface-2);color:var(--muted)}
+.msearch input{flex:1;min-width:0;border:0;background:none;color:var(--ink);
+  font-family:inherit;font-size:10.5px;outline:none;padding:0}
+.msearch input::placeholder{color:var(--muted)}
+/* Chrome mette una sua «x» dentro `type=search`: è un secondo modo di svuotare il
+   campo, con una grafica che non è la nostra e che compare solo su un motore. */
+.msearch input::-webkit-search-cancel-button{display:none}
+
+/* Il picker dei modelli. Le tre righe qui sotto sono l'unica differenza dalle altre
+   tendine, e ognuna corregge una cosa vista guardando: senza `flex`+`min-width:0` sul
+   blocco del testo, un id lungo (`nvidia/nvidia/llama-3.3-nemotron-super-49b-v1`)
+   mandava la riga a capo e la centrava, perche' in un flex il testo non scende sotto la
+   larghezza del proprio contenuto finche' non glielo si permette. L'ellissi sulla `.sub`
+   resta locale: nel menu della modalita' quella riga e' una frase intera che DEVE andare
+   a capo, e troncarla la' sarebbe un peggioramento. */
+.mpick .tx{flex:1;min-width:0}
+/* Nome e id su **una** riga ciascuno, con l'ellissi. Il nome andava a capo
+   («Llama 3.3 Nemotron / Super 49B v1») e la riga diventava alta il doppio: in un
+   elenco di 151 voci l'altezza costante è ciò che permette di scorrerlo a colpo
+   d'occhio. `min-width:0` sul contenitore è la metà che si dimentica — senza, un figlio
+   flex non scende sotto la larghezza del proprio contenuto e `text-overflow` non entra
+   mai in gioco. */
+.mpick .lb,.mpick .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* La sintassi colorata dei blocchi di codice. Le classi le scrive highlight.js; qui si
+   dice solo quale ruolo prende quale colore, con le variabili del tema — un file di
+   tema di highlight.js avrebbe colori fissi, quindi giusti in un tema e sbagliati
+   nell'altro. `hljs-title.function_` non è un errore di battitura: è il nome che
+   highlight.js 11 dà al titolo di una funzione. */
+.hljs-comment,.hljs-quote{color:var(--syn-com);font-style:italic}
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-section,.hljs-doctag,
+.hljs-type,.hljs-built_in{color:var(--syn-key)}
+.hljs-string,.hljs-regexp,.hljs-addition,.hljs-meta-string{color:var(--syn-str)}
+.hljs-number,.hljs-symbol,.hljs-bullet,.hljs-meta,.hljs-link{color:var(--syn-num)}
+.hljs-title,.hljs-name,.hljs-title.function_,.hljs-title.class_{color:var(--syn-fn)}
+.hljs-attr,.hljs-attribute,.hljs-variable,.hljs-template-variable,
+.hljs-selector-attr,.hljs-selector-class,.hljs-params{color:var(--syn-var)}
+.hljs-deletion{color:var(--del)}
+.hljs-emphasis{font-style:italic}
+.hljs-strong{font-weight:600}
+/* Il nome del linguaggio nella barra del blocco: a destra, in tono minore. Dice di che
+   cosa si tratta senza competere col bottone, che è la cosa che si preme. */
+.cblang{margin-left:auto;font-size:9.5px;color:var(--muted);font-family:var(--mono);
+  letter-spacing:.02em}

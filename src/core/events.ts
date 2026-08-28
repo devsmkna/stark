@@ -148,6 +148,22 @@ export type ModelChoice = {
   /** In token. Stesso motivo di `autoMode`: dipende dal modello, non dall'agent, e
    *  saperlo fuori dall'adapter vorrebbe dire indovinare la finestra di contesto. */
   contextWindow: number
+  /**
+   * I tipi MIME che **questo modello** accetta come allegato di un prompt.
+   *
+   * Stessa famiglia di `autoMode` e `contextWindow`: e' un fatto del modello, non
+   * dell'agent, e chi disegna la casella di scrittura non ha modo di saperlo da se'.
+   * Prima era una costante di STARK ripetuta in due file, quindi la graffetta si
+   * offriva anche su un modello che di allegati non ne legge nessuno e rifiutava un
+   * PDF che sarebbe passato.
+   *
+   * Vuoto vuol dire **no**: niente allegati, e il bottone si spegne con la ragione
+   * scritta accanto (mai nascosto — vedi il Principio 5). Assente vuol dire **non lo
+   * so**: un journal scritto prima di questo campo, o un agent che non lo dichiara, e
+   * li' si torna alle quattro immagini di sempre. La distinzione la fa
+   * `core/allegati.ts`, che e' anche l'unico posto in cui esiste un elenco di tipi.
+   */
+  accepts?: string[]
 }
 
 /**
@@ -258,18 +274,32 @@ export type AgentQuestion = {
 export type PromptPart =
   | { type: 'text'; text: string }
   | { type: 'image'; ref: string; mediaType: string; bytes: number; name?: string }
+  /**
+   * Un allegato che **non e' un'immagine** — un PDF, un testo, un CSV.
+   *
+   * Sta a parte e non dentro `image` con un `mediaType` diverso perche' la differenza
+   * e' proprio di chi disegna: un'immagine si mostra, un file si nomina. Fonderli
+   * avrebbe messo un `<img>` su un PDF, cioe' l'icona di immagine rotta su un allegato
+   * arrivato benissimo. E i journal gia' scritti restano leggibili senza sapere niente
+   * di questa riga: li' ci sono solo immagini, ed erano immagini davvero.
+   */
+  | { type: 'file'; ref: string; mediaType: string; bytes: number; name?: string }
 
 /**
  * Cosa la UI allega a un prompt. Qui i byte ci sono davvero, perché è il viaggio
  * dal browser al daemon: è il daemon a scriverli su disco e a sostituirli con un `ref`.
  *
- * I quattro tipi sono quelli che il modello accetta. Un file di testo non sta qui:
- * si incolla, o si nomina per percorso — l'agent sa leggerlo da solo, ed è il motivo
- * per cui non serve spedirglielo.
+ * Quali tipi si possano attaccare **non è scritto qui**: lo dichiara il modello in uso
+ * (`ModelChoice.accepts`), e la casella di scrittura filtra con quello. Prima erano
+ * quattro immagini fisse, con accanto l'argomento che un file di testo non serve
+ * spedirlo perché l'agent sa leggerlo da sé — vero per un file **del progetto**, che
+ * infatti si cita con `@`, e falso per un allegato che arriva da fuori: dal telefono un
+ * percorso da nominare non c'è.
  */
 export type Attachment = {
-  type: 'image'
-  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  /** Solo per chi disegna: un'immagine si mostra, un file si nomina. Vedi `parteDi`. */
+  type: 'image' | 'file'
+  mediaType: string
   /** base64, senza il prefisso `data:`. */
   data: string
   name?: string
@@ -351,6 +381,23 @@ export type Payload =
   // journal non basta a risvegliare: saprebbe dire cosa e successo ma non come tornarci.
   | { k: 'session.resumeRef'; ref: string }
   /** Il titolo scelto dall'utente. Da qui in poi STARK non lo riscrive piu da solo. */
+  /**
+   * Questa conversazione e' stata consegnata a un'altra, su un altro agent.
+   *
+   * Due fatti e non uno (`session.continued` e' l'altra meta') perche' finiscono in
+   * **due journal diversi**: chi legge quello vecchio deve sapere dove e' andato a
+   * finire il lavoro, e chi legge il nuovo da dove arriva, senza dover aprire l'altro.
+   * Il legame sta nel journal e non nel browser: un ricaricamento non lo perde, e lo
+   * ritrova anche chi apre la chat dal telefono.
+   *
+   * Esiste perche' la conversazione vive dentro il CLI (ADR-009): passare da Claude
+   * Code a OpenCode non e' cambiare un parametro, e' cominciarne un'altra. Il file e'
+   * cio' che attraversa il confine — l'unica cosa che i due agent sanno leggere
+   * entrambi.
+   */
+  | { k: 'session.handedOff'; to: string; agent: string; model: string; file: string }
+  /** L'altra meta': questa conversazione riprende il lavoro di un'altra. */
+  | { k: 'session.continued'; from: string; file: string }
   | { k: 'session.renamed'; title: string }
   | { k: 'session.slept' }
   | { k: 'session.woke'; resumedFromSeq: number }

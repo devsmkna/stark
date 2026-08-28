@@ -1538,6 +1538,80 @@ versione del CLI incluso. Due trappole che ha insegnato: un generatore di prompt
 lo stdin e il processo muore prima che si possa chiedere il contesto; e `System tools (deferred)`
 **non** entra nel totale (la somma delle altre categorie dà esattamente `totalTokens`).
 
+**Cosa si puo' allegare lo dice il modello, non STARK** (28 agosto 2026, chiesto
+dall'utente: «il tasto allega file deve essere disabilitato se il modello non e'
+multimodale, e se lo e' usa il parametro che dice quali formati accetta»).
+
+Prima la risposta era una costante di quattro tipi immagine scritta in **due** posti —
+`Dock.svelte` e `registry.ts`, con accanto il commento «i quattro tipi che il modello
+accetta». Non erano del modello: erano di STARK, e valevano identici per un modello che
+legge i PDF e per uno che non guarda niente. Adesso e' `ModelChoice.accepts`, dichiarato
+dall'agent modello per modello, e la casella di scrittura **non conosce nessun tipo per
+nome** — e' la stessa forma di ADR-014 per le modalita': non un elenco di parole da
+sapere, ma un elenco che arriva.
+
+Le due meta' della domanda hanno risposte opposte, ed entrambe sono **misurate**
+(`spike/allegati-dichiarati.ts`, costo zero: un handshake e una domanda di configurazione).
+**Claude Code non dichiara niente**: `list_models` porta `supportsEffort`,
+`supportsAutoMode`, `supportsFastMode` e nient'altro — nessun campo sulla multimodalita',
+sui cinque modelli veri dell'account. **OpenCode lo dichiara eccome**:
+`capabilities.input.{text,image,audio,video,pdf}` per modello — 151 modelli su questa
+macchina, 61 con immagini e 4 con PDF. Da qui la divisione del lavoro: dove il parametro
+c'e' si legge, dove non c'e' lo scrive l'adapter e lo dice.
+
+Due trappole che sono costate un giro ciascuna. La prima: **i tipi non sono il filo**, per
+l'ennesima volta — `ProviderConfig` promette `attachment` e `modalities` piatti sul
+modello, il server manda `capabilities` annidato, e la prima sonda che ha guardato nel
+posto sbagliato non e' fallita: ha risposto «zero modelli con allegati», che sembra un
+fatto. La seconda: **`attachment: true` non vuol dire «accetta immagini»** — otto modelli
+ce l'hanno senza leggere ne' immagini ne' PDF (voce e video di nvidia), e dedurre le
+immagini da quel flag avrebbe riacceso la graffetta esattamente dove il modello aveva
+appena detto di no.
+
+Cosa offre Claude Code, e perche' e' piu' delle quattro immagini di prima: un blocco
+`document` passa dal CLI e arriva al modello, sia in base64 con un PDF sia come testo
+semplice — provato dal vivo (`spike/allegato-pdf.ts`, un turno corto per caso: la parola
+nascosta nel PDF e' tornata indietro). Quindi PDF, TXT, Markdown e CSV, oltre alle
+immagini. `text/markdown` e `text/csv` non sono media type che l'API accetta in un
+`document` (quello vuole `text/plain` e basta): la distinzione e' fra cosa l'utente puo'
+scegliere e cosa parte, e la seconda meta' la fa l'adapter. Rifiutare un `.csv` sarebbe
+rifiutare un file che il modello legge, per una ragione che riguarda noi.
+E cade con questo una frase che era in `docs/event-model.md` dal principio: «un file di
+testo non e' un allegato, si nomina per percorso». Vera per un file **del progetto**, che
+infatti si cita con `@`; falsa per un file che arriva da fuori, perche' dal telefono un
+percorso da nominare non c'e'.
+
+Quello che **non** si offre, detto invece che scoperto dopo: audio e video. OpenCode li
+dichiara e la sua `FilePart` porterebbe qualunque MIME, ma STARK non li sa ne' scrivere su
+disco (`ESTENSIONE` in `core/allegati.ts`) ne' mostrare in conversazione — sarebbe un
+bottone che accetta un file e poi lo perde.
+
+Tre conseguenze strutturali. `PromptPart` ha un caso `file` accanto a `image`, e sono due
+apposta: la differenza e' di chi disegna — un'immagine si mostra, un file si nomina, e
+fonderli avrebbe messo un `<img>` su un PDF, cioe' l'icona di immagine rotta su un allegato
+arrivato benissimo. `PromptImage` del contratto §1 e' diventato `PromptFile`. E il filtro
+per tipo nella casella **non e' la difesa**: quella resta la tabella del registro, che
+scrive su disco solo cio' che sa nominare — il filtro dice cosa ha senso offrire, il
+cancello dice cosa entra.
+Un dettaglio che si scopre solo provandolo: `File.type` dal browser e' spesso **vuoto** su
+`.md` e `.csv`, perche' dipende dal database MIME del sistema. Fidarsi solo di quello
+rifiutava un file che il modello legge, con un messaggio che diceva «e' un », cioe' che non
+diceva niente: `tipoDi()` guarda l'estensione come secondo parere.
+
+Verificato **guidando la UI vera** su sessioni vere (costo: un turno corto in tutto),
+non per esito HTTP: su Claude Code la graffetta e' accesa e dice cosa prende (`Attach a
+file — PNG, JPEG, GIF, WebP, PDF, TXT, Markdown, CSV`), un `.zip` viene rifiutato **con il
+motivo** invece di sparire, un PDF e un `.md` si accodano come schede col nome; su una chat
+OpenCode aperta su un modello di solo testo la graffetta e' **spenta** (opacita' .45,
+`disabled`) e dice perche' — e forzando comunque un file dall'input nascosto (che e' cio'
+che fanno il trascinamento e l'incolla) viene rifiutato, non accodato in silenzio. Il pezzo
+che mostra tutto il senso della cosa: **cambiando modello a caldo** sulla stessa chat
+(`nemotron-nano-12b-v2-vl`, che dichiara `image` ma non `pdf`) la graffetta si riaccende e
+l'elenco si stringe alle sole immagini, col PDF rifiutato. Giro completo dalla via
+dell'utente: PDF allegato nella UI, mandato, letto dall'agent — e nel flusso la scheda col
+nome e il peso, che si apre.
+`npm run check` cresce di **14** verifiche.
+
 Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
 seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
 giusto).
@@ -1685,6 +1759,13 @@ Decisioni già prese:
   corso. Il confine è **la posizione, non la lunghezza**: misurato, un testo di servizio ha
   mediana 131 caratteri e uno rivolto all'utente 2500 e passa, ma una soglia sarebbe da
   tarare e la posizione no.
+- **cosa si puo' allegare a un prompt lo dichiara il modello**, non STARK
+  (`ModelChoice.accepts`): dove l'agent ha un parametro lo si legge (OpenCode:
+  `capabilities.input`), dove non ce l'ha (Claude Code: `list_models` non dice niente) lo
+  scrive l'adapter, misurando cosa il CLI lascia davvero passare. Un modello che non legge
+  allegati spegne la graffetta **con la ragione scritta**, mai nascondendola; un tipo
+  rifiutato lo dice invece di sparire. Il filtro per tipo e' un'offerta, non una difesa:
+  quella resta la tabella del registro, che scrive solo cio' che sa nominare.
 - pannello terminale per sessione: **dopo** l'MVP
 
 Ancora aperte: il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il

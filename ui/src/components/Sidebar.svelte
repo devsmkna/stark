@@ -1,8 +1,11 @@
 <script lang="ts">
   // L'elenco compatto: è la navigazione, non una barra di navigazione.
   //
-  // Raggruppa per stato e, dentro ogni stato, per progetto — sempre, anche quando il
-  // progetto è uno solo: la struttura non deve cambiare forma sotto gli occhi.
+  // Due modi di raggrupparlo, scelti dal bottone sopra la lista (`store.grouping`):
+  // **per stato** e, dentro ogni stato, per progetto — sempre, anche quando il progetto
+  // è uno solo, perché la struttura non deve cambiare forma sotto gli occhi; oppure
+  // **per progetto**, in ordine alfabetico. Sono due domande diverse: la prima è «a
+  // cosa devo rispondere adesso», la seconda «cosa sta succedendo su questo lavoro».
   import Icon from './Icon.svelte'
   import Logo from './Logo.svelte'
   import type { Match, SessionMatches, SessionRow } from '../lib/api.ts'
@@ -79,25 +82,63 @@
     return [...nostri] as string[]
   })
 
-  const tree = $derived(
-    ORDER.map(g => {
-      const byProject = new Map<string, SessionRow[]>()
-      // `since`, non `lastTs`: `lastTs` avanza a ogni evento, quindi due chat "in
-      // progress" si scavalcherebbero di continuo — una scrive un token, sale sopra
-      // l'altra, che ne scrive uno e risale sopra la prima. `since` cambia solo
-      // quando lo stato cambia (§1, `stateSince`): resta fermo per tutta la durata
-      // del turno, e la più recente a essere *iniziata* sta sopra. Quando una finisce
-      // per prima, cambia gruppo con un `since` nuovo — è così che finisce in cima
-      // al suo, senza bisogno di un caso speciale per «chi ha risposto per primo».
-      for (const r of store.rows.filter(r => group(r.state) === g)
-        .sort((a, b) => b.since - a.since)) {
-        const p = project(r.cwd)
-        const list = byProject.get(p)
-        if (list) list.push(r); else byProject.set(p, [r])
-      }
-      return { g, projects: [...byProject].sort((a, b) => a[0].localeCompare(b[0])) }
-    }).filter(x => x.projects.length > 0),
-  )
+  /**
+   * Una sezione dell'elenco, con la stessa forma nei due modi di raggruppare: chi
+   * disegna non deve sapere quale dei due è attivo, se no il `{#each}` diventerebbe due
+   * `{#each}` che divergono al primo ritocco. `proj` c'è solo quando è il progetto a
+   * fare da sezione — raggruppando per stato il pallino colorato sta sui sotto-gruppi.
+   */
+  type Blocco = {
+    key: string
+    head: string
+    proj?: string
+    sub: { name?: string; rows: SessionRow[] }[]
+  }
+
+  /**
+   * `since`, non `lastTs`: `lastTs` avanza a ogni evento, quindi due chat "in progress"
+   * si scavalcherebbero di continuo — una scrive un token, sale sopra l'altra, che ne
+   * scrive uno e risale sopra la prima. `since` cambia solo quando lo stato cambia (§1,
+   * `stateSince`): resta fermo per tutta la durata del turno, e la più recente a essere
+   * *iniziata* sta sopra. Quando una finisce per prima, cambia gruppo con un `since`
+   * nuovo — è così che finisce in cima al suo, senza bisogno di un caso speciale per
+   * «chi ha risposto per primo».
+   */
+  const recenti = $derived([...store.rows].sort((a, b) => b.since - a.since))
+
+  /** Le righe di una lista, raccolte per progetto e i progetti in ordine alfabetico. */
+  function perProgetto(righe: SessionRow[]): [string, SessionRow[]][] {
+    const m = new Map<string, SessionRow[]>()
+    for (const r of righe) {
+      const p = project(r.cwd)
+      const list = m.get(p)
+      if (list) list.push(r); else m.set(p, [r])
+    }
+    return [...m].sort((a, b) => a[0].localeCompare(b[0]))
+  }
+
+  const tree = $derived.by<Blocco[]>(() => {
+    if (store.grouping.by === 'project') {
+      // Dentro un progetto le chat restano ordinate per stato **prima** che per tempo:
+      // fuori dal raggruppamento per stato nessuno lo fa più, e senza, una che dorme
+      // capiterebbe sopra una che ti sta aspettando. `ORDER` è lo stesso elenco che dà
+      // l'ordine alle sezioni nell'altro modo — la convinzione «prima chi aspetta te»
+      // è una sola, e sta in un posto solo.
+      const peso = (r: SessionRow): number => ORDER.indexOf(group(r.state))
+      return perProgetto(recenti).map(([name, rows]) => ({
+        key: `p:${name}`,
+        head: name,
+        proj: name,
+        sub: [{ rows: [...rows].sort((a, b) => peso(a) - peso(b)) }],
+      }))
+    }
+    return ORDER.map(g => ({
+      key: `s:${g}`,
+      head: g,
+      sub: perProgetto(recenti.filter(r => group(r.state) === g))
+        .map(([name, rows]) => ({ name, rows })),
+    })).filter(x => x.sub.length > 0)
+  })
 
   // ─── cercare ──────────────────────────────────────────────────────────────
   //
@@ -173,6 +214,11 @@
 <div class="side">
   <div class="sidetop">
     <Logo height={13} />
+    <!-- I tre comandi in un contenitore loro, e non sciolti nella riga: spinge a destra
+         **il gruppo**, con un passo uguale fra le icone. Sciolti, `margin-left:auto` era
+         su entrambe le `.bell` e i due margini automatici si spartivano lo spazio libero
+         (misurato: 23.9 · 23.9 · 7). -->
+    <div class="acts">
     <!-- La campanella sta qui e non nella barra di stato perché le notifiche non sono
          di una chat ma di tutte. Premerla la prima volta è anche il momento in cui si
          chiede il permesso al browser: fuori da un gesto non si può nemmeno chiedere. -->
@@ -200,10 +246,18 @@
       onclick={() => void store.toggleHelper()}>
       <Icon name="i-chat" />
     </button>
+    <!-- Il telefono sta qui, accanto a campanella e helper, e non nella barra di una
+         conversazione: collegare un telefono è della **macchina**, non della chat che
+         hai aperto — e dal telefono si arriva comunque all'elenco intero. -->
+    <button class="bell" title="Use STARK from your phone" aria-label="Use STARK from your phone"
+      onclick={() => { store.refused = null; store.dialog = { kind: 'phone' } }}>
+      <Icon name="i-phone" />
+    </button>
     <button class="plus" title="New chat" aria-label="New chat"
       onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
       <Icon name="i-plus" />
     </button>
+    </div>
   </div>
 
   <!-- La ricerca sta **sopra** l'elenco e non dentro un pannello suo: cercare è un
@@ -232,6 +286,23 @@
           {#if profili.length > 0}<br />on {profili.map(p => p.replace(/^.*\//, '')).join(', ')}{/if}
         </div>
       </div>
+    </div>
+  {/if}
+
+  <!-- Raggruppare è un modo di guardare l'elenco, quindi il comando sta **sull'elenco**
+       e non nelle impostazioni: la scelta si fa guardando il risultato, e andarla a
+       cercare dietro un pannello vorrebbe dire sceglierla al buio. Sparisce mentre si
+       cerca, perché lì l'albero non c'è: un comando che non muove niente di ciò che
+       vedi è peggio di un comando assente. -->
+  {#if !inRicerca && store.rows.length > 0}
+    <div class="grpby">
+      <span class="lbl">Group by</span>
+      <span class="pick">
+        <button class:on={store.grouping.by === 'project'}
+          onclick={() => store.grouping.set('project')}>Project</button>
+        <button class:on={store.grouping.by === 'status'}
+          onclick={() => store.grouping.set('status')}>Status</button>
+      </span>
     </div>
   {/if}
 
@@ -289,11 +360,15 @@
         </div>
       {/if}
     {:else}
-    {#each tree as section (section.g)}
-      <div class="gstate">{section.g}</div>
-      {#each section.projects as [name, list] (name)}
-        <div class="gproj"><i class="dotk p{palette.get(name) ?? 0}"></i> {name}</div>
-        {#each list as row (row.id)}
+    {#each tree as section (section.key)}
+      <div class="gstate" class:dotted={section.proj}>
+        {#if section.proj}<i class="dotk p{palette.get(section.proj) ?? 0}"></i>{/if}{section.head}
+      </div>
+      {#each section.sub as sub (sub.name ?? section.key)}
+        {#if sub.name}
+          <div class="gproj"><i class="dotk p{palette.get(sub.name) ?? 0}"></i> {sub.name}</div>
+        {/if}
+        {#each sub.rows as row (row.id)}
           {#if store.renaming === row.id}
             <!-- Rinominare non apre una schermata: il titolo diventa scrivibile dov'è.
                  svelte-ignore a11y_autofocus -->
@@ -310,7 +385,7 @@
             <button
               class="sit"
               class:on={row.id === store.selected}
-              class:zz={section.g === 'Sleeping'}
+              class:zz={group(row.state) === 'Sleeping'}
               onclick={() => void store.select(row.id)}
               draggable="true"
               ondragstart={e => {
@@ -421,6 +496,50 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* La riga del raggruppamento.
+     Il primo giro le aveva dato la voce delle intestazioni di sezione (`.gstate`):
+     maiuscoletto spaziato, grassetto. Sbagliato, e l'utente l'ha detto guardandola —
+     quella voce dice «da qui in giù c'è questa roba», mentre questa riga è un
+     **comando**, e a 9.5px in maiuscolo pesava più delle sezioni vere che stanno sotto.
+     Adesso è un'etichetta e basta: minuscola, muta, sottile. A farsi guardare è il
+     controllo, non la parola che lo introduce.
+     Il margine è 8+4 = 12px, cioè lo stesso di logo, lente della ricerca e pallino di
+     progetto: erano quattro cose incolonnate su tre ascisse diverse (12, 12, 10). */
+  .grpby {
+    display: flex; align-items: center; gap: 8px;
+    margin: 2px 8px 4px; padding: 0 4px;
+    font-size: 10px; color: var(--muted);
+  }
+  .grpby .lbl { white-space: nowrap; }
+
+  /* Non `.seg`: quella è la levetta a due vie delle impostazioni, dove sta dentro una
+     tabella e un bordo pieno la separa dalla riga accanto. Qui è sola su un fondo
+     piatto, e lo stesso bordo diventava un riquadro pesante attorno a due bottoni
+     squadrati — «brutti», detto guardandoli. Qui la traccia è un fondo, e a essere
+     disegnata è la voce **scelta**: sale sopra la traccia invece di accendersi. */
+  .pick {
+    margin-left: auto; flex: none;
+    display: flex; gap: 2px; padding: 2px;
+    border-radius: 999px; background: var(--surface-3);
+  }
+  .pick button {
+    padding: 2.5px 10px; border: 0; border-radius: 999px;
+    font: inherit; font-size: 10px; color: var(--muted); line-height: 1.5;
+  }
+  .pick button:hover:not(.on) { color: var(--ink); }
+  .pick button.on {
+    background: var(--surface); color: var(--ink); font-weight: 600;
+    /* Invisibile in tema scuro, e va bene: là a staccare è già `--surface`, che è più
+       **scuro** della traccia. In tema chiaro è il contrario — bianco su grigio — e
+       l'ombra è ciò che le impedisce di sembrare un buco invece di una pastiglia. */
+    box-shadow: 0 1px 1.5px rgba(0, 0, 0, .10);
+  }
+  .pick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* `.gstate` non è flex: lo diventa solo quando porta il pallino del progetto, cioè
+     solo raggruppando per progetto. Senza, il pallino resterebbe un carattere in linea
+     e cadrebbe sotto la riga di base del testo invece che al suo centro. */
+  .gstate.dotted { display: flex; align-items: center; gap: 6px; }
+
   .sit, .sidefoot, .plus, .bell {
     background: none;
     border: 0;
@@ -428,7 +547,14 @@
     font: inherit;
     color: inherit;
   }
-  .plus, .bell { width: auto; padding: 0; display: flex; cursor: pointer; }
+  /* Niente `padding` qui dentro. Ce n'era uno a zero, e vinceva su quello di `app.css`
+     — `.plus.svelte-xxx` e `.sidetop .plus` hanno la stessa specificità, quindi decide
+     l'ordine, e lo stile del componente viene dopo. Risultato: area premibile grande
+     quanto l'icona, e i 4px con cui è calcolato il margine destro della testata
+     semplicemente non c'erano. È la stessa trappola già registrata per `.seg` in
+     Settings.svelte: due fogli che si contendono la stessa proprietà, e quello che
+     sembra la fonte non lo è. La forma di questi bottoni sta tutta in `app.css`. */
+  .plus, .bell { width: auto; display: flex; cursor: pointer; }
   /* Il puntino dice che il browser non ha ancora dato il permesso, e che premendo lo
      si chiede. Non è un errore: il suono intanto funziona già. */
   .bell { position: relative; }

@@ -14,6 +14,7 @@
   // Il motore invece è lo stesso di sempre: `Pane`, `applyTo`, lo stesso snapshot. Il
   // §4 vale anche per una chat che non esiste su disco.
   import Icon from './Icon.svelte'
+  import ModelPicker from './ModelPicker.svelte'
   import { renderMarkdown } from '../lib/markdown.ts'
   import type { Store } from '../lib/store.svelte.ts'
   import type { PartView, TurnView } from '$core/reduce.ts'
@@ -85,29 +86,10 @@
     if (menu) await store.caricaCatalogo()
   }
 
-  // Cosa e' in uso adesso. Due nomi per la stessa cosa: il catalogo elenca `default`,
-  // lo snapshot riporta il modello **risolto** (`claude-opus-5[1m]`) — quindi si
-  // confronta con tutti e due, se no la voce scelta non risulta mai selezionata.
-  // Visto guardando: il chip diceva `claude-opus-5[1m]` e nel menu non era spuntato niente.
+  // Cosa e' in uso adesso. Quale voce del menu corrisponda lo decide `ModelPicker`:
+  // il catalogo elenca `default`, lo snapshot riporta il risolto (`claude-opus-5[1m]`),
+  // e il confronto fra i due e' una regola sola, che sta con l'elenco.
   const modelloOra = $derived(store.helperPick?.model ?? snap?.model ?? '')
-  /**
-   * Quale **voce** del menu e' quella in uso.
-   *
-   * Il confronto diretto non basta e nemmeno il ripiego su `resolved`: piu' voci
-   * possono risolvere allo stesso modello — `Default (recommended)` e `Opus (1M
-   * context)` sono lo stesso modello con due nomi — e segnarle entrambe non dice piu'
-   * quale hai scelto. Visto guardando il menu: due spunte.
-   *
-   * L'ordine giusto e' quindi: **prima** un id esatto (l'utente ha scelto quella voce),
-   * e solo se nessuna corrisponde si ripiega sul modello risolto, prendendo la prima —
-   * che e' `default`, ed e' la voce vera quando nessuno ha scelto niente.
-   */
-  const idScelto = $derived.by(() => {
-    const tutti = (store.catalogo ?? []).flatMap(a => a.models)
-    if (tutti.some(m => m.id === modelloOra)) return modelloOra
-    return tutti.find(m => m.resolved === modelloOra)?.id ?? modelloOra
-  })
-  const scelto = (m: { id: string }): boolean => m.id === idScelto
   /** Solo la coda del nome: `opencode/anthropic/claude-sonnet-5` in un chip da 100px
    *  mostrerebbe il provider e nient'altro, cioè la parte uguale per tutti. */
   const etichetta = $derived(modelloOra.split('/').pop() ?? '—')
@@ -224,35 +206,10 @@
   <div class="hdock">
     {#if menu}
       <div class="hpop">
-        {#if store.catalogo === null}
-          <div class="pg">Loading models…</div>
-        {:else}
-          {#each store.catalogo as a (a.id)}
-            <div class="pg">
-              {a.label}
-              {#if a.models.length}<span class="cnt">{a.models.length}</span>{/if}
-            </div>
-            <!-- L'avviso dell'agent, una volta sola. Su ognuno dei 61 modelli sarebbe
-                 lo sfondo invece di un avviso — difetto gia' corretto una volta. -->
-            {#if a.note}
-              <div class="pnote"><Icon name="i-warn" />{a.note}</div>
-            {/if}
-            {#if !a.available}
-              <div class="mi off"><Icon name="i-block" /><span class="nm">{a.label}</span>
-                <span class="why">{a.reason ?? 'not available'}</span></div>
-            {/if}
-            {#each a.models as m (m.id)}
-              <button class="mi" class:on={scelto(m)}
-                title={m.note ?? ''}
-                onclick={() => void scegli(a.id, m.id)}>
-                <span class="nm">{m.label ?? m.id}</span>
-                {#if m.note}<span class="warn" aria-label="warning"><Icon name="i-warn" /></span>{/if}
-                {#if riparte(a.id)}<span class="why">restarts</span>{/if}
-                {#if scelto(m)}<span class="tick"><Icon name="i-check" /></span>{/if}
-              </button>
-            {/each}
-          {/each}
-        {/if}
+        <ModelPicker catalogo={store.catalogo} corrente={modelloOra}
+          agenteCorrente={store.helperPick?.agent ?? snap?.agent}
+          nota={a => (riparte(a) ? 'restarts' : null)}
+          onScegli={(agent, model) => void scegli(agent, model)} />
       </div>
     {/if}
 

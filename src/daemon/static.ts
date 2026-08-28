@@ -38,7 +38,23 @@ export function uiIsBuilt(): boolean {
 }
 
 /** true se la richiesta è stata servita. */
-export function serveUi(req: IncomingMessage, res: ServerResponse, token: string): boolean {
+/**
+ * `token` è la credenziale **con cui questa richiesta è passata**, non quella della
+ * macchina: da quando un telefono ne ha una sua e revocabile (`telefono.ts`), piantare
+ * sempre quella globale vorrebbe dire consegnargli la chiave maestra al primo
+ * caricamento — cioè annullare la revoca prima ancora di averla scritta.
+ *
+ * `durevole` allunga la vita del cookie per i telefoni. Ventiquattr'ore vanno bene per
+ * una scheda sul computer, dove il token sta comunque nell'indirizzo e nel deposito
+ * locale; su un telefono no — la **prima** richiesta è l'HTML nudo, che non ha
+ * intestazioni né JavaScript, quindi vive solo del cookie: alla sua scadenza il
+ * segnalibro tornerebbe a rispondere 403 e bisognerebbe rifare il codice dal computer.
+ * A difendere non è la scadenza ma la revoca (decisione dell'utente, 28 agosto 2026):
+ * togliere il dispositivo dall'elenco lo ferma subito, cookie o no.
+ */
+export function serveUi(
+  req: IncomingMessage, res: ServerResponse, token: string, durevole = false,
+): boolean {
   if ((req.method ?? 'GET') !== 'GET') return false
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
@@ -75,8 +91,11 @@ export function serveUi(req: IncomingMessage, res: ServerResponse, token: string
     // vivo il 26 agosto (domanda aperta §5 di "Continua da telefono": la credenziale
     // sul telefono non regge quanto dovrebbe). Aggiungerlo non toglie nulla al
     // loopback, che resta comunque un contesto attendibile.
+    // 400 giorni è il tetto che i browser applicano comunque a un cookie persistente:
+    // chiederne di più non lo allunga, lo accorcia a quello.
+    const vita = durevole ? 400 * 86400 : 86400
     headers['set-cookie'] =
-      `stark=${token}; Path=/; SameSite=Strict; HttpOnly; Secure; Max-Age=86400`
+      `stark=${token}; Path=/; SameSite=Strict; HttpOnly; Secure; Max-Age=${vita}`
   }
 
   res.writeHead(200, headers)

@@ -14,33 +14,21 @@
 //     buttata via avrebbe prodotto una chat fantasma nuova — dalla porta accanto a
 //     quella che il 26 agosto era costata mezza giornata.
 //
-// Misurato: 5 modelli in 1646 ms. Non e' gratis, e per questo si tiene la risposta.
+// Misurato: 5 modelli in 1646 ms (3233 su questa macchina il 28 agosto). Non e' gratis,
+// e per questo la risposta si tiene — ma la si tiene in `../index.ts`, non qui: vedi
+// sotto.
 
 import { tmpdir } from 'node:os'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { ModelChoice } from '../../core/events.ts'
 import { buildOptions, modelChoices, resolveModel } from './sdk-options.ts'
 
-/**
- * Per quanto ci si fida di un elenco gia' preso.
- *
- * Cinque minuti e non «per sempre» perche' i modelli **cambiano davvero** mentre STARK
- * e' acceso: un piano che scade, un login diverso, un modello nuovo pubblicato. E non
- * cinque secondi, perche' ogni scadenza costa un processo e un secondo e mezzo.
- */
-const VALIDA_MS = 5 * 60 * 1000
-
-let cache: { quando: number; profilo: string; modelli: ModelChoice[] } | null = null
-
-/** Solo per le prove: dimentica cio' che si e' gia' chiesto. */
-export function scordaCatalogo(): void { cache = null }
+// Qui **non** c'e' cache, di proposito: sta una sola volta sul punto d'ingresso
+// (`catalogoCompleto` in `../index.ts`), che e' anche l'unico chiamante. Averla in due
+// posti vorrebbe dire due scadenze annidate, e un elenco che nel caso peggiore ha il
+// doppio dell'eta' che dichiara.
 
 export async function catalogoModelli(profile?: string): Promise<ModelChoice[]> {
-  const profilo = profile ?? ''
-  if (cache && cache.profilo === profilo && Date.now() - cache.quando < VALIDA_MS) {
-    return cache.modelli
-  }
-
   // `tmpdir()` e non una cartella di lavoro vera: qui non si lavora, si fa una domanda.
   // Una cwd di progetto farebbe leggere al CLI la memoria e le impostazioni di quel
   // progetto per rispondere a una cosa che non dipende dal progetto.
@@ -53,9 +41,7 @@ export async function catalogoModelli(profile?: string): Promise<ModelChoice[]> 
   const q = query({ prompt: muto, options })
   try {
     const info = (await q.initializationResult()) as Record<string, unknown>
-    const modelli = modelChoices(info['models'], resolveModel(info['models'], 'default'))
-    cache = { quando: Date.now(), profilo, modelli }
-    return modelli
+    return modelChoices(info['models'], resolveModel(info['models'], 'default'))
   } catch {
     // Un catalogo che non si riesce a leggere non e' un guasto della chat che lo ha
     // chiesto: chi sta sopra mostrera' l'agent senza modelli, e lo dira'.

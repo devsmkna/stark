@@ -5,6 +5,7 @@
   import Conversation from './components/Conversation.svelte'
   import Effects from './components/Effects.svelte'
   import NewChat from './components/NewChat.svelte'
+  import Phone from './components/Phone.svelte'
   import Settings from './components/Settings.svelte'
   import Todo from './components/Todo.svelte'
   import Icon from './components/Icon.svelte'
@@ -240,6 +241,8 @@
     <Settings {store} />
   {:else if store.dialog?.kind === 'new'}
     <NewChat {store} />
+  {:else if store.dialog?.kind === 'phone'}
+    <Phone {store} />
   {:else if store.dialog?.kind === 'delete'}
     {@const row = store.dialog.row}
     <div class="scrim" role="presentation" onclick={() => { store.dialog = null }}></div>

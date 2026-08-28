@@ -35,6 +35,30 @@ export type SessionRow = {
 }
 
 /** Le sottocartelle di un percorso, per il dialogo «apri path» di New chat. */
+/** Un passo della guida «collega il telefono». `fatto` è misurato dal daemon, mai
+ *  dedotto dal passo precedente — vedi `daemon/tailscale.ts`. */
+export type PassoTelefono = {
+  id: 'installato' | 'collegato' | 'https' | 'pubblicato' | 'telefono'
+  fatto: boolean
+  dettaglio?: string
+  azione?: 'collega' | 'pubblica'
+}
+
+export type StatoTelefono = {
+  tailscale: { passi: PassoTelefono[]; pronto: boolean; url?: string; host?: string }
+  codice: { scade: number } | null
+  devices: { id: string; nome: string; da: number; visto: number }[]
+  /** L'id del dispositivo da cui stai guardando, se ne sei uno. */
+  questo?: string | null
+  /** Stai usando il **token della macchina**, che non appartiene a nessun telefono e
+   *  non si può revocare. È il caso di chi entrava col vecchio segnalibro `?token=…`. */
+  conTokenMacchina?: boolean
+}
+
+/** Il ramo della cartella di una chat. `repo:false` vale anche quando `git` non è
+ *  installato: da fuori è lo stesso fatto, cioè non c'è un ramo da mostrare. */
+export type GitInfo = { repo: boolean; branch?: string; detached?: boolean }
+
 export type BrowseResult = { path: string; parent: string | null; dirs: string[]; error?: string }
 
 /** L'esito del Finder di sistema: `ok:false` copre sia l'annullo sia un errore — la
@@ -280,6 +304,30 @@ export class Api {
    * apre il menu due volte non lo paga due volte. Si chiede quindi all'apertura del
    * selettore e non all'avvio della UI, che di questa risposta non ha bisogno.
    */
+  /**
+   * Passa il lavoro a un altro agent.
+   *
+   * Non usa `json()` perche' il 409 **non e' un errore**: e' la domanda «questa chat
+   * dorme, come vuoi il briefing?». `json()` lo trasformerebbe in un'eccezione con
+   * scritto «409 su /api/handoff», e chi chiama dovrebbe leggere un numero dentro un
+   * messaggio per capire che deve chiedere una cosa all'utente.
+   */
+  async handoff(id: string, agent: string, model: string, via?: 'agent' | 'journal'): Promise<
+    | { ok: true; id: string; file: string }
+    | { ok: false; serveScelta: true; state: string }
+    | { ok: false; error: string }
+  > {
+    const res = await fetch('/api/handoff', {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ id, agent, model, ...(via ? { via } : {}) }),
+    })
+    const b = await res.json().catch(() => ({})) as Record<string, unknown>
+    if (res.status === 201) return { ok: true, id: String(b['id']), file: String(b['file']) }
+    if (res.status === 409) return { ok: false, serveScelta: true, state: String(b['state'] ?? '') }
+    return { ok: false, error: String(b['error'] ?? `${res.status} su /api/handoff`) }
+  }
+
   async models(): Promise<AgentModels[]> {
     return (await this.json<{ agents: AgentModels[] }>('/api/models')).agents
   }
@@ -315,6 +363,29 @@ export class Api {
    *  tornano `{ok:false}`: non è un'eccezione, la UI resta ferma senza avvisi. */
   browseNative(): Promise<NativePickResult> {
     return this.json('/api/browse-native', { method: 'POST' })
+  }
+
+  // ── collegare un telefono ───────────────────────────────────────────────
+  phone(): Promise<StatoTelefono> { return this.json('/api/phone') }
+  phoneCode(): Promise<{ codice: string; scade: number }> {
+    return this.json('/api/phone/code', { method: 'POST' })
+  }
+  phoneCancel(): Promise<Ack> { return this.json('/api/phone/code', { method: 'DELETE' }) }
+  phoneRevoke(id: string): Promise<Ack> {
+    return this.json(`/api/phone/device?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+  /** Lancia `tailscale up`. Non aspetta il login: torna l'indirizzo da aprire. */
+  tailscaleUp(): Promise<{ ok: boolean; url?: string; error?: string }> {
+    return this.json('/api/phone/tailscale-up', { method: 'POST' })
+  }
+  tailscalePublish(): Promise<Ack> { return this.json('/api/phone/publish', { method: 'POST' }) }
+
+  /** Su quale ramo sta `cwd`. Un fallimento non è niente da mostrare — vuol dire che
+   *  un ramo non c'è — quindi non alza: la barra di stato non deve avere un modo di
+   *  rompersi per una cartella qualunque. */
+  async git(cwd: string): Promise<GitInfo> {
+    try { return await this.json<GitInfo>(`/api/git?cwd=${encodeURIComponent(cwd)}`) }
+    catch { return { repo: false } }
   }
 
   /** F3: apre il gestore di file della macchina su `path`. Un rifiuto (file sparito

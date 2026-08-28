@@ -17,11 +17,13 @@ import { activity, type Activity } from '../core/activity.ts'
 import { Journal, MemoryJournal, RawLog, type EventSink } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
+import { DA_ESTENSIONE, ESTENSIONE } from '../core/allegati.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { statsFrom, type Periodo, type Stats } from '../core/stats.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
 import type {
-  AgentQuestion, Attachment, CanonicalEvent, Command, PermissionCategory, PermissionMode, PromptPart,
+  AgentQuestion, Attachment, CanonicalEvent, Command, Payload, PermissionCategory, PermissionMode,
+  PromptPart,
 } from '../core/events.ts'
 
 export type OpenSpec = {
@@ -167,17 +169,8 @@ export const STARK_HOME = process.env['STARK_HOME'] ?? resolve(homedir(), '.star
 const SESSIONS = resolve(STARK_HOME, 'sessioni')
 const ALLEGATI = resolve(STARK_HOME, 'allegati')
 
-/** I quattro tipi che il modello accetta, e le estensioni con cui li scriviamo. */
-const TIPI: Record<string, string> = {
-  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
-}
-/** Il contrario, per rispondere con l'intestazione giusta quando li si rilegge. */
-const DA_ESTENSIONE: Record<string, string> = Object.fromEntries(
-  Object.entries(TIPI).map(([mime, ext]) => [ext, mime]),
-)
-
-/** Un'immagine già scritta su disco: `data` serve ancora, per mandarla all'agent. */
-export type ImmagineSalvata = {
+/** Un allegato già scritto su disco: `data` serve ancora, per mandarlo all'agent. */
+export type AllegatoSalvato = {
   ref: string
   mediaType: string
   bytes: number
@@ -736,11 +729,15 @@ export class Registry {
    * sessione, così cancellare una conversazione porta via anche i suoi allegati
    * invece di lasciarli in giro senza che nessuno sappia più di chi erano.
    */
-  saveAttachments(id: string, list: Attachment[] = []): ImmagineSalvata[] {
-    const out: ImmagineSalvata[] = []
+  saveAttachments(id: string, list: Attachment[] = []): AllegatoSalvato[] {
+    const out: AllegatoSalvato[] = []
     for (const a of list) {
-      const ext = TIPI[a.mediaType]
-      if (!ext) continue   // un tipo che il modello non accetta non si salva e non si manda
+      const ext = ESTENSIONE[a.mediaType]
+      // Un tipo che STARK non sa scrivere su disco non si salva e non si manda. Il
+      // filtro vero — cosa accetta *questo modello* — sta prima, nella casella di
+      // scrittura, che è l'unico posto che sa quale modello è in uso; questa è la
+      // difesa del confine, e vale contro chi la casella non la usa affatto.
+      if (!ext) continue
       const bytes = Buffer.from(a.data, 'base64')
       const ref = createHash('sha256').update(bytes).digest('hex')
       const dir = resolve(ALLEGATI, id)
@@ -773,6 +770,11 @@ export class Registry {
   }
 
   /** Rilettura dal journal: è la stessa cosa che fa un risveglio. */
+  /** C'e' un processo dietro questa conversazione adesso? Chi vuole farle scrivere
+   *  qualcosa deve saperlo prima di chiederglielo: su una dormiente non c'e' nessuno
+   *  che ascolti, e il comando andrebbe perso invece di fallire. */
+  isLive(id: string): boolean { return this.live.has(id) }
+
   events(id: string, from = 0): CanonicalEvent[] {
     // Una effimera non ha un file da rileggere: la coda ce l'ha in memoria, e la
     // domanda e' la stessa — «cosa mi sono perso da `from` in poi». Senza questa
@@ -829,16 +831,33 @@ export class Registry {
   rename(id: string, title: string): { ok: true } | { ok: false; error: string } {
     const clean = title.trim().replace(/\s+/g, ' ').slice(0, 120)
     if (!clean) return { ok: false, error: 'titolo vuoto' }
+    return this.annota(id, { k: 'session.renamed', title: clean })
+  }
+
+  /**
+   * Scrive un fatto nel journal di una conversazione, viva o dormiente che sia.
+   *
+   * I due rami non sono un caso speciale: una sessione viva ha il journal **gia' aperto**
+   * dal suo processo, e aprirne un secondo sullo stesso file vorrebbe dire due scrittori
+   * con due idee del `seq`. Su una dormiente invece non c'e' nessuno, e si apre e si
+   * chiude. La riga vale per il §4 come tutte le altre: la si applica allo snapshot e la
+   * si manda a chi guarda, invece di aggiornare uno stato di lato che poi diverge.
+   *
+   * Era il corpo di `rename`, l'unico che ne aveva bisogno. Col passaggio di consegne i
+   * chiamanti sono diventati due, e due copie di questo ballo sarebbero due modi di
+   * sbagliarlo.
+   */
+  annota(id: string, p: Payload): { ok: true } | { ok: false; error: string } {
     const l = this.live.get(id)
     if (l) {
-      const e = l.journal.append({ k: 'session.renamed', title: clean })
+      const e = l.journal.append(p)
       applyTo(l.snapshot, e)
       for (const w of l.watchers) w(e)
     } else {
       const path = resolve(SESSIONS, `${id}.jsonl`)
       if (!existsSync(path)) return { ok: false, error: 'sconosciuta' }
       const j = new Journal(path, id)
-      j.append({ k: 'session.renamed', title: clean })
+      j.append(p)
       j.close()
     }
     this.bump()

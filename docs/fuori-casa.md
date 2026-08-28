@@ -209,3 +209,78 @@ difetto dei proxy con un idle timeout corto.
 Le prove su `Host`/`Origin` falsificato **non** si fanno da qui e la prova lo dice: le
 riscrive il proxy, non arrivano mai al perimetro. Quelle stanno in `npm run daemon`, che
 gira sul loopback dove il perimetro è l'unica cosa in mezzo.
+
+## Collegare un telefono (28 agosto 2026)
+
+Il giro qui sopra resta vero e resta il fondamento; quello che cambia è **come ci si
+arriva**. Non più un indirizzo con dentro il token da riscrivere a mano, ma il bottone
+col telefono in cima all'elenco.
+
+### Cosa vedi
+
+Il pannello non spiega cosa fare: **mostra cosa manca**, e ogni riga è misurata sulla
+macchina (`src/daemon/tailscale.ts`), non raccontata.
+
+| passo | come si misura | lo fa STARK |
+|---|---|---|
+| Tailscale su questa macchina | `tailscale status --json` risponde | no |
+| macchina collegata all'account | `BackendState: Running` | **sì** — `tailscale up` |
+| certificati HTTPS abilitati | `CertDomains` non vuoto | no: è una spunta nella console web del tuo account |
+| STARK pubblicato sulla tailnet | `serve status --json` ha un handler verso la porta di **questo** daemon | **sì** — `tailscale serve --bg` |
+| Tailscale sul telefono | un peer con `OS` iOS/Android e `Online: true` | no |
+
+Le spunte si accendono **da sole**, ogni due secondi, finché non è tutto verde: due dei
+cinque passi li fai altrove — la console di Tailscale, l'app sul telefono — e devi
+vederli arrivare qui senza chiudere e riaprire. Quando è tutto verde il pannello smette
+di rileggere e mostra una cosa sola: il codice.
+
+L'ultimo passo dice anche **come si chiama** il telefono che ha trovato (`iphone-11`):
+riconoscerlo è ciò che distingue «l'app è installata» da «l'app è installata su un altro
+telefono».
+
+### Il codice
+
+Otto caratteri, cinque minuti, **un uso solo**, tre tentativi. Alfabeto senza `0/O` e
+`1/I/L`, che si sbagliano a leggere da uno schermo. Del codice sta su disco solo
+l'impronta, e il confronto è a tempo costante. È lo stesso accoppiamento del bot Telegram
+e non è una coincidenza: era già stato pensato una volta, e due meccanismi che divergono
+sono due superfici da rivedere invece di una.
+
+Dal telefono si apre il **link fisso** — `https://<macchina>.ts.net/` — e si scrive il
+codice. Da lì in poi quel telefono è dentro, con la UI intera.
+
+### Il pezzo delicato: una porta che si apre e si richiude
+
+Per scrivere il codice il telefono deve caricare una pagina **senza avere ancora una
+credenziale**, e fino a oggi qualunque richiesta senza token era 403. Quindi:
+
+- si passa senza credenziale su **due sole rotte**, `/pair` e `POST /api/phone/claim`
+  (`ROTTE_ACCOPPIAMENTO` in `security.ts` — l'elenco sta lì e non nelle rotte, perché una
+  porta aperta va aperta in un posto solo);
+- e **solo mentre un codice è vivo**. Fuori da quei cinque minuti il link fisso risponde
+  403 esattamente come prima: la superficie non autenticata non è accesa in permanenza,
+  esiste quando l'hai chiesta tu premendo il bottone;
+- le altre tre difese **non** cadono: anche per accoppiare bisogna arrivare dal loopback,
+  con un `Host` che è questa macchina e un `Origin` nostro.
+
+La pagina è una stringa nel daemon (`pagina-pair.ts`), non un file di `ui/dist`. Non è
+pigrizia: una pagina della UI vera tirerebbe dentro il suo JavaScript e il suo CSS, cioè
+`/assets/*`, e per farla funzionare senza credenziale bisognerebbe aprire anche quelli.
+
+### Quanto dura, e come si chiude
+
+**Finché non lo scolleghi tu.** È la risposta alla domanda aperta §5 («che durata deve
+avere la credenziale sul telefono»), presa il 28 agosto 2026: un telefono viene chiuso e
+riaperto dal sistema di continuo, e una credenziale che scade ti chiude fuori proprio
+quando il computer non ce l'hai davanti. A difendere è la **revoca**, non la scadenza —
+l'elenco dei dispositivi collegati sta nello stesso pannello, con un bottone che li
+stacca subito.
+
+Da qui una trappola che è stata chiusa scrivendo il codice, e vale la pena saperla:
+`serveUi` pianta un cookie a ogni caricamento della pagina, e finché la credenziale era
+una sola poteva piantare quella. Con un telefono che ne ha una propria e revocabile,
+piantare sempre quella globale vorrebbe dire **consegnargli la chiave maestra** al primo
+caricamento, cioè annullare la revoca prima ancora di averla scritta. Ora si ripianta la
+credenziale con cui si è entrati (`guard.credenziale()`), e per un telefono dura 400
+giorni invece di 24 ore — perché la prima richiesta di un segnalibro è l'HTML nudo, senza
+intestazioni né JavaScript: vive solo del cookie.

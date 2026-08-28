@@ -70,6 +70,7 @@ Le due conseguenze che hanno deciso la scelta:
 
 - **La barra a sinistra** raggruppa per stato e, dentro ogni stato, **per progetto — sempre**,
   anche quando il progetto è uno solo: la struttura non deve cambiare forma sotto gli occhi.
+  (Dal 28 agosto 2026 il raggruppamento si sceglie — vedi «Due modi di guardare l'elenco».)
 - **Tutti i comandi stanno in basso**, attorno alla casella di scrittura. Sopra di essa un blocco
   con l'operazione in corso e, a destra, il **pulsante per fermare** — solo l'icona: un cerchio
   con dentro un quadrato (`circle-stop`), in rosso.
@@ -133,7 +134,29 @@ Lo stile: laterale chiara, pill di stato, un colore per progetto, densità alta 
 ## 1. L'insieme dei lavori
 
 È la schermata da cui si parte e a cui si torna. Mostra tutte le conversazioni attive e
-dormienti, raggruppate per progetto.
+dormienti.
+
+### Due modi di guardare l'elenco
+
+Sopra la lista c'è **«Group by: Project | Status»**, e sono due domande diverse:
+
+- **by status** (il default, ed è com'è sempre stato) — `Waiting`, `Working`, `Sleeping`, e
+  dentro ogni stato per progetto, **sempre**, anche quando il progetto è uno solo. Risponde a
+  *a cosa devo rispondere adesso*, che è la domanda che si fa aprendo STARK
+- **by project** — i progetti in **ordine alfabetico**, e dentro ognuno le chat con davanti
+  quelle che aspettano te. Risponde a *cosa sta succedendo su questo lavoro*, e serve quando
+  le conversazioni aperte sono tante e su cartelle diverse
+
+Dentro un progetto le chat restano ordinate **per stato prima che per tempo**: fuori dal
+raggruppamento per stato nessun altro lo fa più, e senza, una che dorme capiterebbe sopra una
+che ti sta aspettando. L'elenco degli stati è **lo stesso** che dà l'ordine alle sezioni
+nell'altro modo: la convinzione «prima chi aspetta te» sta in un posto solo.
+
+Il comando sta **sull'elenco** e non nelle impostazioni, perché la scelta si fa guardando il
+risultato — cercarla dietro un pannello vorrebbe dire farla al buio. Sparisce mentre si cerca,
+dove l'albero non c'è: un comando che non muove niente di ciò che vedi è peggio di un comando
+assente. E la scelta vive **nel browser**, come il tema e la dimensione del testo: «su questo
+schermo voglio vederle per progetto» è del dispositivo, non del progetto.
 
 **Cosa serve sapere di ciascuna, per decidere se entrarci:**
 
@@ -369,7 +392,8 @@ Compare un **riquadro in basso**. Tre casi:
 - **un permesso**: vuole eseguire qualcosa e chiede il consenso. Mostra esattamente cosa
   farebbe e in quale cartella
 - **una domanda**: vuole sapere come procedere, con due o quattro alternative fra cui
-  scegliere, ognuna con una breve spiegazione. A volte si può scegliere più di una
+  scegliere — righe con un segno di scelta, ognuna con la sua spiegazione sotto. A volte se
+  ne può scegliere più di una, e allora il segno è quadrato invece che tondo
 - **un piano** (27 agosto 2026): ha finito di pianificare e chiede di partire
 
 ### Il piano è l'unico dei tre che si legge
@@ -414,17 +438,55 @@ terza è esattamente ciò che si vuole fare, e con quattro domande *quale mi man
 domanda che ci si fa davvero — a cui un avanzamento lineare non saprebbe rispondere.
 
 A scelta singola, premere un'opzione porta al passo dopo. A scelta multipla no: non si può
-sapere quando si ha finito di spuntare. Quando c'è **una domanda sola**, a scelta singola,
-non compare nemmeno un Send: lì la scelta *è* la conferma.
+sapere quando si ha finito di spuntare. **«Send answer» c'è sempre**, anche su una domanda
+sola. Fino al 27 agosto 2026 non c'era: lì la scelta *era* la conferma, e premere un'opzione
+inviava di colpo. Con le opzioni disegnate come pillole era coerente — si premeva un bottone, e
+un bottone fa succedere qualcosa. Con le opzioni a pallini no: un pallino dice «questa è
+selezionata», non «è partita», e chi lo preme si aspetta ancora un momento per rileggere.
+
+### Le opzioni sono righe, non pillole
+
+Ridisegnato il 28 agosto 2026 su un riferimento portato dall'utente. Ogni opzione è una
+**riga piena con un segno di scelta a sinistra**: tondo quando se ne prende una, quadrato
+quando se ne possono prendere quante si vuole. Prima erano pillole larghe quanto il loro
+testo, che andavano a capo in fila — una barra di comandi, non una scelta — e `multiSelect`
+non si vedeva da nessuna parte: lo si scopriva premendo due opzioni e vedendole restare
+accese entrambe.
+
+In una riga piena ci sta anche la **descrizione** che l'assistente scrive per ogni opzione.
+Prima era in un tooltip: cioè la sola cosa che dice *cosa costa* una scelta si raggiungeva
+solo fermandoci sopra il mouse, e da telefono per niente.
+
+Quando l'assistente **consiglia** un'opzione, quella porta un badge blu **«Recommended»**
+appoggiato sul bordo in alto a destra. Non è un campo del protocollo: il CLI dice al modello
+di scriverlo in fondo all'etichetta, quindi STARK lo riconosce lì, lo toglie dal testo — il
+badge lo dice meglio — e lo rimanda indietro **intero**, perché la risposta è indicizzata per
+etichetta esatta.
+
+Il riquadro resta **giallo**, che è l'identità del blocco «tocca a te», e ambra restano il
+titolo e l'icona. Il blu è riservato a ciò che si tocca: l'opzione scelta, il badge, «Send
+answer». Due colori con due mestieri, invece di uno solo che li fa entrambi.
 
 ### Due strade in più, su ogni domanda, sempre
 
-Oltre alle opzioni proposte ci sono sempre due voci, disegnate **tratteggiate** perché non
-le propone l'assistente — le mette STARK, e non devono sembrare un'opzione uscita dal
-modello:
+Oltre alle opzioni proposte ci sono sempre due voci, che non propone l'assistente — le mette
+STARK:
 
-- **Type in your answer** — rispondere a parole proprie, per quella domanda
 - **Chat about this** — «non ho abbastanza per scegliere: parliamone»
+- **Type in your answer** — una **casella sempre aperta**, in fondo alla lista, tratteggiata
+  finché non ci si scrive dentro
+
+La casella non è dietro un bottone da premere, e non è una scelta di disposizione: il
+contratto del tool la promette al modello — «*AskUserQuestion always includes a Skip button
+and a free-text input box for custom answers, so do not include `None` or `Other` as
+options*» — quindi l'assistente **omette apposta** l'opzione «nessuna di queste», contando su
+di lei. Tenerla dietro un bottone la rendeva una via da scoprire proprio mentre l'agent dava
+per scontato che fosse aperta.
+
+Non prende il fuoco da sola quando la domanda arriva: sarebbe un campo di testo che ruba la
+tastiera a chi stava scrivendo altrove. Scriverci dentro spegne l'opzione scelta prima, e
+svuotarla torna a «non ho ancora risposto» — sono tre strade, non tre campi da riempire
+insieme.
 
 Che le opzioni coprano tutto lo ha deciso l'assistente. Chi risponde deve poter dire sia
 *nessuna di queste* sia *non ho abbastanza per scegliere*.
@@ -496,6 +558,32 @@ soltanto.
 *mentre* si lavora e si cambiano **a caldo**: vivono nella barra di stato sotto la casella di
 scrittura, che già le mostrava e ora le rende premibili. Chiederle prima del primo messaggio
 sarebbe farsi rispondere a domande non ancora poste.
+
+### La cartella, e il ramo su cui si sta (28 agosto 2026)
+
+Nella barra c'è il **nome** della cartella, non il percorso: quello è lungo, uguale nei primi
+due terzi fra un progetto e l'altro, e la parte che distingue è l'ultima — cioè proprio quella
+che l'ellissi mangiava quando lo spazio stringeva. Il percorso intero resta a un passo, nel
+titolo al passaggio del mouse. È la stessa parola che l'elenco a sinistra usa per il progetto,
+e sono la stessa cosa: due modi di scriverla costringerebbero a tradurre fra le due colonne per
+capire che è la stessa chat.
+
+Accanto, il **ramo git**, quando la cartella è dentro un repo. Non compare mai «no branch»: dove
+git non c'è non c'è un fatto da riportare. Con la testa staccata si mostra la sigla del commit,
+che è l'unica risposta vera a «dove sono».
+
+Il ramo **non è nel journal e non ha un evento canonico**: è un fatto del filesystem, non
+dell'agent. Chi fa `git checkout` in un terminale accanto non manda niente a STARK, quindi la
+risposta si chiede (`GET /api/git`) invece di ricordarla — e ricordarla sarebbe peggio, perché
+il journal è per sempre e il ramo cambia da solo.
+
+Si chiede quando cambia la cartella e **una volta per turno**. Un turno di confini ne muove
+due, all'inizio e alla fine, e chiederlo su entrambi vorrebbe dire sapere due volte la stessa
+cosa: se il ramo è cambiato, a cambiarlo è stato il turno, quindi conta la risposta dopo.
+L'eccezione è una chat aperta *mentre* lavora, che altrimenti resterebbe senza ramo fino a fine
+turno. Verificato dal vivo cambiando ramo dal terminale senza dire niente a STARK: al confine
+del turno la barra passa da `principale` a `sviluppo`, e da lì a `a6d8c33` con la testa
+staccata.
 
 ### Scrivere mentre l'agent lavora
 
@@ -711,11 +799,19 @@ screenshot o si **trascina** un'immagine sul blocco in basso — su tutto il blo
 rettangolo di ventiquattro pixel: chi arriva con un'immagine in mano punta *in basso*. Gli
 allegati restano in attesa sopra la casella finché non si manda.
 
-- **PNG, JPEG, GIF, WebP**, che sono i quattro che il modello accetta. Un file di un altro tipo
-  lo dice, invece di sparire nel nulla.
-- **un file di testo non si allega**: si incolla, o si nomina per percorso. L'agent sa leggerlo
-  da solo, ed è il motivo per cui non serve spedirglielo.
-- **nella conversazione l'immagine resta**, sopra la risposta, com'era davanti al modello.
+- **quali tipi, lo dice il modello** (28 agosto 2026, chiesto dall'utente). Non è una lista di
+  STARK: ogni modello dichiara cosa accetta, e la casella filtra con quella. Su Claude Code sono
+  le quattro immagini più PDF, TXT, Markdown e CSV; su OpenCode dipende dal modello — 61 dei 151
+  di questa macchina leggono immagini, 4 anche i PDF. Un file di un altro tipo lo **dice**,
+  invece di sparire nel nulla, e dice anche cosa avrebbe preso.
+- **un modello che non legge allegati spegne la graffetta**, con la ragione nel tooltip: spenta e
+  spiegata, mai nascosta. Cambiando modello a caldo il bottone si riaccende da sé, perché la
+  domanda è del modello e non della chat.
+- **un file di testo si allega**, e la regola di prima («si nomina per percorso, l'agent sa
+  leggerlo») resta vera solo per i file **del progetto**, che infatti si citano con `@`. Dal
+  telefono, un percorso da nominare non c'è.
+- **nella conversazione l'allegato resta**, sopra la risposta, com'era davanti al modello:
+  l'immagine come immagine, tutto il resto come una scheda col nome e il peso, che si apre.
   Riaprendo il lavoro due giorni dopo si capisce di cosa si stava parlando.
 
 ### I comandi slash

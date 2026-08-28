@@ -27,6 +27,7 @@ import { PushPhone } from './push.svelte.ts'
 import { fromPath, go } from './route.ts'
 import { Themer } from './theme.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
+import { Grouper } from './grouping.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
 import { activityText, project } from './view.ts'
 
@@ -48,6 +49,7 @@ export type Dialog =
   /** La palette: si scrive un pezzo di nome e si salta lì (`lib/shortcuts.ts`). È un
    *  dialogo come gli altri, quindi `Escape` la chiude senza codice in più. */
   | { kind: 'palette' }
+  | { kind: 'phone' }
   | null
 
 /**
@@ -80,6 +82,9 @@ export class Store {
   readonly textSize = new Sizer()
   /** La famiglia del font, stesso motivo. Vedi `fontfamily.svelte.ts`. */
   readonly font = new Fonter()
+  /** Come si raggruppa l'elenco — per stato o per progetto. Stesso motivo del tema:
+   *  è una preferenza di questo schermo. Vedi `grouping.svelte.ts`. */
+  readonly grouping = new Grouper()
 
   /**
    * Le impostazioni della macchina. `null` finché non sono arrivate: prima di allora
@@ -1017,6 +1022,53 @@ export class Store {
       return
     }
     await this.apriHelper({ agent, model })
+  }
+
+  /**
+   * Il passaggio a un altro agent, mentre sta succedendo.
+   *
+   * Tre stati e non un booleano: `null` non sta succedendo niente, `{chiede}` la chat
+   * che lascia non e' viva e la scelta e' dell'utente, `{corso}` il modello sta
+   * scrivendo il briefing — che e' un turno vero e puo' durare minuti, quindi va
+   * mostrato o sembra che il clic non abbia fatto niente.
+   */
+  handoff = $state<
+    | null
+    | { fase: 'chiede'; agent: string; model: string; state: string }
+    | { fase: 'corso'; agent: string; model: string }
+    | { fase: 'fallito'; error: string }
+  >(null)
+
+  /**
+   * Porta il lavoro della chat a fuoco su un altro agent.
+   *
+   * Il pannello **non** cambia: `replacePane` mette la conversazione nuova al posto
+   * della vecchia nello stesso riquadro, che e' cio' che rende il passaggio un cambio
+   * di modello dal punto di vista di chi guarda, e non un «vai a cercarti l'altra chat
+   * nell'elenco». La vecchia resta nell'elenco, con nel journal scritto dov'e' andata.
+   */
+  async passaAdAltroAgent(agent: string, model: string, via?: 'agent' | 'journal'): Promise<void> {
+    const da = this.selected
+    if (!da) return
+    this.handoff = { fase: 'corso', agent, model }
+    // «Svegliala e falla scrivere» e' due cose, non una: il daemon rifiuta `agent` su
+    // una conversazione senza processo dietro, e ha ragione — non deve essere lui a
+    // decidere di spendere un risveglio. La decisione e' qui, dove l'utente l'ha appena
+    // presa, e il risveglio e' lo stesso `wake()` del pulsante nell'elenco.
+    if (via === 'agent') {
+      const riga = this.rows.find(r => r.id === da)
+      if (riga && riga.state === 'sleeping') await this.wake(riga)
+    }
+    const esito = await this.api.handoff(da, agent, model, via)
+    if (!esito.ok) {
+      this.handoff = 'serveScelta' in esito
+        ? { fase: 'chiede', agent, model, state: esito.state }
+        : { fase: 'fallito', error: esito.error }
+      return
+    }
+    this.handoff = null
+    if (this.layout && leafIds(this.layout).includes(da)) await this.replacePane(da, esito.id)
+    else await this.select(esito.id)
   }
 
   /** Il catalogo, una volta sola per caricamento di pagina. */

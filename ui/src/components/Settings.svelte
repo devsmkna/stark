@@ -10,7 +10,7 @@
   // perché cambiano cosa fa l'agent e devono valere da qualunque browser; il tema e i
   // suoni restano nel browser, perché sono del dispositivo.
   import Icon from './Icon.svelte'
-  import type { Storage, SystemInfo } from '../lib/api.ts'
+  import type { StatoTelefono, Storage, SystemInfo } from '../lib/api.ts'
   import type { Stats } from '$core/stats.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
@@ -23,7 +23,7 @@
 
   let { store }: { store: Store } = $props()
 
-  type Sezione = 'permissions' | 'agent' | 'shortcuts' | 'projects' | 'notifications'
+  type Sezione = 'permissions' | 'agent' | 'shortcuts' | 'projects' | 'notifications' | 'phone'
     | 'appearance' | 'usage' | 'storage' | 'system'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
@@ -37,6 +37,7 @@
     { id: 'shortcuts', nome: 'Shortcuts', icona: 'i-bolt' },
     { id: 'projects', nome: 'Projects', icona: 'i-folder' },
     { id: 'notifications', nome: 'Notifications', icona: 'i-bell' },
+    { id: 'phone', nome: 'Phone', icona: 'i-phone' },
     { id: 'appearance', nome: 'Appearance', icona: 'i-palette' },
     { id: 'usage', nome: 'Usage', icona: 'i-chart' },
     { id: 'storage', nome: 'Storage', icona: 'i-disk' },
@@ -135,6 +136,7 @@
   // `default` a mano nel browser — due parole di Claude Code, che su un altro agent non
   // vogliono dire niente.
   let agenti = $state<NonNullable<SystemInfo['agents']> | null>(null)
+  let telStato = $state<StatoTelefono | null>(null)
   $effect(() => {
     if (agenti === null) {
       void store.api.system().then(
@@ -276,6 +278,9 @@
     if ((sez === 'system' || sez === 'projects') && !system) {
       void store.api.system().then(s => { system = s }, e => { errore = String(e.message ?? e) })
     }
+    // Aprendo la sezione, non all'avvio: legge lo stato di Tailscale, che costa due
+    // `execFile`. Stessa condotta della diagnostica qui sotto.
+    if (sez === 'phone' && telStato === null) void store.api.phone().then(x => { telStato = x })
   })
 
   const mb = (n: number): string =>
@@ -747,6 +752,44 @@
           <Icon name="i-bell" />
           <span><b>The dot in the list is not a notification.</b> It only works if you are already
           looking at STARK, and the whole point of these is being able to look somewhere else.</span>
+        </div>
+
+      {:else if sez === 'phone'}
+        <!-- Qui c'è la **porta**, non una seconda copia del pannello. Il pannello vero è
+             `Phone.svelte`, e ci si arriva anche dall'icona in cima all'elenco: due
+             schermate che dicono la stessa cosa sono due schermate da tenere allineate,
+             e la prima volta che divergono nessuno sa quale ha ragione. Quello che sta
+             qui è ciò che una schermata di impostazioni deve dire da sé — a che punto
+             sei — più la via per andare avanti. -->
+        <div class="ssub">
+          A phone reaches STARK through your Tailscale network: nothing is published to
+          the internet, and the connection still arrives from this machine's loopback.
+        </div>
+        <div class="prow">
+          <div>
+            <div class="pn">Tailscale account</div>
+            <div class="pd">
+              {#if telStato === null}Checking…
+              {:else if telStato.tailscale.host}Signed in as {telStato.tailscale.host}
+              {:else}This machine is not signed in{/if}
+            </div>
+          </div>
+          <button class="btn" style="margin-left:auto"
+            onclick={() => { store.dialog = { kind: 'phone' } }}>
+            {telStato?.tailscale.host ? 'Open' : 'Connect Tailscale account'}
+          </button>
+        </div>
+        <div class="prow">
+          <div>
+            <div class="pn">Connected phones</div>
+            <div class="pd">
+              {#if telStato === null}—
+              {:else if telStato.devices.length === 0}None yet
+              {:else}{telStato.devices.map(d => d.nome).join(', ')}{/if}
+            </div>
+          </div>
+          <button class="btn" style="margin-left:auto"
+            onclick={() => { store.dialog = { kind: 'phone' } }}>Connect a phone</button>
         </div>
 
       <!-- ─── Appearance ──────────────────────────────────────────────── -->
