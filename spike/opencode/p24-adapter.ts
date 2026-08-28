@@ -109,6 +109,42 @@ const snapM = (dopoModello.corpo as Record<string, unknown>)['snapshot'] as Reco
 check('cambiare modello a caldo si vede nello snapshot', snapM['model'] === MODELLO,
   String(snapM['model']))
 
+// ─── il controllo che prima non poteva fallire ──────────────────────────────
+//
+// Fino al 27 agosto 2026 la riga qui sopra era **tutta** la prova sul cambio di
+// modello, e `MODELLO` di default e' quello su cui la sessione gia' si trova: cambiava
+// su se stesso, quindi passava sempre. E' il motivo per cui il bug dei modelli — un
+// turno che non partiva mai su 32 dei 61 — non e' mai emerso da qui.
+//
+// Adesso si cambia su un modello **diverso**, e non basta che lo snapshot lo scriva:
+// deve girarci un turno. `session.setModel` emette `session.option` da se', quindi lo
+// snapshot direbbe di si' anche se il runner non sapesse eseguire niente.
+const ALTRO = (modelli as Array<Record<string, unknown>>)
+  .map(m => String(m['id']))
+  .find(x => x !== snapM['model'] && !/free$/.test(x))
+if (ALTRO) {
+  await j(`/api/sessions/${id}/command`, {
+    method: 'POST', body: JSON.stringify({ c: 'session.setModel', model: ALTRO }),
+  })
+  await new Promise(r => setTimeout(r, 800))
+  await j(`/api/sessions/${id}/command`, {
+    method: 'POST', body: JSON.stringify({ c: 'session.prompt', text: 'Di\' soltanto: ALTRO' }),
+  })
+  let esito = ''
+  for (let i = 0; i < 100; i++) {
+    await new Promise(r => setTimeout(r, 1000))
+    const v = await j(`/api/sessions/${id}`)
+    const sn = (v.corpo as Record<string, unknown>)['snapshot'] as Record<string, unknown>
+    const turni = (sn['turns'] ?? []) as Array<Record<string, unknown>>
+    const ult = turni[turni.length - 1]
+    if (ult?.['endedAt']) { esito = String(ult['reason']); break }
+  }
+  check('e su un modello DIVERSO ci gira davvero un turno', esito === 'completed',
+    `${ALTRO} → ${esito || 'mai finito'}`)
+} else {
+  check('e su un modello DIVERSO ci gira davvero un turno', false, 'nessun secondo modello')
+}
+
 // ─── il turno (dipende dal modello, quindi si ritenta) ──────────────────────
 console.log('\n# un turno vero')
 let turno = false

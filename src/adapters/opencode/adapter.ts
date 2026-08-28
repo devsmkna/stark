@@ -19,13 +19,39 @@ import {
 import type {
   Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
 } from '../../core/events.ts'
-import { clientPer, lascia } from './host.ts'
+import { clientLegacyPer, clientPer, lascia } from './host.ts'
 import { modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
 
 type Client = Awaited<ReturnType<typeof clientPer>>
+type Legacy = Awaited<ReturnType<typeof clientLegacyPer>>
 
 /** Quante volte STARK riprova da se'. Tre come il terminale, misurato nel suo log. */
 const RITENTATIVI = 3
+
+/**
+ * Quanto si aspetta il **primo segno di vita** di un turno prima di dichiararlo perso.
+ *
+ * ─── Perche' esiste, misurato il 27 agosto 2026 ───────────────────────────────
+ *
+ * Segnalazione dell'utente: «i modelli di OpenCode non sembrano funzionare». Non era
+ * l'elenco: sceglierne uno che il runner v2 non sa risolvere apriva un turno che non
+ * finiva **mai**. Il server lo sa e lo scrive nel proprio log —
+ * `SessionRunnerModel.ModelUnavailableError` — ma sul flusso eventi **non dice niente**:
+ * arrivano `prompt.admitted` e `prompted`, e poi il silenzio. Misurato: tre tentativi
+ * sulla stessa sessione in 75 secondi, zero eventi.
+ *
+ * Un turno appeso in silenzio e' la cosa peggiore che una GUI possa fare, perche' non
+ * si distingue da un modello che sta pensando. Quindi si guarda una cosa sola e
+ * precisa: **fra l'ammissione del prompt e il primo passo** non deve esserci un vuoto
+ * assurdo. Non e' un timeout sul turno — un tool puo' girare per minuti, e interromperlo
+ * sarebbe un danno; e' un timeout sull'**avvio**.
+ *
+ * 90 secondi perche' devono essere abbondantemente oltre il caso lento e chiaramente
+ * dentro l'assurdo. Misurato su questa macchina: `big-pickle` parte in 1,0-2,5s,
+ * `gpt-5-nano` in 5,8s, e un turno con tre tool ci mette 36s **totali** ma il primo
+ * passo arriva subito. Il caso rotto invece non parte mai.
+ */
+const ATTESA_PRIMO_SEGNO = 90_000
 
 /**
  * L'errore puo' passare da solo?
@@ -63,6 +89,19 @@ function refModello(model: string): { providerID: string; id: string } | undefin
 }
 
 /**
+ * Lo stesso modello nella forma che vuole la superficie **legacy**: `modelID`, non `id`.
+ *
+ * Sembra un capriccio di nomi e non lo e': e' l'unico posto in cui le due superfici
+ * dello stesso server chiedono la stessa cosa con due parole diverse, e sbagliarla non
+ * da' errore — il campo semplicemente non viene letto, e il turno parte sul modello di
+ * default. Scoperto leggendo cosa manda il CLI, non i tipi.
+ */
+function refLegacy(model: string): { providerID: string; modelID: string } | undefined {
+  const r = refModello(model)
+  return r ? { providerID: r.providerID, modelID: r.id } : undefined
+}
+
+/**
  * Su OpenCode **la modalita' E' l'agent**.
  *
  * Fino a ieri qui c'era una mappatura provvisoria (`plan` → `plan`, tutto il resto
@@ -85,6 +124,8 @@ export class OpenCodeAdapter implements AgentSession {
   private readonly hooks: AdapterHooks
   private readonly tr = new OpenCodeTranslator()
   private client: Client | null = null
+  /** La superficie che **esegue** il turno. Vedi `clientLegacyPer`. */
+  private legacy: Legacy | null = null
   private sessionId = ''
   private modello: string
   private modelli: ModelChoice[] = []
@@ -95,10 +136,12 @@ export class OpenCodeAdapter implements AgentSession {
   /** Chi aspetta che il turno finisca (`settled`). */
   private attese: Array<() => void> = []
   /** L'ultimo prompt mandato, per poterlo rimandare se lo step fallisce di striscio. */
-  private ultimoPrompt: { text: string; files?: unknown[] } | null = null
+  private ultimoPrompt: { parts: unknown[] } | null = null
   private tentativi = 0
   /** Lo Stop dell'utente: da li' in poi non si ritenta piu' niente. */
   private fermato = false
+  /** Il guardiano del turno muto. Vedi `ATTESA_PRIMO_SEGNO`. */
+  private guardia: ReturnType<typeof setTimeout> | null = null
 
   constructor(spec: SessionSpec, hooks: AdapterHooks) {
     this.spec = spec
@@ -112,6 +155,7 @@ export class OpenCodeAdapter implements AgentSession {
   async start(): Promise<void> {
     this.emit({ k: 'session.state', state: 'starting' })
     this.client = await clientPer(this.spec.cwd)
+    this.legacy = await clientLegacyPer(this.spec.cwd)
     this.preso = true
     const c = this.client
 
@@ -189,11 +233,18 @@ export class OpenCodeAdapter implements AgentSession {
 
   /** Il flusso **per sessione**, non quello globale: un server serve piu' cartelle. */
   private ascolta(): void {
-    const c = this.client
-    if (!c) return
+    const l = this.legacy
+    if (!l) return
     this.flusso = (async () => {
-      const s = await c.v2.session.events({ sessionID: this.sessionId }, { signal: this.ac.signal })
-      for await (const grezzo of s.stream as AsyncIterable<OpenCodeEvent>) {
+      // Il flusso legacy e' **globale**, non per sessione: un server serve N
+      // conversazioni e le racconta tutte sullo stesso filo. Filtrare qui non e' una
+      // pigrizia — e' il posto giusto, perche' il `sessionID` sta dentro il carico
+      // utile di ogni evento e nessuno sopra questo file sa che esiste un filo solo.
+      const s = await l.event.subscribe({ signal: this.ac.signal }) as {
+        stream: AsyncIterable<OpenCodeEvent>
+      }
+      for await (const grezzo of s.stream) {
+        if (!this.miaSessione(grezzo)) continue
         try { await this.unEvento(grezzo) } catch (e) {
           this.emit({ k: 'notice', level: 'error', text: `evento non gestito: ${String(e)}` })
         }
@@ -201,14 +252,74 @@ export class OpenCodeAdapter implements AgentSession {
     })().catch(() => { /* chiuso da noi, o il server e' andato */ })
   }
 
+  /**
+   * L'evento parla di questa conversazione?
+   *
+   * Gli eventi che **non** portano un `sessionID` passano lo stesso: sono quelli del
+   * server e del catalogo, il traduttore li ignora comunque, e scartarli qui vorrebbe
+   * dire dover ricordare l'elenco in due posti.
+   */
+  private miaSessione(e: OpenCodeEvent): boolean {
+    const d = (e.data ?? e.properties ?? {}) as Record<string, unknown>
+    const dentro = (v: unknown): string =>
+      typeof v === 'string' ? v : String((((v ?? {}) as Record<string, unknown>)['sessionID']) ?? '')
+    const id = dentro(d['sessionID'])
+      || dentro(d['part'])
+      || dentro(d['info'])
+    return !id || id === this.sessionId
+  }
+
+  /**
+   * Il turno e' partito davvero: si smonta il guardiano.
+   *
+   * `prompt.admitted` e `prompted` **non contano**, ed e' tutto il punto: sono
+   * esattamente i due eventi che arrivano anche quando il turno non partira' mai.
+   * Dicono «ho ricevuto», non «sto lavorando».
+   */
+  private vivo(tipo: string): boolean {
+    if (tipo === 'session.next.prompt.admitted' || tipo === 'session.next.prompted') return false
+    return tipo.startsWith('session.next.') || tipo.startsWith('message.part.')
+  }
+
+  private smontaGuardia(): void {
+    if (this.guardia) { clearTimeout(this.guardia); this.guardia = null }
+  }
+
+  /** Il turno e' stato ammesso: da adesso ha `ATTESA_PRIMO_SEGNO` per dare un segno. */
+  private montaGuardia(): void {
+    this.smontaGuardia()
+    this.guardia = setTimeout(() => {
+      this.guardia = null
+      // Non si ritenta: se il runner ha abbandonato la sessione, rimandare lo stesso
+      // prompt trova lo stesso muro — e l'utente aspetterebbe il triplo per leggere
+      // la stessa cosa. Vale la ragione gia' scritta in `passeggero()`.
+      this.ultimoPrompt = null
+      const motivo = `Il turno è stato accettato ma non è mai partito (nessun evento per `
+        + `${Math.round(ATTESA_PRIMO_SEGNO / 1000)}s). Di solito vuol dire che l'agent non `
+        + `riesce a usare il modello scelto: provane un altro dalla barra qui sotto.`
+      this.emit({ k: 'notice', level: 'error', text: motivo })
+      this.emit({ k: 'session.error', message: motivo, fatal: false })
+      for (const p of this.tr.chiudiTurno('error')) this.emit(p)
+      this.emit({ k: 'session.state', state: 'idle' })
+      this.sveglia()
+    }, ATTESA_PRIMO_SEGNO)
+    // Un guardiano non deve tenere in vita il processo: se STARK non ha altro da fare,
+    // che si spenga senza aspettare novanta secondi per niente.
+    this.guardia.unref?.()
+  }
+
   private async unEvento(e: OpenCodeEvent): Promise<void> {
     this.hooks.onRaw?.(e)
+    if (this.vivo(String(e.type))) this.smontaGuardia()
     const d = (e.data ?? e.properties ?? {}) as Record<string, unknown>
 
     // I due bloccanti non passano dal traduttore: hanno bisogno di **aspettare una
     // risposta**, e il traduttore e' una funzione pura di proposito.
-    if (e.type === 'permission.v2.asked') { await this.unPermesso(d); return }
-    if (e.type === 'question.v2.asked') { await this.unaDomanda(d); return }
+    // I nomi senza `v2`: sul filo legacy i due bloccanti si chiamano cosi', e la
+    // forma del carico utile e' diversa (vedi `unPermesso`). Misurato su una
+    // cattura vera: e' `permission.asked` ad arrivare, non `permission.v2.asked`.
+    if (e.type === 'permission.asked') { await this.unPermesso(d); return }
+    if (e.type === 'question.asked') { await this.unaDomanda(d); return }
     if (e.type === 'session.next.step.failed' && await this.forseRitenta(d)) return
 
     for (const p of this.tr.translate(e)) {
@@ -254,22 +365,25 @@ export class OpenCodeAdapter implements AgentSession {
     // di trovare l'altro capo ancora giu'.
     await new Promise(r => setTimeout(r, 1500 * this.tentativi))
     if (this.fermato) return false
-    await this.client?.v2.session.prompt({
-      sessionID: this.sessionId,
-      ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
-      prompt: this.ultimoPrompt,
-      delivery: 'queue',
-    } as never).catch(() => { /* il prossimo `step.failed` chiudera' il turno */ })
+    this.montaGuardia()
+    await this.mandaAlRunner(this.ultimoPrompt)
+      .catch(() => { /* il prossimo errore chiudera' il turno */ })
     return true
   }
 
   private async unPermesso(d: Record<string, unknown>): Promise<void> {
+    // I nomi dei campi sul filo legacy, misurati su una cattura vera e non dedotti
+    // dai tipi: `permission` e' il **tipo** di richiesta (`external_directory`, …),
+    // `patterns` sono le risorse toccate, `always` cio' che si puo' ricordare.
+    // Erano `action`/`resources`/`save` sulla superficie v2: stesso significato, tre
+    // parole diverse, e leggere quelle vecchie non da' errore — da' una card che dice
+    // «azione» su risorse vuote, cioe' un permesso che non si puo' giudicare.
     const requestId = String(d['id'] ?? randomUUID())
-    const azione = String(d['action'] ?? 'azione')
-    const risorse = Array.isArray(d['resources']) ? d['resources'].map(String) : []
-    // `save` e' cio' che OpenCode propone di ricordare: e' gia' il nostro `savable`,
-    // che §14 aveva preso proprio da qui. Non c'e' niente da tradurre.
-    const salvabili = Array.isArray(d['save']) ? d['save'].map(String) : [azione]
+    const azione = String(d['permission'] ?? d['action'] ?? 'azione')
+    const risorse = Array.isArray(d['patterns']) ? d['patterns'].map(String)
+      : Array.isArray(d['resources']) ? d['resources'].map(String) : []
+    const salvabili = Array.isArray(d['always']) ? d['always'].map(String)
+      : Array.isArray(d['save']) ? d['save'].map(String) : [azione]
 
     this.emit({
       k: 'permission.asked', requestId, action: azione,
@@ -284,9 +398,7 @@ export class OpenCodeAdapter implements AgentSession {
     this.emit({ k: 'session.state', state: 'busy' })
     if (!verdetto.allow) {
       this.emit({ k: 'permission.replied', requestId, decision: 'reject', message: verdetto.reason })
-      await this.client?.v2.session.permission.reply({
-        sessionID: this.sessionId, requestID: requestId, reply: 'reject', message: verdetto.reason,
-      })
+      await this.rispondiPermesso(requestId, 'reject')
       return
     }
     // «Consenti sempre» qui e' **nativo**: `reply: 'always'`. Su Claude Code STARK deve
@@ -294,8 +406,29 @@ export class OpenCodeAdapter implements AgentSession {
     // contratto passa una stringa (il soggetto) e non sa ne' l'una ne' l'altra cosa.
     const sempre = verdetto.remember !== undefined
     this.emit({ k: 'permission.replied', requestId, decision: sempre ? 'always' : 'once' })
-    await this.client?.v2.session.permission.reply({
-      sessionID: this.sessionId, requestID: requestId, reply: sempre ? 'always' : 'once',
+    await this.rispondiPermesso(requestId, sempre ? 'always' : 'once')
+  }
+
+  /**
+   * La risposta a un permesso, sulla rotta del runner che l'ha chiesto.
+   *
+   * Le tre parole sono le stesse di `/v2` (`once` / `always` / `reject`) — quello non
+   * cambia. A cambiare e' il nome del campo, `response` invece di `reply`, e il fatto
+   * che il permesso vada risposto **a chi l'ha chiesto**: rispondere su `/v2` lascerebbe
+   * il tool appeso a `running` per sempre, che e' esattamente il sintomo visto in
+   * cattura quando nessuno rispondeva.
+   */
+  private async rispondiPermesso(id: string, response: 'once' | 'always' | 'reject'): Promise<void> {
+    // Il nome brutto e' dell'SDK, non nostro: quella rotta nell'OpenAPI non ha un
+    // `operationId`, quindi il generatore se lo costruisce dal metodo e dal percorso.
+    // Lasciarlo com'e' e' meglio che avvolgerlo: un giorno lo correggeranno, e un alias
+    // nostro nasconderebbe il fatto che il nome e' cambiato.
+    await this.legacy?.postSessionIdPermissionsPermissionId({
+      path: { id: this.sessionId, permissionID: id },
+      query: { directory: this.spec.cwd },
+      body: { response },
+    } as never).catch((e: unknown) => {
+      this.emit({ k: 'notice', level: 'error', text: `permesso non consegnato: ${String(e)}` })
     })
   }
 
@@ -368,26 +501,28 @@ export class OpenCodeAdapter implements AgentSession {
     // errore passeggero del provider, e senza questo STARK mollerebbe dove il terminale
     // insiste (vedi `forseRitenta`). I contatori ripartono a ogni prompt nuovo.
     const invio = {
-      text,
-      ...(images.length
-        ? { files: images.map(i => ({ mime: i.mediaType, url: `data:${i.mediaType};base64,${i.data}`, ...(i.name ? { filename: i.name } : {}) })) }
-        : {}),
+      parts: [
+        { type: 'text' as const, text },
+        ...images.map(i => ({
+          type: 'file' as const,
+          mime: i.mediaType,
+          url: `data:${i.mediaType};base64,${i.data}`,
+          ...(i.name ? { filename: i.name } : {}),
+        })),
+      ],
     }
     this.ultimoPrompt = invio
     this.tentativi = 0
     this.fermato = false
+    this.montaGuardia()
 
-    // `delivery: 'queue'` — la fila FIFO **e' del protocollo**, non da costruire. Su
-    // Claude Code STARK ha dovuto scriversela sopra (consegna uno alla volta, a
-    // sessione ferma) perche' il CLI fondeva in un turno solo i prompt consegnati
-    // insieme. Qui si chiede e basta. E' il posto in cui il secondo adapter fa **meno**
-    // lavoro del primo, non di piu'.
-    void this.client?.v2.session.prompt({
-      sessionID: this.sessionId,
-      ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
-      prompt: invio,
-      delivery: 'queue',
-    } as never).catch((err: unknown) => {
+    // La fila FIFO **e' del protocollo**, non da costruire. Su Claude Code STARK ha
+    // dovuto scriversela sopra (consegna uno alla volta, a sessione ferma) perche' il
+    // CLI fondeva in un turno solo i prompt consegnati insieme. Qui si manda e basta:
+    // misurato sulla rotta legacy, due prompt a 14ms di distanza hanno prodotto quattro
+    // messaggi — utente, agent, utente, agent — nell'ordine giusto e non fusi.
+    // E' il posto in cui il secondo adapter fa **meno** lavoro del primo, non di piu'.
+    void this.mandaAlRunner(invio).catch((err: unknown) => {
       this.emit({ k: 'session.error', message: String(err), fatal: false })
       for (const p of this.tr.chiudiTurno('error')) this.emit(p)
       this.sveglia()
@@ -395,13 +530,38 @@ export class OpenCodeAdapter implements AgentSession {
     return turnId
   }
 
+  /**
+   * Il prompt al runner che esegue davvero.
+   *
+   * Un metodo solo perche' lo chiamano in due — l'invio e il ritentativo — e due copie
+   * della stessa chiamata sono due posti dove sbagliare il nome del campo del modello.
+   */
+  private async mandaAlRunner(invio: { parts: unknown[] }): Promise<void> {
+    await this.legacy?.session.promptAsync({
+      path: { id: this.sessionId },
+      query: { directory: this.spec.cwd },
+      body: {
+        ...(refLegacy(this.modello) ? { model: refLegacy(this.modello) } : {}),
+        ...(this.modo ? { agent: this.modo } : {}),
+        parts: invio.parts,
+      },
+    } as never)
+  }
+
   async interrupt(): Promise<void> {
     // Chi preme il quadrato rosso non vuole che STARK riprovi mezzo secondo dopo.
     this.fermato = true
     this.ultimoPrompt = null
+    this.smontaGuardia()
     // «Idle interruption is a no-op», dice la rotta: fermare una sessione ferma non e'
     // un errore. Quindi non serve guardare prima se sta lavorando.
-    await this.client?.v2.session.interrupt({ sessionID: this.sessionId })
+    //
+    // Si ferma il runner che sta **davvero** girando, cioe' quello legacy: chiedere a
+    // `/v2` di interrompere un turno che non ha avviato lui non fa niente, e chi ha
+    // premuto il quadrato rosso lo vedrebbe continuare.
+    await this.legacy?.session.abort({
+      path: { id: this.sessionId }, query: { directory: this.spec.cwd },
+    } as never).catch(() => { /* gia' ferma, o il server e' andato */ })
     for (const p of this.tr.chiudiTurno('aborted')) this.emit(p)
     this.sveglia()
   }
@@ -413,9 +573,19 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   async setModel(model: string): Promise<void> {
+    // Chi comanda e' `this.modello`: il modello viaggia **con ogni prompt**
+    // (`mandaAlRunner`), quindi la scelta e' gia' efficace appena assegnata qui.
     this.modello = model
     const ref = refModello(model)
-    if (ref) await this.client?.v2.session.switchModel({ sessionID: this.sessionId, model: ref })
+    // Lo si dice anche a `/v2`, cosi' la sessione ricorda la scelta per chi la
+    // riaprisse da li' — ma **senza farne dipendere l'esito**: quel registro conosce
+    // solo i modelli che il suo runner sa eseguire (29 su 61 su questa macchina), e
+    // farlo fallire toglierebbe all'utente proprio i 32 che la via legacy esegue
+    // benissimo. Cioe' rimetterebbe il bug che questo giro e' servito a togliere.
+    if (ref) {
+      await this.client?.v2.session.switchModel({ sessionID: this.sessionId, model: ref })
+        .catch(() => { /* non lo conosce: il prompt lo porta comunque */ })
+    }
     this.emit({ k: 'session.option', id: 'model', value: model })
   }
 
@@ -485,6 +655,7 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   private async spegni(): Promise<void> {
+    this.smontaGuardia()
     for (const p of this.tr.chiudiTurno('interrupted')) this.emit(p)
     this.sveglia()
     this.ac.abort()

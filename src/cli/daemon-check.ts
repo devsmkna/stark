@@ -163,7 +163,14 @@ check(`Host esterno NON dichiarato → 403 (il default resta solo-localhost)`,
   const { soggetto } = await import('../daemon/push.ts')
   const prima = process.env['STARK_VAPID_SUBJECT']
   delete process.env['STARK_VAPID_SUBJECT']
-  check('sub VAPID = il primo host del perimetro', soggetto(p) === `https://${NOME}`, soggetto(p))
+  // Il perimetro si costruisce a mano invece di riusare `p`: `perimetro()` ci somma
+  // l'hostname Tailscale della macchina, e su una macchina che ce l'ha quello finisce
+  // **primo**, quindi la prova cadeva qui e restava verde altrove. Non era il push a
+  // sbagliare — era la prova a dipendere da com'è messa la macchina che la esegue.
+  const soloEnv = { ammessi: [{ host: NOME, origin: `https://${NOME}`, fonte: 'env' as const }],
+    scartate: [] }
+  check('sub VAPID = il primo host del perimetro',
+    soggetto(soloEnv) === `https://${NOME}`, soggetto(soloEnv))
   check('sub VAPID senza perimetro = il mailto: di ripiego',
     soggetto({ ammessi: [], scartate: [] }).startsWith('mailto:'))
   if (prima !== undefined) process.env['STARK_VAPID_SUBJECT'] = prima

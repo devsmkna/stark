@@ -861,58 +861,103 @@ check('diff: forma unificata, numeri di riga coerenti',
 // conversazione che sembra giusta e non lo e'.
 
 {
-  const oc = new OpenCodeTranslator()
   const ev2 = (type: string, data: Record<string, unknown> = {}) => ({ type, data })
-  const tipi = (ps: ReturnType<typeof oc.translate>) => ps.map(p => p.k).join(',')
+  const parte = (x: Record<string, unknown>) => ev2('message.part.updated', { part: x })
+  const chi = (id: string, role: string) => ev2('message.updated', { info: { id, role } })
+  const tipi = (ps: ReturnType<OpenCodeTranslator['translate']>) => ps.map(p => p.k).join(',')
 
+  const oc = new OpenCodeTranslator()
   oc.apriTurno('T1')
 
-  check('OpenCode: il carico utile si legge in `data`, non in `properties`',
-    tipi(oc.translate(ev2('session.next.text.delta', { textID: 'p1', delta: 'ciao' }))) === 'text.delta')
+  check('OpenCode: il carico utile si legge sia in `data` sia in `properties`',
+    tipi(oc.translate(chi('m0', 'assistant'))) === ''
+    && tipi({ type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } } as never
+      ? oc.translate({ type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } })
+      : []) === '')
 
-  // Il pezzo piu' delicato di tutto l'adapter: OpenCode non annuncia la fine del turno
-  // (`session.idle` mai visto in otto giri, `session.wait` non implementato).
-  const conTool = oc.translate(ev2('session.next.step.ended', { finish: 'tool-calls', tokens: {} }))
-  check('OpenCode: `tool-calls` NON chiude il turno — il giro continua',
-    !tipi(conTool).includes('turn.ended'), tipi(conTool))
+  // ─── la trappola numero uno ───────────────────────────────────────────────
+  //
+  // Il prompt dell'utente arriva come una parte `text` **identica** a quelle
+  // dell'agent: a distinguerle c'e' solo il ruolo del messaggio. Senza questo, la
+  // casella di scrittura si vedrebbe rimandare indietro il proprio prompt come
+  // risposta.
+  oc.translate(chi('mU', 'user'))
+  check('OpenCode: le parti dell\'utente non tornano indietro come risposta',
+    oc.translate(parte({ id: 'pU', messageID: 'mU', type: 'text', text: 'ciao' })).length === 0)
 
-  const conStop = oc.translate(ev2('session.next.step.ended', { finish: 'stop', tokens: { input: 10, output: 2 } }))
-  check('OpenCode: `stop` chiude il turno, e la sessione torna idle',
-    tipi(conStop) === 'step.ended,usage.updated,turn.ended,session.state', tipi(conStop))
+  // ─── la trappola numero due, la piu' cara ─────────────────────────────────
+  //
+  // `delta.field` dice quale **campo della parte** cresce, ed e' `"text"` anche per il
+  // ragionamento. Misurato su una cattura vera: 410 delta di parti `reasoning`
+  // etichettati `field:"text"`. Fidarsi di quel campo vorrebbe dire mostrare tutto il
+  // ragionamento come se fosse la risposta — un difetto silenzioso, che nessun errore
+  // segnalerebbe.
+  oc.translate(chi('mA', 'assistant'))
+  check('OpenCode: una parte di ragionamento si apre come tale',
+    tipi(oc.translate(parte({ id: 'pR', messageID: 'mA', type: 'reasoning', text: '' })))
+      === 'reasoning.started')
+  const dR = oc.translate(ev2('message.part.delta', { partID: 'pR', field: 'text', delta: 'penso' }))
+  check('OpenCode: e il suo delta resta ragionamento, benche\' `field` dica «text»',
+    tipi(dR) === 'reasoning.delta', tipi(dR))
+  oc.translate(parte({ id: 'pT', messageID: 'mA', type: 'text', text: '' }))
+  const dT = oc.translate(ev2('message.part.delta', { partID: 'pT', field: 'text', delta: 'ciao' }))
+  check('OpenCode: mentre il delta di una parte di testo e\' testo', tipi(dT) === 'text.delta')
+  check('OpenCode: un delta di una parte mai annunciata si scarta invece di indovinare',
+    oc.translate(ev2('message.part.delta', { partID: 'boh', field: 'text', delta: 'x' })).length === 0)
 
+  // Le parti arrivano **intere** a ogni aggiornamento: si manda solo la coda nuova, se
+  // no ogni risposta comparirebbe raddoppiata.
+  const ripetuta = oc.translate(parte({ id: 'pT', messageID: 'mA', type: 'text', text: 'ciao mondo' }))
+  check('OpenCode: di una parte ripetuta si manda solo la coda nuova',
+    ripetuta.length === 1 && (ripetuta[0] as { delta?: string }).delta === ' mondo',
+    JSON.stringify(ripetuta))
+
+  // ─── i tool: una macchina a stati, non quattro eventi ─────────────────────
+  const pend = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'pending', input: {} } }))
+  check('OpenCode: `pending` apre la riga del tool',
+    pend.length === 1 && pend[0]?.k === 'tool.started', tipi(pend))
+  check('OpenCode: lo stesso stato ripetuto non raddoppia la riga',
+    oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+      callID: 'c1', state: { status: 'pending', input: {} } })).length === 0)
+  // L'input parsato compare in `running`, non in `pending` — che porta `input: {}`.
+  const run = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'running', input: { command: 'ls -1' } } }))
+  check('OpenCode: `running` porta l\'input parsato e il soggetto',
+    run.length === 1 && run[0]?.k === 'tool.input.ended'
+    && (run[0] as { summary?: string }).summary === 'ls -1', JSON.stringify(run))
+  const fin = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'completed', output: 'fatto' } }))
+  const male = oc.translate(parte({ id: 'pE', messageID: 'mA', type: 'tool', tool: 'read',
+    callID: 'c2', state: { status: 'error', error: 'esploso' } }))
+  check('OpenCode: completed e error diventano lo stesso `tool.ended` con `ok` diverso',
+    (fin[0] as { ok?: boolean })?.ok === true && (male[0] as { ok?: boolean })?.ok === false)
+
+  // ─── il giro ──────────────────────────────────────────────────────────────
+  //
+  // Su questa superficie `session.idle` **arriva davvero**: la fine del turno non si
+  // deduce piu' da `step-finish`, che dice soltanto **come** e' andata. Prima era il
+  // contrario, ed era il pezzo piu' delicato dell'adapter.
+  const sf = oc.translate(parte({ id: 'pF', messageID: 'mA', type: 'step-finish',
+    reason: 'stop', tokens: { input: 10, output: 2 }, cost: 0.5 }))
+  check('OpenCode: `step-finish` NON chiude il turno: a dirlo e\' `session.idle`',
+    !tipi(sf).includes('turn.ended'), tipi(sf))
+  check('OpenCode: ma chiude le parti rimaste aperte, se no restano «sta scrivendo»',
+    tipi(sf).startsWith('reasoning.ended,text.ended'), tipi(sf))
+  check('OpenCode: e porta i token e il costo dello step',
+    tipi(sf).endsWith('step.ended,usage.updated'), tipi(sf))
+  const idle = oc.translate(ev2('session.idle'))
+  check('OpenCode: `session.idle` chiude il turno, e la sessione torna idle',
+    tipi(idle) === 'turn.ended,session.state', tipi(idle))
   check('OpenCode: chiudere due volte lo stesso turno non emette niente',
-    oc.translate(ev2('session.next.step.ended', { finish: 'stop', tokens: {} })).length === 2)
+    oc.translate(ev2('session.idle')).length === 0)
 
   // `length` non e' `stop`: un turno troncato non e' un turno riuscito, e appiattirli
-  // sarebbe la bugia comoda che il §4 vieta.
+  // sarebbe la bugia comoda che il §4 vieta. `tool-calls` invece **e'** una fine
+  // possibile, ora che a dirla c'e' `session.idle` e non piu' una deduzione.
   check('OpenCode: un troncamento non si racconta come «completato»',
     motivoDa('length') === 'error' && motivoDa('stop') === 'completed'
-    && motivoDa('aborted') === 'aborted')
-
-  // L'input **parsato** sta in `tool.called`, non in `tool.input.ended` (che porta il
-  // grezzo): tradurre quello sbagliato darebbe una riga senza soggetto.
-  const oc2 = new OpenCodeTranslator()
-  oc2.apriTurno('T2')
-  check('OpenCode: `tool.input.ended` grezzo non produce niente',
-    oc2.translate(ev2('session.next.tool.input.ended', { callID: 'c1', text: '{"command":"ls"}' })).length === 0)
-  const chiamato = oc2.translate(ev2('session.next.tool.called', { callID: 'c1', tool: 'bash', input: { command: 'ls -1' } }))
-  check('OpenCode: `tool.called` porta l\'input parsato e il soggetto',
-    chiamato.length === 1 && chiamato[0]?.k === 'tool.input.ended'
-    && (chiamato[0] as { summary?: string }).summary === 'ls -1')
-
-  // Due eventi distinti invece di un flag `ok`.
-  const bene = oc2.translate(ev2('session.next.tool.success', { callID: 'c1', content: [] }))
-  const male = oc2.translate(ev2('session.next.tool.failed', { callID: 'c2', error: { message: 'esploso' } }))
-  check('OpenCode: success e failed diventano lo stesso `tool.ended` con `ok` diverso',
-    (bene[0] as { ok?: boolean })?.ok === true && (male[0] as { ok?: boolean })?.ok === false)
-
-  // Uno step fallito e' una fine, e va detto: senza questo ramo il turno resterebbe
-  // aperto per sempre — lo stesso difetto del «turno-fantasma» gia' corretto altrove.
-  const oc3 = new OpenCodeTranslator()
-  oc3.apriTurno('T3')
-  const rotto = oc3.translate(ev2('session.next.step.failed', { error: { message: 'a monte' } }))
-  check('OpenCode: uno step fallito chiude il turno invece di lasciarlo appeso',
-    tipi(rotto) === 'session.error,turn.ended,session.state', tipi(rotto))
+    && motivoDa('aborted') === 'aborted' && motivoDa('tool-calls') === 'completed')
 
   check('OpenCode: senza un turno aperto non si chiude niente',
     new OpenCodeTranslator().translate(ev2('session.idle')).length === 0)

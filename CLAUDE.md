@@ -314,8 +314,11 @@ chiuso**, una riga sola che taglia il flusso («Context cleared · 3 turns befor
 riapre cliccandoci: azzerato non vuol dire cancellato, il journal ce l'ha ancora. Riaperto
 resta rientrato e più spento, se no quei turni tornerebbero identici a quelli veri e sarebbe di
 nuovo invisibile dove il contesto smette di valere.
-Che `/clear` azzeri **davvero** non è stato dedotto dal nome: `spike/clear-probe.ts` lo ha
-misurato con tre prompt veri (BANANA → `/clear` → «che parola?» → «NONLOSO»). Da lì sono usciti
+Che `/clear` azzeri **davvero** non è stato dedotto dal nome: è stato misurato con tre prompt
+veri (una parola nascosta → `/clear` → «che parola?» → «NONLOSO»). La sonda di allora non è
+stata tenuta nel repo — quello che ne è rimasto è il comportamento, in
+`src/adapters/claude-code/translate.ts` e in `docs/event-model.md`; la sonda che c'è,
+`spike/risveglio-dopo-clear.ts`, prova l'altra metà, cioè che il taglio sopravviva allo Sleep. Da lì sono usciti
 due fatti che non si indovinano: il CLI lo annuncia con un messaggio suo, `conversation_reset`,
 dentro il turno del comando — quindi **STARK non legge i prompt** per capire cosa fanno, chiede
 al CLI; e il `new_conversation_id` di quel messaggio **non** è il riferimento per il risveglio
@@ -1262,9 +1265,9 @@ modello; il testo del menu (mostra l'etichetta, non l'id); `pending` invece di
 `pendingPermissions`; e un `echo` pre-approvato che dava «il meccanismo non scatta» quando era
 solo silenzio. Leggere il nome vero costa dieci secondi; indovinarlo costa un giro.
 
-`npm run check` 143 → **171**, `npm run daemon` 38, `npm run opencode` **16**.
+`npm run check` 143 → **171**, `npm run daemon` 38, `npm run opencode` **16** — numeri
+**del ramo del secondo adapter, prima del merge**; i totali di oggi stanno più in basso.
 
-Passo corrente: **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
 **Il Finder di sistema per "New chat"** (27 agosto 2026, chiesto dall'utente dopo aver
 visto lo screenshot del browser manuale: «non è conveniente»). Accanto — non al posto —
 del tree che elenca le sottocartelle una alla volta, un bottone apre il selettore
@@ -1346,8 +1349,9 @@ oltre agli screenshot: split orizzontale (594+594×900), split verticale annidat
 destro (tre pannelli, 890/297/297 dopo il ridimensionamento), divisore trascinato e
 **ricaricamento** che restituisce le stesse identiche larghezze, chiusura che collassa il
 genitore rimasto con un figlio solo, e a 390px `.split`, `.pane`, `.hdl` e `×` **tutti a zero**
-col layout salvato intatto. `npm run check` resta **109**, `npm run layout:check` è nuovo a
-**22**, `svelte-check` 0 errori su 107 file.
+col layout salvato intatto. `npm run check` resta **109** (ramo del layout, prima del merge),
+`npm run layout:check` è nuovo a **22**, `svelte-check` 0 errori su 107 file.
+
 **Si arriva da fuori casa senza Tailscale, e si guida da Telegram** (27 agosto 2026,
 chiesti dall'utente: «vorrei collegarmi anche fuori casa senza Tailscale, o integrare
 cose come Telegram — come fa happy.engineering»).
@@ -1403,7 +1407,8 @@ scarto di 250 ms perché Telegram dica «ha finito» e il push no. Nell'estrazio
 un bug che c'era già: **un progetto silenziato taceva solo nella UI**, mentre il daemon
 mandava il push lo stesso. E `isDir` si è spostata da `server.ts` dentro
 `registry.open()`, dove nessun chiamante può saltarla.
-`npm run check` **133**, `npm run daemon` **52**, nuovo `npm run telegram` **54** contro
+`npm run check` **133**, `npm run daemon` **52** (ramo dell'accesso da fuori casa, prima del
+merge), nuovo `npm run telegram` **54** contro
 un finto `api.telegram.org` (whitelist, accoppiamento, un turno che diventa un messaggio
 solo, permessi, domande, 429, 409, e che il bot token non torni mai indietro).
 Resta non fatto e dichiarato: mandare **foto** come allegati di un prompt; e la prova a
@@ -1411,13 +1416,33 @@ mano dal telefono, che è l'unica che può dire come Telegram iOS mostra un mess
 modificato venti volte in un turno — l'incognita più grossa, col ripiego già progettato
 (`stream: 'a fine parte'`) se fosse insopportabile.
 
-Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
-risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
-chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
-ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
-cambiato quello vecchio. Restano i divieti veri (`deny`), e sul filone telefono la durata
-della credenziale (§5) e la seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora
-fattibile sul trasporto giusto).
+**Dove siamo davvero, dopo il merge del 27 agosto** (`f0cb303`: il ramo del secondo adapter,
+quello del layout multi-pannello e quello dell'accesso da fuori casa, uniti insieme).
+Qui c'era scritto «passo corrente: le due misure mai fatte, poi l'adapter per OpenCode».
+**Sono fatte entrambe**, e lo dice questo stesso file poche righe più su: il merge ne aveva
+lasciate **due copie**, ciascuna ferma al proprio ramo, e ognuna mandava a rifare lavoro
+finito. Cade con loro anche il «va scritto un ADR nuovo»: ADR-012, 013 e 014 esistono.
+
+I numeri delle suite scritti nelle sezioni qui sopra sono **per ramo, prima del merge**.
+Dopo il merge, misurati il 27 agosto: `npm run check` **211**, `npm run layout:check` **22**,
+`npm run telegram` **54**, `npm run opencode` **16**, `npm run daemon` **60**.
+
+**Una prova che dipendeva dalla macchina che la esegue** (trovata nello stesso giro,
+rilanciando le suite per rimettere in fila i numeri dopo il merge). `npm run daemon` dava
+59 su 60, e la rossa era `sub VAPID = il primo host del perimetro`. Non era un guasto del
+push: la prova chiamava `perimetro(['stark.esempio.test'])` e si aspettava che `soggetto()`
+tornasse quell'host, ma `perimetro()` ci **somma** l'hostname Tailscale della macchina, che
+finisce **primo** — misurato, non dedotto: `['deus-stark.tailaa7e75.ts.net',
+'stark.esempio.test']`. Quindi verde su una macchina senza Tailscale e rossa su questa, cioè
+verde sul portatile e rossa sul fisso. Corretta la **prova**, non `soggetto()`: costruisce
+ora un `Perimetro` sintetico invece di chiederlo alla macchina, così misura la regola —
+«il `sub` è il primo host ammesso» — e non la configurazione di rete di chi la lancia.
+Quale dei due host debba avere la precedenza quando ci sono entrambi resta una domanda
+aperta, e adesso è una domanda sul comportamento invece che un rosso da interpretare.
+
+Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
+seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
+giusto).
 
 Sul filone «cosa manca all'MVP», dopo il giro del 27 agosto restano tre cose, in
 quest'ordine di valore: il **lavoro dentro un sub-agent** (oggi se ne vede l'incarico e il
@@ -1441,7 +1466,8 @@ Decisioni già prese:
 - il canale lo implementa l'**Agent SDK ufficiale**, non codice nostro (ADR-009). Il vocabolario
   canonico, il journal e la UI restano nostri: l'SDK sostituisce il trasporto, non la traduzione.
 - web app locale: daemon + UI nel browser, NON app nativa (ADR-002)
-- un solo adapter nell'MVP: Claude Code (ADR-004)
+- ~~un solo adapter nell'MVP: Claude Code (ADR-004)~~ — **superata da ADR-012**: il secondo
+  adapter (OpenCode) è scritto, gira, e il contratto del §1 ha retto senza modifiche.
 - daemon persistente, con Sleep esplicito per sessione; TTL automatico rimandato (ADR-005)
 - permessi: sessioni in `auto`, zero card di default; i toggle aggiungono attrito dove serve (ADR-008)
 - Node + TypeScript, journal JSONL append-only per sessione (ADR-007)
@@ -1547,14 +1573,27 @@ Decisioni già prese:
   **non** cifrata da capo a fondo.
 - pannello terminale per sessione: **dopo** l'MVP
 
-Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
-branding (vincolo: "Claude Code" non è utilizzabile per il branding di un prodotto;
-"STARK, Powered by Claude" sì).
+Ancora aperte: il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il
+branding di un prodotto; "STARK, Powered by Claude" sì) e la distribuzione (strumento personale
+o cosa che altri installano).
+~~Accesso~~ e ~~uso da mobile~~ non sono più domande: il perimetro si allarga dichiarandolo
+(§Sicurezza) e il telefono è un client intero, PWA e Web Push compresi. **Nessuna delle due è
+però un ADR su Notion**, e ADR-003 dice che è lì che devono stare: finché non ci sono, la
+premessa su cui sono state prese non è rileggibile da nessuna parte.
 
-## Versioni su cui stiamo costruendo (verificate il 23 agosto 2026)
+## Versioni su cui stiamo costruendo (rimisurate il 27 agosto 2026)
 
-Claude Code CLI **2.1.241** · `@anthropic-ai/claude-agent-sdk` **0.3.241** · Node 24.13.1.
-Il patch dell'SDK insegue quello del CLI (0.3.**241** ↔ 2.1.**241**): vanno aggiornati insieme.
+`@anthropic-ai/claude-agent-sdk` **0.3.241** · `@opencode-ai/sdk` **1.17.20** ↔ `opencode`
+**1.17.20** · Node 24.13.1.
+**«Claude Code 2.1.241» va detto con più precisione di così**: sulla macchina il `claude` nel
+`PATH` è ormai **2.1.247**, ma STARK non usa quello — usa l'eseguibile che l'SDK porta con sé,
+appaiato alla propria versione, cioè **2.1.241** (`pathToClaudeCodeExecutable` resta al bundled
+se nessuno passa `executable`, `src/adapters/claude-code/sdk-options.ts`). Le due cose possono
+divergere e divergono: ADR-009 lo aveva previsto, ed è successo in quattro giorni. Quando una
+misura qui sotto dice «verificato su 2.1.241» parla del bundled; le sonde in `spike/` girano
+sulla stessa coppia dell'SDK.
+Il patch dell'SDK insegue quello del CLI bundled (0.3.**241** ↔ 2.1.**241**): vanno aggiornati
+insieme.
 Per capire cosa una versione supporta **non si confrontano stringhe**: `system/init` porta un array
 `capabilities` con i nomi dei comportamenti di protocollo, ed è documentato usare quello.
 
@@ -1642,8 +1681,12 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
   ogni turno.
 - L'utente è su **abbonamento a quota fissa**: `total_cost_usd` è un valore nominale, NON una
   spesa reale. La risorsa scarsa è la quota (rate limit), non i dollari.
-  Corollario per ADR-005: risvegliare una sessione dormiente rilegge tutto il contesto, quindi
-  costa quota. Lo Sleep libera RAM, non quota.
+  Corollario per ADR-005, **corretto il 27 agosto dopo averlo misurato invece di dedurlo**: il
+  risveglio rilegge sì tutto il contesto, ma quel contesto arriva come `cache_read`, non come
+  input nuovo (`input 2` contro `cache-r 20.564` su una conversazione da 20k token), e regge
+  almeno 420 secondi di pausa. Lo Sleep libera RAM; quota ne costa solo oltre la TTL della
+  cache, che non è stata misurata. Ed è una premessa **di Claude Code, non del dominio**: su
+  OpenCode il server è già in piedi e non c'è nessun contesto da rileggere.
 - **Due macchine**, e i trascritti NON si sincronizzano fra loro (vedi il Punto della situazione).
   Node: **24.13.1** sul fisso (`/mnt/m/devs-development/stark/stark`), **22.23.2** sul portatile
   (`/root/DevsMachna/stark`, aggiornato il 24 agosto 2026). Il prerequisito di ADR-007 è ≥ 22.18:
