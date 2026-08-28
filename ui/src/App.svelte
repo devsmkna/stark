@@ -14,6 +14,7 @@
   import { Store } from './lib/store.svelte.ts'
   import { AZIONI, combos } from './lib/actions.ts'
   import { matches, parse } from './lib/shortcuts.ts'
+  import { zoomRoot } from './lib/zoom.ts'
 
   const store = new Store()
 
@@ -73,6 +74,30 @@
   })
 
   const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
+
+  // Dove disegnare il menu del tasto destro. Non è `store.menu` così com'è: quelle
+  // sono le coordinate del puntatore, cioè **pixel veri della finestra**, mentre un
+  // `left` scritto su un elemento dentro il root zoomato è in unità del root. Al 135%
+  // dello schermo stretto il menu finiva a 1,35 volte la distanza dall'angolo — misurato
+  // in Chromium: clic a (189, 290), menu disegnato a (255, 391). Vedi lib/zoom.ts.
+  let menuEl = $state<HTMLElement | null>(null)
+  let menuPos = $state<{ x: number, y: number } | null>(null)
+
+  // La misura vera dell'elemento serve solo per l'altra metà: un menu aperto in fondo
+  // all'elenco sfonderebbe il bordo, e le sue ultime voci non si potrebbero premere.
+  // Il rettangolo è già in pixel veri, quindi il confronto con la finestra è diretto e
+  // la divisione arriva una volta sola, alla fine.
+  $effect(() => {
+    const m = store.menu
+    const el = menuEl
+    if (!m || !el) { menuPos = null; return }
+    const f = zoomRoot()
+    const r = el.getBoundingClientRect()
+    const bordo = 6
+    const x = Math.max(bordo, Math.min(m.x, window.innerWidth - r.width - bordo))
+    const y = Math.max(bordo, Math.min(m.y, window.innerHeight - r.height - bordo))
+    menuPos = { x: x / f, y: y / f }
+  })
 
   // §8 di docs/ui-schermate.md, deciso il 24 agosto 2026: sotto la soglia stretta non
   // ci sono due colonne rimpicciolite, ce n'è una alla volta — come WhatsApp e
@@ -189,7 +214,11 @@
        una schermata «modifica chat» perché, con cartella e agent bloccati per
        costruzione, sarebbe un contenitore con dentro un campo solo. -->
   {#if store.menu && menuRow}
-    <div class="ctx-menu" style="left:{store.menu.x}px;top:{store.menu.y}px">
+    <!-- La prima posizione è già quella giusta rispetto al cursore: l'effetto qui
+         sopra la ritocca solo se il menu sfonda un bordo, così non c'è un fotogramma
+         in cui compare nell'angolo sbagliato. -->
+    <div class="ctx-menu" bind:this={menuEl}
+      style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
       <!-- Sta in cima e ha una riga sua perché è l'unica voce che NON agisce su questa
            chat: agisce sul suo progetto. Aprire la seconda conversazione su una cartella
            su cui stai già lavorando non deve passare da «New chat» e da un percorso da
