@@ -104,8 +104,14 @@ export function buildOptions(o: LaunchOptions): Options {
   // momento in cui quella chiamata sarebbe partita.
   if (o.title) opts.title = o.title
   if (o.resume) {
+    // `resume` per primo: chi sa già quale conversazione vuole vince su chi chiede
+    // «l'ultima», e i due sono incompatibili per l'SDK.
     opts.resume = o.resume.ref
     if (o.resume.fork) opts.forkSession = true
+  } else if (o.continue) {
+    // Niente `sessionId` accanto: l'SDK li dichiara incompatibili, e passarli insieme
+    // fa fallire l'avvio invece di ignorarne uno.
+    opts.continue = true
   } else if (o.sessionId) {
     opts.sessionId = o.sessionId
   }

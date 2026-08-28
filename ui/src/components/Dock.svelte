@@ -18,7 +18,10 @@
   import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
-  let { store, snap }: { store: Store; snap: SessionSnapshot } = $props()
+  // `live` arriva da fuori e non da `live`: con più pannelli aperti «la chat a
+  // fuoco» non è la chat di *questo* dock, e la nota «no process behind it» compariva
+  // in tutti i pannelli appena una qualsiasi chat a fuoco era ferma.
+  let { store, snap, live }: { store: Store; snap: SessionSnapshot; live: boolean } = $props()
 
   let text = $state('')
   let box = $state<HTMLTextAreaElement | null>(null)
@@ -31,12 +34,12 @@
   // una sessione fermata dal riavvio del daemon finisce a metà di un turno, e ripeterlo
   // alla lettera mostrerebbe una rotellina che gira su niente e una domanda a cui non
   // c'è più nessuno a rispondere — la bugia peggiore, perché è quella su cui si aspetta.
-  const busy = $derived(store.live && (snap.state === 'busy' || snap.state === 'starting'))
+  const busy = $derived(live && (snap.state === 'busy' || snap.state === 'starting'))
   // Il terzo stato bloccante: un piano da approvare. Senza contarlo qui il blocco non
   // si espande, e `Ask.svelte` disegnerebbe in un contenitore alto zero.
   const pending = $derived(
     snap.pendingPermissions.length + snap.pendingQuestions.length + snap.pendingPlans.length > 0)
-  const asking = $derived(store.live && pending)
+  const asking = $derived(live && pending)
   const op = $derived(busy ? activity(snap) : null)
 
   $effect(() => {
@@ -196,7 +199,7 @@
    * coprirebbe quello che si scrive per proporre cose che non servono più.
    */
   const parola = $derived(
-    !chiuso && store.live && /^\/[^\s]*$/.test(text) ? text.slice(1).toLowerCase() : null,
+    !chiuso && live && /^\/[^\s]*$/.test(text) ? text.slice(1).toLowerCase() : null,
   )
 
   const comandi = $derived.by(() => {
@@ -257,7 +260,7 @@
    * condizione ogni indirizzo email scritto in un prompt aprirebbe il menu.
    */
   const cita = $derived.by(() => {
-    if (chiusoAt || !store.live) return null
+    if (chiusoAt || !live) return null
     const m = /(?:^|\s)@([^\s]*)$/.exec(text.slice(0, caret))
     return m ? { start: caret - m[1]!.length - 1, q: m[1]! } : null
   })
@@ -397,7 +400,7 @@
 <!-- Trascinare funziona su tutto il blocco, non solo sulla casella: chi arriva con
      un'immagine in mano punta «in basso», non un rettangolo di 24 pixel. -->
 <div class="dock" class:sopra
-  ondragover={e => { if (store.live) { e.preventDefault(); sopra = true } }}
+  ondragover={e => { if (live) { e.preventDefault(); sopra = true } }}
   ondragleave={() => { sopra = false }}
   ondrop={lascia}
   role="presentation">
@@ -414,13 +417,13 @@
          arriva mentre l'agent sta ancora lavorando, e lo stato canonico in quel momento
          è `awaiting`, non `busy`. Legarlo a `busy` lo farebbe sparire proprio nel
          momento in cui serve di più. -->
-    <Ask {store} {snap} canStop={store.live} />
+    <Ask {store} {snap} canStop={live} />
   {:else if op}
     <div class="doing">
       <span class="spin"></span>
       <div class="txt">{activityText(op)}</div>
       <div class="el">{since(op.from, now)}</div>
-      {#if store.live}
+      {#if live}
         <button class="stopb" title="Stop" onclick={() => void store.stop()}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
         </button>
@@ -495,7 +498,7 @@
     </div>
   {/if}
 
-  {#if store.live}
+  {#if live}
     <div class="row-input">
       <!-- Nascosto apposta: è il bottone vestito da graffetta a fare da etichetta,
            non i controlli grigi di sistema che un <input type=file> porta di suo. -->
@@ -553,7 +556,7 @@
     </div>
   {/if}
 
-  <Status {store} {snap} />
+  <Status {store} {snap} {live} />
 </div>
 
 <style>

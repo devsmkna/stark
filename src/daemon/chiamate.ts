@@ -13,7 +13,7 @@
 import { CALL_HEAD, callFor } from '../core/calls.ts'
 import type { PushPayload } from './push.ts'
 
-/** Un posto dove una chiamata può arrivare. Il Web Push è il primo; Telegram il secondo. */
+/** Un posto dove una chiamata può arrivare. Oggi ce n'è uno: il Web Push. */
 export type Canale = {
   readonly disponibile: boolean
   manda(p: PushPayload): Promise<void>

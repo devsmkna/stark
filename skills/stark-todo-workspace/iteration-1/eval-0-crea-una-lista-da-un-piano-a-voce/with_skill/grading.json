@@ -1,0 +1,51 @@
+{
+  "expectations": [
+    {
+      "text": "Crea .stark/todo.json ed è JSON valido",
+      "passed": true,
+      "evidence": "ok"
+    },
+    {
+      "text": "Contiene esattamente una lista",
+      "passed": true,
+      "evidence": "1 liste"
+    },
+    {
+      "text": "La chiave della lista è un UUID",
+      "passed": true,
+      "evidence": "['77f11f0f-4cfa-4f0e-aea7-68a26623f65f']"
+    },
+    {
+      "text": "La lista ha title, created, __status e tasks",
+      "passed": true,
+      "evidence": "['__status', 'created', 'tasks', 'title']"
+    },
+    {
+      "text": "__status è \"active\"",
+      "passed": true,
+      "evidence": "active"
+    },
+    {
+      "text": "Ci sono tre task, uno per passo descritto",
+      "passed": true,
+      "evidence": "3 task"
+    },
+    {
+      "text": "Tutti i task partono in stato \"todo\"",
+      "passed": true,
+      "evidence": "['todo', 'todo', 'todo']"
+    },
+    {
+      "text": "Gli id dei task sono unici dentro la lista",
+      "passed": true,
+      "evidence": "['t1', 't2', 't3']"
+    },
+    {
+      "text": "Non ha eseguito il lavoro: nessun file di configurazione creato",
+      "passed": true,
+      "evidence": "[]"
+    }
+  ],
+  "passed": 9,
+  "total": 9
+}

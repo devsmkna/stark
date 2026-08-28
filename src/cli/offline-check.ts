@@ -439,6 +439,21 @@ check('§4: il contesto si rilegge dal journal, con l\'ora della misura',
 // vero — vedi il commento in sdk-options.ts), ripiegando sui 200K sbagliati invece del
 // milione vero. Un contesto reale al 21% appariva quindi 100%: non un'ipotesi sulla
 // cache, un denominatore sbagliato.
+// `--continue` e `sessionId` sono dichiarati incompatibili dall'SDK: passarli insieme
+// fa fallire l'avvio. Chi apre con `continue` rinuncia quindi a imporre l'id, e lo
+// scopre all'handshake (`session.resumeRef`).
+{
+  const c = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', continue: true, sessionId: 'a-b' })
+  check('§continue: `continue:true` non porta con sé `sessionId`',
+    c.continue === true && c.sessionId === undefined, JSON.stringify({ c: c.continue, s: c.sessionId }))
+  const r = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', continue: true, resume: { ref: 'r1' } })
+  check('§continue: `resume` vince su `continue` — non partono mai insieme',
+    r.resume === 'r1' && r.continue === undefined, JSON.stringify({ r: r.resume, c: r.continue }))
+  const n = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', sessionId: 'a-b' })
+  check('§continue: senza il flag l\'id resta imposto, come prima',
+    n.sessionId === 'a-b' && n.continue === undefined)
+}
+
 check('§12: la finestra di un alias con `[1m]` è un milione, non 200K',
   contextWindowFor('claude-opus-5[1m]') === 1_000_000,
   String(contextWindowFor('claude-opus-5[1m]')))
@@ -1166,118 +1181,6 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   stato = 'idle'; sveglia(); await new Promise(r => setTimeout(r, 400))
   check('§notifiche: togliendo il silenzio torna a chiamare, senza riavvio',
     mandate.length === 2, `${mandate.length}`)
-}
-
-// ─── Telegram: il testo, che è la parte che si può provare senza un bot ────
-//
-// Perdere un messaggio su questo canale vuol dire perdere una risposta dell'agent, e il
-// modo in cui si perde è un `400 Bad Request` per dell'HTML che Telegram non accetta.
-// Quindi si prova qui, dove costa zero.
-{
-  const { aHtml, escapa, spezza, TETTO } = await import('../daemon/telegram/testo.ts')
-
-  check('§telegram: i tre caratteri di HTML si escapano',
-    escapa('a & b < c > d') === 'a &amp; b &lt; c &gt; d', escapa('a & b < c > d'))
-  // Il caso vero: l'agent scrive del codice dentro una frase, e quel `<` non deve
-  // diventare un tag — Telegram rifiuterebbe il messaggio intero.
-  check('§telegram: un `<` dell\'agent non diventa un tag',
-    !/<div/.test(aHtml('usa <div> qui')), aHtml('usa <div> qui'))
-
-  const conFence = aHtml('prima\n```ts\nconst a = 1 < 2\n```\ndopo')
-  check('§telegram: un fence diventa <pre><code class="language-ts">',
-    conFence.includes('<pre><code class="language-ts">') && conFence.includes('1 &lt; 2'), conFence)
-  check('§telegram: il testo attorno al fence resta',
-    conFence.startsWith('prima') && conFence.endsWith('dopo'), conFence)
-
-  // L'agent tronca i blocchi quando finisce lo spazio: un fence lasciato aperto deve
-  // chiudersi da sé, o l'HTML è rotto e il messaggio non parte.
-  const troncato = aHtml('ecco:\n```js\nconst a = 1')
-  check('§telegram: un fence non chiuso non produce HTML rotto',
-    (troncato.match(/<pre>/g) ?? []).length === (troncato.match(/<\/pre>/g) ?? []).length, troncato)
-
-  check('§telegram: il code inline diventa <code>',
-    aHtml('scrivi `npm run check` ora').includes('<code>npm run check</code>'))
-  // Dentro un blocco di codice un backtick è un carattere, non sintassi.
-  check('§telegram: dentro un fence il backtick non apre niente',
-    !aHtml('```\nuse `x` here\n```').includes('<code>x</code>'))
-
-  // Il taglio si conta **dopo** l'escape: `&amp;` sono cinque caratteri, non uno.
-  {
-    const lungo = 'a & b\n'.repeat(2000)
-    const pezzi = spezza(aHtml(lungo))
-    check('§telegram: nessun pezzo supera il tetto di Telegram',
-      pezzi.every(p => p.length <= TETTO), pezzi.map(p => p.length).join(','))
-    check('§telegram: spezzare non perde testo',
-      pezzi.join('').replace(/\n/g, '') === aHtml(lungo).replace(/\n/g, ''))
-  }
-  // Un blocco di codice più lungo del tetto: si chiude e si riapre. Perdere
-  // l'evidenziazione è meglio che perdere il messaggio.
-  {
-    const pezzi = spezza(aHtml('```\n' + 'riga di codice\n'.repeat(500) + '```'))
-    const bilanciati = pezzi.every(p =>
-      (p.match(/<pre>/g) ?? []).length === (p.match(/<\/pre>/g) ?? []).length)
-    check('§telegram: un fence più lungo del tetto resta bilanciato in ogni pezzo',
-      pezzi.length > 1 && bilanciati, `${pezzi.length} pezzi`)
-  }
-  check('§telegram: un testo corto resta un pezzo solo', spezza('ciao').length === 1)
-}
-
-// ─── Telegram: come si legge un turno ──────────────────────────────────────
-{
-  const { turno } = await import('../daemon/telegram/render.ts')
-  const { reduce: red } = await import('../core/reduce.ts')
-  const ev = (payload: unknown, seq: number): CanonicalEvent =>
-    ({ v: 1, seq, ts: 1000 + seq, sessionId: 'x', payload } as CanonicalEvent)
-
-  const snap = red([
-    ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'sistema il diff' }] }, 1),
-    ev({ k: 'tool.started', callId: 'c1', name: 'Read' }, 2),
-    ev({ k: 'tool.input.ended', callId: 'c1', input: {}, summary: 'src/core/diff.ts', intent: 'leggo come si fanno gli hunk' }, 3),
-    ev({ k: 'tool.ended', callId: 'c1', ok: true, output: '…' }, 4),
-    ev({ k: 'tool.started', callId: 'c2', name: 'Bash' }, 5),
-    ev({ k: 'tool.input.ended', callId: 'c2', input: {}, summary: 'grep -rn "hunk" src/' }, 6),
-    ev({ k: 'text.started', partId: 'p' }, 7),
-    ev({ k: 'text.delta', partId: 'p', delta: 'ecco cosa ho trovato' }, 8),
-  ], 'x')
-  const t = snap.turns[0]!
-  const reso = turno(t)
-
-  // Quando l'agent ha scritto **perché**, è quello a fare da riga: «cerco chi lo usa»
-  // invece di `grep -rn …`. Il comando resta, in monospace, ma non è ciò che si legge
-  // scorrendo. È la stessa scelta della UI (F2).
-  check('§telegram: la motivazione dell\'agent fa da riga, il riassunto le sta accanto',
-    reso.includes('leggo come si fanno gli hunk') && reso.includes('<code>src/core/diff.ts</code>'), reso)
-  check('§telegram: senza motivazione resta il riassunto da solo',
-    reso.includes('grep -rn') && !reso.includes('<code>grep'), reso)
-  check('§telegram: un tool ancora aperto si distingue da uno finito',
-    reso.includes('⏳ grep') && reso.includes('· leggo'), reso)
-  check('§telegram: il prompt sta in testa e la risposta in coda',
-    reso.startsWith('▶ <b>sistema il diff</b>') && reso.trimEnd().endsWith('ecco cosa ho trovato'), reso)
-
-  const finito = red([
-    ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'ciao' }] }, 1),
-    ev({ k: 'turn.ended', turnId: 't', reason: 'aborted', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 2),
-  ], 'x').turns[0]!
-  check('§telegram: un turno fermato dall\'utente non si legge come un errore',
-    turno(finito).startsWith('⏹'), turno(finito))
-
-  // Il testo deve essere **stabile**: se non cambia non si manda niente, e quello è ciò
-  // che tiene il bot dentro i limiti di Telegram.
-  check('§telegram: la resa è stabile a parità di stato', turno(t) === reso)
-
-  // Venti tool non fanno venti righe: le ultime otto, e il resto si conta.
-  {
-    const molti = []
-    let seq = 1
-    molti.push(ev({ k: 'turn.started', turnId: 't', prompt: [{ type: 'text', text: 'tanto' }] }, seq++))
-    for (let i = 0; i < 20; i++) {
-      molti.push(ev({ k: 'tool.started', callId: `c${i}`, name: 'Read' }, seq++))
-      molti.push(ev({ k: 'tool.input.ended', callId: `c${i}`, input: {}, summary: `file${i}.ts` }, seq++))
-    }
-    const reso2 = turno(red(molti, 'x').turns[0]!)
-    check('§telegram: venti operazioni diventano otto righe più un conteggio',
-      reso2.includes('+12 prima') && reso2.includes('file19.ts') && !reso2.includes('file7.ts'), reso2)
-  }
 }
 
 // ─── Finder di sistema: pickFolderNative con un `exec` finto ────────────────
