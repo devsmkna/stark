@@ -15,7 +15,7 @@ import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
   type AgentModels, type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
-  type SessionRow, type Settings,
+  type SessionRow, type Settings, type StatoAggiornamento,
 } from './api.ts'
 import { Pane } from './pane.svelte.ts'
 import {
@@ -237,6 +237,68 @@ export class Store {
    */
   refusedAuth = $state(false)
 
+  // ─── aggiornamenti ─────────────────────────────────────────────────────────
+  //
+  // Il controllo l'ha già fatto il daemon accendendosi: qui si legge il risultato una
+  // volta sola, all'avvio della pagina. Ripeterlo a intervalli non servirebbe — la
+  // risposta non cambia finché il daemon non riparte, e a farlo ripartire è proprio
+  // l'aggiornamento.
+  /** `null` finché non si è chiesto, o se il daemon non ha risposto. */
+  aggiornamento = $state<StatoAggiornamento | null>(null)
+  /** Il banner si può chiudere: chi non vuole aggiornare adesso non deve portarselo
+   *  dietro tutta la sessione. Sta nel browser e non sul daemon perché è una scelta
+   *  **di questa scheda** — e ricompare al prossimo avvio, che è il punto: ricorda
+   *  senza insistere. La versione fa parte della chiave, se no chiudere una volta
+   *  zittirebbe anche tutte le release future. */
+  aggiornamentoChiuso = $state(false)
+  /** Acceso mentre l'aggiornamento gira: il daemon muore e torna, come nel riavvio. */
+  aggiornamentoInCorso = $state(false)
+
+  /** C'è qualcosa da mostrare in cima? */
+  get mostraAggiornamento(): boolean {
+    return !!this.aggiornamento?.disponibile && !this.aggiornamentoChiuso
+  }
+
+  chiudiAggiornamento(): void {
+    this.aggiornamentoChiuso = true
+    const v = this.aggiornamento?.ultima
+    if (v) try { localStorage.setItem('stark.update.dismissed', v) } catch { /* privato */ }
+  }
+
+  /**
+   * Aggiorna e aspetta che STARK torni.
+   *
+   * Non si ricarica la pagina qui: il flusso cade da sé e si ricollega quando il daemon
+   * riparte, che è la stessa cosa che succede col riavvio. Un `location.reload()`
+   * adesso chiederebbe una pagina a un processo che si sta spegnendo. A ricaricare si
+   * va **dopo**, e lì serve davvero: il pacchetto della UI è cambiato, e una scheda che
+   * si limita a ricollegarsi resterebbe con il JavaScript di prima addosso al daemon
+   * nuovo.
+   */
+  async aggiorna(): Promise<void> {
+    this.aggiornamentoInCorso = true
+    try {
+      await this.api.runUpdate()
+    } catch (e) {
+      this.aggiornamentoInCorso = false
+      this.refused = `update failed: ${(e as Error).message}`
+      return
+    }
+    for (let i = 0; i < 360; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      try {
+        const r = await fetch('/api/health', { headers: this.api.authHeaders })
+        // Ricaricare **è** il punto d'arrivo: dopo un aggiornamento la UI su disco è
+        // un'altra, e questa scheda ha ancora in memoria quella di prima.
+        if (r.ok) { location.reload(); return }
+      } catch { /* ancora spento: è quello che stiamo aspettando */ }
+    }
+    // Tre minuti sono larghi anche per un `npm install` che scarica: oltre, non è più
+    // «sta aggiornando», è qualcosa da guardare — e il posto dove guardare è il log.
+    this.aggiornamentoInCorso = false
+    this.refused = 'update: STARK did not come back — check daemon.log'
+  }
+
   /** La riga dell'elenco che corrisponde alla chat aperta. */
   get row(): SessionRow | undefined {
     return this.rows.find(r => r.id === this.selected)
@@ -267,6 +329,14 @@ export class Store {
     // Servono subito: da qui nascono i colori dei progetti e il silenzio per progetto,
     // che si vedono nella barra laterale prima ancora che si apra una chat.
     void this.loadSettings()
+    // Una lettura sola, e mai bloccante: se il daemon non risponde su questa rotta non
+    // succede niente: nessun banner, che è la risposta giusta quando non si sa.
+    void this.api.update().then(u => {
+      this.aggiornamento = u
+      try {
+        this.aggiornamentoChiuso = localStorage.getItem('stark.update.dismissed') === u.ultima
+      } catch { /* navigazione privata: il banner resta, ed è il male minore */ }
+    }).catch(() => { /* daemon vecchio senza questa rotta, o rete: nessun banner */ })
     this.#stopList = this.api.sessionsStream(
       rows => {
         this.#ring(rows)
@@ -615,7 +685,16 @@ export class Store {
    * snapshot da qui, quell'effetto esisterebbe in un posto che il journal non conosce.
    */
   async send(cmd: Command, id = this.selected): Promise<boolean> {
-    if (!id) return false
+    // Senza una chat a cui mandare si tornava `false` **in silenzio**: il bottone si
+    // premeva, il tasto si batteva, e non succedeva niente — nessuna riga, nessun
+    // errore, niente da riferire. È la forma peggiore di guasto, perché non lascia
+    // nemmeno di che raccontarlo: cercando un «premo invio e non succede nulla»
+    // segnalato da un collega, questo era l'unico ramo capace di produrlo esattamente
+    // così. Che sia lui o no, un ramo che tace va fatto parlare.
+    if (!id) {
+      this.refused = 'Nessuna chat a fuoco: il comando non è partito.'
+      return false
+    }
     this.refused = null
     const esito = await this.api.command(id, cmd)
     if (!esito.ok) this.refused = esito.error ?? 'refused'

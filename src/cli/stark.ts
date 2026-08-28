@@ -36,6 +36,8 @@ import { STARK_HOME } from '../daemon/registry.ts'
 import {
   clearPid, ensureHome, logPath, pidPath, readToken, runningPid, tokenPath, writePid, writeToken,
 } from '../daemon/identity.ts'
+import { controlla, passaAllaRelease } from '../daemon/aggiornamenti.ts'
+import { ambienteSystemd } from '../daemon/riavvio.ts'
 
 /** La radice del repo: questo file sta in `src/cli/`, due livelli sotto. */
 const RADICE = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -271,31 +273,13 @@ function installa(): void {
 }
 
 /**
- * Le variabili che il daemon legge davvero, nella forma che vuole `systemd-run`.
+ * Le variabili che il daemon legge davvero le elenca `riavvio.ts`, non questo file.
  *
- * Vanno passate a mano perché un servizio transiente parte con un ambiente **pulito**:
- * senza `HOME` il registro cercherebbe i journal nel posto sbagliato, e senza
- * `CLAUDE_CONFIG_DIR` i processi figli non troverebbero le sessioni da riprendere —
- * che è il modo in cui questa cosa si rompe sembrando rotta senza motivo (§Vincoli).
- *
- * Diventano visibili in `systemctl show`, e va detto: non è un'esposizione nuova,
- * perché lo stesso ambiente si legge già da `/proc/<pid>/environ`, e in entrambi i casi
- * serve essere root — cioè chi ha già avviato il daemon.
+ * Erano due copie della stessa lista — una qui per l'unità del daemon, una là per
+ * l'unità del ricambio — e due copie vogliono dire che un giorno una delle due perde
+ * una variabile. Quella perdita è già successa una volta con `STARK_PUBLIC_HOST`, e si
+ * manifesta come un perimetro che si richiude in silenzio dopo un riavvio.
  */
-function ambiente(): string[] {
-  const fuori: string[] = []
-  // `STARK_PUBLIC_HOST` e `STARK_VAPID_SUBJECT` sono qui per una ragione precisa:
-  // dimenticarle qui non rompe niente in primo piano (`npm run stark`) e **richiude il
-  // perimetro in silenzio** dopo `stark start`, con il telefono che si becca un 403 che
-  // sembra un problema di token. È già successo con Tailscale, in un'altra forma.
-  for (const k of ['STARK_HOME', 'STARK_PORT', 'STARK_MODEL', 'STARK_TOKEN',
-    'STARK_PUBLIC_HOST', 'STARK_VAPID_SUBJECT',
-    'CLAUDE_CONFIG_DIR', 'PATH', 'HOME']) {
-    const v = process.env[k]
-    if (v) fuori.push('--setenv', `${k}=${v}`)
-  }
-  return fuori
-}
 
 /**
  * `npm`, ma **quello accanto al nostro Node**, non quello che capita nel `PATH`.
@@ -384,7 +368,7 @@ function avviaConSystemd(): boolean {
     '--collect', '--quiet',
     `--property=StandardOutput=append:${log}`,
     `--property=StandardError=append:${log}`,
-    ...ambiente(),
+    ...ambienteSystemd(),
     process.execPath, fileURLToPath(import.meta.url), 'run',
   ], { stdio: 'ignore' })
   return r.status === 0
@@ -626,11 +610,35 @@ if (comando === 'run') {
   // nessuna via per prendere una correzione: il lanciatore punta al repo, ma nessuno gli
   // ha dato il comando per aggiornarlo, e «fai `cd` là dentro e `git pull`» è di nuovo
   // il tipo di istruzione che l'installer esiste per togliere di mezzo.
-  const g = spawnSync('git', ['-C', RADICE, 'pull', '--ff-only'], { stdio: 'inherit' })
-  if (g.status !== 0) {
-    console.error(`\n"git pull" è fallito in ${RADICE}.`)
-    console.error('Se ci hai lavorato sopra, le modifiche locali vanno risolte a mano:')
-    console.error('è il tuo lavoro, e sovrascriverlo non è una decisione che prendo io.')
+  //
+  // Si aggiorna **all'ultima release**, non all'ultimo commit di `main`. Prima era
+  // `git pull --ff-only`, cioè: qualunque push tirava dietro tutti. Chi rilascia deve
+  // poter spingere su `main` senza spedire quel commit a un collega nello stesso
+  // minuto — e chi installa deve prendere una versione che qualcuno ha dichiarato
+  // pronta, non l'ultima cosa scritta. Cosa sia una release lo dice `core/release.ts`;
+  // come ci si arriva, `daemon/aggiornamenti.ts`.
+  const stato = await controlla(RADICE)
+  if (stato.errore) {
+    console.error(`Non sono riuscito a chiedere le versioni al remoto: ${stato.errore}`)
+    console.error('Serve rete e accesso al repo. La copia su disco non è stata toccata.')
+    process.exit(1)
+  }
+  if (!stato.ultima || !stato.tag) {
+    // Non è un errore: è un progetto che non ha ancora rilasciato niente. Dirlo con
+    // un codice di uscita rosso manderebbe a cercare un guasto che non c'è.
+    console.log('Nessuna release pubblicata su questo repo: non c\'è niente a cui')
+    console.log('aggiornarsi. Le release sono tag `vX.Y.Z` — vedi docs/rilascio.md.')
+    process.exit(0)
+  }
+  if (!stato.disponibile) {
+    console.log(`Già all'ultima versione: ${stato.installata} (release ${stato.ultima}).`)
+    process.exit(0)
+  }
+  console.log(`Aggiorno da ${stato.installata} a ${stato.ultima} (tag ${stato.tag}).`)
+  try {
+    await passaAllaRelease(RADICE, stato.tag)
+  } catch (e) {
+    console.error(`\nNon sono riuscito a passare a ${stato.tag}: ${(e as Error).message}`)
     process.exit(1)
   }
   // `npm install` e non `ci`: `ci` cancella `node_modules` e riscarica tutto, compresi i

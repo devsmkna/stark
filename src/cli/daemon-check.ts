@@ -189,15 +189,45 @@ check('commandExists: un comando reale (`ls`) c\'è', await commandExists('ls'))
 check('commandExists: un comando inventato non c\'è',
   !(await commandExists('comando-che-non-esiste-davvero-xyz123')))
 {
-  // L'attesa è coerente con la piattaforma vera che sta eseguendo la prova, qualunque
-  // essa sia — non si assume WSL: si ricalcola cosa ci si aspetta con la stessa logica
-  // del modulo sotto test, per restare vero su qualunque macchina di sviluppo.
+  // Questa prova prima **ricalcolava la stessa regola** del modulo sotto test («si
+  // ricalcola cosa ci si aspetta con la stessa logica»), cioè era una tautologia: verde
+  // finché le due copie coincidevano, rossa il giorno in cui il modulo migliorava — ed è
+  // successo. Adesso asserisce il fatto che conta, che è anche il bug segnalato
+  // dall'utente il 28 agosto 2026 («sembra aprire il finder dentro il terminale»).
+  //
+  // Il fatto: su WSL l'interop con Windows può esserci benissimo **senza** che le
+  // cartelle di Windows stiano nel `PATH` di Linux. Misurato sul daemon vero di questa
+  // macchina, leggendo `/proc/<pid>/environ`: zero voci `/mnt/c`. Chiedere solo al
+  // `PATH` spegneva quindi il selettore nativo per una ragione falsa, e restava solo il
+  // tree dentro la pagina.
   const { WSL } = await import('../core/platform.ts')
-  const atteso = WSL ? await commandExists('powershell.exe')
-    : process.platform === 'darwin' ? true
-    : await commandExists('zenity')
-  check('nativeFolderPickerAvailable coerente con la piattaforma corrente',
-    (await nativeFolderPickerAvailable()) === atteso)
+  const { existsSync } = await import('node:fs')
+  const PS_WSL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
+
+  if (WSL && existsSync(PS_WSL)) {
+    // Si svuota il `PATH` per il tempo della domanda: `commandExists` non trova più
+    // nemmeno `which`, quindi la vecchia logica risponderebbe **false**. Deve dire true.
+    const prima = process.env['PATH']
+    process.env['PATH'] = '/cartella-che-non-esiste'
+    const senzaPath = await nativeFolderPickerAvailable()
+    const cercatoNelPath = await commandExists('powershell.exe')
+    process.env['PATH'] = prima ?? ''
+    check('native-browse: su WSL il selettore nativo non dipende dal PATH',
+      senzaPath === true && cercatoNelPath === false,
+      JSON.stringify({ senzaPath, cercatoNelPath }))
+  } else if (process.platform === 'darwin') {
+    check('native-browse: su macOS il selettore c\'è sempre (osascript è di sistema)',
+      (await nativeFolderPickerAvailable()) === true)
+  } else if (!WSL) {
+    // Linux nativo: lì `zenity` è davvero una domanda sul `PATH`, e la risposta deve
+    // seguirla — è l'unico ramo in cui «c'è nel PATH» *è* il criterio giusto.
+    check('native-browse: su Linux il selettore segue la presenza di zenity',
+      (await nativeFolderPickerAvailable()) === (await commandExists('zenity')))
+  } else {
+    // WSL senza il PowerShell di Windows al posto atteso: resta il ripiego sul `PATH`.
+    check('native-browse: senza PowerShell su disco si ricade sul PATH',
+      (await nativeFolderPickerAvailable()) === (await commandExists('powershell.exe')))
+  }
 }
 
 // ─── F3: arrivare a un file citato in chat ──────────────────────────────────

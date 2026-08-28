@@ -115,6 +115,48 @@
 
 <Sprite />
 
+<!-- ─── c'è una versione nuova ──────────────────────────────────────────────────
+     In cima e per tutta la larghezza, non dentro la barra laterale come la banda della
+     quota: quella parla delle **chat** che si sono fermate, e sta accanto all'elenco
+     delle chat. Questa parla dell'installazione intera, che non appartiene a nessuna
+     delle due colonne.
+     Compare solo se il daemon, accendendosi, ha visto una **release** più nuova di
+     quella su disco: un push su `main` non fa comparire niente (vedi core/release.ts).
+     Si può chiudere, e resta chiusa per quella versione: ricorda senza insistere. -->
+{#if store.mostraAggiornamento}
+  <div class="upd" role="status">
+    <!-- `i-import` e non `i-down`: il secondo e' un chevron, cioe' «apri», e qui non
+         c'e' niente da aprire. Questo e' la freccia che scende dentro un contenitore —
+         l'icona che ovunque vuol dire «scarica». -->
+    <Icon name={store.aggiornamentoInCorso ? 'i-loader' : 'i-import'} />
+    <div class="ut">
+      {#if store.aggiornamentoInCorso}
+        Updating to {store.aggiornamento?.ultima}… STARK restarts and this tab reloads.
+      {:else}
+        <!-- Da telefono restano le parole che dicono il fatto: quale versione c'e'.
+             Quella che si ha e' scritta nelle impostazioni, e su una riga larga 390px
+             costava tre righe su quattro. `&nbsp;` e non uno spazio normale: Svelte
+             taglia lo spazio iniziale dentro un elemento, e senza questo le due meta'
+             si attaccherebbero su schermo largo (stessa trappola gia' trovata sul chip
+             del contesto nella barra di stato). -->
+        STARK <b>{store.aggiornamento?.ultima}</b> is available<span class="lbl"
+          >&nbsp;— you have {store.aggiornamento?.installata}</span>.
+      {/if}
+    </div>
+    {#if !store.aggiornamentoInCorso}
+      <button class="ub" onclick={() => void store.aggiorna()}
+        >Update<span class="lbl">&nbsp;to the last version</span></button>
+      <!-- Il comando c'è comunque, e non è una ripetizione del bottone: il riavvio del
+           daemon passa da `/bin/sh` (riavvio.ts), quindi su Windows nativo il bottone
+           non ha ancora una strada. Lì questa riga è l'unica via, e vale la pena che ci
+           sia per tutti invece di comparire solo dove serve. -->
+      <code class="uc">stark update</code>
+      <button class="ux" title="Not now" aria-label="Dismiss"
+        onclick={() => store.chiudiAggiornamento()}><Icon name="i-x" /></button>
+    {/if}
+  </div>
+{/if}
+
 <div class="shell">
   <!-- Si prova comunque, e ci si arrende solo se il daemon dice davvero di no.
        Prima bastava non avere un token **in memoria** per fermarsi qui — ma il token non

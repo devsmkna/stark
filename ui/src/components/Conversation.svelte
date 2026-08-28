@@ -1183,47 +1183,14 @@
   .prose :global(:first-child) { margin-top: 0; }
   .prose :global(a) { color: var(--accent); text-decoration: underline; }
   .prose :global(code) { font-family: var(--mono); font-size: .92em; }
-  /* Ogni `<pre>` che Markdown produce esce da `renderMarkdown` già avvolto in un
-     `.codeblock` con sopra la barra del bottone «Copy» — vedi `markdown.ts`. Il
-     margine che separava un blocco di codice dal successivo sta ora sul contenitore,
-     non più sul `<pre>`, altrimenti si duplicherebbe con quello della barra. */
-  .prose :global(.codeblock) { margin: 0 0 8px; }
-  .prose :global(.cbbar) {
-    display: flex; background: var(--surface-2);
-    border: 1px solid var(--line-2); border-bottom: 0; border-radius: 7px 7px 0 0;
-    padding: 3px;
-  }
-  /* In alto a sinistra, sempre visibile: è il pezzo di risposta che si copia più
-     spesso, e un bottone che si scopre solo al passaggio del mouse costa un
-     movimento in più proprio dove si vuole essere veloci. */
-  .prose :global(.copybtn) {
-    display: inline-flex; align-items: center; gap: 4px;
-    font: inherit; font-size: 9.5px; color: var(--muted);
-    background: none; border: 0; border-radius: 5px; padding: 3px 7px; cursor: pointer;
-  }
-  .prose :global(.copybtn svg.ic) { width: 11px; height: 11px; }
-  .prose :global(.copybtn:hover) { background: var(--surface-3); color: var(--ink); }
-  .prose :global(.copybtn:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .prose :global(.copybtn.done) { color: var(--done); }
+  /* Il blocco di codice — contenitore, barra, bottone «Copy» e `pre` — sta in
+     `app.css` e non qui: `renderMarkdown` lo produce anche fuori da `.prose` (il
+     pannello del piano, il piano riletto, l'helper), e uno stile scoped su un
+     contenitore che non c'è sempre lasciava il bottone al default del browser. */
 
-  /* F1: il bottone accanto a un link riconosciuto. Inline come il link stesso — non
-     va a capo da solo, segue il testo — perché è una seconda via per la stessa
-     frase, non un blocco a parte come il codice. */
-  .prose :global(.applink) {
-    display: inline-flex; align-items: center; gap: 3px; vertical-align: middle;
-    font: inherit; font-size: 9.5px; color: var(--accent);
-    background: var(--accent-soft); border: 0; border-radius: 5px;
-    padding: 2px 6px; margin-left: 4px; cursor: pointer;
-  }
-  .prose :global(.applink svg.ic) { width: 10px; height: 10px; }
-  .prose :global(.applink:hover) { filter: brightness(0.94); }
-  .prose :global(.applink:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .prose :global(pre) {
-    font-family: var(--mono); font-size: 10.5px; background: var(--surface);
-    border: 1px solid var(--line-2); border-radius: 0 0 7px 7px; padding: 8px 10px;
-    margin: 0; overflow: auto; white-space: pre;
-  }
-  .prose :global(pre code) { background: none; padding: 0; font-size: 1em; }
+  /* Il bottone «Open in …» accanto a un link riconosciuto sta in `app.css` per la
+     stessa ragione del blocco di codice: lo inietta `markdown.ts`, che gira anche
+     fuori da `.prose`. */
   .prose :global(blockquote) {
     margin: 0 0 8px; padding: 2px 10px; border-left: 3px solid var(--line-2);
     color: var(--muted);

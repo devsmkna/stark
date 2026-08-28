@@ -25,7 +25,10 @@ import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
 import { agentiDisponibili, backendFor, catalogoCompleto, scaldaCatalogo } from '../adapters/index.ts'
 import { logPath, readToken } from './identity.ts'
-import { avviaRicambio } from './riavvio.ts'
+import { avviaRicambio, RADICE } from './riavvio.ts'
+import {
+  aggiornamentoNoto, alberoSporco, controllaAllAvvio, versioneInstallata,
+} from './aggiornamenti.ts'
 import { eseguiHandoff, type ViaBriefing } from './handoff.ts'
 import type { Command } from '../core/events.ts'
 import type { MemoryOutcome } from '../core/adapter.ts'
@@ -121,6 +124,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
   backendFor().warmDiagnostics?.()
+
+  // C'è una release più nuova di quella installata? Stesso momento e stessa ragione
+  // degli altri riscaldamenti qui sopra: è un giro di rete, e non deve stare fra chi
+  // accende STARK e STARK acceso. Il risultato lo legge `GET /api/update`.
+  //
+  // Va detto perché è l'unica altra cosa che esce dalla macchina oltre al Web Push: a
+  // ogni accensione parte un `git ls-remote` verso il remoto del repo. Non manda
+  // niente — chiede quali tag esistono — ed è lo stesso posto da cui STARK è stato
+  // installato, ma è traffico che prima non c'era.
+  controllaAllAvvio(RADICE)
 
   // Stessa idea, stesso momento: il catalogo dei modelli costa un handshake per agent
   // (~3s in tutto) e la prima apertura del menu e' l'unica che lo pagherebbe intero.
@@ -539,6 +552,59 @@ async function route(
      * (i processi agent sono figli di questo, quindi muoiono tutti). La scheda aperta
      * si ricollega da sola, che è la stessa cosa che fa dopo un riavvio da terminale.
      */
+    /**
+     * C'è una versione più nuova? È la risposta del controllo fatto **all'accensione**
+     * (`aggiornamenti.ts`), non una domanda al remoto: chiederlo qui vorrebbe dire un
+     * giro di rete a ogni caricamento della pagina, e la risposta cambierebbe solo se
+     * qualcuno rilascia proprio in quel momento.
+     *
+     * `null` — controllo non ancora tornato — si serve come «niente da aggiornare»
+     * invece che come stato a sé: al primo secondo dopo l'accensione la risposta onesta
+     * è che non lo sappiamo, e non sapere non è una cosa da mostrare a schermo.
+     */
+    if (method === 'GET' && path === '/api/update') {
+      return send(res, 200, aggiornamentoNoto() ?? {
+        installata: versioneInstallata(RADICE), ultima: null, tag: null, disponibile: false,
+      })
+    }
+
+    /**
+     * Aggiorna e riparti. È il bottone del banner, ed è `stark update` fatto partire da
+     * qui invece che da un terminale — letteralmente lo stesso comando, vedi
+     * `riavvio.ts`.
+     *
+     * I due rifiuti prima di muovere qualcosa non sono ridondanti rispetto ai controlli
+     * che `stark update` rifà per conto suo: **lì** fallirebbero dentro un processo
+     * staccato, dopo che questo daemon è già morto, cioè in un log che nessuno sta
+     * guardando. Qui invece la risposta torna al browser, che può dirlo a chi ha
+     * premuto. Il controllo doppio è voluto: `update` deve restare corretto anche
+     * quando lo si digita a mano.
+     */
+    if (method === 'POST' && path === '/api/update') {
+      const stato = aggiornamentoNoto()
+      if (!stato?.disponibile || !stato.tag) {
+        return send(res, 409, { error: 'non c\'è nessuna release più nuova da installare' })
+      }
+      if (await alberoSporco(RADICE)) {
+        return send(res, 409, {
+          error: 'ci sono modifiche locali a file tracciati in ' + RADICE
+            + ': STARK non le sovrascrive. Risolvile a mano, poi riprova.',
+        })
+      }
+      const esito = avviaRicambio(STARK_HOME, { aggiorna: true, log: logPath(STARK_HOME) })
+      if (!esito.ok) return send(res, 500, { error: esito.error })
+      send(res, 200, { ok: true, tag: stato.tag, ...(esito.pid ? { pid: esito.pid } : {}) })
+      // Stesso ritardo e stessa ragione del riavvio qui sotto: `send` scrive nel socket,
+      // e chiudere subito strapperebbe la connessione prima che il corpo arrivi.
+      setTimeout(() => {
+        void (async () => {
+          try { await registry.shutdown() } catch { /* stiamo morendo comunque */ }
+          process.exit(0)
+        })()
+      }, 250)
+      return
+    }
+
     if (method === 'POST' && path === '/api/restart') {
       const body = await readJson<{ rebuildUi?: boolean }>(req)
       const esito = avviaRicambio(STARK_HOME, {

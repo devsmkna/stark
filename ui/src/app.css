@@ -75,8 +75,38 @@
 html,body{height:100%}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
   font-size:12px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
-#app{height:100%}
-.shell{height:100%;display:flex;background:var(--surface);overflow:hidden;position:relative}
+/* Colonna, non un blocco: sopra al guscio può comparire la banda dell'aggiornamento, e
+   senza questo il guscio — alto `100%` — la spingerebbe fuori dallo schermo invece di
+   farle posto. `min-height:0` sul guscio è la metà che si dimentica: un figlio flex non
+   scende sotto la propria altezza naturale finché non glielo si permette, e senza quello
+   a essere spinta fuori sarebbe la conversazione. */
+#app{height:100%;display:flex;flex-direction:column}
+.shell{flex:1;min-height:0;display:flex;background:var(--surface);overflow:hidden;position:relative}
+
+/* La banda «c'è una versione nuova». Blu-azzurro come il turno in corso e non gialla
+   come l'attesa o rossa come la quota finita: non è un guasto e non è una scadenza —
+   è una cosa che si può fare quando si vuole. */
+.upd{display:flex;align-items:center;gap:9px;flex:none;padding:7px 12px;
+  background:var(--user-bg);color:var(--ink);font-size:11px;
+  border-bottom:1px solid var(--line);
+  padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+.upd>svg{width:13px;height:13px;flex:none;color:var(--user)}
+.upd .ut{flex:1;min-width:0}
+.upd .ub{flex:none;border:1px solid var(--user);border-radius:7px;padding:3px 10px;
+  background:var(--surface);color:var(--user);font-weight:600;font-size:11px}
+.upd .ub:hover{background:var(--user);color:var(--surface)}
+/* Il comando resta leggibile ma non compete col bottone: è la seconda via, non la prima. */
+.upd .uc{flex:none;color:var(--muted);background:none;font-size:10.5px;padding:0}
+.upd .ux{flex:none;display:flex;padding:2px;border-radius:6px;color:var(--muted)}
+.upd .ux:hover{color:var(--ink)}
+.upd .ux svg{width:12px;height:12px}
+/* Da telefono la riga è stretta: sparisce il comando da digitare — lì una tastiera non
+   c'è — e il bottone perde le parole che il resto della banda ha già detto. */
+@media(max-width:860px){
+  .upd .uc{display:none}
+  .upd .lbl{display:none}
+  .upd .ub{padding:3px 8px}
+}
 /* `.scrim` e `.dlg` sono assoluti: nell'anteprima il riferimento era il riquadro del
    mock, qui è il guscio — che È la finestra. Senza `position` sul guscio andrebbero a
    cercarne uno più su e finirebbero fuori posto. */
@@ -851,6 +881,50 @@ button.mi.on:hover{background:var(--accent-soft)}
 .hljs-deletion{color:var(--del)}
 .hljs-emphasis{font-style:italic}
 .hljs-strong{font-weight:600}
+/* La veste del blocco di codice sta QUI, e non nello scoped di un componente.
+   `renderMarkdown` produce questo markup in **cinque** punti — la risposta nel flusso,
+   la nota, il piano riletto, il pannello del piano, l'helper — mentre lo stile viveva
+   solo sotto `.prose`. Negli altri tre il bottone «Copy» ricadeva quindi sul default
+   del browser (riquadro bordato, font di sistema) e il `pre` restava senza sfondo né
+   bordo: segnalato con uno screenshot del pannello del piano, 28 agosto 2026.
+   La regola generale che ne esce: **il markup che nasce in `markdown.ts` non può avere
+   il suo stile nello `<style>` di un componente**, perché non c'è nessun componente che
+   lo contenga sempre. Tutto è agganciato a `.codeblock`, che avvolge solo i `pre` di
+   Markdown: un `<pre>` scritto a mano in un template (il prompt intero di un turno, per
+   dire) non viene toccato.
+   Il raggio è complementare fra i due pezzi — barra sopra, `pre` sotto — e i due bordi
+   si toccano perché la barra rinuncia al proprio inferiore: sono un oggetto solo. */
+.codeblock{margin:0 0 8px}
+.codeblock .cbbar{display:flex;background:var(--surface-2);border:1px solid var(--line-2);
+  border-bottom:0;border-radius:7px 7px 0 0;padding:3px}
+/* In alto a sinistra, sempre visibile: è il pezzo di risposta che si copia più spesso,
+   e un bottone che si scopre solo al passaggio del mouse costa un movimento in più
+   proprio dove si vuole essere veloci. */
+.codeblock .copybtn{display:inline-flex;align-items:center;gap:4px;font:inherit;
+  font-size:9.5px;color:var(--muted);background:none;border:0;border-radius:5px;
+  padding:3px 7px;cursor:pointer}
+.codeblock .copybtn svg.ic{width:11px;height:11px}
+.codeblock .copybtn:hover{background:var(--surface-3);color:var(--ink)}
+.codeblock .copybtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.codeblock .copybtn.done{color:var(--done)}
+/* `font-size` resta l'unica cosa che i contenitori possono cambiare, e infatti la
+   cambiano: il pannello del piano e l'helper lo portano a 11px con una regola scoped,
+   che vince su questa per specificità. Il resto — sfondo, bordo, angoli — è dell'oggetto
+   e non di chi lo ospita. */
+.codeblock pre{font-family:var(--mono);font-size:10.5px;background:var(--surface);
+  border:1px solid var(--line-2);border-radius:0 0 7px 7px;padding:8px 10px;margin:0;
+  overflow:auto;white-space:pre}
+.codeblock pre code{background:none;padding:0;font-size:1em}
+/* F1: il bottone accanto a un link riconosciuto. Inline come il link stesso — non va a
+   capo da solo, segue il testo — perché è una seconda via per la stessa frase, non un
+   blocco a parte come il codice. Qui e non nello scoped di un componente per la stessa
+   ragione del blocco di codice: lo inietta `markdown.ts`, che gira in cinque punti. */
+.applink{display:inline-flex;align-items:center;gap:3px;vertical-align:middle;font:inherit;
+  font-size:9.5px;color:var(--accent);background:var(--accent-soft);border:0;
+  border-radius:5px;padding:2px 6px;margin-left:4px;cursor:pointer}
+.applink svg.ic{width:10px;height:10px}
+.applink:hover{filter:brightness(0.94)}
+.applink:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 /* Il nome del linguaggio nella barra del blocco: a destra, in tono minore. Dice di che
    cosa si tratta senza competere col bottone, che è la cosa che si preme. */
 .cblang{margin-left:auto;font-size:9.5px;color:var(--muted);font-family:var(--mono);

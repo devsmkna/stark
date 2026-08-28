@@ -16,15 +16,12 @@
 // shell, quindi un percorso con spazi o caratteri strani non è un'iniezione — è
 // solo un argomento.
 
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { promisify } from 'node:util'
 // `WSL` sta in `core/platform.ts`: era la stessa costante, con lo stesso commento,
 // anche in `launch.ts` e serviva a un terzo posto (il CLI, per aprire il browser).
-import { WIN, WSL } from '../core/platform.ts'
+import { esegui, WIN, WSL } from '../core/platform.ts'
 
-const run = promisify(execFile)
 
 export type RevealResult = { ok: true } | { ok: false; error: string }
 
@@ -46,7 +43,7 @@ export async function reveal(path: string): Promise<RevealResult> {
       // dell'eseguibile, non un errore di STARK.
       //
       // Non verificato dal vivo: nessuna delle macchine di sviluppo è Windows nativo.
-      await run('explorer.exe', [`/select,${p}`]).catch(() => { /* vedi sopra */ })
+      await esegui('explorer.exe', [`/select,${p}`]).catch(() => { /* vedi sopra */ })
       return { ok: true }
     }
     if (WSL) {
@@ -58,13 +55,13 @@ export async function reveal(path: string): Promise<RevealResult> {
       // funzionato** — verificato dal vivo, è un comportamento noto dell'eseguibile
       // stesso, non un errore di STARK — quindi non si tratta un suo fallimento
       // come un fallimento nostro.
-      const { stdout } = await run('wslpath', ['-w', p])
+      const { stdout } = await esegui('wslpath', ['-w', p])
       const win = stdout.trim()
-      await run('explorer.exe', [`/select,${win}`]).catch(() => { /* vedi sopra */ })
+      await esegui('explorer.exe', [`/select,${win}`]).catch(() => { /* vedi sopra */ })
       return { ok: true }
     }
     if (process.platform === 'darwin') {
-      await run('open', ['-R', p])
+      await esegui('open', ['-R', p])
       return { ok: true }
     }
     // Linux nativo: nessun comando è universale per «selezionare», dipende dal
@@ -73,9 +70,9 @@ export async function reveal(path: string): Promise<RevealResult> {
     // se manca, si scende alla versione minima onestamente disponibile ovunque —
     // aprire la cartella — invece di far finta che «selezionare» sia garantito.
     try {
-      await run('nautilus', ['--select', p])
+      await esegui('nautilus', ['--select', p])
     } catch {
-      await run('xdg-open', [dirname(p)])
+      await esegui('xdg-open', [dirname(p)])
     }
     return { ok: true }
   } catch (e) {

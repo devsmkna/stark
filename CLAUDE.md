@@ -1296,6 +1296,68 @@ Annullare il dialogo, o non avere il comando giusto in `PATH`, tornano identici
 `npm run check` sale a **109** (i tre test di `pickFolderNative` aggiunti in revisione
 finale, con un `exec` finto invece di un dialogo vero), `npm run daemon` resta **35**.
 
+**E infatti, provato dall'utente, non funzionava — per due ragioni diverse** (28 agosto
+2026: «sembra aprire il finder all'interno del terminale, io voglio l'explorer, lo stesso
+che compare quando allego un file»). È il click dal vivo che quel giro aveva lasciato in
+sospeso, e ha trovato entrambe le metà rotte.
+
+**La prima: il bottone non partiva mai.** `nativeFolderPickerAvailable()` chiedeva al
+`PATH` se c'è `powershell.exe` — ma su WSL l'interop può esserci benissimo con le cartelle
+di Windows **fuori** dal `PATH` di Linux. Misurato sul daemon vero di questa macchina
+leggendo `/proc/<pid>/environ`: **zero** voci `/mnt/c`, mentre
+`/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe` esiste e gira. Il selettore
+risultava quindi «non disponibile» per una ragione falsa, e restava solo il tree dentro la
+pagina — che è ciò che l'utente ha chiamato «il finder dentro il terminale». Ora si guarda
+**il disco** e il `PATH` è il ripiego, non la domanda. Il ripiego finale è il nome nudo e
+non `null`: se non c'è nessun candidato si prova comunque, invece di arrendersi prima di
+aver tentato — e serve anche a tenere le prove indipendenti dalla macchina che le esegue.
+
+**La seconda: era il dialogo sbagliato.** `FolderBrowserDialog` è la finestrella ad albero
+di Windows XP, non la finestra di Explorer che compare allegando un file. Quella è la
+**Common Item Dialog** — `IFileOpenDialog` con `FOS_PICKFOLDERS` — e su .NET Framework,
+cioè su Windows PowerShell 5.1 (quello che c'è *sempre*), non esiste una via gestita per
+arrivarci: `FolderBrowserDialog` è stato riscritto sopra `IFileDialog` solo da .NET Core
+3.0, cioè in `pwsh`, che può non esserci. Quindi si dichiara l'interfaccia COM e si chiama
+quella. I metodi che non servono restano dichiarati come `Unused`: in un vtable conta
+**l'ordine**, non la firma di ciò che non si invoca — toglierli sposterebbe tutti quelli
+dopo, ed è il modo in cui questa cosa si rompe chiamando in silenzio il metodo sbagliato.
+Il ripiego su `FolderBrowserDialog` sta **dentro** lo script e non in un secondo giro: su
+una macchina dove `Add-Type` non può compilare, meglio il dialogo vecchio che nessuno.
+
+**Lo script viaggia in `-EncodedCommand`** (base64 di UTF-16LE) e non come `-Command`: è
+l'unica forma in cui un blocco di C# con virgolette, graffe e un here-string `@'…'@`
+attraversa indenne due livelli di quoting — quello di `execFile` e quello dell'interop di
+WSL, che ricostruisce la riga di comando con regole sue. E la `cwd` è `/mnt/c/Windows`, per
+lo stesso inciampo dell'UNC già documentato per `cmd.exe` in `launch.ts`.
+
+**Verificato su un PowerShell 5.1 vero senza aprire nessuna finestra**, che è il vincolo
+che aveva bloccato la verifica la prima volta: si cattura lo script **generato davvero**
+usando lo stesso seam d'iniezione delle prove (`spike/dialogo-cartella.ts` — costo zero, non
+parte nessun processo Windows), lo si decodifica, e su quel testo si controllano tre cose:
+sintassi valida col parser di PowerShell, il C# che **compila** (`Add-Type`, 2518 caratteri,
+metodo pubblico `Pick`), e il vtable allineato — `GetOptions` torna `0x1808`, cioè i flag di
+default veri della Common Item Dialog, che dopo `SetOptions` diventano `0x1868` con
+`FOS_PICKFOLDERS` acceso. Un vtable disallineato non avrebbe restituito quei valori. Il
+click resta all'utente: una prova automatica non ha il permesso di aprire una finestra
+addosso a chi non l'ha chiesta.
+
+**Una prova che era una tautologia**, caduta nello stesso giro: `nativeFolderPickerAvailable
+coerente con la piattaforma corrente` **ricalcolava la stessa regola** del modulo sotto test
+(il commento lo diceva: «si ricalcola cosa ci si aspetta con la stessa logica»). Verde finché
+le due copie coincidevano, rossa il giorno in cui il modulo è migliorato — cioè non misurava
+niente. Sostituita con l'invariante che descrive il bug vero: **svuotato il `PATH`**,
+`commandExists('powershell.exe')` risponde `false` mentre `nativeFolderPickerAvailable()`
+deve rispondere `true`. È la differenza fra la vecchia logica e la nuova, scritta come
+prova. `npm run daemon` resta **103**, `npm run check` **269**.
+
+**E `bundledExecutable()` elencava tre percorsi a mano su otto** (`profiles.ts`, trovato
+confrontando i due `claude`): mancavano entrambi i `win32`, `linux-arm64`, `darwin-x64` e
+`linux-arm64-musl` — lacuna diventata reale il giorno in cui STARK ha imparato a girare su
+Windows nativo. Non dava errore: dava `bundled: false` nella diagnostica, cioè una pagina che
+dice il falso proprio a chi la legge perché qualcosa non torna. Ora il pacchetto si risolve
+con `createRequire(...).resolve`, come ci arriva l'SDK — quindi regge anche quando
+`node_modules` non è dove ci si aspetta.
+
 **Le chat si affiancano** (27 agosto 2026). N conversazioni aperte insieme nella stessa
 pagina, in pannelli ridimensionabili: si trascina una riga dell'elenco sul **bordo** di un
 pannello e quello si divide nella direzione del bordo, o sul **centro** e la chat prende il
@@ -1762,6 +1824,142 @@ allarga l'helper (`Helper.svelte:135`) somma un delta di `clientX` — pixel ver
 larghezza in unità del root, quindi sotto zoom la colonna segue il dito più veloce del dito.
 Stessa cura, `zoomRoot()`, quando si toccherà quel punto.
 
+**Il bottone «Copy» di un blocco di codice era quello di default del browser** (28 agosto
+2026, segnalato con uno screenshot di un collega su Linux/Firefox: «vede questo bottone
+copia con questo stile»). Non era Firefox e non era il tema: era **dove** stava il blocco.
+
+`renderMarkdown` produce quel markup — `.codeblock` + `.cbbar` + `.copybtn` + il `<pre>` —
+in **cinque** punti: la risposta nel flusso, la nota, il piano riletto, il pannello del
+piano, l'helper. Lo stile però viveva nello `<style>` scoped di `Conversation.svelte`,
+sotto `.prose`. Negli altri tre contenitori (`.planbody`, `.planread`, `.ha`) non arrivava
+niente: il bottone ricadeva sul default del browser — riquadro bordato, font di sistema —
+e il `pre` restava senza sfondo, senza bordo e senza angoli. Su Firefox si nota di più
+perché il suo bottone di default ha anche il fondo grigio.
+
+La regola che ne esce, ed è più generale del caso: **il markup che nasce in `markdown.ts`
+non può avere il suo stile nello `<style>` di un componente**, perché non c'è nessun
+componente che lo contenga sempre. Va in `app.css`. Che fosse già così a metà lo diceva il
+file stesso: `.cblang` e `svg.ic` erano globali, il resto no — un'incoerenza che era il
+sintomo, non la causa. Tutto è ora agganciato a `.codeblock`, che avvolge solo i `pre` di
+Markdown: un `<pre>` scritto a mano in un template — il prompt intero di un turno, per dire
+— non viene toccato. `font-size` resta l'unica cosa che i contenitori possono cambiare, e
+infatti la cambiano (11px nel piano e nell'helper): il resto è dell'oggetto, non di chi lo
+ospita.
+
+Nello stesso giro **`.applink`**, il bottone «Open in …» accanto a un link riconosciuto,
+che è iniettato dalla stessa funzione e aveva lo stesso identico difetto — in un piano
+sarebbe stato un altro bottone di sistema. Trovato cercando *cosa altro* crea
+`markdown.ts`, invece di fermarsi al pezzo segnalato.
+
+Verificato **A/B nella UI vera** su un journal sintetico (`tools/prova-codeblock.mjs`,
+costo zero di quota: nessun processo agent, casa in `/tmp`, porta effimera), leggendo i
+rettangoli e gli stili calcolati oltre agli screenshot. Prima, nel piano: bottone
+`border 2px` e `font-size 13.33px` — cioè i default del browser — e `pre` con sfondo e
+bordo a zero. Dopo: identico al flusso in tutti i valori misurati, e uguale anche in tema
+**scuro** (`pre` a `rgb(22,26,35)` in entrambi i posti), che è da dove arrivava la
+segnalazione.
+
+Due inciampi di metodo, la stessa malattia due volte — **guardare il posto sbagliato**.
+`initializationResult()` non porta `tools` né `capabilities` (stanno nel `system:init`
+grezzo), e la prima sonda che li ha letti da lì non è fallita: ha stampato zero, che sembra
+un fatto. E nella prova della UI cliccavo l'intestazione di **tutti** i turni per aprirli,
+mentre l'ultimo nasce già aperto: il clic lo chiudeva, e il blocco cercato non c'era mai.
+Si è risolto ispezionando il DOM prima di toccarlo, non ragionandoci sopra.
+
+Resta aperto, e non l'ho toccato perché è una scelta di disegno e non un difetto: dentro un
+piano o nell'helper un **link**, una **tabella**, una **citazione** o un `hr` non hanno
+stile — quei contenitori dichiarano solo `h1-h3`, `p`, `ul`, `ol`, `pre`, di proposito, per
+restare compatti. Il blocco di codice era diverso perché è un oggetto composito che si
+*rompe* senza la sua veste, non solo uno che si veste in modo più sobrio.
+
+**«Scrivo la risposta, premo invio, non succede nulla» — NON riprodotto** (28 agosto 2026,
+segnalato su una sessione in modalità plan da un collega su Linux). Vale la pena scrivere
+anche un'indagine che non trova il colpevole, perché quello che ha **escluso** è la parte
+che non va rifatta.
+
+Escluso per misura, non per lettura: **il tasto Invio funziona.** Su una sessione viva con
+una domanda pendente, scrivere e premere Invio produce **la stessa identica POST** del clic
+su «Send answer» (`tools/prova-risposta.mjs`, costo zero di quota: la sessione si apre
+davvero — il box si monta solo con un processo dietro, `Dock.svelte`: `asking = live &&
+pending` — ma un'apertura è solo l'handshake). Il `keydown` arriva al gestore
+(`defaultPrevented: false`, `isComposing: false`), la bozza si aggiorna mentre si scrive
+(«Send answer» passa da spento ad acceso), e la richiesta parte. Vale anche **con due
+pannelli affiancati**: cliccare la casella sposta già il fuoco, quindi la risposta va alla
+chat giusta.
+
+Escluso anche il sospetto più promettente, e questa è la parte istruttiva. Nei tipi
+dell'SDK c'è `dialogExpiry`, default **`5m`**: «max time a permission/user dialog forwarded
+to a **remote client** stays parked awaiting an answer […] before either resolves to its
+safe no-action default (cancelled)». STARK non la imposta mai, e leggere un piano lungo ci
+sta comodamente dentro: sembrava la spiegazione. **Misurata, non è.** Con
+`CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS=8000` e una risposta data **16 secondi dopo**, il
+permesso è stato onorato lo stesso — file creato, tool `ok`, chiesto una volta sola
+(`spike/scadenza-dialogo.ts`, costa due turni corti). Coerente con la seconda metà della
+stessa frase, che al primo giro avevo saltato: «local-only prompts (no remote client) are
+**unaffected**» — la porta dell'SDK non conta come client remoto. Terza volta che «i tipi
+non sono i fatti» in questo repo, dopo l'hook `PermissionDenied` e `TodoWrite`.
+
+E un'auto-correzione: nel primo giro la sonda tornava `{ decision: 'allow' }` invece di
+`{ allow: true }`, che è la forma del §1. Non un errore — **un rifiuto silenzioso**: il
+file non veniva creato in *nessuna* delle due scene, e nella scena tardiva il permesso
+risultava chiesto due volte (l'agent che ritenta dopo un rifiuto). Sembrava la conferma
+della scadenza ed era rumore prodotto da me. Senza il controllo che falliva anche lui, ci
+sarei cascata.
+
+Cosa resta, e non è la causa provata di niente: **`Conversation` riceve l'id della propria
+chat e non lo passa a `Dock`**, che monta `Ask`. Ne segue che ogni comando del blocco in
+basso — risposte, permessi, piani, Stop, prompt — parte con `store.send(cmd)`, cioè verso
+`store.selected`, la chat **a fuoco**, non quella del pannello che lo disegna. Con un
+pannello solo coincidono sempre; con più pannelli il clic sposta il fuoco prima, quindi
+nella pratica non si vede. È latente e va sistemato, ma non è quello che è stato segnalato.
+
+Fatto intanto l'unico ramo che poteva produrre **esattamente** «non succede nulla, senza
+nemmeno un errore»: `store.send` tornava `false` in silenzio quando non c'è una chat a cui
+mandare. Adesso lo dice. Che sia lui o no, un ramo che tace non lascia niente da
+raccontare — ed è la ragione per cui questa indagine è finita senza una risposta.
+
+**Su Windows lampeggiavano tre finestre nere a ogni fine turno** (28 agosto 2026, segnalato
+dall'utente per conto di un collega su Windows nativo). Due colpevoli diversi, e solo uno è
+nostro — distinzione che è costata tre catture ed è l'unica cosa che decideva dove mettere le
+mani.
+Il meccanismo: su Windows un figlio **eredita la console del padre**, e se il padre non ne ha
+una il sistema **gliene alloca una nuova, con la sua finestra**. Il daemon non ha console —
+nasce con `DETACHED_PROCESS` apposta, per sopravvivere alla chiusura del terminale — e l'SDK
+lancia `claude` con `CREATE_NO_WINDOW`, che gliela toglie a sua volta. Quindi ogni comando
+lanciato da lì in giù, se non chiede di essere nascosto, si porta dietro un lampo. In un
+terminale non succede: là la console c'è, e i figli ci si attaccano dentro.
+Catturato con `Win32_ProcessStartTrace` sulla macchina vera, in tre giri. Il primo ha escluso
+gli hook (nessuno configurato). Il secondo ha nominato il processo — `git.exe`, quattro in 24
+ms — e ha insegnato a leggere il log: `conhost.exe` **non** vuol dire finestra visibile (ne
+nasce uno anche accanto a ogni `docker.exe`, ogni due secondi, e nessuno lo vede), mentre
+`OpenConsole.exe` sì, perché una console nuova e visibile la ospita il terminale predefinito.
+Il terzo, interrogando il **padre** invece del figlio (che vive dieci millisecondi e sparisce
+prima che se ne possa leggere la riga di comando), ha dato la risposta: tre `git.exe` da
+`claude.exe` e **due da `node.exe … stark.ts run`**, cioè da noi.
+I nostri erano `ramoDi()` in `daemon/git.ts` — il ramo mostrato nella barra di stato — che
+`Status.svelte` chiede **al confine del turno**, per scelta esplicita già scritta lì («se il
+ramo è cambiato, a cambiarlo è stato il turno, quindi la risposta che conta è quella dopo»).
+Cioè il lampeggio arrivava esattamente quando il modello finiva, e sembrava una conseguenza
+della risposta: era la domanda che STARK fa subito dopo.
+La cura non è `windowsHide: true` ripetuto: erano **quindici** punti, e il sedicesimo se lo
+sarebbe dimenticato. `core/platform.ts` esporta `esegui`/`eseguiSync`, e chi lancia un comando
+passa di lì — stessa ragione per cui in quel file era già finita la costante `WSL`. A tenerlo
+fermo c'è una verifica **statica** in `npm run check`: nessun `execFile`/`spawn` fuori da
+`platform.ts` senza `windowsHide`. Statica e non dinamica di proposito, perché su Linux
+`windowsHide` è ignorato — una prova che *esegue* qualcosa sarebbe verde qui qualunque cosa
+succeda su Windows. Vista fallire prima di crederle (`src/daemon/git.ts:47`).
+**Le altre tre non sono nostre**: le lancia `claude.exe`. Il CLI passa `windowsHide` 91 volte
+nel suo binario, ma non su quei `git`; e siccome è l'SDK a creare il processo — senza esporre
+nessuna opzione di spawn, verificato nei tipi e nel bundle — STARK non ha nessuna leva. Va
+segnalato a monte.
+Misura collaterale che vale la pena avere scritta, dalla stessa sessione: sul Linux di
+sviluppo, con `strace` agganciato per davvero, un turno **senza tool** non lancia **nessun**
+processo alla fine. Il primo tentativo diceva la stessa cosa ed era una bugia — `strace` non
+si era agganciato (`attach: No such process`, perché `pgrep -f` aveva pescato un pid già
+morto) e il suo stderr era stato buttato via con `stdio: 'ignore'`. Sonda in
+`spike/_git-fine-turno.ts`, costa un turno cortissimo: senza il controllo positivo un log
+vuoto non distingue «non lancia niente» da «non stavo guardando».
+
 Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
 seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
 giusto).
@@ -1778,6 +1976,21 @@ conversazione aperta**, che oggi passa dalla stessa casella dell'elenco e quindi
 Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
 `deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica
 dell'instradamento.
+
+**Da correggere — «Chat about this» allarga la discussione a tutte le domande** (segnalato
+dall'utente il 28 agosto 2026). Una richiesta di `AskUserQuestion` ne porta da 1 a 4, e la voce
+serve a dire «su *questa* non ho abbastanza per scegliere»: le altre risposte passano com'erano.
+Nei fatti l'agent torna con un approfondimento su **tutte**, comprese quelle a cui si era già
+risposto. Quello che parte oggi è `DISCUSS` in `ui/src/components/Ask.svelte:85` — una frase
+fissa («walk me through the options…») che **non nomina la domanda** e finisce in `answers`
+sotto la sua chiave. Il sospetto, da verificare e non da dare per buono, è che quella chiave
+non basti: la frase letta da sola non dice a cosa si riferisce, e l'agent ricomincia da capo.
+La cura probabile è citare la domanda dentro il testo che parte, invece di affidarsi alla
+posizione nella mappa. Va **misurato dal vivo** su una richiesta con tre domande, di cui una
+sola marcata «parliamone»: è l'unico modo di distinguere «la chiave si perde» da «l'agent la
+legge e decide comunque di riaprire tutto», che sono due difetti diversi con due cure diverse.
+Nota che il commento accanto al codice promette già il comportamento giusto («vale **solo per
+quella** — le altre restano risposte»): è una promessa scritta, non una verificata.
 
 ~~Due cose non ancora misurate~~ — **fatte** il 27 agosto: vedi «Le due misure mai fatte»
 più sopra. Il classificatore resta sotto la risoluzione della misura; il risveglio arriva

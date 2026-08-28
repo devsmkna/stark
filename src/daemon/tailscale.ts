@@ -16,9 +16,11 @@
 // all'avvio perché è una difesa, non un'informazione.
 
 import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { esegui } from '../core/platform.ts'
 
-const run = promisify(execFile)
+// `esegui` invece di un `promisify(execFile)` locale: nasconde la finestra su Windows.
+// Vedi `core/platform.ts` — era la stessa opzione dimenticata in quindici punti.
+const run = esegui
 
 /** Un passo della checklist. `fatto` è misurato, mai dedotto da quello prima. */
 export type Passo = {
@@ -115,7 +117,7 @@ export async function statoTailscale(porta: number): Promise<StatoTailscale> {
  */
 export function collega(): Promise<{ ok: boolean; url?: string; error?: string }> {
   return new Promise(resolve => {
-    const child = execFile('tailscale', ['up', '--json'], { timeout: 120_000 }, () => { /* vedi sotto */ })
+    const child = execFile('tailscale', ['up', '--json'], { timeout: 120_000, windowsHide: true }, () => { /* vedi sotto */ })
     let buf = ''
     let risposto = false
     const rispondi = (r: { ok: boolean; url?: string; error?: string }): void => {

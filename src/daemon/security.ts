@@ -5,7 +5,7 @@
 // sotto servono a tre attacchi diversi, e nessuna copre il buco delle altre.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { eseguiSync } from '../core/platform.ts'
 import type { IncomingMessage } from 'node:http'
 
 export type Guard = {
@@ -234,7 +234,7 @@ export function detectTailnetHost(): string | null {
   if (tailnetCache) return tailnetCache.host
   let host: string | null = null
   try {
-    const j = JSON.parse(execFileSync('tailscale', ['status', '--json'], { timeout: 2000 }).toString())
+    const j = JSON.parse(eseguiSync('tailscale', ['status', '--json'], { timeout: 2000 }).toString())
     const dns = (j.Self?.DNSName as string | undefined)?.replace(/\.$/, '')
     host = dns || null
   } catch { host = null }

@@ -6,8 +6,9 @@
 // specifica marca come trappole, così che se un domani smettono di essere gestiti il
 // test lo dica invece di scoprirlo la UI.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { quotaWindows } from '../adapters/claude-code/quota.ts'
 import { callFor } from '../core/calls.ts'
@@ -29,6 +30,7 @@ import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
+import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
 import { Journal, MemoryJournal } from '../core/journal.ts'
@@ -1870,6 +1872,97 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('OpenCode: senza niente da leggere, `attachment` resta l\'ultimo indizio',
     allegabiliDi({ attachment: true }).length === IMMAGINI.length
     && allegabiliDi({ attachment: false }).length === 0)
+}
+
+// ─── release: qual e' l'ultima versione rilasciata ──────────────────────────
+//
+// La regola vive in `core/release.ts` senza toccare git ne' la rete, quindi si prova
+// qui con `node` puro — come `layout.ts` per i pannelli e `gruppi.ts` per i turni.
+// Il caso che conta piu' di tutti e' il terzultimo: **un push su main non deve
+// chiamare nessuno**, ed e' l'intera ragione per cui questo codice esiste.
+{
+  const tags = ['v0.1.0', 'v0.2.0', 'v0.10.0', 'v0.9.9', 'v1.0.0-rc.1',
+    'backup-prima-riscrittura', 'nightly']
+
+  check('release: `^{}` di un tag annotato non diventa una seconda versione',
+    JSON.stringify(tagDaLsRemote(
+      'aaa\trefs/tags/v0.2.0\nbbb\trefs/tags/v0.2.0^{}\nccc\trefs/tags/v0.1.0\n',
+    )) === JSON.stringify(['v0.2.0', 'v0.1.0']))
+
+  // Ordinare per stringa direbbe che v0.9.9 batte v0.10.0: e' il modo classico in cui
+  // una release nuova non viene offerta a nessuno, e nessuno se ne accorge.
+  check('release: 0.10.0 batte 0.9.9 (numeri, non stringhe)',
+    ultimaRelease(tags)?.tag === 'v0.10.0')
+
+  check('release: una pre-release non e\' l\'ultima versione',
+    ultimaRelease(['v1.0.0-rc.1', 'v0.9.0'])?.tag === 'v0.9.0')
+
+  // In questo repo `backup-prima-riscrittura` esiste davvero. Letto come 0.0.0
+  // vincerebbe su un elenco vuoto, cioe' offrirebbe di «aggiornare» a un backup.
+  check('release: un tag che non e\' una versione viene ignorato',
+    numeriDiTag('backup-prima-riscrittura') === null
+    && ultimaRelease(['backup-prima-riscrittura', 'nightly']) === null)
+
+  check('release: la `v` iniziale e\' facoltativa',
+    ultimaRelease(['1.4.0'])?.versione === '1.4.0')
+
+  // Il cuore della richiesta: si confronta con `package.json`, che cambia **solo** nel
+  // commit taggato. Un commit in piu' su main lo lascia dov'e', quindi nessun banner.
+  check('release: un push su main non fa comparire nessun aggiornamento',
+    daAggiornare('0.2.0', ultimaRelease(['v0.2.0'])) === false)
+
+  check('release: una release piu\' alta invece si', daAggiornare('0.2.0', ultimaRelease(tags)))
+
+  check('release: senza release pubblicate non c\'e\' niente da aggiornare',
+    daAggiornare('0.2.0', null) === false && ultimaRelease([]) === null)
+
+  // Una versione locale illeggibile e' «non lo so», e nel dubbio non si manda nessuno
+  // a fare un aggiornamento: il contrario mostrerebbe il banner a chiunque abbia un
+  // `package.json` senza `version`.
+  check('release: una versione locale illeggibile non vale come «sono indietro»',
+    daAggiornare('', ultimaRelease(tags)) === false)
+
+  check('release: una versione locale piu\' alta della release non chiama nessuno',
+    daAggiornare('2.0.0', ultimaRelease(tags)) === false)
+  // ─── nessuna finestra addosso all'utente (Windows) ───────────────────────
+  //
+  // Su Windows un figlio eredita la console del padre; il daemon non ne ha una
+  // (`DETACHED_PROCESS`), quindi ogni comando lanciato senza `windowsHide` si prende
+  // una console **nuova**, cioè una finestra nera che lampeggia. Successo davvero:
+  // `ramoDi()` faceva lampeggiare `git.exe` a ogni fine turno su una macchina Windows
+  // nativa (28 agosto 2026, catturato con `Win32_ProcessStartTrace`).
+  //
+  // La guardia è statica e non dinamica di proposito: il difetto non si riproduce su
+  // Linux — `windowsHide` lì è ignorato — quindi una prova che *esegue* qualcosa
+  // sarebbe verde su questa macchina qualunque cosa succeda. Quello che si può tenere
+  // fermo è la **regola**: chi lancia un processo passa dal posto unico.
+  {
+    // due livelli sopra `src/cli/offline-check.ts` è `src/`; la radice è uno più su
+    const radice = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
+    const scoperti: string[] = []
+    const visita = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p2 = resolve(dir, e.name)
+        if (e.isDirectory()) { visita(p2); continue }
+        if (!e.name.endsWith('.ts')) continue
+        // `core/platform.ts` è il posto unico, e `cli/` gira in un terminale che una
+        // console ce l'ha già: lì un figlio non ne alloca una nuova.
+        if (p2.endsWith('core/platform.ts') || p2.includes('/cli/')) continue
+        readFileSync(p2, 'utf8').split('\n').forEach((riga, i) => {
+          if (!/\b(execFile|execFileSync|spawn)\(/.test(riga)) return
+          if (riga.trimStart().startsWith('*') || riga.trimStart().startsWith('//')) return
+          if (/windowsHide/.test(riga)) return
+          // `riavvio.ts` lancia `/bin/sh`, che su Windows non esiste: là il ramo è un
+          // altro, e nascondere una finestra che non può nascere non vuol dire niente.
+          if (p2.endsWith('daemon/riavvio.ts')) return
+          scoperti.push(`${p2.slice(radice.length + 1)}:${i + 1}`)
+        })
+      }
+    }
+    visita(resolve(radice, 'src'))
+    check('nessun processo lanciato senza windowsHide fuori da core/platform.ts',
+      scoperti.length === 0, scoperti.join(', '))
+  }
 }
 
 let failed = 0
