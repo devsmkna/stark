@@ -1718,8 +1718,14 @@ lo dice riga per riga invece di lasciarlo dedurre. Non provato nemmeno `systemd-
 --user` da un utente **non** root con una sessione logind vera: è stato verificato il
 meccanismo, non quel caso.
 
-Le suite dopo il giro: `npm run check` **243**, `npm run daemon` **91**,
-`npm run layout:check` 22, `npm run gruppi:check` 24, `typecheck` pulito.
+Le suite del ramo, prima del merge: `npm run check` **243**, `npm run daemon` **91**,
+`npm run layout:check` 22, `npm run gruppi:check` 24, `typecheck` pulito. **Dopo il merge**
+con `origin/main` (scorciatoie, Palette, riavvio dal pannello, Usage): `check` **269**,
+`daemon` **103**, typecheck pulito.
+Le due rotte che escono dallo stesso merge non si pestano i piedi ed è bene sapere perché:
+`/api/restart` accende un ricambio e **poi** muore, `/api/shutdown` muore e basta — la
+prima è «prendi l'aggiornamento senza tornare al terminale», la seconda è la sola via con
+cui `stark stop` può chiudere con garbo su Windows.
 
 **Il menu del tasto destro cadeva lontano dalla riga premuta** (28 agosto 2026, segnalato
 con uno screenshot: «troppo spostato rispetto all'elemento su cui ho premuto»). Non era un

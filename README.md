@@ -241,13 +241,13 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 | `npm run stark` | il daemon in primo piano (staccato: `stark:start`, vedi sopra) |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
-| `npm run check` | catena completa su eventi finti: 243 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 269 verifiche, **zero quota spesa** |
 | `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
-| `npm run daemon` | prova il daemon da capo a fondo: 91 verifiche, perimetro compreso (con `-- --reveal` una in più, che apre una finestra vera) |
+| `npm run daemon` | prova il daemon da capo a fondo: 103 verifiche, perimetro compreso (con `-- --reveal` una in più, che apre una finestra vera) |
 | `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
 | `npm run queue` | manda due prompt ravvicinati e verifica che restino due turni, in fila |
 | `npm run icons` · `python3 tools/gen-logo.py` | rigenerano icone e marchio dalle sorgenti |
