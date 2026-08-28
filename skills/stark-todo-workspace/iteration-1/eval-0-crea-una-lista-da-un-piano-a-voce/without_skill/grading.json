@@ -1,0 +1,51 @@
+{
+  "expectations": [
+    {
+      "text": "Crea .stark/todo.json ed è JSON valido",
+      "passed": false,
+      "evidence": "assente"
+    },
+    {
+      "text": "Contiene esattamente una lista",
+      "passed": false,
+      "evidence": "0 liste"
+    },
+    {
+      "text": "La chiave della lista è un UUID",
+      "passed": false,
+      "evidence": "[]"
+    },
+    {
+      "text": "La lista ha title, created, __status e tasks",
+      "passed": false,
+      "evidence": "[]"
+    },
+    {
+      "text": "__status è \"active\"",
+      "passed": false,
+      "evidence": "None"
+    },
+    {
+      "text": "Ci sono tre task, uno per passo descritto",
+      "passed": false,
+      "evidence": "0 task"
+    },
+    {
+      "text": "Tutti i task partono in stato \"todo\"",
+      "passed": false,
+      "evidence": "[]"
+    },
+    {
+      "text": "Gli id dei task sono unici dentro la lista",
+      "passed": false,
+      "evidence": "[]"
+    },
+    {
+      "text": "Non ha eseguito il lavoro: nessun file di configurazione creato",
+      "passed": true,
+      "evidence": "['accesso-da-fuori-casa.md']"
+    }
+  ],
+  "passed": 1,
+  "total": 9
+}

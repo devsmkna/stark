@@ -1,0 +1,25 @@
+{
+  "77f11f0f-4cfa-4f0e-aea7-68a26623f65f": {
+    "title": "Accesso a STARK da fuori casa",
+    "created": 1787907695771,
+    "__status": "active",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "Perimetro dichiarato con STARK_PUBLIC_HOST",
+        "state": "todo"
+      },
+      {
+        "id": "t2",
+        "text": "Traefik sul VPS con Let's Encrypt e mTLS",
+        "state": "todo"
+      },
+      {
+        "id": "t3",
+        "text": "Tunnel misurato: l'SSE non viene strozzato",
+        "state": "todo",
+        "note": "npm run tunnel — costo zero di quota, usa i battiti"
+      }
+    ]
+  }
+}

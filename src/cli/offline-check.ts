@@ -26,7 +26,7 @@ import { Journal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
 import {
-  capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
+  buildOptions, capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -425,6 +425,21 @@ check('§4: il contesto si rilegge dal journal, con l\'ora della misura',
 // vero — vedi il commento in sdk-options.ts), ripiegando sui 200K sbagliati invece del
 // milione vero. Un contesto reale al 21% appariva quindi 100%: non un'ipotesi sulla
 // cache, un denominatore sbagliato.
+// `--continue` e `sessionId` sono dichiarati incompatibili dall'SDK: passarli insieme
+// fa fallire l'avvio. Chi apre con `continue` rinuncia quindi a imporre l'id, e lo
+// scopre all'handshake (`session.resumeRef`).
+{
+  const c = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', continue: true, sessionId: 'a-b' })
+  check('§continue: `continue:true` non porta con sé `sessionId`',
+    c.continue === true && c.sessionId === undefined, JSON.stringify({ c: c.continue, s: c.sessionId }))
+  const r = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', continue: true, resume: { ref: 'r1' } })
+  check('§continue: `resume` vince su `continue` — non partono mai insieme',
+    r.resume === 'r1' && r.continue === undefined, JSON.stringify({ r: r.resume, c: r.continue }))
+  const n = buildOptions({ cwd: '/tmp', model: 'x', mode: 'auto', sessionId: 'a-b' })
+  check('§continue: senza il flag l\'id resta imposto, come prima',
+    n.sessionId === 'a-b' && n.continue === undefined)
+}
+
 check('§12: la finestra di un alias con `[1m]` è un milione, non 200K',
   contextWindowFor('claude-opus-5[1m]') === 1_000_000,
   String(contextWindowFor('claude-opus-5[1m]')))

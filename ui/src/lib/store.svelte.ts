@@ -53,10 +53,15 @@ export type Dialog =
  * perché la seconda porta va **vista** per essere usata: chi non sa che esiste non la
  * cerca in una tendina.
  */
-export type NewTab = 'new' | 'import' | 'resume'
+export type NewTab = 'new' | 'import'
 
 /** Il menu del tasto destro su una riga dell'elenco. */
 export type ContextMenu = { id: string; x: number; y: number } | null
+
+/** Una preferenza di questo dispositivo, con la modalità privata che non esplode. */
+function leggiPreferenza(chiave: string): boolean {
+  try { return localStorage.getItem(chiave) === '1' } catch { return false }
+}
 
 export class Store {
   readonly api = new Api(bootToken())
@@ -124,6 +129,21 @@ export class Store {
   }
   dialog = $state<Dialog>(null)
   menu = $state<ContextMenu>(null)
+
+  /**
+   * La colonna dei todo è aperta?
+   *
+   * Nel browser e non sul daemon, come il tema e il layout dei pannelli: «su questo
+   * schermo tengo aperta anche la colonna dei task» è un fatto del dispositivo, non del
+   * progetto. Chiusa di default — una colonna in più su una finestra stretta toglie
+   * spazio alla conversazione, e chi non usa le liste non deve pagarla.
+   */
+  todoOpen = $state(leggiPreferenza('stark.todo'))
+
+  toggleTodo(): void {
+    this.todoOpen = !this.todoOpen
+    try { localStorage.setItem('stark.todo', this.todoOpen ? '1' : '0') } catch { /* modalità privata */ }
+  }
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
   renaming = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */
@@ -679,7 +699,10 @@ export class Store {
    * come fatto del progetto, così la prossima chat sulla stessa cartella lo eredita senza
    * chiederlo di nuovo — «il profilo è deciso» vuol dire deciso da qui in poi.
    */
-  async newChat(cwd: string, opts: { model?: string; profile?: string } = {}): Promise<void> {
+  async newChat(
+    cwd: string,
+    opts: { model?: string; profile?: string; continue?: boolean } = {},
+  ): Promise<void> {
     this.working = true
     this.refused = null
     try {
@@ -693,6 +716,7 @@ export class Store {
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
         ...(profile ? { configDir: profile } : {}),
+        ...(opts.continue ? { continue: true } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
         void this.setProject(cwd, { profile: opts.profile })

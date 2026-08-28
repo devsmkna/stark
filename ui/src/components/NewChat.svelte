@@ -24,14 +24,27 @@
   let { store }: { store: Store } = $props()
 
   let cwd = $state('')
+  /** `--continue`: riprende l'ultima conversazione di quella cartella invece di
+   *  cominciarne una. Spenta di default — «New chat» vuol dire nuova. */
+  let continua = $state(false)
   let chosen = $state<string | null>(null)
   let filter = $state('')
 
-  // ─── «Resume»: un id scritto a mano, niente da sfogliare ───────────────────
-  let resumeId = $state('')
-  const resumeReady = $derived(resumeId.trim().length > 0 && !store.working)
+  // ─── un id scritto a mano ──────────────────────────────────────────────────
+  //
+  // Aveva una linguetta sua, ed era una linguetta di troppo: tre schede per due cose
+  // che si fanno nello stesso posto. Adesso vive dentro la ricerca di «Import», che è
+  // dove uno cerca una conversazione — e siccome gli id adesso si **vedono** su ogni
+  // riga, cercarne uno è un gesto naturale invece di un campo da trovare.
+  //
+  // La capacità NON si è persa, ed era il punto: `Import` elenca i **60 trascritti più
+  // recenti** (il limite di `listSessions` dell'SDK, `catalogue.ts`), mentre
+  // `claude -r <id>` apre qualunque id. Senza questa strada STARK saprebbe fare meno
+  // del CLI su un id di due mesi fa.
+  const FORMA_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const idCercato = $derived(FORMA_ID.test(filter.trim()) ? filter.trim() : null)
   function startResume(): void {
-    if (resumeReady) void store.resumeById(resumeId.trim())
+    if (idCercato && !store.working) void store.resumeById(idCercato)
   }
 
   // ─── il profilo, solo se c'è davvero una scelta da fare ────────────────────
@@ -130,11 +143,14 @@
 
   function start(): void {
     if (ready) {
-      void store.newChat(cwd.trim(), showProfiles && effectiveProfile ? { profile: effectiveProfile } : {})
+      void store.newChat(cwd.trim(), {
+        ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
+        ...(continua ? { continue: true } : {}),
+      })
     }
   }
 
-  function goto(tab: 'new' | 'import' | 'resume'): void {
+  function goto(tab: 'new' | 'import'): void {
     store.tab = tab
     store.refused = null
     // Si richiede aprendo la linguetta e non all'avvio: legge dei file da disco, e chi
@@ -149,8 +165,21 @@
     return rows.filter(r =>
       r.title.toLowerCase().includes(q)
       || (r.firstPrompt ?? '').toLowerCase().includes(q)
-      || (r.cwd ?? '').toLowerCase().includes(q))
+      || (r.cwd ?? '').toLowerCase().includes(q)
+      // Anche per id: adesso che si vedono su ogni riga, incollarne uno e ritrovarlo
+      // è il gesto ovvio. Vale sia per l'id intero sia per le prime cifre.
+      || r.sessionId.toLowerCase().includes(q))
   })
+
+  /**
+   * La riga «apri questo id» si mostra solo se l'elenco quell'id non ce l'ha.
+   *
+   * Sta **dopo** `shown` e non accanto a `idCercato` perché lo legge: più su sarebbe un
+   * uso prima della dichiarazione. A runtime funzionava lo stesso — un `$derived` si
+   * valuta quando lo si legge, cioè a componente già costruito — ed è proprio per
+   * questo che non se ne accorgeva nessuno guardando lo schermo: l'ha detto `svelte-check`.
+   */
+  const mostraPerId = $derived(idCercato !== null && !shown.some(r => r.sessionId === idCercato))
 
   const size = (n: number | undefined): string =>
     !n ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} kB`
@@ -166,20 +195,16 @@
   <div class="dlgh">
     <div>
       <div class="dt">
-        {store.tab === 'new' ? 'New chat'
-          : store.tab === 'import' ? 'Import a conversation'
-          : 'Resume a conversation'}
+        {store.tab === 'new' ? 'New chat' : 'Import a conversation'}
       </div>
       <div class="ds">
         {store.tab === 'new' ? 'A folder is all it needs'
-          : store.tab === 'import' ? 'Started in the terminal, on this machine'
-          : 'If you already know its id'}
+          : 'Started in the terminal — search by name, or paste an id'}
       </div>
     </div>
     <div class="switch" style="margin-left:auto">
       <button class:on={store.tab === 'new'} onclick={() => goto('new')}>New</button>
       <button class:on={store.tab === 'import'} onclick={() => goto('import')}>Import</button>
-      <button class:on={store.tab === 'resume'} onclick={() => goto('resume')}>Resume</button>
     </div>
     <button class="x" aria-label="Close" onclick={() => { store.dialog = null }}>
       <Icon name="i-x" />
@@ -252,6 +277,19 @@
         {/if}
       </div>
 
+      <div class="fgroup">
+        <div class="flabel">Start</div>
+        <label class="chk">
+          <input type="checkbox" bind:checked={continua} />
+          <span>Continue the last conversation in this folder</span>
+        </label>
+        <div class="hint">The same as <code>claude --continue</code>: the agent keeps the
+          context of the most recent chat in that folder. STARK can't know which one it is
+          before the handshake, so <b>the previous turns won't be shown here</b> — they count
+          for the model, not on screen. If that folder has no earlier conversation, this
+          starts a new chat.</div>
+      </div>
+
       {#if showProfiles}
         <div class="fgroup">
           <div class="flabel">Claude profile</div>
@@ -292,14 +330,37 @@
         </span>
       </div>
 
+      {#if mostraPerId}
+        <!-- L'elenco mostra i 60 trascritti più recenti: un id più vecchio non c'è,
+             anche se il file esiste su disco. Qui si apre lo stesso, cercandolo per
+             nome file in **tutti** i profili della macchina — cioè quello che fa
+             `claude -r <id>`. -->
+        <!-- Niente `.rd`: le altre righe si **scelgono** e poi si conferma con
+             «Import», questa si **preme** e basta. Una pallina che non si riempie mai
+             direbbe che c'è una selezione in corso quando non c'è. -->
+        <button class="imp byid" onclick={startResume} disabled={store.working}>
+          <div class="bd">
+            <div class="t1"><span class="nm">Open this id</span></div>
+            <div class="fp">Not in the list — that only shows the 60 most recent.
+              STARK will look for this id across every Claude profile on this machine,
+              import its history if it doesn't have it yet, and open it.</div>
+            <div class="mt">{store.working ? 'opening…' : idCercato}</div>
+          </div>
+        </button>
+      {/if}
+
       {#if store.importable === null}
         <div class="mid" style="padding:26px">Looking for conversations…</div>
-      {:else if shown.length === 0}
+      {:else if shown.length === 0 && !mostraPerId}
         <div class="mid" style="padding:26px">
           {store.importable.length === 0
             ? 'No conversation from the terminal was found on this machine.'
             : 'Nothing matches that.'}
         </div>
+      {:else if shown.length === 0}
+        <!-- Con la riga per id sopra, «Nothing matches that» si contraddirebbe: c'è
+             eccome qualcosa da fare. Si dice l'altra metà, che è quella vera. -->
+        <div class="mid" style="padding:14px 26px 20px">Nothing else matches that id.</div>
       {:else}
         {#each shown as r (r.sessionId)}
           <button class="imp" class:on={chosen === r.sessionId} class:live={r.recent}
@@ -317,6 +378,13 @@
                   {/if}
                   {project(r.cwd)}{#if r.branch}{' · '}{r.branch}{/if}
                 </span>
+                <!-- L'id accorciato come un hash di git: otto cifre bastano a
+                     riconoscerlo in un log o in un terminale, e l'intero sta nel
+                     `title` — la riga è già fitta, e trentasei caratteri di uuid
+                     spingerebbero fuori il nome della conversazione. Uno `span` e non
+                     un bottone «copia»: questa riga **è** un bottone, e un bottone
+                     dentro un bottone non è HTML valido. -->
+                <span class="chip sid" title={r.sessionId}>{r.sessionId.slice(0, 8)}</span>
               </div>
               <!-- Il primo prompt in evidenza, non il titolo: il titolo lo scrive il
                    modello e si somigliano tutti; la prima frase scritta da te è quella
@@ -357,32 +425,6 @@
       </button>
     </div>
 
-  {:else}
-    <div class="dlgb">
-      <div class="fgroup">
-        <div class="flabel">Session id</div>
-        <!-- Un campo solo: la cartella si legge dal trascritto trovato, non la si
-             sceglie qui — vedi docs/superpowers/specs/2026-08-27-resume-by-id-design.md. -->
-        <!-- svelte-ignore a11y_autofocus -->
-        <input class="field" autofocus bind:value={resumeId}
-          placeholder="c15a2fde-a535-4cdd-9764-b40cffaf2bf0"
-          onkeydown={e => { if (e.key === 'Enter') startResume() }} />
-        <div class="hint">Paste a Claude Code session id. STARK looks for it across every
-          profile on this machine, imports its history if it doesn't have it yet, and opens
-          it live — the same as <code>claude -r &lt;id&gt;</code>.</div>
-      </div>
-
-      {#if store.refused}
-        <div class="warn"><Icon name="i-warn" /><span>{store.refused}</span></div>
-      {/if}
-    </div>
-
-    <div class="dlgf">
-      <button class="btn" onclick={() => { store.dialog = null }}>Cancel</button>
-      <button class="btn pri" disabled={!resumeReady} onclick={startResume}>
-        {store.working ? 'Opening…' : 'Resume'}
-      </button>
-    </div>
   {/if}
 </div>
 
@@ -405,6 +447,9 @@
      riconoscerlo senza allargare la riga quanto "Browse (system Finder)…". */
   .pathrow .btn.finder { display: inline-flex; align-items: center; gap: 5px; }
   .pathrow .btn.finder :global(svg.ic) { width: 12px; height: 12px; }
+
+  .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .chk input { margin: 0; }
 
   /* Il browser di cartelle: stesso posto della casella che sostituisce, non un
      dialogo sopra il dialogo — aprirne un secondo sopra il primo per scegliere
@@ -452,5 +497,14 @@
   .imp[disabled] { opacity: .5; cursor: default; }
   .imp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .imp .fp { white-space: normal; }
+  /* Più piccolo dei chip in cima alla modale: quelli sono comandi, questo è
+     un'etichetta dentro una riga di un elenco fitto. */
+  .imp .sid {
+    flex: none; padding: 1px 6px; font-family: var(--mono); font-size: 9px;
+    color: var(--muted); border-radius: 999px;
+  }
+  /* La riga «apri questo id» non ha un progetto né una data: senza un fondo suo
+     sembrerebbe una conversazione a cui mancano dei pezzi, invece che un'azione. */
+  .imp.byid { border: 1px dashed var(--line-2); border-radius: 9px; }
   .dotk.new { background: none; border: 1.5px solid var(--line-2); }
 </style>

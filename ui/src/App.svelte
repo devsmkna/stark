@@ -5,6 +5,7 @@
   import Effects from './components/Effects.svelte'
   import NewChat from './components/NewChat.svelte'
   import Settings from './components/Settings.svelte'
+  import Todo from './components/Todo.svelte'
   import Icon from './components/Icon.svelte'
   import Workspace from './components/Workspace.svelte'
   import { Store } from './lib/store.svelte.ts'
@@ -120,6 +121,14 @@
           </div>
         {:else}Pick a chat on the left.{/if}
       </div>
+    {/if}
+
+    <!-- Sotto la soglia stretta la colonna non c'è: 258px su 390 sarebbero due terzi
+         dello schermo per una cosa che si guarda di sfuggita, e §8 di ui-schermate.md
+         dice che lì si mostra una schermata alla volta. La preferenza resta salvata,
+         quindi tornando su uno schermo largo la colonna si ritrova aperta. -->
+    {#if store.todoOpen && !store.narrow}
+      <Todo {store} />
     {/if}
   {/if}
 

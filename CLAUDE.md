@@ -1108,7 +1108,15 @@ Decisioni già prese:
   `startedAt`, il riassunto dei tool e la risposta data come parte del turno.
 - avviare un lavoro e importarne uno dal terminale stanno nello **stesso riquadro, dietro due
   linguette**: una tendina sul `+` si apre solo se sai già che c'è qualcosa da scegliere, e la
-  seconda porta va vista per essere usata.
+  seconda porta va vista per essere usata. Le linguette restano **due**: aprire un id scritto
+  a mano ha avuto per un giorno una terza scheda sua, ed era una scheda di troppo — adesso si
+  incolla l'id nella **ricerca** di «Import», che è dove uno cerca una conversazione. La
+  capacità non si è persa, ed era il punto: l'elenco mostra i **60 trascritti più recenti**
+  (il limite di `listSessions` dell'SDK), mentre `claude -r <id>` apre qualunque id, quindi
+  senza quella strada STARK saprebbe fare **meno del CLI** su un id di due mesi fa.
+- ogni riga di «Import» porta il **session-id accorciato a otto cifre**, come un hash di git:
+  è il manico con cui la si riprende dal terminale, e vederlo rende naturale cercarlo. Intero
+  nel `title`, perché trentasei caratteri di uuid spingerebbero fuori il nome.
 - ~~la riga dell'elenco dice **da quanto sta in quello stato**~~ — **rovesciata il 26 agosto
   2026 su richiesta dell'utente**: «da quanto» non si mostra più. La premessa era che
   distinguesse un lavoro che procede da uno piantato; a dirlo però è già **«cosa sta facendo

@@ -1,0 +1,26 @@
+{
+  "skill_name": "stark-todo",
+  "evals": [
+    {
+      "id": 0,
+      "name": "crea-una-lista-da-un-piano-a-voce",
+      "prompt": "ok allora facciamo così per l'accesso da fuori casa: prima dichiariamo il perimetro con STARK_PUBLIC_HOST, poi metto su traefik sul vps con let's encrypt e mtls, poi misuriamo il tunnel per vedere se strozza l'SSE. tienimi traccia di dove siamo che poi mi perdo",
+      "expected_output": "Crea .stark/todo.json con UNA lista, __status active, tre task in stato todo, ids stabili. Non fa il lavoro descritto.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "riassume-senza-riscrivere",
+      "prompt": "a che punto siamo con le cose aperte su questo progetto?",
+      "expected_output": "Legge .stark/todo.json e riassume: lista attiva con 1/3 fatti, t2 in corso. Non modifica il file, non ricrea liste, non ripete la lista già chiusa come se fosse aperta.",
+      "files": ["fixtures/esistente/.stark/todo.json"]
+    },
+    {
+      "id": 2,
+      "name": "aggiorna-stato-e-blocco",
+      "prompt": "traefik è a posto, l'ho finito ieri. il tunnel invece è fermo: sul vps il dns punta ancora a cloudflare in modalità proxied, quindi non posso misurarlo finché non lo sistemo",
+      "expected_output": "Mette t2 a done e t3 a blocked con una note che spiega il DNS proxied. Conserva le altre chiavi e l'altra lista. __status resta active perché non è finita.",
+      "files": ["fixtures/esistente/.stark/todo.json"]
+    }
+  ]
+}

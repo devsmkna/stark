@@ -125,6 +125,21 @@
     n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`
 
   let copiato = $state('')
+  // ─── il link da portare in un altro browser ────────────────────────────────
+  //
+  // `location.origin` e non `sys.url`: quello dice sempre `http://127.0.0.1:<porta>`,
+  // che è giusto per un'altra finestra su questa macchina e sbagliato per tutto il
+  // resto. L'indirizzo da cui stai leggendo questa pagina funziona in entrambi i casi —
+  // se sei entrato dal telefono via Tailscale o dal dominio pubblico, è quello.
+  //
+  // Punta alla **chat aperta** se ce n'è una, perché è il caso per cui uno copia un
+  // link. Il valore non si indovina: la riga qui sotto mostra esattamente l'indirizzo
+  // che finirà negli appunti, col solo token mascherato — come la riga «Token» sopra.
+  const linkAltrove = $derived(
+    `${location.origin}${store.selected ? `/chat/${store.selected}` : '/'}?token=${store.api.tokenValue}`)
+  const linkMostrato = $derived(
+    `${location.origin}${store.selected ? `/chat/${store.selected}` : '/'}?token=•••`)
+
   async function copia(che: string, testo: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(testo)
@@ -572,6 +587,14 @@
             <span class="v2">••••••••••••••••
               <button class="lnk" onclick={() => void copia('token', store.api.tokenValue)}>
                 {copiato === 'token' ? 'Copied' : 'Copy'}</button></span>
+            <span class="k2">Open elsewhere</span>
+            <!-- Stessa forma delle righe «Address» e «Home» qui sopra: il valore va a capo
+                 se non ci sta, invece di essere troncato. Su uno schermo stretto un URL
+                 mozzato coi puntini non serve a niente — questo è un indirizzo da
+                 leggere e da riconoscere, non un'etichetta. -->
+            <span class="v2" title={linkMostrato}>{linkMostrato}
+              <button class="lnk" onclick={() => void copia('link', linkAltrove)}>
+                {copiato === 'link' ? 'Copied' : 'Copy link'}</button></span>
             <span class="k2">Listening on</span><span class="v2">{system.listening}</span>
             {#if system.perimeter?.open}
               <span class="k2">Reachable as</span>
@@ -588,9 +611,14 @@
             machine itself, and it can only be turned off there, because the perimeter is read once
             when the daemon starts.</div>
           {/if}
+          <div class="hint"><b>Open elsewhere</b> is the address plus the token, which is what
+          another browser needs: the token is dropped from the address bar on the first load and
+          moved into a cookie, so the URL you copy from there has nothing in it. It is needed
+          <b>once per browser</b> — after that the cookie does the work. Treat that link like a
+          root password: whoever has it can make an agent run commands on this machine.</div>
           <div class="hint">The token now <b>stays the same across restarts</b>: it lives in
           <code>{system.home}/token</code> with <code>0600</code>, which is what lets
-          you keep this tab open. Copy it to open STARK in a second browser. To replace it:
+          you keep this tab open. To replace it:
           <code>npm run stark:token -- --new</code>, then restart the daemon — it cannot be done
           from here without cutting this page off mid-sentence.</div>
         </div>

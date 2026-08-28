@@ -42,6 +42,8 @@ export type OpenSpec = {
   model?: string
   mode?: string
   resume?: { ref: string; fork?: boolean }
+  /** `--continue`: riprende l'ultima conversazione di quella cartella. */
+  continue?: boolean
   /** Quale profilo Claude (`CLAUDE_CONFIG_DIR`) usare. Omesso: quello di default. */
   configDir?: string
 }
@@ -79,6 +81,37 @@ export type Storage = {
   home: string
   sessions: { id: string; title: string; cwd?: string; bytes: number }[]
   bytes: number
+}
+
+/** Un task di una lista di `.stark/todo.json`. */
+export type TodoTask = {
+  id: string
+  text: string
+  state: 'todo' | 'doing' | 'done' | 'blocked'
+  note?: string
+}
+
+export type TodoList = {
+  id: string
+  title: string
+  created?: number
+  status: 'active' | 'paused' | 'done' | 'abandoned'
+  tasks: TodoTask[]
+}
+
+/**
+ * Le liste del **progetto**, non della chat: il file sta accanto al codice, quindi due
+ * conversazioni sulla stessa cartella vedono la stessa lista.
+ *
+ * `assente` distingue «non c'è ancora nessun file» da «c'è ed è vuoto»: la prima è la
+ * condizione normale di un progetto nuovo e va detta in un altro modo.
+ */
+export type Todos = {
+  cwd: string
+  lists: TodoList[]
+  scartate: number
+  motivo?: string
+  assente: boolean
 }
 
 export type SystemInfo = {
@@ -310,6 +343,25 @@ export class Api {
    * aveva altro modo di sapere che *un'altra* chat era cambiata. Ora lo dice il daemon.
    * Alla connessione manda subito le righe, quindi non serve un caricamento a parte.
    */
+  todo(id: string): Promise<Todos> { return this.json(`/api/sessions/${id}/todo`) }
+
+  /**
+   * Il flusso dei todo di un progetto. Manda lo stato **intero** a ogni cambio: un file
+   * di qualche riga non vale un protocollo di differenze, e mandare tutto rende
+   * impossibile restare disallineati dopo una riconnessione.
+   */
+  todoStream(
+    id: string,
+    onTodo: (t: Todos) => void,
+    onStatus: (s: LinkStatus) => void,
+  ): () => void {
+    return this.sse(
+      () => `/api/sessions/${id}/todostream`,
+      data => onTodo(JSON.parse(data) as Todos),
+      onStatus,
+    )
+  }
+
   sessionsStream(
     onRows: (rows: SessionRow[]) => void,
     onStatus: (s: LinkStatus) => void,
