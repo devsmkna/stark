@@ -30,7 +30,8 @@ def leggi() -> dict:
     except json.JSONDecodeError as e:
         # Un file illeggibile non si sovrascrive: dentro c'è del lavoro, e ricominciare
         # da zero lo butterebbe via. Meglio fermarsi e dirlo.
-        sys.exit(f'{percorso()} non è JSON valido ({e}). Sistemalo a mano: non lo tocco.')
+        sys.exit(f'{os.path.abspath(percorso())} non è JSON valido ({e}).\n'
+                 'Sistemalo a mano: dentro c\'è del lavoro, e riscriverlo lo butterebbe via.')
 
 
 def scrivi(dati: dict) -> None:
@@ -69,8 +70,12 @@ def main(argv: list) -> None:
     dati = leggi()
 
     if cmd == 'list':
+        # Il percorso si stampa **sempre**, non solo quando è vuoto: è l'unico modo di
+        # accorgersi di stare scrivendo nella cartella sbagliata, che è un errore che
+        # altrimenti non dà nessun segno — solo una barra che resta vuota.
+        print(f'# {os.path.abspath(percorso())}')
         if not dati:
-            print('nessuna lista in', percorso())
+            print('(nessuna lista)')
             return
         for lid, l in dati.items():
             fatti = sum(1 for t in l.get('tasks', []) if t.get('state') == 'done')

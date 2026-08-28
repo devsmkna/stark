@@ -75,16 +75,29 @@ this goes wrong, and it makes the sidebar lie about what is left.
 
 ## Use the script, not hand-edited JSON
 
-`scripts/todo.py` does read-modify-write for you:
+`scripts/todo.py` does read-modify-write for you. Two things about how to call it,
+because getting either wrong fails quietly rather than loudly:
+
+- **The script path is relative to this skill's own directory**, which you were told when
+  this skill loaded. Use it in full.
+- **Run it from the project folder**, because it resolves `.stark/` from the current
+  working directory — that is how it knows which project's list to touch. If you run it
+  from somewhere else you will not get an error: you will get a brand new `.stark/todo.json`
+  in the wrong place, and a sidebar that stays empty while you keep writing to a file
+  nobody reads. When in doubt, `pwd` first.
 
 ```bash
-python3 scripts/todo.py list                                   # show every list, compactly
-python3 scripts/todo.py new "Reach STARK from outside"         # prints the new list id
-python3 scripts/todo.py add <list-id> "Declare the perimeter" "Traefik with mTLS"
-python3 scripts/todo.py set <list-id> t2 doing                 # task state
-python3 scripts/todo.py note <list-id> t3 "blocked on the VPS"
-python3 scripts/todo.py status <list-id> done                  # list state
+# <skill> is this skill's directory; run from the project folder
+python3 <skill>/scripts/todo.py list                            # show every list, compactly
+python3 <skill>/scripts/todo.py new "Reach STARK from outside"  # prints the new list id
+python3 <skill>/scripts/todo.py add <list-id> "Declare the perimeter" "Traefik with mTLS"
+python3 <skill>/scripts/todo.py set <list-id> t2 doing          # task state
+python3 <skill>/scripts/todo.py note <list-id> t3 "blocked on the VPS"
+python3 <skill>/scripts/todo.py status <list-id> done           # list state
 ```
+
+`list` prints the path it read, so one call is also the cheapest way to check you are
+pointed at the right project.
 
 Two reasons this matters more than it looks.
 
