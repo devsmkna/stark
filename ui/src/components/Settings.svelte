@@ -15,7 +15,7 @@
   import type { Theme } from '../lib/theme.svelte.ts'
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
   import type { FontFamily } from '../lib/fontfamily.svelte.ts'
-  import { project } from '../lib/view.ts'
+  import { MODE_BLURB, MODE_ICON, project } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
@@ -66,11 +66,36 @@
 
   /** La modalità con cui partono le chat nuove. Non tocca quelle già aperte: i loro
    *  hook sono stati installati all'avvio, e rinegoziarli a metà turno non si può. */
-  async function salvaModo(m: string): Promise<void> {
+  async function salvaModo(agent: string, m: string): Promise<void> {
     const s = store.settings
     if (!s) return
-    await store.saveSettings({ ...s, defaultMode: m })
+    await store.saveSettings({
+      ...s,
+      defaultModes: { ...(s.defaultModes ?? {}), [agent]: m },
+      // La preferenza unica resta allineata per l'agent di default: un file scritto
+      // oggi deve restare leggibile da una versione che non conosce `defaultModes`.
+      ...(agent === 'claude-code' ? { defaultMode: m } : {}),
+    })
   }
+
+  // ─── quali agent, e quali modalità hanno ──────────────────────────────────
+  // Le voci NON sono scritte qui: le dichiara l'agent (ADR-014). Prima c'erano `auto` e
+  // `default` a mano nel browser — due parole di Claude Code, che su un altro agent non
+  // vogliono dire niente.
+  let agenti = $state<NonNullable<SystemInfo['agents']> | null>(null)
+  $effect(() => {
+    if (agenti === null) {
+      void store.api.system().then(
+        s => { agenti = (s.agents ?? []).filter(a => a.available && a.modes.length > 0) },
+        () => { agenti = [] },
+      )
+    }
+  })
+  const AGENT_NOMI: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode' }
+  const modoDi = (id: string): string =>
+    store.settings?.defaultModes?.[id]
+    ?? (id === 'claude-code' ? (store.settings?.defaultMode ?? '') : '')
+    ?? ''
 
   // ─── progetti ─────────────────────────────────────────────────────────────
 
@@ -229,24 +254,55 @@
         <!-- La modalità di partenza. Era l'unica differenza strutturale fra STARK e il
              terminale, e non si poteva toccare: `auto` era cablato nel registro.
              Misurato il 27 agosto 2026 — `claude` senza `--permission-mode` parte in
-             `default`. Le due voci sono quelle vere, non un'astrazione nostra. -->
-        <div class="fgroup">
-          <div class="flabel">New chats start in…</div>
-          <div class="seg" role="group" aria-label="Permission mode for new chats">
-            <button class:on={(store.settings.defaultMode ?? 'auto') === 'auto'}
-              onclick={() => void salvaModo('auto')}>auto</button>
-            <button class:on={store.settings.defaultMode === 'default'}
-              onclick={() => void salvaModo('default')}>default</button>
+             `default`.
+             Dopo ADR-014 le voci non stanno più qui: le dichiara l'agent, e ce n'è un
+             riquadro per ciascuno. Senza scelta salvata parte la prima che l'agent
+             dichiara disponibile — non `auto`, che è una parola di Claude Code. -->
+        {#each agenti ?? [] as a (a.id)}
+          <div class="fgroup">
+            <div class="flabel">New chats start in…{#if (agenti?.length ?? 0) > 1}
+              <span style="color:var(--muted)"> · {AGENT_NOMI[a.id] ?? a.id}</span>{/if}</div>
+            <!-- Lo **stesso pannello** che si apre dalla barra della chat (`Status.svelte`):
+                 una riga per modalità, con icona, nome e cosa fa sulla riga stessa. Prima
+                 erano cinque parole in fila e le descrizioni raccolte in un blocco sotto,
+                 quindi per sapere cosa faceva «acceptEdits» bisognava rileggerlo altrove e
+                 riappaiarlo a mano — la scelta e la sua conseguenza stavano in due posti.
+                 Le voci **spente** ora restano in elenco con la ragione accanto, come nella
+                 barra: prima venivano filtrate via, perché un controllo a segmenti non sa
+                 dire «questa non si può, ed ecco perché» — una riga sì, ed è il Principio 5
+                 (mai nascosta, disabilitata con la spiegazione). -->
+            <div class="menu modes" role="radiogroup"
+              aria-label="Starting mode for {AGENT_NOMI[a.id] ?? a.id}">
+              {#each a.modes as m (m.mode)}
+                {@const scelta = modoDi(a.id) === m.mode}
+                <button class="mi" class:on={scelta} class:dis={!m.available}
+                  role="radio" aria-checked={scelta} disabled={!m.available}
+                  onclick={() => void salvaModo(a.id, m.mode)}>
+                  <Icon name={MODE_ICON[m.mode] ?? 'i-shield'}
+                    style={scelta ? 'color:var(--accent)' : ''} />
+                  <!-- Stessa precedenza della barra: `reason` dice perché una voce è
+                       spenta e viene prima; `note` è la descrizione dell'agent; e
+                       `MODE_BLURB` resta il ripiego per chi non ne dichiara nessuna. -->
+                  <span class="mtxt">{m.label ?? m.mode}<span class="sub"
+                    >{m.reason ?? m.note ?? MODE_BLURB[m.mode] ?? ''}</span></span>
+                  {#if !m.available}<span class="tag">unavailable</span>
+                  {:else if scelta}<Icon name="i-check" style="color:var(--accent)" />{/if}
+                </button>
+              {/each}
+            </div>
+            <!-- Questa è prosa su una MISURA fatta su Claude Code, non una regola del
+                 modello: mostrarla sotto le modalità di un altro agent sarebbe dire una
+                 cosa falsa. La parte funzionale — quali modalità esistono — viene
+                 dall'agent; questa è documentazione, ed è legata a chi è stato misurato. -->
+            {#if a.id === 'claude-code'}
+              <div class="hint">Measured, so you can choose knowing: the same work in
+              <b>auto</b> and <b>default</b> cost the same tokens (190k against 190k), and the
+              classifier did not move the plan quota by a single percentage point over 32 tool
+              calls — it is below what the meter can see. The real difference is not the bill,
+              it is whether you get interrupted.</div>
+            {/if}
           </div>
-          <div class="hint"><b>auto</b> is STARK's default: a classifier decides every action, and
-          nothing stops to ask — that is the point of it. <b>default</b> is what
-          <code>claude</code> does when you start it from a terminal without options: a risky
-          action <b>stops and asks you</b>.
-          <br />Measured, so you can choose knowing: the same work in the two modes cost the same
-          tokens (190k against 190k), and the classifier did not move the plan quota by a single
-          percentage point over 32 tool calls — it is below what the meter can see. The real
-          difference is not the bill, it is whether you get interrupted.</div>
-        </div>
+        {/each}
 
         <div class="hard">
           <div class="ht"><Icon name="i-block" /> Never, no exceptions</div>
@@ -714,6 +770,45 @@
   .sw.on { outline: 2px solid var(--ink); outline-offset: 1px; }
   .chip.on { border-color: var(--accent); color: var(--accent); }
   .mt { font-size: 10px; color: var(--muted); }
+  /* ─── Le modalità di partenza ──────────────────────────────────────────────
+     Il pannello è quello globale — `.menu` e `.mi` in `app.css`, gli stessi che la
+     barra della chat apre col chip della modalità — così le due schermate che
+     scelgono la stessa cosa si somigliano invece di somigliarsi per caso. Qui si
+     ridichiara solo ciò che cambia fra una tendina e una sezione delle impostazioni:
+     la larghezza (là è un riquadro sospeso, qui è la colonna), l'ombra (serve a
+     staccare una tendina dal contenuto sotto; dentro un pannello opaco è rumore) e la
+     misura del testo, che nel resto della sezione è quella di `.prow`, non quella più
+     stretta della barra.
+     Il reset del bottone va rifatto qui, e non è una dimenticanza di `app.css`: là
+     `.mi` è solo forma e colore, e ogni componente che la usa toglie da sé l'aspetto
+     di pulsante del browser (`Status.svelte` fa lo stesso). Senza, queste righe
+     avrebbero il bordo grigio e il fondo di sistema. */
+  .modes { width: auto; box-shadow: none; }
+  .modes .mi {
+    width: 100%; border: 0; background: none; color: var(--ink); font: inherit;
+    text-align: left; cursor: pointer;
+    align-items: flex-start; gap: 8px; padding: 7px 9px; font-size: 11px;
+  }
+  /* L'icona sta sulla prima riga del testo, non in mezzo alle due: la riga è alta due
+     righe (nome e descrizione) e centrarla la lascerebbe a metà fra le due, cioè
+     accanto a niente. Stessa ragione per `align-items: flex-start` qui sopra. */
+  .modes .mi :global(svg.ic) { flex: none; margin-top: 1.5px; }
+  .modes .mtxt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .modes .mi .sub { font-size: 10px; line-height: 1.4; }
+  /* `.mtxt` e non `.mn`, che in `app.css` è già la riga **tolta** di un diff, colore
+     `--del` compreso: la classe esisteva, la regola vinceva, e i nomi delle modalità
+     venivano rosso-salmone. Misurato leggendo il colore calcolato, non guardando lo
+     screenshot — è la stessa collisione di `.row` con la riga di un tool, che era
+     costata i pannelli affiancati. */
+  /* La spunta va spinta a destra da qui e non da uno stile inline come nella barra:
+     la riga finisce col nome, e senza questo la spunta resterebbe appiccicata a lui. */
+  .modes .mi > :global(svg.ic:last-child) { margin-left: auto; margin-top: 2.5px; }
+  .modes .mi[disabled] { cursor: default; color: var(--muted); }
+  .modes .mi:not([disabled]):hover { background: var(--surface-2); }
+  .modes .mi.on { background: var(--accent-soft); }
+  .modes .mi.on:hover { background: var(--accent-soft); }
+  .modes .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
   .sn:focus-visible, .seg button:focus-visible, .chip:focus-visible,
   .tog:focus-visible, .x:focus-visible, .sw:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px;

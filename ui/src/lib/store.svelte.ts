@@ -14,7 +14,8 @@ import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
-  type ImportableRow, type LinkStatus, type Memoria, type SessionRow, type Settings,
+  type AgentModels, type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
+  type SessionRow, type Settings,
 } from './api.ts'
 import { Pane } from './pane.svelte.ts'
 import {
@@ -148,6 +149,21 @@ export class Store {
   renaming = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */
   refused = $state<string | null>(null)
+  /**
+   * Cosa si sta cercando. Sta qui e non dentro la barra laterale perché sopravvive al
+   * cambio di schermata: su telefono la ricerca è nell'elenco, il risultato apre la
+   * conversazione, e tornando indietro la ricerca deve essere ancora lì — se no la
+   * seconda cosa da controllare va ridigitata.
+   */
+  query = $state('')
+  /**
+   * Il turno da portare in vista quando la conversazione si apre.
+   *
+   * È uno stato e non un parametro di `select()` perché chi lo consuma è un altro
+   * componente, che deve poterlo vedere anche quando la chat era **già** quella
+   * aperta — caso in cui `select()` esce subito e non passa di lì.
+   */
+  mostra = $state<string | null>(null)
   /** Una riga sta partendo o si sta risvegliando: il pulsante non va premuto due volte. */
   working = $state(false)
   /**
@@ -595,6 +611,20 @@ export class Store {
 
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
+  /**
+   * Cambia una scelta dichiarata dall'agent (ADR-014).
+   *
+   * La UI non sa cosa siano gli `id`: li ha ricevuti in `session.created` e li rimanda
+   * indietro. `setMode`/`setModel` restano perche' del codice li usa per nome — la
+   * risposta a un piano sceglie **una modalita'**, non «l'opzione con id mode».
+   *
+   * Il secondo parametro e' la **sessione**, non l'opzione: col layout multi-pannello
+   * «quella corrente» ha smesso di essere una sola.
+   */
+  setOption(id: string, value: string, session = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setOption', id, value }, session)
+  }
+
   setMode(mode: PermissionMode, id = this.selected): Promise<boolean> {
     return this.send({ c: 'session.setMode', mode }, id)
   }
@@ -634,6 +664,27 @@ export class Store {
     const id = this.selected
     if (!id || !this.live) return []
     return this.api.files(id, q)
+  }
+
+  /** Cercare in tutte le conversazioni. Chi chiama tiene i risultati: come `files()`,
+   *  è una domanda al daemon e non un comando, quindi non c'è niente da ricordare qui. */
+  async search(q: string): Promise<SessionMatches[]> {
+    return this.api.search(q)
+  }
+
+  /**
+   * Aprire una conversazione **su un turno preciso**, che è ciò che serve arrivando
+   * da un risultato di ricerca: aprirla e basta lascerebbe in fondo, cioè lontano da
+   * quello che si era appena trovato.
+   *
+   * `mostra` si assegna **prima** di `select`, non dopo: se la chat era già quella
+   * aperta `select` esce subito, e un'assegnazione dopo non troverebbe più nessuno
+   * che la sta aspettando. (Il nome non è `reveal` perché quello è già preso, ed è
+   * un'altra cosa: aprire il gestore di file della macchina su un percorso.)
+   */
+  async apri(id: string, turnId: string): Promise<void> {
+    this.mostra = turnId
+    await this.select(id)
   }
 
   /**
@@ -701,7 +752,7 @@ export class Store {
    */
   async newChat(
     cwd: string,
-    opts: { model?: string; profile?: string; continue?: boolean } = {},
+    opts: { model?: string; profile?: string; agent?: string; continue?: boolean } = {},
   ): Promise<void> {
     this.working = true
     this.refused = null
@@ -715,7 +766,12 @@ export class Store {
       const { id } = await this.api.open({
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
-        ...(profile ? { configDir: profile } : {}),
+        ...(profile ? { profile } : {}),
+        // L'agent NON si ricorda per progetto come il profilo: due chat sulla stessa
+        // cartella con due agent diversi sono una cosa che si vuole (è il modo in cui
+        // si confrontano), mentre due profili Claude sulla stessa cartella erano una
+        // fonte di confusione. Sono due domande diverse, e si rispondono diversamente.
+        ...(opts.agent ? { agent: opts.agent } : {}),
         ...(opts.continue ? { continue: true } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
@@ -745,7 +801,7 @@ export class Store {
       // motivo apparente (nessuna conversazione da riprendere, forse nemmeno il login).
       const profile = this.project(row.cwd).profile
       await this.api.open({
-        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { configDir: profile } : {}),
+        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { profile } : {}),
       })
       this.dialog = null
       // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso, nel
@@ -793,11 +849,11 @@ export class Store {
       if (!cwd) { this.refused = 'this conversation has no folder to resume in'; return }
       // Il profilo trovato durante l'import (se diverso dal default) diventa il fatto
       // del progetto, come la prima chat di una cartella nuova in `newChat()`.
-      if (esito.ok && esito.configDir && this.project(cwd).profile !== esito.configDir) {
-        void this.setProject(cwd, { profile: esito.configDir })
+      if (esito.ok && esito.profile && this.project(cwd).profile !== esito.profile) {
+        void this.setProject(cwd, { profile: esito.profile })
       }
-      const profile = (esito.ok ? esito.configDir : undefined) ?? this.project(cwd).profile
-      await this.api.open({ cwd, resume: { ref: clean }, ...(profile ? { configDir: profile } : {}) })
+      const profile = (esito.ok ? esito.profile : undefined) ?? this.project(cwd).profile
+      await this.api.open({ cwd, resume: { ref: clean }, ...(profile ? { profile } : {}) })
       this.dialog = null
       this.selected = null
       await this.select(clean)
@@ -817,9 +873,142 @@ export class Store {
     if (this.panes.has(id)) this.closePane(id)
   }
 
+  // ─── l'helper (§17) ────────────────────────────────────────────────────────
+  //
+  // Una chat di lato, larga un sesto, per la domanda che arriva mentre ne stai
+  // seguendo un'altra. Sta **fuori** da `panes` e da `layout`, e non e' un dettaglio
+  // di implementazione: quelli sono le chat di un lavoro, disposte in un albero che si
+  // salva e si ricarica. L'helper non e' un lavoro, non si dispone e non si salva.
+  // Metterlo li' dentro avrebbe voluto dire insegnare all'albero un'eccezione.
+
+  /** La conversazione dell'helper. `Pane` e' la stessa unita' delle altre — snapshot,
+   *  flusso, riduttore — perche' l'invariante del §4 vale anche per una chat che non
+   *  esiste su disco: e' cio' che permette di disegnarla senza un secondo modello. */
+  helper = $state<Pane | null>(null)
+  /** Il pannello e' aperto. Separato da `helper`: si apre subito e la chat arriva dopo
+   *  un secondo e mezzo (l'handshake), e in mezzo bisogna pur mostrare qualcosa. */
+  helperOn = $state(false)
+  /** Sta aprendo, o sta cambiando agent. Blocca la casella senza svuotarla. */
+  helperBusy = $state(false)
+  /** Un rifiuto **dell'helper**, tenuto separato da `refused`: due riquadri diversi
+   *  non devono mostrarsi l'un l'altro gli errori. */
+  helperRefused = $state<string | null>(null)
+  /** Il catalogo dei modelli, chiesto alla prima apertura del selettore e non prima:
+   *  costa un handshake per agent, e la UI all'avvio non ne ha bisogno. */
+  catalogo = $state<AgentModels[] | null>(null)
+  /** Cosa e' stato scelto. Sopravvive a un cambio di chat perche' e' una preferenza
+   *  del pannello, non della conversazione che ci sta dentro adesso. */
+  helperPick = $state<{ agent: string; model: string } | null>(null)
+
+  static readonly #HELPER_W = 'stark.helper.width'
+
+  /**
+   * Quanto e' largo il pannello.
+   *
+   * Un sesto della finestra come default — la misura chiesta — e trascinabile, con la
+   * scelta ricordata **sul dispositivo**: quanto e' largo il monitor non e' un fatto
+   * del progetto, e portarsi la larghezza del 27 pollici sul portatile sarebbe la
+   * stessa distinzione che gia' separa tema e suoni dalle impostazioni di macchina.
+   */
+  helperW = $state<number>(0)
+
+  #larghezzaIniziale(): number {
+    const salvata = Number(localStorage.getItem(Store.#HELPER_W) ?? '')
+    if (Number.isFinite(salvata) && salvata > 0) return this.#limita(salvata)
+    return this.#limita(Math.round(innerWidth / 6))
+  }
+
+  /** Un minimo sotto cui il markdown non e' piu' leggibile ma diventa una colonna di
+   *  sillabe, e un tetto oltre il quale non sarebbe piu' un pannello di lato. */
+  #limita(px: number): number {
+    return Math.max(220, Math.min(px, Math.round(innerWidth / 2.5)))
+  }
+
+  setHelperW(px: number): void {
+    this.helperW = this.#limita(px)
+    localStorage.setItem(Store.#HELPER_W, String(this.helperW))
+  }
+
+  /** Apre o chiude il pannello. Chiudere **non** butta la conversazione: e' il cestino
+   *  a farlo, e sono due intenzioni diverse — «adesso non mi serve a schermo» non e'
+   *  «ho finito con questa domanda». */
+  async toggleHelper(): Promise<void> {
+    if (this.helperOn) { this.helperOn = false; return }
+    if (this.helperW === 0) this.helperW = this.#larghezzaIniziale()
+    this.helperOn = true
+    if (!this.helper) await this.apriHelper()
+  }
+
+  /** Apre una conversazione helper nuova. Chiude quella di prima, se c'era: ce n'e'
+   *  una sola, e il daemon lo impone dalla sua parte. */
+  async apriHelper(pick?: { agent: string; model: string }): Promise<void> {
+    this.helperBusy = true
+    this.helperRefused = null
+    const vecchio = this.helper
+    this.helper = null
+    vecchio?.close()
+    try {
+      const scelta = pick ?? this.helperPick ?? undefined
+      const { id } = await this.api.openHelper(scelta ?? {})
+      const pane = new Pane(id)
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.helperRefused = esito.error; return }
+      this.helper = pane
+      if (pick) this.helperPick = pick
+    } catch (e) {
+      this.helperRefused = (e as Error).message
+    } finally {
+      this.helperBusy = false
+    }
+  }
+
+  /** Butta la conversazione e ne apre una vuota. E' il cestino in cima al pannello. */
+  async svuotaHelper(): Promise<void> {
+    await this.apriHelper()
+  }
+
+  async helperPrompt(text: string): Promise<void> {
+    const id = this.helper?.chatId
+    if (!id || !text.trim()) return
+    this.helperRefused = null
+    const esito = await this.api.command(id, { c: 'session.prompt', text })
+    if (!esito.ok) this.helperRefused = esito.error ?? 'refused'
+  }
+
+  async helperStop(): Promise<void> {
+    const id = this.helper?.chatId
+    if (id) await this.api.command(id, { c: 'session.interrupt' })
+  }
+
+  /**
+   * Sceglie agent e modello.
+   *
+   * Cambiare **modello** dentro lo stesso agent e' un'opzione di sessione e la
+   * conversazione continua. Cambiare **agent** vuol dire un altro backend, quindi la
+   * chat riparte — su una chat usa-e-getta e' accettabile, ma il pannello lo dice
+   * invece di farlo di nascosto.
+   */
+  async scegliHelper(agent: string, model: string): Promise<void> {
+    const stessoAgent = this.helperPick?.agent === agent || (!this.helperPick && agent === this.helper?.snap?.agent)
+    if (stessoAgent && this.helper) {
+      this.helperPick = { agent, model }
+      await this.api.command(this.helper.chatId, { c: 'session.setOption', id: 'model', value: model })
+      return
+    }
+    await this.apriHelper({ agent, model })
+  }
+
+  /** Il catalogo, una volta sola per caricamento di pagina. */
+  async caricaCatalogo(): Promise<void> {
+    if (this.catalogo) return
+    try { this.catalogo = await this.api.models() }
+    catch { this.catalogo = [] }
+  }
+
   dispose(): void {
     removeEventListener('popstate', this.#popstate)
     for (const pane of this.panes.values()) pane.close()
+    this.helper?.close()
     this.#stopList?.()
   }
 }

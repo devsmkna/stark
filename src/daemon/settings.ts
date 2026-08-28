@@ -63,7 +63,16 @@ export type Settings = {
    * classificatore misurato sulla quota del piano è risultato **sotto la risoluzione
    * della misura** — 32 chiamate non spostano un punto percentuale.
    */
+  /**
+   * La modalità con cui parte una chat nuova, **per agent** (ADR-014).
+   *
+   * `defaultMode` (senza `s`) resta perché i file già scritti ce l'hanno, e vale per
+   * l'agent di default: buttarlo vorrebbe dire far ripartire da `auto` chi aveva scelto
+   * `default`, senza dirglielo. Una preferenza persa in silenzio è peggio di un campo
+   * in più.
+   */
   defaultMode: PermissionMode
+  defaultModes?: Record<string, PermissionMode>
 }
 
 export const DEFAULTS: Settings = {
@@ -71,12 +80,35 @@ export const DEFAULTS: Settings = {
   defaultMode: 'auto',
 }
 
-/** Le sei che il CLI accetta. Una stringa fuori da qui torna al default invece di
- *  arrivare al processo figlio, che la rifiuterebbe all'avvio. */
-const MODI: PermissionMode[] =
-  ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions']
+/**
+ * La modalità con cui partono le chat nuove.
+ *
+ * Qui **non si convalida contro un elenco**, e il cambio è ADR-014: prima c'erano le
+ * sei parole di Claude Code scritte a mano nel daemon, che è esattamente il posto in
+ * cui il §1 dice che non devono stare. Un altro agent ne ha altre — OpenCode ha
+ * `build` e `plan` — e un elenco fisso qui rifiuterebbe le sue.
+ *
+ * A dire se una modalità si può usare è l'**adapter**, che la dichiara nelle proprie
+ * opzioni e, se non ce l'ha, declassa **dicendolo** (misurato dal vivo su OpenCode:
+ * `auto` → `default` con una nota nel flusso). Qui resta solo la difesa contro un file
+ * scritto male: una stringa vuota, o qualcosa che non è una stringa, torna al default.
+ */
 const saneMode = (m: unknown): PermissionMode =>
-  MODI.includes(m as PermissionMode) ? m as PermissionMode : 'auto'
+  typeof m === 'string' && m.trim().length > 0 && m.length < 64 ? m : 'auto'
+
+/**
+ * Le modalità per agent, ripulite. Una chiave con un valore non-stringa si butta invece
+ * di far tornare tutto ai default: perdere una preferenza è un fastidio, perderle tutte
+ * per una riga sbagliata è un guasto.
+ */
+function sanePerAgent(v: unknown): { defaultModes?: Record<string, PermissionMode> } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return {}
+  const out: Record<string, PermissionMode> = {}
+  for (const [k, m] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof m === 'string' && m.trim().length > 0 && m.length < 64) out[k] = m
+  }
+  return Object.keys(out).length > 0 ? { defaultModes: out } : {}
+}
 
 const FILE = 'settings.json'
 
@@ -99,6 +131,7 @@ export function readSettings(home: string): Settings {
       // non ce l'ha, e per quel file la risposta giusta è il default, cioè accesa.
       toolDescriptions: raw.toolDescriptions !== false,
       defaultMode: saneMode(raw.defaultMode),
+      ...(sanePerAgent(raw['defaultModes'])),
     }
   } catch {
     return { ...DEFAULTS, projects: {} }
@@ -112,6 +145,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     projects: saneProjects(s.projects),
     toolDescriptions: s.toolDescriptions !== false,
     defaultMode: saneMode(s.defaultMode),
+    ...(sanePerAgent(s.defaultModes)),
   }
   writeFileSync(resolve(home, FILE), `${JSON.stringify(pulito, null, 2)}\n`)
   return pulito

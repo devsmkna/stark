@@ -212,6 +212,15 @@ export function permissionHeadline(action: string): { icon: string; text: string
  * nella UI la conoscenza di nessun agent: quale sia utilizzabile lo dice `snap.modes`,
  * che arriva dall'adapter perché è l'unico a sapere chi rifiuta e perché.
  */
+/**
+ * Cosa fa una modalita', **come ripiego**.
+ *
+ * Dopo ADR-014 queste frasi le dichiara l'agent (`ModeChoice.note`): sono descrizioni
+ * del suo comportamento, non del modello. Restano qui per i journal scritti prima, che
+ * non ne portano nessuna — e per nient'altro. Se compaiono accanto a una modalita' di
+ * un agent che non e' Claude Code, quello e' un difetto: vuol dire che l'adapter non ha
+ * descritto le proprie.
+ */
 export const MODE_BLURB: Record<string, string> = {
   auto: 'A classifier checks every action. No cards.',
   default: 'Asks before everything',

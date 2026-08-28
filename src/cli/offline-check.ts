@@ -16,17 +16,23 @@ import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
 import { activity } from '../core/activity.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
-import { intentOf } from '../adapters/claude-code/summary.ts'
-import { allineaMemoria, INIZIO_REGOLA } from '../daemon/memoria.ts'
+import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
+import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
+import { passeggero } from '../adapters/opencode/adapter.ts'
+import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
+import { optionsFrom } from '../core/adapter.ts'
+import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
+import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
-import { Journal } from '../core/journal.ts'
+import { Journal, MemoryJournal } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { intraLine, sideBySide, stats, unified } from '../core/diff.ts'
+import { countSnapshot, searchSnapshot } from '../core/search.ts'
 import {
-  buildOptions, capabilitiesFor, contextWindowFor, resolveModel, slashCommands,
+  buildOptions, capabilitiesFor, contextWindowFor, modelChoices, resolveModel, slashCommands,
 } from '../adapters/claude-code/sdk-options.ts'
 import type { NativeEvent } from '../adapters/claude-code/raw.ts'
 
@@ -673,6 +679,337 @@ check('diff: forma unificata, numeri di riga coerenti',
   uDue.filter(r => r.kind === 'removed').every(r => r.oldNo === 2)
   && uDue.filter(r => r.kind === 'added').some(r => r.newNo === 2))
 
+// ─── il confine del §1: il contratto dell'adapter (ADR-012) ─────────────────
+
+// Queste verifiche esistono perché tutte e quattro le falle che ADR-012 ha trovato
+// fallivano **in silenzio**. Un `profile` che non arriva non dà un errore: dà una
+// sessione che guarda nella cartella sbagliata, non trova niente da riprendere e
+// sembra rotta senza motivo. È il modo peggiore di rompersi, quindi va tenuto fermo.
+
+{
+  const base = { cwd: '/tmp', model: 'default', mode: 'auto' as const }
+
+  const conProfilo = buildOptions({ ...base, profile: '/root/.claude-altro' })
+  check('§1: il `profile` del contratto diventa CLAUDE_CONFIG_DIR nell\'adapter',
+    (conProfilo.env as Record<string, string> | undefined)?.['CLAUDE_CONFIG_DIR'] === '/root/.claude-altro')
+
+  const senzaProfilo = buildOptions(base)
+  check('§1: senza profilo non si tocca l\'ambiente del processo figlio',
+    senzaProfilo.env === undefined)
+
+  const conExe = buildOptions({ ...base, executable: '/usr/local/bin/claude' })
+  check('§1: `executable` punta l\'eseguibile, e il default resta quello dell\'SDK',
+    conExe.pathToClaudeCodeExecutable === '/usr/local/bin/claude'
+    && senzaProfilo.pathToClaudeCodeExecutable === undefined)
+
+  check('ADR-012: il backend di default è claude-code',
+    backendFor().id === 'claude-code' && DEFAULT_AGENT === 'claude-code')
+
+  // Un nome sconosciuto deve **rompersi col nome dentro**: ricadere sul default
+  // sarebbe il modo peggiore di fallire, perché sembra funzionare.
+  let motivo = ''
+  try { backendFor('non-esiste') } catch (e) { motivo = String((e as Error).message) }
+  check('ADR-012: un agent sconosciuto è un errore, e dice quale',
+    motivo.includes('non-esiste'), motivo)
+
+  // Il contratto è un'interfaccia, non una promessa a parole: se un metodo sparisse,
+  // il daemon lo scoprirebbe solo su una sessione viva.
+  const sessione = backendFor().open(base, { onPayload: () => {} })
+  const mancanti = ([
+    'start', 'prompt', 'interrupt', 'setModel', 'setMode', 'setMcp',
+    'refreshQuota', 'refreshContext', 'fileSuggestions', 'settled', 'sleep', 'close',
+  ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
+  check('§1: la sessione aperta dal backend implementa tutto il contratto',
+    mancanti.length === 0, mancanti.join(','))
+}
+
+// ─── §10-bis: i due fatti che la prova di carico ha fatto entrare ───────────
+
+{
+  let n = 0
+  const e = (payload: CanonicalEvent['payload']): CanonicalEvent => ev(++n, n * 1000, payload)
+  const s = reduce([], 's-nuovi')
+  applyTo(s, e({ k: 'session.created', agent: 'x', cwd: '/tmp', model: 'm',
+    capabilities: capabilitiesFor('m'), tools: [], commands: [] }))
+  applyTo(s, e({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'via' }] }))
+
+  applyTo(s, e({ k: 'session.retried', attempt: 2, reason: '502 a monte' }))
+  const parte = s.turns[0]?.parts.find(x => x.kind === 'retry')
+  check('§10-bis: un ritentativo finisce NEL TURNO, dov\'è successo',
+    parte?.kind === 'retry' && parte.attempt === 2 && parte.reason === '502 a monte')
+
+  // La checklist arriva intera ogni volta: si SOSTITUISCE. Fonderla vorrebbe dire
+  // ricostruire uno stato applicando patch, che è l'opposto di come si rilegge un
+  // journal append-only — e una voce cancellata dall'agent non sparirebbe mai.
+  applyTo(s, e({ k: 'todo.updated', todos: [
+    { content: 'uno', status: 'completed' }, { content: 'due', status: 'in_progress' },
+    { content: 'tre', status: 'pending' },
+  ] }))
+  check('§10-bis: la checklist si legge dall\'ultimo evento', s.todos.length === 3)
+  applyTo(s, e({ k: 'todo.updated', todos: [{ content: 'uno', status: 'completed' }] }))
+  check('§10-bis: un elenco nuovo SOSTITUISCE il vecchio, non ci si somma',
+    s.todos.length === 1 && s.todos[0]?.content === 'uno')
+
+  // Le due capacità dicono la differenza fra «non ce l'ha» e «non ha niente da fare».
+  check('§10-bis: Claude Code dichiara di NON avere checklist né ritentativi visibili',
+    capabilitiesFor('claude-sonnet-5').todos === false
+    && capabilitiesFor('claude-sonnet-5').retries === false)
+}
+
+// ─── ADR-014: le opzioni di sessione, e i journal gia' scritti ──────────────
+
+// La parte che puo' fare danno non e' la forma nuova: e' che le conversazioni gia' su
+// disco continuino a ricostruirsi identiche. Un journal misto esiste davvero — una
+// chat aperta prima di ADR-014 e risvegliata dopo ha le due forme nello stesso file.
+
+{
+  const opz = [
+    { id: 'mode', label: 'Permissions', value: 'auto', kind: 'mode' as const,
+      choices: [{ value: 'auto', available: true }, { value: 'plan', available: true }] },
+    { id: 'model', label: 'Model', value: 'a', kind: 'model' as const,
+      choices: [{ value: 'a', available: true }, { value: 'b', available: true }] },
+  ]
+  let n = 0
+  const e = (payload: CanonicalEvent['payload']): CanonicalEvent => ev(++n, n, payload)
+  const base = (): SessionSnapshot => {
+    const s = reduce([], 's-opt')
+    applyTo(s, e({ k: 'session.created', agent: 'x', cwd: '/tmp', model: 'a',
+      capabilities: capabilitiesFor('a'), tools: [], commands: [], options: opz }))
+    return s
+  }
+
+  const nuovo = base()
+  applyTo(nuovo, e({ k: 'session.option', id: 'mode', value: 'plan' }))
+  check('ADR-014: un\'opzione cambiata aggiorna il selettore E la comodita\' sullo snapshot',
+    nuovo.options.find((o) => o.id === 'mode')?.value === 'plan' && nuovo.mode === 'plan')
+
+  // La forma VECCHIA, quella dei journal gia' scritti: deve muovere le stesse due cose,
+  // se no la barra mostrerebbe il valore nuovo in un campo e quello vecchio nel
+  // selettore, contraddicendosi a schermo.
+  const vecchio = base()
+  applyTo(vecchio, e({ k: 'session.mode', mode: 'plan' }))
+  check('ADR-014: un journal scritto PRIMA si ricostruisce identico',
+    vecchio.mode === 'plan' && vecchio.options.find((o) => o.id === 'mode')?.value === 'plan')
+
+  const vm = base()
+  applyTo(vm, e({ k: 'session.model', model: 'b' }))
+  check('ADR-014: e vale anche per il modello',
+    vm.model === 'b' && vm.options.find((o) => o.id === 'model')?.value === 'b')
+
+  // Un id che l'agent non ha dichiarato non deve inventare un selettore dal nulla.
+  const ignoto = base()
+  applyTo(ignoto, e({ k: 'session.option', id: 'thinking', value: 'alto' }))
+  check('ADR-014: un\'opzione non dichiarata non ne crea una',
+    ignoto.options.length === 2)
+
+  // Il costruttore condiviso: un agent senza modalita' non deve avere un chip vuoto.
+  check('ADR-014: chi non ha modalità non dichiara il selettore',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: true, contextWindow: 1 }] })
+      .every((o) => o.id !== 'mode'))
+  // `note` si COPIA, non si deduce. La prima versione la inventava da `autoMode`, e su
+  // un agent senza classificatore — dove `autoMode` è `false` per tutti — comparivano
+  // 61 triangoli di avviso che non dicevano niente. Un'assenza è degna di nota solo
+  // dove esiste l'alternativa, e a saperlo è l'adapter.
+  check('ADR-014: una nota si copia dall\'agent, non si deduce da `autoMode`',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: false, contextWindow: 1 }] })[0]
+      ?.choices[0]?.note === undefined)
+  check('ADR-014: e quando l\'agent la scrive, arriva',
+    optionsFrom({ model: 'a', models: [{ id: 'a', autoMode: false, contextWindow: 1, note: 'attento' }] })[0]
+      ?.choices[0]?.note === 'attento')
+  // Su Claude Code l'avviso deve esserci: lì l'assenza distingue davvero.
+  check('Claude Code: un modello che non regge auto mode porta l\'avviso',
+    (modelChoices([], 'claude-haiku-4-5')[0]?.note ?? '').includes('No auto mode')
+    && modelChoices([], 'claude-sonnet-5')[0]?.note === undefined)
+}
+
+// ─── «Consenti sempre»: si scrive in un file DELL'UTENTE ────────────────────
+
+// Regola di condotta, la stessa di `memoria.ts`: quel file non e' nostro. Non si
+// riscrive, si aggiunge una voce e tutto il resto passa identico. Le prove qui sotto
+// tengono ferma proprio quella parte, che e' l'unica che puo' fare danno.
+
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-regole-'))
+  const dove = percorsoRegole(casa)
+
+  const primo = consentiSempre(casa, 'Bash')
+  check('sempre: il file nasce col formato che scrive l\'SDK',
+    primo.scritto && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow[0] === 'Bash',
+    readFileSync(dove, 'utf8').replace(/\s+/g, ' '))
+
+  const due = consentiSempre(casa, 'Write')
+  check('sempre: il secondo soggetto si aggiunge, non sostituisce',
+    due.scritto && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow.join(',') === 'Bash,Write')
+
+  const ripetuto = consentiSempre(casa, 'Bash')
+  check('sempre: due volte lo stesso soggetto non lo duplica',
+    ripetuto.giaPresente && !ripetuto.scritto
+    && JSON.parse(readFileSync(dove, 'utf8')).permissions.allow.length === 2)
+
+  // La prova che conta davvero: quello che c'era prima deve restare.
+  writeFileSync(dove, JSON.stringify({
+    permissions: { allow: ['Bash'], deny: ['Read(secret)'] },
+    unaCosaSua: { tenuta: true },
+  }, null, 2))
+  consentiSempre(casa, 'Edit')
+  const dopo = JSON.parse(readFileSync(dove, 'utf8'))
+  check('sempre: NON si tocca nulla di cio\' che l\'utente aveva scritto',
+    dopo.unaCosaSua?.tenuta === true && dopo.permissions.deny?.[0] === 'Read(secret)'
+    && dopo.permissions.allow.join(',') === 'Bash,Edit')
+
+  // Un JSON rotto non si sovrascrive: sarebbe cancellare le regole di qualcuno per un
+  // suo errore di battitura. Si rifiuta e si dice perche'.
+  writeFileSync(dove, '{ questo non e json')
+  const rotto = consentiSempre(casa, 'Bash')
+  check('sempre: un file illeggibile si rifiuta invece di sovrascriverlo',
+    !rotto.scritto && !!rotto.error && readFileSync(dove, 'utf8').startsWith('{ questo'),
+    rotto.error ?? '')
+
+  rmSync(casa, { recursive: true, force: true })
+}
+
+// ─── il secondo adapter: il traduttore di OpenCode (§14-bis) ────────────────
+
+// Il traduttore e' una funzione pura di proposito, quindi si prova su eventi finti a
+// costo zero — come quello di Claude Code. Qui sotto ci sono soprattutto le cose che si
+// **deducono**, perche' una deduzione sbagliata non da' un errore: da' una
+// conversazione che sembra giusta e non lo e'.
+
+{
+  const ev2 = (type: string, data: Record<string, unknown> = {}) => ({ type, data })
+  const parte = (x: Record<string, unknown>) => ev2('message.part.updated', { part: x })
+  const chi = (id: string, role: string) => ev2('message.updated', { info: { id, role } })
+  const tipi = (ps: ReturnType<OpenCodeTranslator['translate']>) => ps.map(p => p.k).join(',')
+
+  const oc = new OpenCodeTranslator()
+  oc.apriTurno('T1')
+
+  check('OpenCode: il carico utile si legge sia in `data` sia in `properties`',
+    tipi(oc.translate(chi('m0', 'assistant'))) === ''
+    && tipi(oc.translate(
+      { type: 'message.updated', properties: { info: { id: 'm0b', role: 'assistant' } } },
+    )) === '')
+
+  // ─── la trappola numero uno ───────────────────────────────────────────────
+  //
+  // Il prompt dell'utente arriva come una parte `text` **identica** a quelle
+  // dell'agent: a distinguerle c'e' solo il ruolo del messaggio. Senza questo, la
+  // casella di scrittura si vedrebbe rimandare indietro il proprio prompt come
+  // risposta.
+  oc.translate(chi('mU', 'user'))
+  check('OpenCode: le parti dell\'utente non tornano indietro come risposta',
+    oc.translate(parte({ id: 'pU', messageID: 'mU', type: 'text', text: 'ciao' })).length === 0)
+
+  // ─── la trappola numero due, la piu' cara ─────────────────────────────────
+  //
+  // `delta.field` dice quale **campo della parte** cresce, ed e' `"text"` anche per il
+  // ragionamento. Misurato su una cattura vera: 410 delta di parti `reasoning`
+  // etichettati `field:"text"`. Fidarsi di quel campo vorrebbe dire mostrare tutto il
+  // ragionamento come se fosse la risposta — un difetto silenzioso, che nessun errore
+  // segnalerebbe.
+  oc.translate(chi('mA', 'assistant'))
+  check('OpenCode: una parte di ragionamento si apre come tale',
+    tipi(oc.translate(parte({ id: 'pR', messageID: 'mA', type: 'reasoning', text: '' })))
+      === 'reasoning.started')
+  const dR = oc.translate(ev2('message.part.delta', { partID: 'pR', field: 'text', delta: 'penso' }))
+  check('OpenCode: e il suo delta resta ragionamento, benche\' `field` dica «text»',
+    tipi(dR) === 'reasoning.delta', tipi(dR))
+  oc.translate(parte({ id: 'pT', messageID: 'mA', type: 'text', text: '' }))
+  const dT = oc.translate(ev2('message.part.delta', { partID: 'pT', field: 'text', delta: 'ciao' }))
+  check('OpenCode: mentre il delta di una parte di testo e\' testo', tipi(dT) === 'text.delta')
+  check('OpenCode: un delta di una parte mai annunciata si scarta invece di indovinare',
+    oc.translate(ev2('message.part.delta', { partID: 'boh', field: 'text', delta: 'x' })).length === 0)
+
+  // Le parti arrivano **intere** a ogni aggiornamento: si manda solo la coda nuova, se
+  // no ogni risposta comparirebbe raddoppiata.
+  const ripetuta = oc.translate(parte({ id: 'pT', messageID: 'mA', type: 'text', text: 'ciao mondo' }))
+  check('OpenCode: di una parte ripetuta si manda solo la coda nuova',
+    ripetuta.length === 1 && (ripetuta[0] as { delta?: string }).delta === ' mondo',
+    JSON.stringify(ripetuta))
+
+  // ─── i tool: una macchina a stati, non quattro eventi ─────────────────────
+  const pend = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'pending', input: {} } }))
+  check('OpenCode: `pending` apre la riga del tool',
+    pend.length === 1 && pend[0]?.k === 'tool.started', tipi(pend))
+  check('OpenCode: lo stesso stato ripetuto non raddoppia la riga',
+    oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+      callID: 'c1', state: { status: 'pending', input: {} } })).length === 0)
+  // L'input parsato compare in `running`, non in `pending` — che porta `input: {}`.
+  const run = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'running', input: { command: 'ls -1' } } }))
+  check('OpenCode: `running` porta l\'input parsato e il soggetto',
+    run.length === 1 && run[0]?.k === 'tool.input.ended'
+    && (run[0] as { summary?: string }).summary === 'ls -1', JSON.stringify(run))
+  const fin = oc.translate(parte({ id: 'pC', messageID: 'mA', type: 'tool', tool: 'bash',
+    callID: 'c1', state: { status: 'completed', output: 'fatto' } }))
+  const male = oc.translate(parte({ id: 'pE', messageID: 'mA', type: 'tool', tool: 'read',
+    callID: 'c2', state: { status: 'error', error: 'esploso' } }))
+  check('OpenCode: completed e error diventano lo stesso `tool.ended` con `ok` diverso',
+    (fin[0] as { ok?: boolean })?.ok === true && (male[0] as { ok?: boolean })?.ok === false)
+
+  // ─── il giro ──────────────────────────────────────────────────────────────
+  //
+  // Su questa superficie `session.idle` **arriva davvero**: la fine del turno non si
+  // deduce piu' da `step-finish`, che dice soltanto **come** e' andata. Prima era il
+  // contrario, ed era il pezzo piu' delicato dell'adapter.
+  const sf = oc.translate(parte({ id: 'pF', messageID: 'mA', type: 'step-finish',
+    reason: 'stop', tokens: { input: 10, output: 2 }, cost: 0.5 }))
+  check('OpenCode: `step-finish` NON chiude il turno: a dirlo e\' `session.idle`',
+    !tipi(sf).includes('turn.ended'), tipi(sf))
+  check('OpenCode: ma chiude le parti rimaste aperte, se no restano «sta scrivendo»',
+    tipi(sf).startsWith('reasoning.ended,text.ended'), tipi(sf))
+  check('OpenCode: e porta i token e il costo dello step',
+    tipi(sf).endsWith('step.ended,usage.updated'), tipi(sf))
+  const idle = oc.translate(ev2('session.idle'))
+  check('OpenCode: `session.idle` chiude il turno, e la sessione torna idle',
+    tipi(idle) === 'turn.ended,session.state', tipi(idle))
+  check('OpenCode: chiudere due volte lo stesso turno non emette niente',
+    oc.translate(ev2('session.idle')).length === 0)
+
+  // `length` non e' `stop`: un turno troncato non e' un turno riuscito, e appiattirli
+  // sarebbe la bugia comoda che il §4 vieta. `tool-calls` invece **e'** una fine
+  // possibile, ora che a dirla c'e' `session.idle` e non piu' una deduzione.
+  check('OpenCode: un troncamento non si racconta come «completato»',
+    motivoDa('length') === 'error' && motivoDa('stop') === 'completed'
+    && motivoDa('aborted') === 'aborted' && motivoDa('tool-calls') === 'completed')
+
+  check('OpenCode: senza un turno aperto non si chiude niente',
+    new OpenCodeTranslator().translate(ev2('session.idle')).length === 0)
+
+  const oc4 = new OpenCodeTranslator()
+  oc4.apriTurno('T4')
+  const rit = oc4.translate(ev2('session.next.retried', { attempt: 3, error: { message: 'giu\'' } }))
+  check('OpenCode: un ritentativo diventa un fatto canonico, non un avviso',
+    rit[0]?.k === 'session.retried' && rit[0].attempt === 3, JSON.stringify(rit))
+  const td = oc4.translate(ev2('todo.updated', { todos: [
+    { content: 'a', status: 'pending', priority: 'high' }, { content: '', status: 'x' },
+  ] }))
+  check('OpenCode: la checklist si traduce, e una voce senza testo si scarta',
+    td[0]?.k === 'todo.updated' && td[0].todos.length === 1
+    && td[0].todos[0]?.priority === 'high', JSON.stringify(td))
+
+  // Cosa si ritenta e cosa no. La riga che conta e' l'ultima: una chiave che non
+  // abilita un modello non cambia idea riprovando, e insistere li' farebbe aspettare
+  // l'utente tre volte nascondendogli l'unica cosa da leggere.
+  check('OpenCode: un 503 «Endpoint is unavailable» e\' passeggero, si riprova',
+    passeggero('Provider request failed with HTTP 503: Endpoint is unavailable.'))
+  check('OpenCode: anche un rate limit e un timeout',
+    passeggero('Rate limit exceeded') && passeggero('HTTP 429') && passeggero('request timeout'))
+  check('OpenCode: «Model X is not supported» NON si ritenta',
+    !passeggero('Provider request failed with HTTP 401: Model kimi-k2.5-free is not supported'))
+  check('OpenCode: e nemmeno un errore che non dice niente di passeggero',
+    !passeggero('Invalid opencode/openai-compatible-chat stream event'))
+  // La riga piu' sottile: il messaggio di un budget esaurito CONTIENE «Rate limit
+  // exceeded», quindi sembra un 429 e non lo e'. Riprovare brucerebbe tre richieste
+  // dello stesso budget e ritarderebbe l'unica cosa da leggere.
+  check('OpenCode: un budget free esaurito NON e\' un intoppo passeggero',
+    !passeggero('{"type":"FreeUsageLimitError","message":"Error from provider (Console): Rate limit exceeded. Please try again later."}'))
+
+  check('OpenCode: il modello si scrive `provider/id`',
+    modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')
+}
+
 // ─── le impostazioni (§16.5) ────────────────────────────────────────────────
 
 // Il pannello dei permessi vive di due cose: che una categoria diventi i tool giusti,
@@ -904,16 +1241,16 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   const dirAltro = profiloFinto('.claude-altro', ID_ALTRO, '/tmp/proj-altro')
 
   const { Registry } = await import('../daemon/registry.ts')
-  const reg = new Registry({ configDir: dirDefault })
+  const reg = new Registry({ profile: dirDefault })
 
   const rDefault = await reg.importSession(ID_DEFAULT)
   check('§resume: trova un trascritto per id anche fuori dai 60 più recenti',
-    rDefault.ok === true && rDefault.id === ID_DEFAULT && rDefault.configDir === undefined,
+    rDefault.ok === true && rDefault.id === ID_DEFAULT && rDefault.profile === undefined,
     JSON.stringify(rDefault))
 
   const rAltro = await reg.importSession(ID_ALTRO)
   check('§resume: cerca anche in un profilo diverso da quello di default',
-    rAltro.ok === true && rAltro.configDir === dirAltro,
+    rAltro.ok === true && rAltro.profile === dirAltro,
     JSON.stringify({ rAltro, atteso: dirAltro }))
 
   const rAssente = await reg.importSession(ID_ASSENTE)
@@ -926,6 +1263,337 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
   if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
   rmSync(casa, { recursive: true, force: true })
+}
+
+// ─── §5: la modalità la decide il CLI, non solo noi ─────────────────────────
+//
+// Trovato dal vivo il 27 agosto 2026, approvando un piano vero: il CLI passava
+// davvero ad `acceptEdits` (lo diceva nel suo `system:status`) e la barra di stato
+// continuava a mostrare `plan`, perché STARK emetteva `session.mode` solo quando
+// era **lui** a imporla. Vale anche per `EnterPlanMode`, che è un tool dell'agent:
+// l'agent può cambiare modalità da sé, e senza questo STARK mostrerebbe per sempre
+// quella di prima.
+{
+  const t3 = new Translator()
+  t3.seedMode('plan')
+  check('§5: ripetere la stessa modalità non produce eventi',
+    t3.handle({ type: 'system', subtype: 'status', status: 'idle',
+      permissionMode: 'plan' } as unknown as NativeEvent).length === 0)
+  const cambio = t3.handle({ type: 'system', subtype: 'status', status: 'idle',
+    permissionMode: 'acceptEdits' } as unknown as NativeEvent)
+  // Dopo ADR-014 il fatto e' lo stesso e la forma no: la modalita' e' una delle
+  // opzioni che l'agent dichiara, non un caso speciale del modello.
+  check('§5: una modalità cambiata dal CLI diventa un evento canonico',
+    cambio[0]?.k === 'session.option' && cambio[0].id === 'mode'
+    && cambio[0].value === 'acceptEdits',
+    JSON.stringify(cambio))
+  // Il resto del messaggio non deve andare perso per strada: il cambio si aggiunge,
+  // non sostituisce.
+  const insieme = t3.handle({ type: 'system', subtype: 'status', status: 'requesting',
+    permissionMode: 'default' } as unknown as NativeEvent)
+  check('§5: il cambio di modalità non mangia il resto del messaggio',
+    insieme.length === 2 && insieme[0]?.k === 'session.option'
+    && insieme[1]?.k === 'session.state', JSON.stringify(insieme.map(x => x.k)))
+}
+
+// ─── §8: il piano ───────────────────────────────────────────────────────────
+//
+// Verificato dal vivo il 27 agosto 2026: `ExitPlanMode` arriva come richiesta di
+// permesso, con `{plan, planFilePath}`. Ciò che queste verifiche tengono fermo è che
+// **non** ridiventi un permesso: il piano è un documento da leggere, e nella card
+// generica non si vedeva affatto — `plan` non è fra i campi in cui `summarize()`
+// cerca il soggetto di un'azione, quindi quella card mostrava il nome del tool e
+// nient'altro.
+{
+  check('§8: un piano non ha soggetto da mostrare come un\'azione qualunque',
+    resourcesOf('ExitPlanMode', { plan: '# Passo 1\nfare questo', planFilePath: '/p.md' })
+      .length === 0,
+    JSON.stringify(resourcesOf('ExitPlanMode', { plan: '# Passo 1' })))
+
+  const s = reduce([], 'piano')
+  let n = 0
+  const add = (payload: Parameters<typeof applyTo>[1]['payload']): void => {
+    applyTo(s, { v: MODEL_VERSION, seq: ++n, ts: 1000 + n, sessionId: 'piano', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'fai un piano' }] })
+  add({ k: 'plan.proposed', requestId: 'r1', plan: '# Piano\n1. leggere\n2. scrivere', path: '/tmp/p.md' })
+  check('§8: un piano proposto ferma la sessione', s.state === 'awaiting', s.state)
+  check('§8: il piano è in attesa con il suo testo per intero',
+    s.pendingPlans[0]?.plan.includes('2. scrivere') === true, JSON.stringify(s.pendingPlans[0]))
+  check('§8: un piano non finisce fra i permessi', s.pendingPermissions.length === 0)
+
+  add({ k: 'plan.replied', requestId: 'r1', decision: 'approved', mode: 'acceptEdits' })
+  check('§8: risposto, la sessione riparte', s.state === 'busy' && s.pendingPlans.length === 0,
+    `${s.state} · ${s.pendingPlans.length}`)
+  const risposta = s.turns[0]?.parts.find(p => p.kind === 'answer')
+  check('§8: nel flusso resta cosa si è deciso, e con quale modalità si riparte',
+    risposta?.kind === 'answer' && risposta.of === 'plan'
+    && risposta.answer === 'approved, continuing in acceptEdits',
+    JSON.stringify(risposta))
+  // Il piano **per intero** e non un riassunto: nel journal non è scritto da
+  // nessun'altra parte, quindi tagliarlo qui vorrebbe dire perderlo.
+  check('§8: il piano approvato resta rileggibile per intero',
+    risposta?.kind === 'answer' && risposta.asked.includes('2. scrivere'))
+
+  // Rimandare a pianificare non è un fallimento e non è un permesso negato: è una
+  // correzione, e il testo con cui la si dà deve restare.
+  add({ k: 'plan.proposed', requestId: 'r2', plan: '# Altro' })
+  add({ k: 'plan.replied', requestId: 'r2', decision: 'rejected', feedback: 'troppi passi' })
+  const seconda = s.turns[0]?.parts.filter(p => p.kind === 'answer')[1]
+  check('§8: «continua a pianificare» porta con sé cosa cambiare',
+    seconda?.kind === 'answer' && seconda.refused
+    && seconda.answer === 'kept planning: troppi passi', JSON.stringify(seconda))
+}
+
+// ─── §7: i lavori che continuano da soli ────────────────────────────────────
+//
+// Un comando lanciato in background risponde subito «lancio riuscito», quindi la sua
+// riga risulterebbe finita mentre il lavoro gira ancora. Le due metà della storia
+// stanno lontanissime: misurato su un journal reale, `tool_result` alla riga 53 ed
+// esito alla riga **810**, cioè in un altro turno. È il caso che queste verifiche
+// tengono fermo, perché è quello che si rompe per primo se qualcuno «semplifica»
+// cercando il task nel turno corrente.
+{
+  const t2 = new Translator()
+  const fatti = (n: NativeEvent): ReturnType<Translator['handle']> => t2.handle(n)
+
+  const avvio = fatti({
+    type: 'system', subtype: 'task_started', task_id: 'tk1', tool_use_id: 'toolu_bg',
+    description: 'Chi crea chat fantasma', is_backgrounded: true, task_type: 'local_bash',
+  } as unknown as NativeEvent)
+  check('§7: `task_started` diventa un evento canonico',
+    avvio[0]?.k === 'task.started', avvio[0]?.k ?? 'niente')
+  check('§7: il tipo del CLI è tradotto in vocabolario canonico',
+    avvio[0]?.k === 'task.started' && avvio[0].kind === 'command' && avvio[0].background,
+    JSON.stringify(avvio[0]))
+  // Un tipo che non conosciamo non deve sparire: `other` è la promessa che una
+  // versione futura del CLI si veda lo stesso, anche se non sappiamo chiamarla.
+  const ignoto = fatti({
+    type: 'system', subtype: 'task_started', task_id: 'tk9', tool_use_id: 'x',
+    task_type: 'qualcosa_di_nuovo',
+  } as unknown as NativeEvent)
+  check('§7: un tipo di lavoro sconosciuto si mostra come `other`, non sparisce',
+    ignoto[0]?.k === 'task.started' && ignoto[0].kind === 'other',
+    JSON.stringify(ignoto[0]))
+  // Uno stato intermedio ridirebbe «sta lavorando», che la riga dice già.
+  check('§7: uno stato non definitivo non produce eventi',
+    fatti({ type: 'system', subtype: 'task_notification', task_id: 'tk1',
+      status: 'in_progress' } as unknown as NativeEvent).length === 0)
+  const esito = fatti({
+    type: 'system', subtype: 'task_notification', task_id: 'tk1', tool_use_id: 'toolu_bg',
+    status: 'completed', summary: 'Ho letto tutto e verificato sul disco',
+  } as unknown as NativeEvent)
+  check('§7: `task_notification` porta l\'esito e il resoconto',
+    esito[0]?.k === 'task.ended' && esito[0].status === 'completed'
+    && esito[0].summary?.startsWith('Ho letto tutto') === true, JSON.stringify(esito[0]))
+
+  // E ora il giro completo nel reducer, con l'esito che arriva **in un altro turno**.
+  const s = reduce([], 'task')
+  let n = 0
+  const add = (payload: Parameters<typeof applyTo>[1]['payload']): void => {
+    applyTo(s, { v: MODEL_VERSION, seq: ++n, ts: 1000 + n, sessionId: 'task', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'lancia' }] })
+  add({ k: 'tool.started', callId: 'toolu_bg', name: 'Bash' })
+  add({ k: 'tool.input.ended', callId: 'toolu_bg', input: { command: 'npm test' } })
+  add({ k: 'task.started', taskId: 'tk1', callId: 'toolu_bg', kind: 'command',
+    description: 'Chi crea chat fantasma', background: true })
+  // Il `tool_result` del **lancio**: positivo, e subito. È la ragione per cui serve
+  // il task — senza, qui la riga direbbe già «✓».
+  add({ k: 'tool.ended', callId: 'toolu_bg', ok: true, output: 'Async agent launched' })
+  add({ k: 'turn.ended', turnId: 't1', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } })
+
+  const riga = s.turns[0]?.parts.find(p => p.kind === 'tool') as
+    { done: boolean; ok?: boolean; task?: { status?: string; summary?: string } } | undefined
+  check('§7: il lavoro si attacca alla riga che lo ha lanciato',
+    riga?.task !== undefined && riga.done && riga.ok === true)
+  check('§7: finché non si sa com\'è andata, l\'esito del lavoro è assente',
+    riga?.task?.status === undefined, String(riga?.task?.status))
+
+  // Turni dopo. Il collegamento è solo `taskId`: la notifica non porta `tool_use_id`
+  // in tutte le forme, e comunque la riga sta in un turno che non è più quello aperto.
+  add({ k: 'turn.started', turnId: 't2', prompt: [{ type: 'text', text: 'altro' }] })
+  add({ k: 'turn.ended', turnId: 't2', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } })
+  add({ k: 'task.ended', taskId: 'tk1', status: 'completed', summary: 'fatto tutto' })
+  check('§7: l\'esito trova la sua riga anche a turni di distanza',
+    riga?.task?.status === 'completed' && riga.task.summary === 'fatto tutto',
+    JSON.stringify(riga?.task))
+
+  // §4: se il replay non ricostruisse i task, una conversazione riaperta perderebbe
+  // proprio gli esiti che erano arrivati tardi — cioè quelli per cui si torna.
+  const j2 = new Journal(resolve(dir, 'task.jsonl'), 'task')
+  for (const e of [
+    { k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'lancia' }] },
+    { k: 'tool.started', callId: 'c', name: 'Bash' },
+    { k: 'task.started', taskId: 'tk', callId: 'c', kind: 'agent', background: true },
+    { k: 'tool.ended', callId: 'c', ok: true },
+    { k: 'task.ended', taskId: 'tk', status: 'failed', summary: 'non ce l\'ha fatta' },
+  ] as Parameters<typeof applyTo>[1]['payload'][]) j2.append(e)
+  j2.close()
+  const riletto = reduce(Journal.read(resolve(dir, 'task.jsonl')), 'task')
+  const riga2 = riletto.turns[0]?.parts.find(p => p.kind === 'tool')
+  check('§4: i lavori sopravvivono al replay del journal',
+    riga2?.kind === 'tool' && riga2.task?.status === 'failed',
+    JSON.stringify(riga2?.kind === 'tool' ? riga2.task : null))
+}
+
+// ─── ricerca ────────────────────────────────────────────────────────────────
+//
+// Si prova qui e non nel browser perché è tutta aritmetica su stringhe: il ritaglio
+// attorno alla corrispondenza, e la posizione da evidenziare **dopo** che gli a capo
+// sono diventati spazi. Guardandolo si vede solo che «più o meno è lì».
+{
+  const s = reduce([], 'cerca')
+  const add = (payload: Parameters<typeof applyTo>[1]['payload'], seq: number): void => {
+    applyTo(s, { v: MODEL_VERSION, seq, ts: 1000 + seq, sessionId: 'cerca', payload })
+  }
+  add({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'sistema il parser JSON' }] }, 1)
+  add({ k: 'text.started', partId: 'p1' }, 2)
+  // Volutamente spezzato in tre delta: è il caso che una ricerca sul journal riga per
+  // riga NON troverebbe mai, perché la frase intera su disco non esiste da nessuna parte.
+  add({ k: 'text.delta', partId: 'p1', delta: 'Ho corretto il ' }, 3)
+  add({ k: 'text.delta', partId: 'p1', delta: 'parser' }, 4)
+  add({ k: 'text.delta', partId: 'p1', delta: ' e aggiunto i test.' }, 5)
+  add({ k: 'text.ended', partId: 'p1', text: 'Ho corretto il parser e aggiunto i test.' }, 6)
+  add({ k: 'turn.ended', turnId: 't1', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 7)
+  add({ k: 'turn.started', turnId: 't2', prompt: [{ type: 'text', text: 'grazie' }] }, 8)
+  add({ k: 'turn.ended', turnId: 't2', reason: 'completed', usage: EMPTY_USAGE, cost: { nominalUsd: 0 } }, 9)
+
+  const trovati = searchSnapshot(s, 'parser')
+  check('ricerca: trova nel prompt e nella risposta', trovati.length === 2,
+    JSON.stringify(trovati.map(m => m.kind)))
+  check('ricerca: una frase spezzata in più delta si trova comunque',
+    trovati.some(m => m.kind === 'answer' && m.snippet.includes('corretto il parser')),
+    JSON.stringify(trovati.find(m => m.kind === 'answer')?.snippet))
+  // Dentro un turno l'ordine è quello di lettura — prima cosa hai chiesto, poi cosa
+  // ti è stato risposto — ma i turni scorrono all'indietro: chi cerca in una
+  // conversazione lunga sta quasi sempre ritrovando qualcosa di poco fa, e con un
+  // tetto sui risultati tenere i primi vorrebbe dire mostrare l'inizio e nascondere
+  // la fine.
+  check('ricerca: dentro il turno, prima il prompt e poi la risposta',
+    trovati[0]?.kind === 'prompt' && trovati[1]?.kind === 'answer',
+    JSON.stringify(trovati.map(m => m.kind)))
+  // Il numero che la UI usa per evidenziare. Se fosse calcolato sul testo prima del
+  // ritaglio, l'evidenziazione cadrebbe su un'altra parola — e sembrerebbe giusta,
+  // perché è comunque *una* parola.
+  const m = trovati[0]!
+  check('ricerca: `at` cade davvero sulla corrispondenza dentro il ritaglio',
+    m.snippet.slice(m.at, m.at + m.len).toLowerCase() === 'parser',
+    `«${m.snippet.slice(m.at, m.at + m.len)}» in «${m.snippet}»`)
+  check('ricerca: non distingue maiuscole e minuscole',
+    searchSnapshot(s, 'PARSER').length === 2)
+  check('ricerca: una parentesi non è un\'espressione regolare',
+    searchSnapshot(s, 'parser)').length === 0)
+  check('ricerca: sotto i due caratteri non si cerca', searchSnapshot(s, 'p').length === 0)
+  check('ricerca: conta tutte le occorrenze, anche quelle non riportate',
+    countSnapshot(s, 'parser') === 2, String(countSnapshot(s, 'parser')))
+  // Un turno solo può contenere decine di corrispondenze: il tetto vale sui
+  // risultati, non sui turni. Senza questo, una conversazione con trenta righe di
+  // tool che nominano la stessa parola riempiva la barra laterale da sola.
+  for (let i = 0; i < 12; i++) {
+    add({ k: 'text.started', partId: `x${i}` }, 100 + i * 2)
+    add({ k: 'text.ended', partId: `x${i}`, text: `ancora il parser numero ${i}` }, 101 + i * 2)
+  }
+  check('ricerca: il tetto vale anche dentro un turno solo',
+    searchSnapshot(s, 'parser', 5).length === 5,
+    String(searchSnapshot(s, 'parser', 5).length))
+  // I turni scorrono all'indietro: una corrispondenza in un turno più recente sta
+  // sopra una identica in uno più vecchio.
+  add({ k: 'turn.started', turnId: 't4', prompt: [{ type: 'text', text: 'e il parser?' }] }, 20)
+  check('ricerca: il turno più recente sta sopra',
+    searchSnapshot(s, 'parser')[0]?.turnId === 't4',
+    searchSnapshot(s, 'parser')[0]?.turnId)
+  // Il ritaglio deve restare una riga: in un elenco, sei righe di risultato
+  // spingerebbero fuori vista tutti gli altri.
+  add({ k: 'turn.started', turnId: 't3', prompt: [{ type: 'text', text: 'a\n\n\nb parser c' }] }, 10)
+  check('ricerca: gli a capo diventano spazi, il ritaglio resta una riga',
+    !searchSnapshot(s, 'parser')[0]!.snippet.includes('\n'))
+}
+
+// ─── §13: leggere solo la coda di un journal ────────────────────────────────
+//
+// È ciò su cui poggia la cache dell'elenco: se «lo stato di prima più le righe
+// nuove» non fosse identico a «rileggere tutto», la barra laterale mostrerebbe
+// conversazioni ferme a uno stato vecchio, e nessuno se ne accorgerebbe subito.
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-coda-'))
+  const p = resolve(casa, 'j.jsonl')
+  const j = new Journal(p, 'coda')
+  j.append({ k: 'session.state', state: 'starting' })
+  j.append({ k: 'turn.started', turnId: 't1', prompt: [{ type: 'text', text: 'ciao' }] })
+  const meta = Journal.readFrom(p, 0)
+  check('§13: readFrom(0) legge tutto', meta.events.length === 2, String(meta.events.length))
+
+  j.append({ k: 'text.started', partId: 'p1' })
+  j.append({ k: 'text.delta', partId: 'p1', delta: 'ok' })
+  const coda = Journal.readFrom(p, meta.offset)
+  check('§13: readFrom continua da dove era rimasto, senza rileggere il resto',
+    coda.events.length === 2 && coda.from === meta.offset,
+    `${coda.events.length} eventi da ${coda.from} (atteso ${meta.offset})`)
+
+  // L'invariante vera: incrementale === integrale. `reduce` non è che `applyTo`
+  // ripetuto, quindi continuare uno snapshot già fatto deve dare lo stesso oggetto.
+  const incrementale = reduce(meta.events, 'coda')
+  for (const e of coda.events) applyTo(incrementale, e)
+  check('§13: stato incrementale identico alla rilettura integrale',
+    JSON.stringify(incrementale) === JSON.stringify(reduce(Journal.read(p), 'coda')))
+
+  // Una riga a metà: `writeSync` scrive una riga alla volta, ma un journal copiato o
+  // troncato può finire dentro un JSON. Ripartire da dentro quella riga darebbe due
+  // frammenti che non sono JSON né l'uno né l'altro.
+  const dopoCoda = coda.offset
+  writeFileSync(p, readFileSync(p, 'utf8') + '{"v":1,"seq":99,"ts":0,"sessi', 'utf8')
+  const monca = Journal.readFrom(p, dopoCoda)
+  check('§13: una riga non ancora terminata non viene letta né consumata',
+    monca.events.length === 0 && monca.offset === dopoCoda,
+    `${monca.events.length} eventi, offset ${monca.offset} (atteso ${dopoCoda})`)
+  writeFileSync(p, readFileSync(p, 'utf8')
+    + 'onId":"coda","payload":{"k":"session.state","state":"idle"}}\n', 'utf8')
+  const finita = Journal.readFrom(p, dopoCoda)
+  check('§13: la stessa riga, una volta finita, si legge intera',
+    finita.events.length === 1 && finita.events[0]?.seq === 99,
+    JSON.stringify(finita.events[0]?.payload ?? null))
+
+  // Un file più corto dell'offset non è la coda dello stesso file: è un altro file.
+  // Continuare uno snapshot vecchio sopra una storia nuova darebbe uno stato che non
+  // è mai esistito, ed è il caso di una chat cancellata e ricreata con lo stesso id.
+  writeFileSync(p, '', 'utf8')
+  check('§13: un file accorciato fa ripartire da capo, non dalla coda',
+    Journal.readFrom(p, finita.offset).from === 0)
+  rmSync(casa, { recursive: true, force: true })
+}
+
+// ─── §17: il deposito in memoria dell'helper ────────────────────────────────
+//
+// Le invarianti del §13 valgono anche per una chat che non tocca il disco, e non per
+// gentilezza: `seq` senza buchi e nell'ordine dei fatti e' cio' che fa funzionare
+// `applyTo`, quindi la UI dell'helper ricostruisce lo stato con lo **stesso**
+// riduttore di tutte le altre. Se questa parte si rompesse, il sintomo non sarebbe un
+// errore ma una conversazione che si disegna sbagliata.
+{
+  const m = new MemoryJournal('helper-1')
+  check('§17: un deposito in memoria non dichiara un percorso', m.path === '' && m.lastSeq === 0)
+
+  const a = m.append({ k: 'session.state', state: 'starting' })
+  const b = m.append({ k: 'session.state', state: 'idle' })
+  check('§17: i seq crescono di uno, come sul disco', a.seq === 1 && b.seq === 2 && m.lastSeq === 2)
+  check('§17: ogni evento porta la sessione e la versione del modello',
+    a.sessionId === 'helper-1' && typeof a.v === 'number')
+
+  check('§17: `from` da\' solo cio\' che e\' successo dopo', m.from(1).length === 1 && m.from(1)[0]?.seq === 2)
+  check('§17: `from(0)` da\' tutto, come una rilettura', m.from(0).length === 2)
+  check('§17: `from` oltre la fine non da\' niente', m.from(9).length === 0)
+
+  // Lo stato ricostruito dev'essere lo stesso che si otterrebbe da un journal su file:
+  // e' l'invariante del §4, ed e' la ragione per cui l'helper non ha un secondo modello.
+  const daMemoria = reduce(m.from(0), 'helper-1')
+  check('§17: il riduttore ci lavora identico', daMemoria.state === 'idle' && daMemoria.lastSeq === 2)
+
+  m.close()
+  check('§17: chiudere svuota subito, non quando lo decide il GC', m.from(0).length === 0)
+  let esploso = false
+  try { m.append({ k: 'session.state', state: 'idle' }) } catch { esploso = true }
+  check('§17: scrivere su un deposito chiuso e\' un errore, non un silenzio', esploso)
 }
 
 let failed = 0

@@ -8,8 +8,11 @@
 // `EventSource` farebbe con `Last-Event-ID` mentre il daemon legge `?from=`.
 
 import type { Activity } from '$core/activity.ts'
-import type { CanonicalEvent, Command } from '$core/events.ts'
+import type { CanonicalEvent, Command, ModelChoice } from '$core/events.ts'
 import type { SessionSnapshot } from '$core/reduce.ts'
+import type { Match, SessionMatches } from '$core/search.ts'
+
+export type { Match, SessionMatches }
 
 export type SessionRow = {
   id: string
@@ -44,8 +47,14 @@ export type OpenSpec = {
   resume?: { ref: string; fork?: boolean }
   /** `--continue`: riprende l'ultima conversazione di quella cartella. */
   continue?: boolean
-  /** Quale profilo Claude (`CLAUDE_CONFIG_DIR`) usare. Omesso: quello di default. */
-  configDir?: string
+  /**
+   * Quale profilo usare. Stringa **opaca**: la UI la porta e non la interpreta, e dopo
+   * ADR-012 non si chiama più `configDir` — quello era il nome della variabile
+   * d'ambiente di Claude Code, arrivato fin quassù attraverso il confine del §1.
+   */
+  profile?: string
+  /** Con quale agent. Omesso: quello di default del daemon. */
+  agent?: string
 }
 
 /** Una conversazione nata nel terminale, come la elenca il daemon. */
@@ -71,7 +80,10 @@ export type Settings = {
   toolDescriptions: boolean
   /** In quale modalità permessi partono le chat nuove. La CLI nuda parte in `default`;
    *  STARK propone `auto` (ADR-008), ma la scelta è tua. */
+  /** La preferenza unica, per l'agent di default. Resta per i file già scritti. */
   defaultMode: string
+  /** La modalità di partenza **per agent** (ADR-014): le voci non sono universali. */
+  defaultModes?: Record<string, string>
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */
@@ -114,6 +126,21 @@ export type Todos = {
   assente: boolean
 }
 
+/** Un agent della macchina e i suoi modelli, come li elenca il selettore dell'helper. */
+export type AgentModels = {
+  id: string
+  label: string
+  /** Guidabile adesso. `false` non vuol dire nascosto: vuol dire mostrato con `reason`. */
+  available: boolean
+  /** Perche' non si puo' usare. Presente solo quando `available` e' `false`. */
+  reason?: string
+  /** Un avviso che vale per **tutto** l'agent — «qui la sola lettura non e'
+   *  garantita» — e che quindi si dice una volta sull'intestazione del gruppo, non
+   *  su ognuno dei suoi 61 modelli. */
+  note?: string
+  models: ModelChoice[]
+}
+
 export type SystemInfo = {
   url: string
   port: number
@@ -124,6 +151,15 @@ export type SystemInfo = {
     configDir: string
     profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
   }
+  /**
+   * Gli agent che questa macchina sa guidare, chi c'è davvero installato, e **quali
+   * modalità ha ciascuno** — che le impostazioni devono poter offrire prima che esista
+   * una conversazione (ADR-014).
+   */
+  agents?: {
+    id: string; available: boolean
+    modes: { mode: string; label?: string; available: boolean; reason?: string; note?: string }[]
+  }[]
   /** Chi può parlare col daemon oltre a questa macchina. `open: false` è il default:
    *  aprire il perimetro si fa sulla macchina (`STARK_PUBLIC_HOST`, o Tailscale), e ha
    *  effetto al riavvio del daemon — quindi non è un interruttore che sta qui. */
@@ -227,6 +263,32 @@ export class Api {
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
 
+  /**
+   * Tutti i modelli guidabili su questa macchina, per agent (§17).
+   *
+   * Costa un handshake per agent **la prima volta** e poi e' in cache nel daemon: chi
+   * apre il menu due volte non lo paga due volte. Si chiede quindi all'apertura del
+   * selettore e non all'avvio della UI, che di questa risposta non ha bisogno.
+   */
+  async models(): Promise<AgentModels[]> {
+    return (await this.json<{ agents: AgentModels[] }>('/api/models')).agents
+  }
+
+  /** Apre l'helper. Ne esiste **uno solo**: questa chiamata chiude quello di prima,
+   *  ed e' anche il modo in cui «muore col ricaricamento della pagina» diventa un
+   *  fatto invece di una speranza appesa a `beforeunload`. */
+  openHelper(pick: { agent?: string; model?: string } = {}): Promise<{ id: string }> {
+    return this.json('/api/helper', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(pick),
+    })
+  }
+
+  closeHelper(): Promise<{ ok: boolean }> {
+    return this.json('/api/helper', { method: 'DELETE' })
+  }
+
   /** Apre il Finder di sistema sulla macchina del daemon. Annullo o fallimento
    *  tornano `{ok:false}`: non è un'eccezione, la UI resta ferma senza avvisi. */
   browseNative(): Promise<NativePickResult> {
@@ -284,11 +346,24 @@ export class Api {
     } catch { return [] }
   }
 
+  /**
+   * Cercare in tutte le conversazioni. Come `files()`: una risposta che non arriva
+   * vale «niente», non un errore a schermo — si sta ancora digitando, e un avviso in
+   * mezzo a una parola è peggio di un elenco che tace.
+   */
+  async search(q: string): Promise<SessionMatches[]> {
+    try {
+      const r = await this.json<{ results: SessionMatches[] }>(
+        `/api/search?q=${encodeURIComponent(q)}`)
+      return r.results
+    } catch { return [] }
+  }
+
   importable(): Promise<{ sessions: ImportableRow[] }> {
     return this.json('/api/importable')
   }
 
-  async doImport(sessionId: string): Promise<Ack & { id?: string; configDir?: string }> {
+  async doImport(sessionId: string): Promise<Ack & { id?: string; profile?: string }> {
     const res = await fetch('/api/importable', {
       method: 'POST',
       headers: { ...this.auth, 'content-type': 'application/json' },

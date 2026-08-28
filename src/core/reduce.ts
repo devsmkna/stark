@@ -10,6 +10,7 @@ import {
   EMPTY_USAGE,
   type CanonicalEvent, type Capabilities, type Cost, type Hunk,
   type AgentQuestion, type McpServer, type ModeChoice, type ModelChoice, type PermissionMode,
+  type SessionOption, type TodoItem,
   type ContextUsage, type PromptPart, type QuotaWindow, type SessionState, type SlashCommand, type Usage,
 } from './events.ts'
 
@@ -29,6 +30,25 @@ export type ToolPartView = {
   /** Cio che il tool ha restituito, per intero. Arriva con `tool.ended`: prima di
    *  quel momento non esiste, e un tool bloccato non ce l'ha mai. */
   output?: string
+  /**
+   * Il lavoro che questa chiamata ha **avviato** e che è andato avanti per conto suo.
+   *
+   * Sta dentro la parte del tool e non in un elenco a parte perché è la stessa riga:
+   * un comando lanciato in background non è un secondo fatto, è ciò che si scopre
+   * dopo su un fatto già mostrato. E soprattutto: senza di questo la riga direbbe
+   * `done` — il `tool_result` del lancio arriva **subito** e ha esito positivo —
+   * mentre il lavoro sta ancora girando. Vedi `task.started` in `events.ts`.
+   */
+  task?: {
+    taskId: string
+    kind: 'command' | 'agent' | 'other'
+    description?: string
+    background: boolean
+    /** Assente finché non si sa: è la differenza fra «sta girando» e «è andata così». */
+    status?: 'completed' | 'failed'
+    summary?: string
+    outputFile?: string
+  }
 }
 /**
  * Una domanda sola dentro una risposta: com'era intitolata, cosa chiedeva, cosa si e
@@ -46,7 +66,7 @@ export type AnswerItemView = { header: string; asked: string; answer: string }
  * capire cosa si era deciso, e perche l'agent ha fatto in quel modo.
  */
 export type AnswerPartView = {
-  kind: 'answer'; partId: string; of: 'permission' | 'question'
+  kind: 'answer'; partId: string; of: 'permission' | 'question' | 'plan'
   /** Cosa era stato chiesto, come lo si era letto nel blocco in basso. */
   asked: string
   /** Cosa si e risposto. */
@@ -74,8 +94,16 @@ export type CompactPartView = {
   trigger?: 'manual' | 'auto'
   at: number
 }
+/**
+ * Il turno e' stato ritentato. Sta nel flusso e non nell'intestazione perche' e'
+ * successo **li'**: e' la spiegazione della pausa che si vede sopra.
+ */
+export type RetryPartView = {
+  kind: 'retry'; partId: string; attempt: number; reason: string; at: number
+}
 export type PartView =
   TextPartView | ReasoningPartView | ToolPartView | AnswerPartView | CompactPartView
+  | RetryPartView
 
 export type TurnView = {
   turnId: string
@@ -119,9 +147,32 @@ export type QuotaView = {
   status: string; kind: string; resetsAt: number; usingOverage: boolean
 }
 export type PendingQuestionView = { requestId: string; questions: AgentQuestion[] }
+/**
+ * Un piano in attesa di essere approvato.
+ *
+ * `plan` è markdown, e per intero: è un documento da **leggere**, non un soggetto da
+ * riconoscere. È la differenza per cui non è un permesso — e prima di questo tipo
+ * finiva in una card generica che di quel testo non mostrava niente, perché `plan`
+ * non è fra i campi in cui l'adapter cerca il soggetto di un'azione.
+ */
+export type PendingPlanView = { requestId: string; plan: string; path?: string }
 export type NoticeView = { level: 'info' | 'warn' | 'error'; text: string }
 export type BlockedView = {
   by: 'classifier' | 'denyRule'; callId?: string; reason: string; ts: number
+}
+
+/**
+ * Tiene allineata un'opzione quando arriva una delle **forme vecchie**
+ * (`session.mode` / `session.model`).
+ *
+ * Serve perche' un journal misto esiste davvero: una conversazione aperta prima di
+ * ADR-014 e risvegliata dopo ha le due forme nello stesso file. Senza questo, la barra
+ * mostrerebbe il valore giusto in un campo e quello vecchio nel selettore, e i due si
+ * contraddirebbero a schermo.
+ */
+function specchia(s: SessionSnapshot, id: string, value: string): void {
+  const o = s.options.find(x => x.id === id)
+  if (o) o.value = value
 }
 
 export type SessionSnapshot = {
@@ -135,6 +186,17 @@ export type SessionSnapshot = {
    *  UI mostra allora solo il valore corrente, invece di inventarsi un elenco. */
   models: ModelChoice[]
   modes: ModeChoice[]
+  /**
+   * La checklist dell'agent, se ne tiene una. Vuota vuol dire due cose diverse — «non
+   * ce l'ha» e «non ha ancora niente da fare» — e a distinguerle e' `capabilities.todos`.
+   */
+  todos: TodoItem[]
+  /**
+   * I selettori che l'agent dichiara, e che la barra di stato disegna **senza
+   * conoscerli** (ADR-014). Vuoto su un journal scritto prima: allora valgono `models`
+   * e `modes`, che sono gli stessi due casi in forma vecchia.
+   */
+  options: SessionOption[]
   /** Il titolo scelto a mano. Se manca, lo si ricava dal primo prompt. */
   title?: string
   state: SessionState
@@ -153,6 +215,10 @@ export type SessionSnapshot = {
   shell: CommandRunView[]
   pendingPermissions: PendingPermissionView[]
   pendingQuestions: PendingQuestionView[]
+  /** I piani in attesa di approvazione. Una lista come le altre due, anche se in
+   *  pratica ne arriva uno alla volta: la forma uniforme è ciò che permette al blocco
+   *  in basso di trattarli con la stessa regola invece che con un caso speciale. */
+  pendingPlans: PendingPlanView[]
   blocked: BlockedView[]
   notices: NoticeView[]
   usage: Usage
@@ -195,8 +261,8 @@ export type SessionSnapshot = {
 function emptySnapshot(sessionId: string): SessionSnapshot {
   return {
     v: 1, sessionId, state: 'starting', tools: [], slashCommands: [],
-    models: [], modes: [], mcpServers: [],
-    turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [],
+    models: [], modes: [], options: [], todos: [], mcpServers: [],
+    turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [], pendingPlans: [],
     blocked: [], notices: [], quotaWindows: [],
     usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
     stateSince: 0,
@@ -241,6 +307,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.capabilities = p.capabilities; s.tools = p.tools; s.slashCommands = p.commands
       if (p.models) s.models = p.models
       if (p.modes) s.modes = p.modes
+      if (p.options) s.options = p.options
       // `session.created` arriva ogni volta che nasce un processo figlio nuovo per
       // questa sessione — non solo alla prima: anche a ogni risveglio, e a ogni
       // riavvio del daemon che la ospitava. Un processo che *nasce* non puo' avere
@@ -261,14 +328,27 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.state = p.state
       if (p.reason !== undefined) s.stateReason = p.reason
       break
-    case 'session.model': s.model = p.model; break
+    // ADR-014: la via nuova. `mode` e `model` restano come **comodita'** sullo
+    // snapshot — l'elenco delle chat e le notifiche li vogliono senza aprire una
+    // conversazione — ma non sono piu' due casi speciali del modello: sono due
+    // opzioni con un id convenuto.
+    case 'session.option': {
+      const o = s.options.find(x => x.id === p.id)
+      if (o) o.value = p.value
+      if (p.id === 'mode') s.mode = p.value
+      if (p.id === 'model') s.model = p.value
+      break
+    }
+    // Le due forme vecchie: nessun adapter le emette piu', ma i journal scritti prima
+    // ne sono pieni e devono continuare a ricostruirsi identici (§4).
+    case 'session.model': s.model = p.model; specchia(s, 'model', p.model); break
     case 'session.tools': s.tools = p.tools; break
     // Si sostituisce, non si fonde: l'evento porta la fotografia intera di com'erano
     // in quel momento. Fondere terrebbe in vita un server sparito dalla macchina.
     case 'session.mcp': s.mcpServers = p.servers; break
     case 'session.commands': s.slashCommands = p.commands; break
     case 'session.resumeRef': s.resumeRef = p.ref; break
-    case 'session.mode': s.mode = p.mode; break
+    case 'session.mode': s.mode = p.mode; specchia(s, 'mode', p.mode); break
     case 'session.slept': s.state = 'sleeping'; break
     case 'session.woke': s.state = 'idle'; break
     case 'session.error':
@@ -360,6 +440,33 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
     }
 
+    case 'task.started': {
+      // Senza `callId` non c'è niente a cui attaccarlo. Non si inventa una riga: una
+      // riga in più che dice «è partito qualcosa» senza poter dire da dove sarebbe
+      // rumore, e il caso non si è mai visto nei journal reali (279 task, tutti con
+      // il loro `tool_use_id`).
+      if (!p.callId) break
+      const part = findTool(s, p.callId)
+      if (!part) break
+      part.task = {
+        taskId: p.taskId, kind: p.kind, background: p.background,
+        ...(p.description !== undefined ? { description: p.description } : {}),
+      }
+      break
+    }
+    case 'task.ended': {
+      // Si cerca per `taskId` e **non** per `callId`, che qui non c'è: l'esito arriva
+      // molto dopo, spesso in un altro turno, e l'unica cosa che lega le due metà è
+      // l'id del lavoro. Per questo la ricerca risale tutta la conversazione.
+      const part = findTask(s, p.taskId)
+      if (part?.task) {
+        part.task.status = p.status
+        if (p.summary !== undefined) part.task.summary = p.summary
+        if (p.outputFile !== undefined) part.task.outputFile = p.outputFile
+      }
+      break
+    }
+
     case 'permission.asked':
       s.pendingPermissions.push({
         requestId: p.requestId, action: p.action, resources: p.resources,
@@ -380,6 +487,33 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         refused: p.decision === 'reject', at: e.ts,
       })
       if (s.pendingPermissions.length === 0 && s.state === 'awaiting') s.state = 'busy'
+      break
+    }
+    case 'plan.proposed':
+      s.pendingPlans.push({
+        requestId: p.requestId, plan: p.plan,
+        ...(p.path !== undefined ? { path: p.path } : {}),
+      })
+      s.state = 'awaiting'
+      break
+    case 'plan.replied': {
+      // Come per i permessi: la richiesta si legge PRIMA di toglierla, se no nel
+      // flusso resterebbe un «approvato» senza dire cosa.
+      const chiesto = s.pendingPlans.find(x => x.requestId === p.requestId)
+      s.pendingPlans = s.pendingPlans.filter(x => x.requestId !== p.requestId)
+      // Il piano **per intero** resta nel flusso, non un suo riassunto: è il documento
+      // su cui l'agent ha lavorato da lì in poi, ed è la cosa che si torna a rileggere
+      // due giorni dopo per capire perché ha fatto in quel modo. Riassumerlo qui
+      // vorrebbe dire perderlo, perché in nessun altro posto è scritto.
+      turn()?.parts.push({
+        kind: 'answer', partId: p.requestId, of: 'plan',
+        asked: chiesto?.plan ?? 'plan',
+        answer: p.decision === 'rejected'
+          ? (p.feedback ? `kept planning: ${p.feedback}` : 'kept planning')
+          : p.mode ? `approved, continuing in ${p.mode}` : 'approved',
+        refused: p.decision === 'rejected', at: e.ts,
+      })
+      if (s.pendingPlans.length === 0 && s.state === 'awaiting') s.state = 'busy'
       break
     }
     case 'question.asked':
@@ -440,6 +574,21 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.quotaWindows = p.windows; s.quotaWindowsAt = e.ts; break
     case 'context.usage':
       s.contextUsage = p.usage; s.contextUsageAt = e.ts; break
+    case 'session.retried': {
+      // Senza un turno aperto non c'e' un posto nel flusso: un ritentativo avviene per
+      // definizione dentro un turno. Se ne arrivasse uno fuori, si perderebbe qui — e
+      // lo dice questo commento, come per la compattazione.
+      turn()?.parts.push({
+        kind: 'retry', partId: `retry-${e.seq}`,
+        attempt: p.attempt, reason: p.reason, at: e.ts,
+      })
+      break
+    }
+    // La checklist arriva **intera** ogni volta: si sostituisce, non si fonde. E' la
+    // forma in cui la manda l'agent ed e' quella giusta per un journal append-only —
+    // chi rilegge non deve applicare patch, gli basta l'ultimo evento.
+    case 'todo.updated': s.todos = p.todos; break
+
     case 'context.compacted': {
       // Senza un turno aperto non c'e un posto nel flusso in cui metterla, e non e mai
       // successo: la compattazione avviene mentre un turno gira. Se un giorno arrivasse
@@ -503,6 +652,25 @@ function findReasoning(s: SessionSnapshot, partId: string): ReasoningPartView | 
     for (let j = parts.length - 1; j >= 0; j--) {
       const part = parts[j]
       if (part && part.kind === 'reasoning' && part.partId === partId) return part
+    }
+  }
+  return undefined
+}
+
+/**
+ * La chiamata a cui appartiene un lavoro, cercata per id del lavoro.
+ *
+ * Serve una funzione a sé, e non basta `findTool`, perché l'esito di un task arriva
+ * **senza** `tool_use_id`: il CLI manda solo `task_id`. Le due metà della stessa
+ * storia — «è partito» e «è andata così» — possono stare a centinaia di eventi e a
+ * più turni di distanza, quindi l'unica cosa che le lega è quell'id.
+ */
+function findTask(s: SessionSnapshot, taskId: string): ToolPartView | undefined {
+  for (let i = s.turns.length - 1; i >= 0; i--) {
+    const parts = s.turns[i]?.parts ?? []
+    for (let j = parts.length - 1; j >= 0; j--) {
+      const part = parts[j]
+      if (part && part.kind === 'tool' && part.task?.taskId === taskId) return part
     }
   }
   return undefined

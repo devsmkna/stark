@@ -9,35 +9,59 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { ClaudeCodeAdapter, type PermissionAnswer, type QuestionAnswer } from '../adapters/claude-code/adapter.ts'
-import { isRecent, listTranscripts, transcriptPath, type TranscriptInfo } from '../adapters/claude-code/catalogue.ts'
-import { importTranscript } from '../adapters/claude-code/import.ts'
-import { askToolsFor } from '../adapters/claude-code/permissions.ts'
-import { configDirOf, listProfiles } from '../adapters/claude-code/profiles.ts'
+import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
+import type {
+  AgentSession, ConversationInfo, PermissionAnswer, PlanAnswer, QuestionAnswer,
+} from '../core/adapter.ts'
 import { activity, type Activity } from '../core/activity.ts'
-import { Journal, RawLog } from '../core/journal.ts'
+import { Journal, MemoryJournal, RawLog, type EventSink } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import { promptText } from '../core/events.ts'
+import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
-import type { AgentQuestion, Attachment, CanonicalEvent, Command, PermissionMode, PromptPart } from '../core/events.ts'
+import type {
+  AgentQuestion, Attachment, CanonicalEvent, Command, PermissionCategory, PermissionMode, PromptPart,
+} from '../core/events.ts'
 
 export type OpenSpec = {
   cwd: string
   model?: string
   mode?: PermissionMode
   resume?: { ref: string; fork?: boolean }
-  /** Riprendere l'ultima conversazione di `cwd` (`--continue`). Vedi sdk-options. */
+  /** Riprendere l'ultima conversazione di `cwd` (`--continue`). Vedi core/adapter.ts. */
   continue?: boolean
-  askTools?: string[]
+  /**
+   * Su cosa chiedere conferma: **categorie**, non nomi di tool. Fino ad ADR-012 questo
+   * campo era `askTools: string[]` e portava `Bash` e `mcp__*` — vocabolario di Claude
+   * Code — fin quassù, con il registro che chiamava `askToolsFor()` per tradurlo. Ora
+   * a tradurre è l'adapter, che è l'unico a conoscere quei nomi.
+   */
+  ask?: PermissionCategory[]
+  /**
+   * Cosa questa chat **non puo' fare**, categorie canoniche. Passa dritto all'adapter,
+   * che le rende impossibili: qui non si interpreta, si inoltra.
+   */
+  deny?: PermissionCategory[]
+  /**
+   * Non lasciare niente su disco: le righe restano in memoria e muoiono col daemon.
+   *
+   * Non e' un ramo che salta il journal — e' lo **stesso** percorso con un deposito
+   * diverso (`MemoryJournal`). Vale l'invariante del §4 come per tutte le altre, ed e'
+   * cio' che permette alla UI di disegnarla con lo stesso riduttore.
+   */
+  ephemeral?: boolean
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
   /**
-   * Il profilo Claude da usare — una `CLAUDE_CONFIG_DIR` diversa da quella di default
-   * del daemon. Omesso: resta quella di default. Ogni sessione spawna il suo processo
-   * (ADR-009), quindi due chat con profili diversi non si toccano: non serve che il
-   * daemon ne tenga «aperto uno solo», serve solo passare il valore giusto qui.
+   * Il profilo da usare — per Claude Code una `CLAUDE_CONFIG_DIR` diversa da quella di
+   * default del daemon, per un altro agent qualcos'altro. Da qui in su è una stringa
+   * **opaca**: si passa, non si interpreta. Omesso: resta quello di default.
+   * Ogni sessione spawna il suo processo (ADR-009), quindi due chat con profili diversi
+   * non si toccano: non serve che il daemon ne tenga «aperto uno solo».
    */
-  configDir?: string
+  profile?: string
+  /** Con quale agent. Omesso: quello di default. */
+  agent?: string
 }
 
 export type SessionRow = {
@@ -78,7 +102,7 @@ export type SessionRow = {
 }
 
 /** Una conversazione della CLI come la vede la UI, con ciò che il registro sa in più. */
-export type ImportableRow = TranscriptInfo & {
+export type ImportableRow = ConversationInfo & {
   /** È già dentro STARK: importarla di nuovo non aggiungerebbe niente. */
   already: boolean
   /** Scritta da poco: **forse** è aperta in un terminale proprio adesso. */
@@ -88,11 +112,14 @@ export type ImportableRow = TranscriptInfo & {
 type Pending =
   | { kind: 'permission'; resolve: (a: PermissionAnswer) => void }
   | { kind: 'question'; resolve: (a: QuestionAnswer) => void }
+  | { kind: 'plan'; resolve: (a: PlanAnswer) => void }
 
 type Live = {
   id: string
-  adapter: ClaudeCodeAdapter
-  journal: Journal
+  adapter: AgentSession
+  journal: EventSink
+  /** Non sta su disco: va tenuta fuori da elenco, ricerca e notifiche. */
+  ephemeral: boolean
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
   pending: Map<string, Pending>
@@ -157,6 +184,22 @@ export type ImmagineSalvata = {
   data: string
 }
 
+/**
+ * Quale conversazione del CLI riprendere. È una funzione a parte, ed esportata, perché
+ * è l'unico pezzo di `open()` che si può provare **senza** aprire una sessione vera:
+ * la regola è una scelta fra due stringhe, e sbagliarla non si vede finché qualcuno non
+ * fa un `/clear` prima di uno Sleep (vedi il commento in `open()`).
+ *
+ * `spec.resume.ref` è l'id STARK, cioè il nome del journal. `resumeRef` è quello che il
+ * CLI ha dichiarato per ultimo nel suo `system:init`: coincidono sempre, tranne dopo un
+ * reset del contesto. Vince il secondo, quando c'è.
+ */
+export const refDaRiprendere = (
+  resume: { ref: string; fork?: boolean } | undefined,
+  resumeRef: string | undefined,
+): { ref: string; fork?: boolean } | undefined =>
+  resume && !resume.fork && resumeRef ? { ...resume, ref: resumeRef } : resume
+
 export class Registry {
   private readonly live = new Map<string, Live>()
   /**
@@ -167,9 +210,15 @@ export class Registry {
    * esattamente ciò che SSE esiste per non fare.
    */
   private readonly all = new Set<() => void>()
-  private readonly defaults: { model: string; mode: PermissionMode; configDir?: string }
+  /**
+   * Quanto si è già letto del journal di ogni conversazione **ferma**, e lo stato a
+   * cui si era arrivati. Vedi `leggi()`: è la cache che toglie la rilettura integrale
+   * di tutta la storia a ogni aggiornamento dell'elenco.
+   */
+  private readonly letti = new Map<string, { offset: number; snap: SessionSnapshot }>()
+  private readonly defaults: { model: string; mode: PermissionMode; profile?: string }
 
-  constructor(defaults: { model?: string; mode?: PermissionMode; configDir?: string } = {}) {
+  constructor(defaults: { model?: string; mode?: PermissionMode; profile?: string } = {}) {
     this.defaults = {
       // `'default'` non è un segnaposto: è un `value` vero nella lista che l'SDK
       // restituisce (`list_models`), e si risolve con la stessa logica di un modello
@@ -182,7 +231,7 @@ export class Registry {
       // `--strict-mcp-config` era stato scartato per i server MCP.
       model: defaults.model ?? 'default',
       mode: defaults.mode ?? 'auto',
-      ...(defaults.configDir ? { configDir: defaults.configDir } : {}),
+      ...(defaults.profile ? { profile: defaults.profile } : {}),
     }
   }
 
@@ -242,6 +291,26 @@ export class Registry {
     return { home: SESSIONS, sessions: out, bytes: out.reduce((n, x) => n + x.bytes, 0) }
   }
 
+  /**
+   * Con quale modalità parte una chat nuova.
+   *
+   * Tre gradini, e l'ordine conta (ADR-014). Chi apre con una modalità esplicita vince
+   * sempre — è il caso delle prove e del risveglio. Poi la scelta dell'utente **per
+   * quell'agent**. Poi, solo per l'agent di default, la vecchia preferenza unica, che
+   * resta perché buttarla farebbe ripartire da `auto` chi aveva scelto `default` senza
+   * dirglielo. E in fondo: **la prima modalità che l'agent dichiara di avere** — non
+   * `auto`, che è una parola di Claude Code e su un altro agent non vuol dire niente.
+   */
+  private async modoDiPartenza(spec: OpenSpec): Promise<PermissionMode> {
+    if (spec.mode) return spec.mode
+    const agent = spec.agent ?? DEFAULT_AGENT
+    const perAgent = this.settings().defaultModes?.[agent]
+    if (perAgent) return perAgent
+    if (agent === DEFAULT_AGENT && this.settings().defaultMode) return this.settings().defaultMode
+    const suoi = await backendFor(agent).modes?.()
+    return suoi?.find(m => m.available)?.mode ?? this.defaults.mode
+  }
+
   async open(spec: OpenSpec): Promise<string> {
     // La cartella si controlla **qui**, non solo al confine HTTP.
     //
@@ -258,20 +327,32 @@ export class Registry {
     const id = spec.resume && !spec.resume.fork ? spec.resume.ref : randomUUID()
     if (this.live.has(id)) return id
 
-    const journal = new Journal(resolve(SESSIONS, `${id}.jsonl`), id)
-    const raw = new RawLog(resolve(SESSIONS, `${id}.raw.jsonl`))
-    const snapshot = reduce(Journal.read(journal.path), id)
+    // L'unica differenza fra una chat vera e una effimera e' **dove finiscono le
+    // righe**. Tutto il resto di questa funzione non sa quale delle due sta aprendo, ed
+    // e' voluto: due rami separati diventerebbero due comportamenti diversi al primo
+    // caso al bordo che si aggiunge solo a uno dei due.
+    const effimera = spec.ephemeral === true
+    const journal: EventSink = effimera
+      ? new MemoryJournal(id)
+      : new Journal(resolve(SESSIONS, `${id}.jsonl`), id)
+    // Il raw nativo e' materiale di diagnosi di una conversazione che si potra'
+    // riguardare: di una che non esistera' piu' non c'e' niente da diagnosticare, e
+    // scriverlo sarebbe l'unica traccia lasciata da una chat che ha promesso di non
+    // lasciarne.
+    const raw = effimera ? null : new RawLog(resolve(SESSIONS, `${id}.raw.jsonl`))
+    const snapshot = effimera ? reduce([], id) : reduce(Journal.read(journal.path), id)
     const pending = new Map<string, Pending>()
     const watchers = new Set<(e: CanonicalEvent) => void>()
     const startFrom = journal.lastSeq
 
-    const entry: Live = { id, adapter: null as never, journal, snapshot, watchers, pending }
+    const entry: Live = { id, adapter: null as never, journal, ephemeral: effimera, snapshot, watchers, pending }
 
     // Risvegliare deve restituire la chat com'era, strumenti compresi: una sessione
     // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
     // l'utente non ha modo di collegare la cosa allo Sleep. Lo dice il journal.
     const mcp = spec.mcp ?? snapshot.mcpServers.filter(s => s.enabled).map(s => s.name)
-    const ask = spec.askTools ?? askToolsFor(askCategories(this.settings()))
+    // Le categorie escono da qui **come categorie**: a farne nomi di tool è l'adapter.
+    const ask = spec.ask ?? askCategories(this.settings())
     // Stessa ragione, stesso posto: il modello è quanto di più "com'era" ci sia. Prima
     // di questo il risveglio non lo guardava, e ogni Sleep smontava silenziosamente la
     // scelta di modello per quella chat — una sessione spostata su Opus si svegliava su
@@ -279,27 +360,57 @@ export class Registry {
     // chat che non è mai partita: qui sotto è già popolato da `session.created`.
     const model = spec.model ?? snapshot.model ?? this.defaults.model
 
-    const adapter = new ClaudeCodeAdapter({
+    // Terzo campo che il risveglio deve restituire com'era, e il più subdolo dei tre:
+    // **quale conversazione** riprendere. `spec.resume.ref` fa due mestieri — dà il
+    // nome al journal (qui sopra, `id`) e dice al CLI da dove ripartire — e di norma i
+    // due coincidono, perché all'apertura STARK passa il proprio id come `sessionId`.
+    // Un `/clear` li fa divergere: il CLI **sposta la conversazione su un id nuovo**, e
+    // lo dichiara nel `system:init` che segue (→ `session.resumeRef`). Riprendere il
+    // vecchio id riapre la conversazione di **prima** del taglio, cioè riporta indietro
+    // il contesto che l'utente aveva appena buttato via — misurato su una chat vera:
+    // 129.387 token prima del `/clear`, 57.748 dopo, e di nuovo **129.387** al
+    // risveglio. Il journal sapeva la risposta e nessuno gliela chiedeva.
+    //
+    // Solo per un risveglio vero: su un `fork` lo snapshot letto qui sopra è quello del
+    // journal **nuovo**, cioè vuoto, e `resumeRef` non c'è — la conversazione da cui si
+    // biforca è un'altra domanda, e la si lascia dov'è.
+    const resume = refDaRiprendere(spec.resume, snapshot.resumeRef)
+
+    const adapter = backendFor(spec.agent ?? DEFAULT_AGENT).open({
       cwd: spec.cwd,
       model,
       // La modalità di partenza è un'**impostazione**, non un valore cablato: era
       // l'unica differenza strutturale fra STARK e la CLI nuda (che parte in `default`,
       // misurato) e non c'era modo di toccarla. Chi apre una chat con una modalità
       // esplicita vince comunque — è il caso delle prove, e del risveglio.
-      mode: spec.mode ?? this.settings().defaultMode ?? this.defaults.mode,
+      mode: await this.modoDiPartenza(spec),
       // Il profilo è una scelta **per progetto** (§ settings.ts), non del daemon: se
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.
-      ...((spec.configDir ?? this.defaults.configDir) ? { configDir: spec.configDir ?? this.defaults.configDir } : {}),
-      ...(spec.resume ? { resume: spec.resume }
+      ...((spec.profile ?? this.defaults.profile) ? { profile: spec.profile ?? this.defaults.profile } : {}),
+      ...(resume ? { resume }
         : spec.continue ? { continue: true }
         : { sessionId: id }),
-      // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
-      // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo
-      // fanno); tutti gli altri prendono la tabella, che è il pannello dei permessi.
-      ...(ask.length ? { askTools: ask } : {}),
+      // Chi apre con categorie esplicite sa cosa sta facendo (le prove lo fanno);
+      // tutti gli altri prendono la tabella, che è il pannello dei permessi.
+      ...(ask.length ? { ask } : {}),
+      // I divieti non hanno una tabella e non ereditano niente dalle impostazioni: li
+      // chiede chi apre, e sono per **questa** chat. L'unico a chiederli oggi e'
+      // l'helper, che non ha dove mostrare una card di permesso.
+      ...(spec.deny?.length ? { deny: spec.deny } : {}),
       ...(mcp.length ? { mcp } : {}),
-      onRaw: m => raw.write(JSON.stringify(m)),
+      // Come si chiama, detto da noi. Serve a spegnere la generazione automatica del
+      // titolo dell'agent, che e' una chiamata al modello per rispondere a una domanda
+      // a cui `titleOf` risponde gia' gratis. Si passa **sempre**, anche il segnaposto
+      // di una chat appena nata: il campo conta solo alla nascita — su un risveglio il
+      // titolo persistito vince comunque — ed e' esattamente alla nascita che quella
+      // chiamata sarebbe partita.
+      title: titleOf(snapshot),
+      ...(effimera ? { ephemeral: true } : {}),
+    }, {
+      // Su una effimera non si passa proprio: senza `onRaw` l'adapter non serializza
+      // in JSON ogni messaggio nativo per poi buttarlo via.
+      ...(raw ? { onRaw: (m: unknown) => raw.write(JSON.stringify(m)) } : {}),
       onPayload: p => {
         const e = journal.append(p)      // prima il disco
         applyTo(snapshot, e)
@@ -314,6 +425,9 @@ export class Registry {
       }),
       onQuestion: r => new Promise<QuestionAnswer>(res => {
         pending.set(r.requestId, { kind: 'question', resolve: res })
+      }),
+      onPlan: r => new Promise<PlanAnswer>(res => {
+        pending.set(r.requestId, { kind: 'plan', resolve: res })
       }),
     })
     entry.adapter = adapter
@@ -350,7 +464,10 @@ export class Registry {
       // conversazione vera e il file contiene tutta la sua storia: cancellarlo perché
       // la ripresa non è partita distruggerebbe esattamente ciò che si stava cercando
       // di riaprire.
-      const maiNata = startFrom === 0 && !snapshot.cwd
+      // Su una effimera non c'e' nessun file da togliere: la memoria se n'e' gia'
+      // andata con `journal.close()`, e `journal.path` e' la stringa vuota — passarla
+      // a `rmSync` sarebbe una cancellazione su un percorso che non e' un percorso.
+      const maiNata = !effimera && startFrom === 0 && !snapshot.cwd
       if (maiNata) {
         // Il motivo non si perde: va nel log del daemon **prima** di togliere il file,
         // che era l'unico posto in cui l'errore restava scritto.
@@ -381,13 +498,50 @@ export class Registry {
     for (const w of this.all) w()
   }
 
+  /**
+   * Lo stato di una conversazione **senza processo**, leggendo del suo journal solo
+   * ciò che non era già stato letto.
+   *
+   * Il journal è append-only (§13), e questa è la prima volta che quella invariante
+   * viene usata invece che solo rispettata: se il file è cresciuto di tre righe, lo
+   * stato di prima più quelle tre righe **è** lo stato di adesso — `reduce` non è
+   * altro che `applyTo` ripetuto su uno snapshot vuoto, quindi continuare da uno
+   * snapshot già fatto dà lo stesso identico oggetto.
+   *
+   * Prima si rileggeva tutto a ogni giro, e «ogni giro» sono fino a quattro volte al
+   * secondo mentre una chat streama: misurato, 82 ms per un journal da 12 MB, **per
+   * ciascuna** conversazione ferma. Con dieci conversazioni di quella taglia il
+   * daemon passava più tempo a rileggere la storia che a servire il presente, e
+   * `readFileSync` + `JSON.parse` sono sincroni: a fermarsi era tutto, SSE compreso.
+   */
+  private leggi(id: string, path: string): SessionSnapshot {
+    const prima = this.letti.get(id)
+    const { events, offset, from } = Journal.readFrom(path, prima?.offset ?? 0)
+    // `from` diverso da dove eravamo rimasti vuol dire che `readFrom` è ripartito da
+    // capo: il file si è accorciato, cioè non è più lo stesso file. Continuare uno
+    // snapshot vecchio sopra una storia nuova darebbe uno stato che non è mai esistito.
+    const snap = prima && from === prima.offset
+      ? prima.snap
+      : reduce([], id)
+    for (const e of events) applyTo(snap, e)
+    this.letti.set(id, { offset, snap })
+    return snap
+  }
+
   list(): SessionRow[] {
     const rows = new Map<string, SessionRow>()
     if (existsSync(SESSIONS)) {
+      const visti = new Set<string>()
       for (const f of readdirSync(SESSIONS)) {
         if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
         const id = f.replace(/\.jsonl$/, '')
-        const s = reduce(Journal.read(resolve(SESSIONS, f)), id)
+        visti.add(id)
+        // La riga di una sessione viva la scrive il processo, qui sotto, e sovrascrive
+        // comunque questa. Rileggerne il journal era lavoro buttato — e per giunta
+        // proprio quello della chat più grande e più spesso ricalcolata, perché è
+        // quella che sta streamando ed è la ragione per cui `list()` viene richiamata.
+        if (this.live.has(id)) continue
+        const s = this.leggi(id, resolve(SESSIONS, f))
         const state = settled(s.state)
         rows.set(id, {
           id, title: titleOf(s), state, turns: s.turns.length,
@@ -407,8 +561,16 @@ export class Registry {
           ...(s.quota && s.quota.status !== 'allowed' ? { quota: s.quota } : {}),
         })
       }
+      // Una conversazione cancellata non deve restare in memoria per sempre: la
+      // cache tiene uno snapshot intero per riga, cioè tutta la sua storia.
+      for (const id of this.letti.keys()) if (!visti.has(id)) this.letti.delete(id)
     }
     for (const [id, l] of this.live) {
+      // L'helper (§17) non compare: non e' un lavoro, e' una domanda al volo. Basta
+      // questa riga perche' resti fuori anche dalle **notifiche** e dal bot Telegram,
+      // che guardano l'elenco e non le vive — se no il telefono suonerebbe ogni volta
+      // che l'helper finisce di rispondere.
+      if (l.ephemeral) continue
       const s = l.snapshot
       const doing = activity(s)
       rows.set(id, {
@@ -424,6 +586,53 @@ export class Registry {
     return [...rows.values()]
   }
 
+  /**
+   * Cercare in tutte le conversazioni.
+   *
+   * Non è una rotta che scandisce il disco: passa dagli stessi snapshot che tiene
+   * l'elenco (`leggi()`), quindi su una macchina già accesa una ricerca non rilegge
+   * **niente**. È anche il motivo per cui trova ciò che la UI mostra e non ciò che sta
+   * scritto su disco: una risposta arrivata in trecento `text.delta` nel journal non
+   * esiste come frase intera in nessuna riga, e cercarla lì non la troverebbe mai.
+   *
+   * Due caratteri di soglia: con uno solo il risultato è «tutte», che non è una
+   * risposta — e costerebbe un ritaglio per ogni turno di ogni chat per dirlo.
+   */
+  search(query: string, limit = 5): SessionMatches[] {
+    const q = query.trim()
+    if (q.length < MINIMO) return []
+    const out: SessionMatches[] = []
+    const snapshots = new Map<string, SessionSnapshot>()
+    if (existsSync(SESSIONS)) {
+      for (const f of readdirSync(SESSIONS)) {
+        if (!f.endsWith('.jsonl') || f.endsWith('.raw.jsonl')) continue
+        const id = f.replace(/\.jsonl$/, '')
+        if (this.live.has(id)) continue
+        snapshots.set(id, this.leggi(id, resolve(SESSIONS, f)))
+      }
+    }
+    // Le vive dopo: il loro snapshot in memoria è più avanti di qualunque cosa il
+    // disco possa dire, perché il journal lo scrive lo stesso oggetto.
+    for (const [id, l] of this.live) {
+      // Fuori anche da qui: un risultato che porta a una conversazione che non esiste
+      // piu' e' peggio di nessun risultato — e l'helper non e' li' per essere ritrovato.
+      if (l.ephemeral) continue
+      snapshots.set(id, l.snapshot)
+    }
+
+    for (const [id, snap] of snapshots) {
+      const matches = searchSnapshot(snap, q, limit)
+      if (matches.length === 0) continue
+      out.push({
+        sessionId: id, title: titleOf(snap), total: countSnapshot(snap, q), matches,
+        ...(snap.cwd ? { cwd: snap.cwd } : {}),
+      })
+    }
+    // Per corrispondenza più recente, non per numero: chi cerca sta ritrovando
+    // qualcosa, e «quante volte l'ho detto» non aiuta a decidere quale aprire.
+    return out.sort((a, b) => (b.matches[0]?.ts ?? 0) - (a.matches[0]?.ts ?? 0))
+  }
+
   // ─── conversazioni nate nel terminale ─────────────────────────────────────
 
   /**
@@ -432,12 +641,15 @@ export class Registry {
    * seconda è l'avviso sulla presa in carico.
    */
   async importable(): Promise<ImportableRow[]> {
-    const found = await listTranscripts(this.defaults.configDir)
+    const b = backendFor()
+    // Un agent senza un terminale proprio non ha conversazioni da importare, e non è
+    // la stessa cosa che averne zero: la domanda non si pone (§12).
+    const found = (await b.listConversations?.(this.defaults.profile)) ?? []
     const now = Date.now()
     return found.map(t => ({
       ...t,
       already: existsSync(resolve(SESSIONS, `${t.sessionId}.jsonl`)),
-      recent: isRecent(t, now),
+      recent: b.isRecent?.(t, now) ?? false,
     }))
   }
 
@@ -449,7 +661,12 @@ export class Registry {
    * Un journal già presente non si tocca — reimportare sopra raddoppierebbe la storia.
    */
   async importSession(sessionId: string):
-    Promise<{ ok: true; id: string; configDir?: string } | { ok: false; error: string }> {
+    Promise<{ ok: true; id: string; profile?: string } | { ok: false; error: string }> {
+    const b = backendFor()
+    if (!b.locateConversation || !b.importConversation) {
+      return { ok: false, error: 'questo agent non ha conversazioni da importare' }
+    }
+
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
     const journal = new Journal(dest, sessionId)
     if (journal.lastSeq > 0) {
@@ -457,32 +674,23 @@ export class Registry {
       return { ok: false, error: 'già importata' }
     }
 
-    // Si cerca per **nome file**, non dentro `listTranscripts` (i 60 trascritti più
-    // recenti — un limite pensato per un elenco da sfogliare): un id scritto a mano
-    // può essere vecchio quanto si vuole. E si cerca prima nel profilo di default,
-    // poi negli altri della macchina: un id può appartenere a una `CLAUDE_CONFIG_DIR`
-    // diversa da quella con cui è partito il daemon.
-    const defaultDir = configDirOf(this.defaults.configDir)
-    let path = transcriptPath(sessionId, defaultDir)
-    let foundIn: string | undefined
-    if (!path) {
-      for (const p of listProfiles(this.defaults.configDir)) {
-        if (resolve(p.path) === defaultDir) continue   // già provato sopra
-        const candidate = transcriptPath(sessionId, p.path)
-        if (candidate) { path = candidate; foundIn = resolve(p.path); break }
-      }
-    }
-    if (!path) {
+    // Si cerca per **id**, non dentro l'elenco delle importabili — quello sono le più
+    // recenti, un limite pensato per una schermata da sfogliare, e un id scritto a
+    // mano può essere vecchio quanto si vuole. Dove guardare, e in quali profili, lo
+    // sa l'agent: il `ref` che torna è **opaco** (per Claude Code è il percorso del
+    // trascritto) e da qui non si guarda dentro.
+    const trovata = b.locateConversation(sessionId, this.defaults.profile)
+    if (!trovata) {
       // Nessun residuo: il journal appena creato e mai scritto se ne va, se no
-      // resterebbe una chat senza `cwd` in mezzo a quelle vere (stessa disciplina
-      // di `open()` sul confine).
+      // resterebbe una chat senza `cwd` in mezzo a quelle vere — stessa disciplina
+      // di `open()`, e stessa ragione.
       journal.close()
       rmSync(dest, { force: true })
       return { ok: false, error: 'trascritto non trovato su questa macchina' }
     }
 
     try {
-      const { events } = importTranscript(path)
+      const { events } = b.importConversation(trovata.ref)
       // `session.resumeRef` per primo: senza, il journal saprebbe dire cosa è successo
       // ma non come tornarci, e la conversazione importata resterebbe da guardare e
       // basta. L'ora è quella del primo fatto, non di adesso: una conversazione di due
@@ -493,7 +701,7 @@ export class Registry {
       journal.close()
     }
     this.bump()
-    return { ok: true, id: sessionId, ...(foundIn ? { configDir: foundIn } : {}) }
+    return { ok: true, id: sessionId, ...(trovata.profile ? { profile: trovata.profile } : {}) }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -545,6 +753,12 @@ export class Registry {
 
   /** Rilettura dal journal: è la stessa cosa che fa un risveglio. */
   events(id: string, from = 0): CanonicalEvent[] {
+    // Una effimera non ha un file da rileggere: la coda ce l'ha in memoria, e la
+    // domanda e' la stessa — «cosa mi sono perso da `from` in poi». Senza questa
+    // riga un flusso caduto e riagganciato tornerebbe vuoto, cioe' la conversazione
+    // sparirebbe dallo schermo pur essendo ancora viva.
+    const l = this.live.get(id)
+    if (l?.ephemeral) return (l.journal as MemoryJournal).from(from)
     const path = resolve(SESSIONS, `${id}.jsonl`)
     return Journal.read(path).filter(e => e.seq > from)
   }
@@ -615,6 +829,38 @@ export class Registry {
    * non c'è un cestino, e non è recuperabile. Se sta girando la si chiude prima,
    * altrimenti l'adapter continuerebbe a scrivere su un file che non esiste più.
    */
+  /**
+   * L'helper: una chat che non lascia niente, e ce n'e' **una sola** (§17).
+   *
+   * L'unicita' non e' una limitazione ma il modo in cui «muore col ricaricamento della
+   * pagina» diventa un fatto invece di una speranza. Un browser che si ricarica non
+   * puo' avvisare in modo affidabile (`beforeunload` non e' una promessa), e la sua
+   * memoria dell'id se n'e' andata comunque: la prima cosa che fa riaprendo il pannello
+   * e' chiederne uno nuovo, e quella richiesta porta via il vecchio. Nessun ciclo di
+   * vita da indovinare, nessun orfano che resta acceso a consumare un processo.
+   */
+  async openHelper(spec: Omit<OpenSpec, 'ephemeral'>): Promise<string> {
+    await this.closeHelper()
+    const id = await this.open({ ...spec, ephemeral: true })
+    this.helperId = id
+    return id
+  }
+
+  /** Chiude quello vivo, se c'e'. Idempotente. */
+  async closeHelper(): Promise<void> {
+    const id = this.helperId
+    this.helperId = null
+    if (!id || !this.live.has(id)) return
+    await this.command(id, { c: 'session.close' })
+  }
+
+  /** Qual e' l'helper vivo. `null` se nessuno lo ha ancora aperto. */
+  get helper(): string | null {
+    return this.helperId && this.live.has(this.helperId) ? this.helperId : null
+  }
+
+  private helperId: string | null = null
+
   async remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const path = resolve(SESSIONS, `${id}.jsonl`)
     const l = this.live.get(id)
@@ -646,6 +892,12 @@ export class Registry {
         return { ok: true }
       case 'session.interrupt':
         await l.adapter.interrupt()
+        return { ok: true }
+      // ADR-014: il verbo generale. Il daemon non sa cosa siano gli `id` — li ha
+      // dichiarati l'agent — e li passa senza guardarli. `setModel`/`setMode` restano
+      // per le sonde e per il codice interno che sceglie *una modalita'* per nome.
+      case 'session.setOption':
+        await l.adapter.setOption(cmd.id, cmd.value)
         return { ok: true }
       case 'session.setModel':
         await l.adapter.setModel(cmd.model)
@@ -684,22 +936,17 @@ export class Registry {
           p.resolve({ allow: false, reason: 'Negato dall\'utente' })
           return { ok: true }
         }
-        // «Consenti sempre» deve consentire davvero anche la prossima volta, e la
-        // regola la scrive l'SDK in .claude/settings.local.json (ADR-009). Senza
+        // «Consenti sempre» deve consentire davvero anche la prossima volta: senza
         // questo passaggio il pulsante si comporterebbe come «Consenti», e l'evento
-        // nel journal direbbe `always`: una bugia scritta su disco.
+        // nel journal direbbe `always` — una bugia scritta su disco.
+        //
+        // Qui passa **il soggetto** da ricordare e nient'altro. Fino ad ADR-012 questo
+        // ramo costruiva un `PermissionUpdate` dell'SDK Anthropic, con dentro
+        // `destination: 'localSettings'`: il daemon decideva in quale file di Claude
+        // Code finiva la regola (falla n.3). In che forma quella stringa diventi una
+        // regola lo sa solo l'adapter.
         const scope = cmd.decision === 'always' ? cmd.scope : undefined
-        p.resolve(scope
-          ? {
-              allow: true,
-              remember: [{
-                type: 'addRules',
-                rules: [{ toolName: scope }],
-                behavior: 'allow',
-                destination: 'localSettings',
-              }],
-            }
-          : { allow: true })
+        p.resolve(scope ? { allow: true, remember: scope } : { allow: true })
         return { ok: true }
       }
       case 'question.reply': {
@@ -707,6 +954,15 @@ export class Registry {
         if (p?.kind !== 'question') return { ok: false, error: 'domanda sconosciuta' }
         l.pending.delete(cmd.requestId)
         p.resolve({ answers: cmd.answers, ...(cmd.response !== undefined ? { response: cmd.response } : {}) })
+        return { ok: true }
+      }
+      case 'plan.reply': {
+        const p = l.pending.get(cmd.requestId)
+        if (p?.kind !== 'plan') return { ok: false, error: 'piano sconosciuto' }
+        l.pending.delete(cmd.requestId)
+        p.resolve(cmd.decision === 'approved'
+          ? { approved: true, ...(cmd.mode ? { mode: cmd.mode } : {}) }
+          : { approved: false, ...(cmd.feedback ? { feedback: cmd.feedback } : {}) })
         return { ok: true }
       }
       case 'question.reject': {

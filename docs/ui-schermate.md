@@ -158,6 +158,34 @@ Come sta nella riga, deciso implementando il 24 agosto 2026:
   costerebbe l'altezza dell'elenco per non dire nulla. Su una sessione senza processo
   dietro sarebbe anche **falsa** — il suo journal è rimasto aperto a metà di un turno.
 
+### Cercare (27 agosto 2026)
+
+Sopra l'elenco c'è una casella. Cercare non è un posto dove andare, è **un modo di guardare
+l'elenco**: per questo i risultati prendono il posto dell'albero invece di aprirsi in un
+pannello a parte.
+
+Due ricerche in una casella sola, tenute separate anche a schermo, perché rispondono a due
+domande diverse:
+
+- **Titles** — le conversazioni il cui titolo contiene quello che hai scritto. Il filtro lo fa
+  il browser: i titoli sono già tutti lì, e aspettare il daemon per nascondere righe che ho già
+  in mano sarebbe un ritardo inventato.
+- **Inside conversations** — le conversazioni che *ne parlano dentro*. Le cerca il daemon, che è
+  l'unico ad avere i journal. Sotto il titolo di ciascuna, fino a cinque righe: chi ha scritto
+  quel testo (`you asked`, `answered`, `did`) e il ritaglio con la parola evidenziata. Accanto
+  al titolo, **quante volte in tutto** — con cinque righe mostrate e quaranta trovate, tacere
+  sul resto direbbe che sono cinque.
+
+Premere un risultato non apre la conversazione e basta: la apre **su quel turno**, che si apre
+da sé, si porta in vista e lampeggia una volta. Se il turno stava sopra un `/clear`, si apre
+anche il capitolo che lo conteneva — portare in vista qualcosa che non è disegnato non porta in
+vista niente. Premere invece il *titolo* apre la conversazione senza scegliere un punto, che è
+quello che si vuole quando le corrispondenze sono tante e nessuna in particolare è quella
+giusta.
+
+Il lampo dura e sparisce: dice «è questo» a chi è appena arrivato, e da lì in poi sarebbe un
+colore senza significato su una riga come le altre.
+
 ### Il comportamento che conta
 
 Quando una conversazione si ferma ad aspettare una risposta, **non deve essere cercata**.
@@ -238,6 +266,37 @@ Il turno intero si può **richiudere**. La conversazione diventa così una lista
 che si sono chieste — tredici titoli invece di quattrocento blocchi — e si tiene aperto solo
 quello a cui si sta lavorando.
 
+### Dentro il turno: il lavoro sta in un blocco solo (27 agosto 2026)
+
+Aperto un turno, fra la richiesta e la risposta c'è **una riga sola**: `259 operations ·
+51 notes`, chiusa, che si apre sull'elenco esatto di prima. Ci finisce tutto ciò che è il
+*come* — i comandi, le modifiche, i ragionamenti — e con loro le **narrazioni di servizio**,
+cioè le righe con cui l'agent racconta quello che sta per fare («ora guardo il CSS»).
+
+Ne restano fuori tre cose, e sono le tre volte in cui l'agent smette di raccontare e si
+rivolge a te: la **risposta finale**; una **domanda o un permesso** con la risposta data; e
+il **testo che introduce quella domanda**, perché è quello che ti serve per scegliere.
+Insieme a loro restano fuori la compattazione e i retry, che non sono lavoro ma tagli del
+flusso. Resta fuori anche l'**operazione in corso**, l'unica di cui ha senso chiedersi a che
+punto è.
+
+Perché non basta raggruppare le operazioni (com'era fino a ieri): l'agent scrive una nota
+ogni tre o quattro comandi, e un testo in mezzo spezzava il gruppo. Su un turno vero da 418
+parti restavano **103 blocchi** in colonna; adesso ne fa **2**, e il turno intero sta in una
+schermata. La media su 48 turni veri passa da **29,6 blocchi a 2,5**.
+
+Il taglio si decide per **posizione**, non per lunghezza: sui journal veri una narrazione ha
+mediana **131 caratteri** (710 casi, solo 2 sopra gli 800), il testo che introduce una
+domanda **2631**, il recap finale **2487**. Sono due specie, e la posizione le separa senza
+soglie da tarare.
+
+Arrivando da una **ricerca** il turno si apre con i gruppi **aperti**: chi cerca ha chiesto di
+vedere, e portare in vista un turno in cui la frase trovata è dentro una riga chiusa sarebbe
+come non portare in vista niente.
+
+La regola sta in `ui/src/lib/gruppi.ts`, fuori dal componente, e si prova con `node` puro:
+`npm run gruppi:check`, 24 verifiche.
+
 ### Cosa resta sempre sotto gli occhi
 
 Tre cose, e solo queste:
@@ -259,6 +318,7 @@ Sono **quattordici**, e nel terminale hanno tutte lo stesso aspetto. Qui devono 
 | **la risposta a parole** | il testo dell'assistente | formattato per davvero: titoli, elenchi, tabelle. **Sempre per intero**, non si richiude mai |
 | **il ragionamento** | il pensiero prima di rispondere | **chiuso**, con l'indicazione di quanto ha pensato. Si apre per capire una scelta |
 | **un'operazione** | un comando, una modifica a un file, una ricerca | una riga sola: *cosa* ha fatto e *su cosa*, più l'esito. Il risultato resta **chiuso** |
+| **il lavoro accorpato** | tutte le operazioni e le narrazioni di un tratto di turno | una riga che le conta (`46 operations · 3 notes`), chiusa, che si apre sull'elenco di prima |
 | **il risultato di un comando** | ciò che il comando ha stampato | separato fra output normale, errori, ed esito |
 | **un file modificato** | il file e quante righe sono cambiate | un blocco cliccabile che apre il confronto |
 | **una richiesta di permesso** | vuole fare qualcosa e chiede | riquadro in basso, ferma **solo questa** conversazione |
@@ -304,12 +364,40 @@ modifica reale — e se quel file non è stato toccato affatto, STARK se ne acco
 
 ## 3. Quando l'assistente chiede qualcosa
 
-Compare un **riquadro in basso**. Due casi:
+Compare un **riquadro in basso**. Tre casi:
 
 - **un permesso**: vuole eseguire qualcosa e chiede il consenso. Mostra esattamente cosa
   farebbe e in quale cartella
 - **una domanda**: vuole sapere come procedere, con due o quattro alternative fra cui
   scegliere, ognuna con una breve spiegazione. A volte si può scegliere più di una
+- **un piano** (27 agosto 2026): ha finito di pianificare e chiede di partire
+
+### Il piano è l'unico dei tre che si legge
+
+Un permesso lo si riconosce a colpo d'occhio — è una riga, un comando, un percorso. Una domanda
+è un titolo e delle opzioni. Un piano è **un documento**, e va letto per intero prima di
+approvarlo: per questo il suo riquadro ha un corpo che scorre, con il markdown reso, invece di
+un sommario. Ha un tetto d'altezza legato allo schermo e non a un numero di pixel, perché la
+cosa da non superare è lo schermo — e sotto ci sono i bottoni con cui si approva, che non devono
+mai finire fuori.
+
+Prima che esistesse questo riquadro il piano finiva nella card generica dei permessi, che di
+quel testo **non mostrava niente**: si approvava un piano che non si poteva leggere.
+
+Le vie d'uscita sono tre, e le prime due sono due bottoni distinti invece di uno con una spunta
+accanto: **«Go ahead, accept edits»** e **«Go ahead, ask me first»**. Nel terminale sono due
+voci, ed è la stessa decisione presa in due modi — chi approva la sta già prendendo, farla
+scegliere dopo da un menu la nasconderebbe. La terza è **«Keep planning»**, con accanto una riga
+per dire cosa cambiare: facoltativa, perché obbligare a motivare un «no» renderebbe più scomodo
+dire di no che dire di sì.
+
+Sotto il piano c'è il **file** in cui il CLI se l'è scritto per conto suo: si può aprire dove si
+aprono gli altri file. Dirlo permette di arrivarci; leggerlo da lì per mostrarlo qui vorrebbe
+dire preferire il disco a ciò che il protocollo ha già mandato.
+
+Approvato, il piano **resta nel flusso** e si riapre: è il documento su cui l'agent ha lavorato
+da lì in poi, e nel journal non è scritto da nessun'altra parte. Chiuso di default come tutto il
+resto — lo si rilegge solo quando ci si chiede *perché* ha fatto in quel modo.
 
 Nel normale funzionamento questi riquadri **quasi non compaiono**: l'assistente decide da
 sé quasi tutto, e si ferma solo per le cose serie. Chi vuole più controllo può chiedere di
@@ -429,6 +517,26 @@ alla volta.
   sarebbero peggio: hai scritto qualcosa, e dov'è finito deve vedersi.
 - **fra un turno e il successivo la chat non si dichiara ferma.** Sembra un dettaglio: è lo
   stato su cui suona la notifica «ha finito», e suonerebbe a metà lavoro.
+
+### Un lavoro che continua dopo la riga che lo ha lanciato (27 agosto 2026)
+
+Un comando lanciato in **background**, o un **sub-agent**, non finisce quando finisce la
+chiamata: quella risponde subito «lancio riuscito». Fino a oggi la riga mostrava quindi un ✓
+verde su un lavoro ancora in corso, e l'esito vero — che arriva molto dopo, spesso in un altro
+turno — non compariva da nessuna parte.
+
+Adesso la riga dice cosa sta succedendo davvero: **`running`** (o `agent running`) finché il
+lavoro gira, poi **`failed`** se è andata male. E quando il CLI manda il suo resoconto, quello
+compare **sotto la riga chiusa**, non dentro il dettaglio da aprire: è la risposta alla domanda
+per cui si stava guardando quella riga — «com'è andata?» — e nasconderla dietro un clic
+significherebbe nasconderla proprio a chi era tornato apposta per leggerla. Su un sub-agent è
+anche **l'unica** cosa che ne resta: il suo lavoro interno non passa da questo canale.
+
+Il resoconto è prosa e sta su più righe, ma con un tetto di quattro: venti righe dentro una riga
+di elenco non sono più una riga di elenco.
+
+Quanto pesa, su journal veri di questa macchina: **316** lavori in una sola conversazione, di
+cui 15 in background, 5 sub-agent e **10 falliti**. Quei dieci fallimenti prima erano invisibili.
 
 ### Perché un comando è stato lanciato, non solo quale
 

@@ -5,7 +5,7 @@
 // Node e nel browser, quindi non introduce dipendenze, e per giunta è la stessa forma
 // che usa OpenCode — il che risparmierà lavoro al secondo adapter invece di crearne.
 
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createGuard, type Perimetro } from './security.ts'
@@ -19,10 +19,23 @@ import { leggiTodo, guardaTodo } from './todo.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { diagnostics, warmDiagnostics } from '../adapters/claude-code/profiles.ts'
-import { allineaMemoria } from './memoria.ts'
+import { agentiDisponibili, backendFor, catalogoCompleto } from '../adapters/index.ts'
 import { readToken } from './identity.ts'
 import type { Command } from '../core/events.ts'
+import type { MemoryOutcome } from '../core/adapter.ts'
+
+/**
+ * «Scrivi una `description` quando lanci un comando», chiesto all'agent.
+ *
+ * Passa dal backend perché **come** si ottiene non è la stessa cosa per due agent: su
+ * Claude Code quel campo lo scrive il modello, quindi l'unico modo è una regola nel suo
+ * `CLAUDE.md` globale — che è anche il motivo per cui il pannello dichiara che la
+ * regola vale pure fuori da STARK. Un agent che non ha il concetto non implementa il
+ * metodo, e allora non c'è niente da dire: `undefined`, e la UI non mostra la riga.
+ */
+function descrizioniComandi(profile: string | undefined, accesa: boolean): MemoryOutcome | undefined {
+  return backendFor().setCommandDescriptions?.(profile, accesa)
+}
 
 export type DaemonOptions = {
   port?: number
@@ -88,12 +101,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     // Le sessioni dell'utente possono vivere fuori da ~/.claude. Se non si propaga
     // questa, i processi figli guardano nella cartella sbagliata: nessuna
     // conversazione da riprendere e forse nemmeno il login, con l'aria di essere rotti.
-    configDir: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
+    // `CLAUDE_CONFIG_DIR` si legge **qui**, al confine col mondo, e da qui in giù è
+    // solo «il profilo»: una stringa opaca che il registro passa e non interpreta.
+    profile: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
   })
 
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
-  warmDiagnostics()
+  backendFor().warmDiagnostics?.()
 
   // La regola sulle descrizioni dei comandi va riallineata **all'avvio**, non solo
   // quando si tocca l'impostazione: il `CLAUDE.md` globale è un file dell'utente, e
@@ -102,9 +117,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // file un'altra — cioè l'impostazione mentirebbe.
   {
     const configDir = opts.configDir ?? process.env['CLAUDE_CONFIG_DIR']
-    const esito = allineaMemoria(configDir, registry.settings().toolDescriptions)
-    if (esito.error) console.error('memoria globale non scrivibile:', esito.path, esito.error)
-    else if (esito.cambiato) console.log('memoria globale allineata:', esito.path)
+    const esito = descrizioniComandi(configDir, registry.settings().toolDescriptions)
+    // `undefined` non è un guasto: è un agent che quel concetto non ce l'ha, e allora
+    // non c'è niente da allineare e niente da dire.
+    if (esito?.error) console.error('memoria globale non scrivibile:', esito.path, esito.error)
+    else if (esito?.cambiato) console.log('memoria globale allineata:', esito.path)
   }
 
   // Le notifiche sul telefono. Vive nel daemon e non nella pagina perché è **l'unico**
@@ -212,6 +229,14 @@ async function route(
       return send(res, 200, { sessions: registry.list() })
     }
 
+    // Cercare. Non è un comando di sessione (§18): non cambia niente e non riguarda
+    // una conversazione sola, quindi è una GET sul registro come `/api/sessions`.
+    // Non tiene stato fra una richiesta e l'altra — chi scrive nella casella ne manda
+    // una per pausa di digitazione, e ognuna deve poter essere l'ultima.
+    if (method === 'GET' && path === '/api/search') {
+      return send(res, 200, { results: registry.search(url.searchParams.get('q') ?? '') })
+    }
+
     // Il flusso dell'**elenco**, non di una sessione. Esiste perché senza, per sapere
     // che una chat diversa da quella aperta è cambiata, alla barra laterale non
     // restava che richiedere `/api/sessions` a ripetizione.
@@ -237,7 +262,7 @@ async function route(
       // sta guardando è la cosa che il browser non può sapere da sé, e la sezione
       // Agent lo mostra prima ancora che l'utente tocchi l'interruttore.
       const s = registry.settings()
-      return send(res, 200, { settings: s, memoria: allineaMemoria(configDir, s.toolDescriptions) })
+      return send(res, 200, { settings: s, memoria: descrizioniComandi(configDir, s.toolDescriptions) })
     }
     if (method === 'PUT' && path === '/api/settings') {
       const body = await readJson<Settings>(req)
@@ -248,7 +273,7 @@ async function route(
       const salvate = registry.saveSettings(body)
       // Il file dell'agent segue la spunta subito, non al prossimo riavvio: una
       // preferenza che ha effetto «più tardi» è una preferenza che sembra rotta.
-      const memoria = allineaMemoria(configDir, salvate.toolDescriptions)
+      const memoria = descrizioniComandi(configDir, salvate.toolDescriptions)
       // L'esito torna al client perché è l'unica cosa che l'utente non può dedurre:
       // *quale* file è stato toccato, e se non si è potuto scriverlo.
       return send(res, 200, { settings: salvate, memoria })
@@ -307,9 +332,55 @@ async function route(
           open: guard.perimetro.ammessi.length > 0,
           hosts: guard.perimetro.ammessi.map(a => ({ host: a.host, source: a.fonte })),
         },
-        agent: await diagnostics(configDir),
+        agent: await backendFor().diagnostics?.(configDir),
         nativeFolderPicker: await nativeFolderPickerAvailable(),
+        // Quali agent questa macchina sa guidare. La UI ne fa una scelta **solo se ce
+        // n'è più di uno**: una tendina con una voce sola è un ostacolo, non una scelta
+        // (stessa regola del profilo in «New chat»).
+        agents: await agentiDisponibili(),
       })
+    }
+
+    // ─── l'helper (§17) ──────────────────────────────────────────────────────
+    //
+    // Tre rotte e non una dentro `/api/sessions`, perche' l'helper **non e' una
+    // sessione dell'elenco**: non ha un progetto, non si risveglia, non si rinomina, e
+    // ce n'e' uno solo. Passarlo dalla rotta delle chat vere vorrebbe dire aggiungere
+    // a quella una manciata di casi speciali che valgono per un solo chiamante.
+
+    /** Tutti i modelli guidabili sulla macchina, per agent. Costa un handshake per
+     *  agent la prima volta (misurato: ~1,6s Claude Code, ~1,5s OpenCode) e poi e'
+     *  in cache: chi apre il menu due volte non lo paga due volte. */
+    if (method === 'GET' && path === '/api/models') {
+      return send(res, 200, { agents: await catalogoCompleto() })
+    }
+
+    if (method === 'POST' && path === '/api/helper') {
+      const body = await readJson<{ agent?: string; model?: string }>(req)
+      try {
+        const id = await registry.openHelper({
+          // Una cartella **sua**, non quella della chat che si sta guardando: l'helper
+          // e' un'istanza a parte, e ereditare il progetto lo renderebbe una seconda
+          // chat di quel progetto. Sta sotto `STARK_HOME` e non in `/tmp` perche' un
+          // `/tmp` ripulito a meta' sessione farebbe fallire l'apertura successiva con
+          // un errore che non c'entra niente con quello che l'utente stava facendo.
+          cwd: helperDir(),
+          ...(body?.agent ? { agent: body.agent } : {}),
+          ...(body?.model ? { model: body.model } : {}),
+          // Sola lettura, e non per prudenza: in un pannello largo un sesto di schermo
+          // non c'e' posto per una card di permesso, e un permesso che chiede senza
+          // avere dove rispondere non e' cauto — e' una chat piantata.
+          deny: ['shell', 'edit', 'net', 'agents', 'external'],
+        })
+        return send(res, 201, { id, snapshot: registry.snapshot(id) })
+      } catch (e) {
+        return send(res, 400, { error: (e as Error).message })
+      }
+    }
+
+    if (method === 'DELETE' && path === '/api/helper') {
+      await registry.closeHelper()
+      return send(res, 200, { ok: true })
     }
 
     if (method === 'POST' && path === '/api/sessions') {
@@ -591,6 +662,21 @@ async function readJson<T>(req: IncomingMessage, max = 4 * 1024 * 1024): Promise
   }
   if (chunks.length === 0) return null
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T } catch { return null }
+}
+
+/**
+ * La cartella in cui gira l'helper.
+ *
+ * Esiste ed e' vuota, e va bene cosi': l'helper e' in sola lettura, quindi non ci
+ * scrivera' niente, e non e' li' per lavorare su un progetto. Serve perche' una
+ * sessione **deve** avere una cartella di lavoro — e perche' `open()` rifiuta al
+ * confine una `cwd` che non esiste (400), che e' la difesa messa il 26 agosto contro
+ * le chat fantasma e che vale anche qui.
+ */
+function helperDir(): string {
+  const d = resolve(STARK_HOME, 'helper')
+  mkdirSync(d, { recursive: true })
+  return d
 }
 
 function closeServer(server: Server): Promise<void> {

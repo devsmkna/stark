@@ -9,46 +9,70 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type {
   Capabilities, ModeChoice, ModelChoice, PermissionMode, SlashCommand,
 } from '../../core/events.ts'
+import type { SessionSpec } from '../../core/adapter.ts'
 
-export type LaunchOptions = {
-  cwd: string
-  model: string
-  /** Default STARK: 'auto' (ADR-008). */
-  mode: PermissionMode
-  /** Riprendere una conversazione esistente. `ref` è l'id di sessione di Claude Code. */
-  resume?: { ref: string; fork?: boolean }
-  /**
-   * `--continue` della CLI: riprende **l'ultima** conversazione di `cwd` senza
-   * saperne l'id in anticipo. Mutuamente esclusivo con `resume` e con `sessionId`
-   * (lo dice l'SDK), quindi l'id vero si scopre solo all'handshake — arriva col
-   * `system:init` e finisce nel journal come `session.resumeRef`, che è ciò con cui
-   * il risveglio tornerà lì. Conseguenza da sapere: il journal STARK nasce **vuoto**,
-   * quindi i turni precedenti valgono per il modello ma non si vedono a schermo.
-   */
-  continue?: boolean
-  /** Imporre l'id invece di scoprirlo: così STARK sa come risvegliare già in partenza. */
-  sessionId?: string
-  /**
-   * Dove vivono sessioni e credenziali. Chi usa `CLAUDE_CONFIG_DIR` ha le proprie
-   * conversazioni fuori da `~/.claude`, e un processo che non se lo vede passare
-   * guarda nella cartella sbagliata: non trova nulla da riprendere e forse nemmeno il
-   * login. Fallisce con l'aria di essere rotto senza motivo.
-   */
-  configDir?: string
-  /**
-   * Quale eseguibile guidare. Il default è quello che l'SDK porta con sé, appaiato
-   * alla sua versione. Si punta altrove solo con una ragione.
-   */
-  pathToExecutable?: string
-  /** I nomi di tool per cui l'utente vuole essere interrogato. */
-  askTools?: string[]
+/**
+ * Le opzioni di lancio **sono** il contratto del §1: `SessionSpec`, senza aggiunte.
+ * Prima di ADR-012 questo tipo esisteva a parte e parlava di `configDir`,
+ * `pathToExecutable` e `askTools` — cioe' del vocabolario di Claude Code — e quei
+ * nomi risalivano fino alla rotta HTTP del daemon e alla UI. Qui restano solo come
+ * **traduzione**, dentro `buildOptions`, che e' il posto giusto: e' l'unica funzione
+ * il cui mestiere e' proprio dire come STARK configura questo agent.
+ */
+export type LaunchOptions = SessionSpec
+
+/**
+ * Le sei modalità **di Claude Code**, e la funzione che ci riporta dentro.
+ *
+ * Dopo ADR-014 `PermissionMode` è una stringa aperta nel modello canonico: sono gli
+ * agent a dichiarare come si chiamano le proprie modalità. Qui si torna all'enumerazione
+ * dell'SDK, ed è giusto che la conversione stia in questo file — è l'unico il cui
+ * mestiere è dire come STARK configura *questo* agent.
+ *
+ * Una modalità che non è delle sei non si passa: passarla darebbe un errore dell'SDK a
+ * runtime su un valore che noi sapevamo già essere sbagliato.
+ */
+export const MODI_CLAUDE = [
+  'default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions',
+] as const
+export type ModoClaude = typeof MODI_CLAUDE[number]
+
+export function modoDiClaude(m: string | undefined): ModoClaude | undefined {
+  return MODI_CLAUDE.includes(m as ModoClaude) ? (m as ModoClaude) : undefined
 }
 
 export function buildOptions(o: LaunchOptions): Options {
   const opts: Options = {
     cwd: o.cwd,
     model: o.model,
-    permissionMode: o.mode,
+    permissionMode: modoDiClaude(o.mode),
+    // Il system prompt di Claude Code, chiesto per nome — e la ragione per cui questa
+    // riga non e' un dettaglio e' che **non passarla non vuol dire «lascia fare al CLI»**.
+    //
+    // L'SDK, quando `systemPrompt` e' assente, non si tira indietro: lo sostituisce con
+    // una stringa vuota. La riga esatta nel bundle (`sdk.mjs`, funzione `xP`) e'
+    // `if (s === void 0) p = ""`, e la doc lo dice nei termini che contano: «the SDK uses
+    // a minimal prompt that covers tool calling but omits Claude Code's coding guidelines,
+    // response style, and project context. This differs from `claude -p`, which uses the
+    // full Claude Code prompt by default».
+    //
+    // Misurato prima di correggerlo, non dedotto (`spike/costo-vs-cli.ts`, costo zero di
+    // quota): senza questa riga la categoria «System prompt» di `getContextUsage()` vale
+    // **677** token invece di **3.969**. Cioe' le sessioni di STARK giravano con l'agent
+    // istruito meno di quello del terminale — Principio 5 al contrario, e nessuno se ne
+    // accorgeva perche' fallisce nel modo peggiore: non da' errore, risponde peggio.
+    //
+    // Cosa NON si perdeva, e va detto perche' sembra il contrario: `CLAUDE.md` e le skill
+    // restano (62.414 e 1.875 token, identici con e senza). Quelli non passano dal system
+    // prompt — la doc: «the SDK reads it and injects its content into the conversation as
+    // project context, not into the system prompt».
+    //
+    // `excludeDynamicSections` si lascia spento di proposito: serve a una flotta di
+    // macchine diverse che vuole far combaciare il prefisso di cache fra utenti, al prezzo
+    // di spostare cartella di lavoro e stato git in un messaggio utente, dove pesano meno
+    // sul comportamento. STARK gira su una macchina sola: pagherebbe il prezzo senza
+    // incassare il vantaggio.
+    systemPrompt: { type: 'preset', preset: 'claude_code' },
     // `false`, e la ragione è cambiata nel tempo: vale la pena scriverla intera.
     //
     // Era `true` perché senza, la sessione eredita tutti i server MCP della macchina:
@@ -72,20 +96,33 @@ export function buildOptions(o: LaunchOptions): Options {
     // La callback vera viene innestata dall'adapter.
     canUseTool: async (_n, input) => ({ behavior: 'allow', updatedInput: input }),
   }
+  // Dire come si chiama la conversazione spegne la generazione automatica del titolo
+  // («When provided, the session uses this title instead of auto-generating one from the
+  // first user message»), che e' una chiamata al modello per una cosa che STARK sa gia'.
+  // Su un risveglio non serve e non fa niente: il titolo persistito della sessione vince
+  // comunque, lo dice l'SDK — quindi il campo conta solo alla nascita, che e' l'unico
+  // momento in cui quella chiamata sarebbe partita.
+  if (o.title) opts.title = o.title
   if (o.resume) {
     // `resume` per primo: chi sa già quale conversazione vuole vince su chi chiede
     // «l'ultima», e i due sono incompatibili per l'SDK.
     opts.resume = o.resume.ref
     if (o.resume.fork) opts.forkSession = true
   } else if (o.continue) {
-    // Niente `sessionId`: l'SDK li dichiara incompatibili, e passarli insieme fa
-    // fallire l'avvio invece di ignorarne uno.
+    // Niente `sessionId` accanto: l'SDK li dichiara incompatibili, e passarli insieme
+    // fa fallire l'avvio invece di ignorarne uno.
     opts.continue = true
   } else if (o.sessionId) {
     opts.sessionId = o.sessionId
   }
-  if (o.configDir) opts.env = { ...process.env, CLAUDE_CONFIG_DIR: o.configDir }
-  if (o.pathToExecutable) opts.pathToClaudeCodeExecutable = o.pathToExecutable
+  // Il `profile` del contratto e' una stringa opaca: **qui** diventa
+  // `CLAUDE_CONFIG_DIR`. Chi la usa ha le proprie conversazioni fuori da `~/.claude`,
+  // e un processo che non se la vede passare guarda nella cartella sbagliata: non
+  // trova nulla da riprendere e forse nemmeno il login. Fallisce con l'aria di essere
+  // rotto senza motivo, quindi vale la pena che sia scritto dove si traduce.
+  if (o.profile) opts.env = { ...process.env, CLAUDE_CONFIG_DIR: o.profile }
+  // Il default e' l'eseguibile che l'SDK porta con se', appaiato alla sua versione.
+  if (o.executable) opts.pathToClaudeCodeExecutable = o.executable
   return opts
 }
 
@@ -140,6 +177,13 @@ export function capabilitiesFor(model: string): Capabilities {
     permissionAlways: true,
     questions: true,
     revert: false,       // c'è `enableFileCheckpointing`, non ancora usato
+    // I ritentativi li fa l'SDK sotto e non affiorano: non e' un buco, e' un fatto che
+    // questo agent non racconta. Misurato: nessun messaggio nativo li dichiara.
+    retries: false,
+    // Verificato due volte il 27 agosto sulla lista **runtime** dei tool di una
+    // sessione vera (60 tool): c'e' `Task`/`TaskOutput`/`TaskStop`, non `TodoWrite`
+    // ne' i `TaskCreate`. I tipi dell'SDK li dichiarano lo stesso — §16.10.
+    todos: false,
     toolProgress: false,
     fileBrowser: false,
     pty: false,          // Roadmap, Fase 2
@@ -162,6 +206,8 @@ export function resolveModel(models: unknown, requested: string): string {
  * un agent, che è ciò che il §1 vieta fuori di qui. La UI ne fa un avviso: la voce
  * resta scegliibile, perché il CLI la accetta (Principio 5), ma dice cosa succede.
  */
+const SENZA_AUTO = 'No auto mode — this chat would fall back and ask for everything'
+
 export function modelChoices(raw: unknown, current: string): ModelChoice[] {
   const out: ModelChoice[] = []
   const seen = new Set<string>()
@@ -172,9 +218,14 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       seen.add(id)
       const resolved = typeof m?.['resolvedModel'] === 'string' ? m['resolvedModel'] : undefined
       const label = typeof m?.['displayName'] === 'string' ? m['displayName'] : undefined
+      const auto = modelSupportsAutoMode(resolved ?? id)
       out.push({
-        id, autoMode: modelSupportsAutoMode(resolved ?? id),
+        id, autoMode: auto,
         contextWindow: contextWindowFor(resolved ?? id),
+        // L'avviso lo scrive **questo** agent, e solo qui ha senso: su Claude Code
+        // alcuni modelli reggono auto mode e altri no, quindi l'assenza distingue. Su
+        // un agent senza classificatore non distinguerebbe niente — vedi `optionsFrom`.
+        ...(auto ? {} : { note: SENZA_AUTO }),
         ...(label ? { label } : {}), ...(resolved ? { resolved } : {}),
       })
     }
@@ -186,6 +237,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
     out.unshift({
       id: current, autoMode: modelSupportsAutoMode(current),
       contextWindow: contextWindowFor(current),
+      ...(modelSupportsAutoMode(current) ? {} : { note: SENZA_AUTO }),
     })
   }
   return out
@@ -199,18 +251,40 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
  * CLI non accetta si mostra disabilitata con la spiegazione, mai nascosta. Nasconderla
  * farebbe sembrare STARK meno capace del terminale.
  */
+/**
+ * Cosa fa ciascuna modalita', **detto da qui**.
+ *
+ * Queste frasi stavano nella UI (`view.ts`, `MODE_BLURB`), ed era il posto sbagliato:
+ * descrivono il comportamento di *questo* agent, e la prova di carico l'ha mostrato in
+ * modo lampante — su OpenCode la voce `plan` mostrava «Plans first, touches nothing»,
+ * cioe' la frase di Claude Code capitata li' per omonimia. Vera per caso, falsa nei
+ * fatti. Dopo ADR-014 chi descrive una modalita' e' chi ce l'ha.
+ */
+const COSA_FA: Record<string, string> = {
+  auto: 'A classifier checks every action. No cards.',
+  default: 'Asks before everything',
+  acceptEdits: 'File edits go through, the rest asks',
+  plan: 'Plans first, touches nothing',
+  dontAsk: 'Never asks. The classifier still checks.',
+  bypassPermissions: 'No checks at all',
+}
+
 export function modeChoices(): ModeChoice[] {
   const root = typeof process.getuid === 'function' && process.getuid() === 0
-  const ALL: PermissionMode[] = [
-    'auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions',
-  ]
-  return ALL.map(mode => mode === 'bypassPermissions' && root
-    ? {
-        mode, available: false,
-        reason: 'Refused by the CLI itself when it runs with root privileges — '
-          + 'not a STARK restriction.',
-      }
-    : { mode, available: true })
+  const ALL: PermissionMode[] = ['auto', ...MODI_CLAUDE.filter(m => m !== 'auto')]
+  return ALL.map(mode => ({
+    mode,
+    ...(COSA_FA[mode] ? { note: COSA_FA[mode] } : {}),
+    // `bypassPermissions` da root lo rifiuta **il CLI**, non STARK: la voce resta in
+    // elenco spenta con la ragione, che e' la differenza fra un limite e un default.
+    ...(mode === 'bypassPermissions' && root
+      ? {
+          available: false,
+          reason: 'Refused by the CLI itself when it runs with root privileges — '
+            + 'not a STARK restriction.',
+        }
+      : { available: true }),
+  }))
 }
 
 export function slashCommands(raw: unknown): SlashCommand[] {

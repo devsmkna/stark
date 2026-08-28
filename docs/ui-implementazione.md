@@ -54,6 +54,12 @@ Il browser lo scarica playwright con `npx playwright-core install chromium`, e *
 non si scrive a mano**: il numero di build cambia da macchina a macchina, e `shot.mjs` lo
 aveva dentro — funzionava su una sola.
 
+Quando la schermata da guardare dipende da una **forma** del journal che non capita a
+comando — due `/clear` di fila, un turno troncato, un capitolo vuoto — il journal si
+scrive invece di aspettarlo: `node tools/prova-clear.ts` ne genera due (uno con due tagli
+e poco dopo, uno col taglio come ultima cosa), li mette in `/tmp/stark-prova-clear` e
+stampa l'indirizzo già col token. È il modello da copiare per il caso che serve.
+
 ### Guardare le notifiche
 
 Due cose vanno sapute prima di provarle, e nessuna delle due si indovina:

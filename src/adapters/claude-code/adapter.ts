@@ -16,21 +16,19 @@ import {
   EMPTY_USAGE,
   type AgentQuestion, type McpServer, type Payload, type PermissionMode, type PromptPart,
 } from '../../core/events.ts'
-
-/** Un'immagine pronta da mandare: i byte per l'agent, il riferimento per il journal. */
-export type PromptImage = {
-  ref: string
-  mediaType: string
-  bytes: number
-  name?: string
-  /** base64. Non finisce nel journal: vedi `PromptPart`. */
-  data: string
-}
+import {
+  optionsFrom,
+  type AdapterHooks, type AgentSession, type PermissionAnswer, type PromptImage,
+  type SessionSpec,
+} from '../../core/adapter.ts'
 import {
   buildOptions, capabilitiesFor, modeChoices, modelChoices, modelSupportsAutoMode,
-  resolveModel, slashCommands, type LaunchOptions,
+  modoDiClaude, resolveModel, slashCommands,
+  type LaunchOptions, type ModoClaude,
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
+import { askToolsFor } from './permissions.ts'
+import { consentiSempre } from './regole.ts'
 import { quotaWindows } from './quota.ts'
 import { resourcesOf } from './summary.ts'
 import { Translator } from './translate.ts'
@@ -42,40 +40,37 @@ import { Translator } from './translate.ts'
  */
 type InCoda = { turnId: string; parts: PromptPart[]; msg: SDKUserMessage; annunciato: boolean }
 
-/** Cosa STARK decide su una richiesta di permesso. */
-export type PermissionAnswer =
-  | { allow: true; input?: Record<string, unknown>; remember?: PermissionUpdate[] }
-  | { allow: false; reason: string }
+/**
+ * Quello che serve ad aprire una sessione di Claude Code: il contratto neutro, piu'
+ * le callback. Non c'e' un «piu' le opzioni di Claude Code»: se ce ne servisse una
+ * che il contratto non prevede, quella e' la cosa da registrare — vedi ADR-012,
+ * paletto n.1.
+ */
+export type AdapterOptions = SessionSpec & AdapterHooks
 
-/** Cosa STARK riporta indietro da una domanda dell'agent. */
-export type QuestionAnswer =
-  | { answers: Record<string, string | string[]>; response?: string }
-  | null   // l'utente ha chiuso la card senza rispondere
-
-export type AdapterOptions = LaunchOptions & {
-  /**
-   * I server MCP che questa conversazione vuole accesi, per nome. Tutti gli altri
-   * vengono spenti prima del primo turno. Omesso vuol dire **nessuno**, che è il
-   * default di STARK: gli strumenti esterni si accendono quando servono, non si
-   * subiscono perché stanno sulla macchina.
-   */
-  mcp?: string[]
-  onPayload: (p: Payload) => void
-  /** Il messaggio nativo, per il file di debug separato dal journal (§13). */
-  onRaw?: (m: unknown) => void
-  /**
-   * Chiamata solo per ciò che la tabella dei permessi di STARK non consente già.
-   * Se manca, tutto ciò che arriva fin qui viene consentito: in `auto` mode è il
-   * comportamento giusto, perché il classificatore ha già deciso a monte (ADR-008).
-   */
-  onPermission?: (r: { requestId: string; toolName: string; input: Record<string, unknown> })
-    => Promise<PermissionAnswer>
-  /** Chiamata quando l'agent fa una domanda a scelta multipla. */
-  onQuestion?: (r: { requestId: string; questions: AgentQuestion[] })
-    => Promise<QuestionAnswer>
+/**
+ * «Consenti sempre», tradotto nella forma che Claude Code capisce.
+ *
+ * Il contratto (`PermissionAnswer.remember`) dice **cosa** ricordare: una stringa, il
+ * soggetto. Che quel soggetto diventi una regola `addRules` scritta in
+ * `.claude/settings.local.json` e' un fatto di questo agent, e prima di ADR-012 lo
+ * costruiva `daemon/registry.ts` — cioe' il daemon decideva in quale file di Claude
+ * Code finiva la regola (falla n.3). Su un altro agent la stessa stringa diventera'
+ * altro: su OpenCode un elemento di `save` mandato con `reply: "always"`.
+ *
+ * Non lo emuliamo piu' a mano: rimandare indietro la regola la fa scrivere all'SDK
+ * (ADR-009).
+ */
+function regolaDaRicordare(soggetto: string): PermissionUpdate[] {
+  return [{
+    type: 'addRules',
+    rules: [{ toolName: soggetto }],
+    behavior: 'allow',
+    destination: 'localSettings',
+  }]
 }
 
-export class ClaudeCodeAdapter {
+export class ClaudeCodeAdapter implements AgentSession {
   private readonly opts: AdapterOptions
   private readonly tr = new Translator()
   private readonly input = new PromptQueue()
@@ -94,16 +89,59 @@ export class ClaudeCodeAdapter {
     // classificatore risolve prima, e la callback non viene mai chiamata (misurato).
     // L'unico punto che gira su OGNI chiamata è l'hook PreToolUse, ed è documentato
     // esattamente per questo. Il set dei matcher È il pannello dei permessi (ADR-008).
-    const ask = this.opts.askTools ?? []
-    if (ask.length > 0) {
+    // Le categorie diventano nomi di tool **qui**, che e' l'unico posto che li
+    // conosce. Prima lo faceva `daemon/registry.ts` chiamando `askToolsFor()`, cioe'
+    // il daemon sapeva che esistono `Bash` e `mcp__*`: la falla n.1 di ADR-012.
+    //
+    // `deny` viaggia sullo **stesso** hook, ed e' la ragione per cui la sola lettura
+    // dell'helper non costa nessuna superficie nuova dell'SDK: il meccanismo dei
+    // permessi c'e' gia', qui la risposta e' semplicemente fissata a «no». Misurato su
+    // un turno vero (`spike/helper-sola-lettura.ts`, 5/5): il modello prova, l'hook
+    // rifiuta, il file **non esiste sul disco**, e il modello lo dice invece di fingere.
+    //
+    // Il vietato vince sul chiesto: un tool in entrambi gli elenchi non deve aprire una
+    // card che poi non si potrebbe onorare comunque.
+    const vietati = new Set(askToolsFor(this.opts.deny ?? []))
+    const ask = askToolsFor(this.opts.ask ?? []).filter(t => !vietati.has(t))
+    if (ask.length > 0 || vietati.size > 0) {
       options.hooks = {
-        PreToolUse: ask.map(tool => ({
+        PreToolUse: [
+          ...[...vietati].map(tool => ({
+            matcher: tool,
+            hooks: [async () => ({
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse' as const,
+                permissionDecision: 'deny' as const,
+                // Il motivo lo legge **il modello**, non l'utente: e' cio' che gli fa
+                // cambiare strada invece di ritentare in cerchio. Dice cos'e' la
+                // sessione, non «vietato» e basta.
+                permissionDecisionReason:
+                  'Questa e\' una chat di sola lettura: puoi leggere, non modificare niente.',
+              },
+            })],
+          })),
+          ...ask.map(tool => ({
           matcher: tool,
           hooks: [async (input: Record<string, unknown>) => {
             const verdict = await this.decide(
               String(input['tool_name'] ?? tool),
               (input['tool_input'] ?? {}) as Record<string, unknown>,
             )
+            // «Consenti sempre» **qui non passa dall'SDK**, e la ragione e' misurata:
+            // `PreToolUseHookSpecificOutput` non ha nessun campo per ricordare
+            // qualcosa, questo hook scavalca `canUseTool` (che invece saprebbe farlo),
+            // e l'hook `PermissionRequest` non scatta mai. Senza questa riga il
+            // bottone si comportava come «Consenti» mentre il journal scriveva
+            // `always`. Vedi `regole.ts` per la tabella delle misure.
+            if (verdict.allow && verdict.remember) {
+              const esito = consentiSempre(this.opts.cwd, verdict.remember)
+              if (esito.error) {
+                this.emit({
+                  k: 'notice', level: 'warn',
+                  text: `«Consenti sempre» non ha potuto scrivere la regola in ${esito.path}: ${esito.error}`,
+                })
+              }
+            }
             // `ask` qui non significa "chiedi": in headless non c'è nessuno a cui
             // chiedere e l'azione muore come errore di tool. Si risponde sempre
             // allow o deny, mai altro.
@@ -115,7 +153,8 @@ export class ClaudeCodeAdapter {
               },
             }
           }],
-        })),
+          })),
+        ],
       } as Options['hooks']
     }
     const q = query({ prompt: this.input.stream(), options })
@@ -516,13 +555,38 @@ export class ClaudeCodeAdapter {
    * lo sa è chi ha ricevuto il comando, cioè noi.
    */
   private fermato = false
+  /**
+   * Il verbo generale (ADR-014). L'`id` lo abbiamo dichiarato noi in `session.created`,
+   * quindi qui si sa cosa vuol dire; chi lo manda no, ed e' il punto.
+   */
+  async setOption(id: string, value: string): Promise<void> {
+    if (id === 'mode') return this.setMode(value)
+    if (id === 'model') return this.setModel(value)
+    this.emit({ k: 'notice', level: 'warn', text: `opzione sconosciuta: ${id}` })
+  }
+
   async setMode(mode: PermissionMode): Promise<void> {
-    await this.q?.setPermissionMode(mode)
-    this.emit({ k: 'session.mode', mode })
+    // Dopo ADR-014 la modalita' arriva come stringa aperta: chi la richiude nelle sei
+    // dell'SDK e' questo adapter, l'unico che le conosce. Una che non c'e' non si
+    // manda — darebbe un errore a runtime su un valore gia' noto come sbagliato — e
+    // non si tace: il Principio 5 vuole la spiegazione, non il silenzio.
+    const m = modoDiClaude(mode)
+    if (!m) {
+      this.emit({
+        k: 'notice', level: 'warn',
+        text: `Claude Code non ha la modalità «${mode}»: non è stata cambiata`,
+      })
+      return
+    }
+    await this.q?.setPermissionMode(m)
+    this.emit({ k: 'session.option', id: 'mode', value: mode })
+    // Anche qui: il traduttore riporta i cambi che vengono dal CLI, e senza saperlo
+    // riemetterebbe questo stesso valore al prossimo `system:status`.
+    this.tr.seedMode(mode)
   }
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model)
-    this.emit({ k: 'session.model', model })
+    this.emit({ k: 'session.option', id: 'model', value: model })
   }
 
   /** ADR-005: lo Sleep è STARK che chiude la sessione. L'agent non sa cosa sia. */
@@ -549,6 +613,9 @@ export class ClaudeCodeAdapter {
     this.created = true
     const model = resolveModel(info['models'], this.opts.model)
     const caps = info['capabilities']
+    const modi = modeChoices()
+    const modelli = modelChoices(info['models'], model)
+    const modoIniziale = String(info['current_permission_mode'] ?? this.opts.mode)
     this.emit({
       k: 'session.created',
       agent: 'claude-code',
@@ -557,13 +624,20 @@ export class ClaudeCodeAdapter {
       capabilities: capabilitiesFor(model),
       tools: [],
       commands: slashCommands(info['commands']),
-      models: modelChoices(info['models'], model),
-      modes: modeChoices(),
+      models: modelli,
+      modes: modi,
+      // ADR-014: gli stessi due, nella forma generale. `models`/`modes` restano
+      // perche' un journal scritto prima ha solo quelli — e perche' toglierli
+      // significherebbe riscrivere la storia invece di leggerla.
+      options: optionsFrom({ mode: modoIniziale, modes: modi, model, models: modelli }),
       ...(Array.isArray(caps) ? { protocolCapabilities: caps.map(String) } : {}),
     })
 
-    const actual = String(info['current_permission_mode'] ?? this.opts.mode)
-    this.emit({ k: 'session.mode', mode: actual as PermissionMode })
+    const actual = modoIniziale
+    this.emit({ k: 'session.option', id: 'mode', value: actual })
+    // Il traduttore deve sapere da dove si parte, se no il primo `system:init`
+    // riemetterebbe la modalità appena scritta un istante fa.
+    this.tr.seedMode(actual)
     // Se chiediamo `auto` e la sessione parte in Manual, l'utente si ritroverebbe a
     // confermare tutto senza sapere perché. Il Principio 3 impone di dirglielo, e si
     // può dire PRIMA del primo prompt invece che dopo.
@@ -692,13 +766,62 @@ export class ClaudeCodeAdapter {
       }
     }
 
+    if (toolName === 'ExitPlanMode') {
+      const plan = typeof input['plan'] === 'string' ? input['plan'] : ''
+      const path = typeof input['planFilePath'] === 'string' ? input['planFilePath'] : undefined
+      this.emit({ k: 'plan.proposed', requestId, plan, ...(path ? { path } : {}) })
+      this.emit({ k: 'session.state', state: 'awaiting', reason: 'piano' })
+      // Senza qualcuno che lo guardi si approva, che è il comportamento di prima:
+      // questa callback è la GUI, e una prova automatica non deve restare appesa.
+      const answer = this.opts.onPlan
+        ? await this.opts.onPlan({ requestId, plan, ...(path ? { path } : {}) })
+        : { approved: true as const }
+      this.emit({ k: 'session.state', state: 'busy' })
+      if (!answer.approved) {
+        this.emit({
+          k: 'plan.replied', requestId, decision: 'rejected',
+          ...(answer.feedback ? { feedback: answer.feedback } : {}),
+        })
+        // Un rifiuto qui non è un errore: è «continua a pianificare», ed è così che
+        // il CLI lo intende. Il messaggio torna al modello come correzione.
+        return {
+          behavior: 'deny',
+          message: answer.feedback
+            ? `L'utente non ha approvato il piano. Cosa cambiare: ${answer.feedback}`
+            : "L'utente non ha approvato il piano. Continua a pianificare.",
+        }
+      }
+      this.emit({
+        k: 'plan.replied', requestId, decision: 'approved',
+        ...(answer.mode ? { mode: answer.mode } : {}),
+      })
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        // `setMode` è un aggiornamento dei permessi dell'SDK, non un comando nostro:
+        // arriva **insieme** all'approvazione, quindi non esiste l'istante in cui
+        // l'agent è ripartito ma la modalità è ancora `plan`.
+        //
+        // E **non** si semina il traduttore, di proposito: qui a cambiare modalità è
+        // il CLI, e il fatto che l'abbia davvero fatto lo deve dire lui. Misurato: lo
+        // dice nel suo `system:status` subito dopo. Scriverlo noi qui vorrebbe dire
+        // annunciare un cambiamento che abbiamo solo chiesto.
+        ...(modoDiClaude(answer.mode)
+          ? { updatedPermissions: [{
+              type: 'setMode' as const,
+              mode: modoDiClaude(answer.mode) as ModoClaude,
+              destination: 'session' as const,
+            }] }
+          : {}),
+      }
+    }
+
     const verdict = await this.decide(toolName, input)
     if (!verdict.allow) return { behavior: 'deny', message: verdict.reason }
-    const remember = verdict.remember ?? []
     return {
       behavior: 'allow',
       updatedInput: verdict.input ?? input,
-      ...(remember.length > 0 ? { updatedPermissions: remember } : {}),
+      ...(verdict.remember ? { updatedPermissions: regolaDaRicordare(verdict.remember) } : {}),
     }
   }
 
@@ -729,7 +852,7 @@ export class ClaudeCodeAdapter {
     // e rimandarne una indietro la scrive in .claude/settings.local.json (ADR-009).
     this.emit({
       k: 'permission.replied', requestId,
-      decision: (verdict.remember ?? []).length > 0 ? 'always' : 'once',
+      decision: verdict.remember ? 'always' : 'once',
     })
     return verdict
   }

@@ -25,7 +25,7 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-001 — Canale di comunicazione con gli agent
   - ADR-002 — Piattaforma: web app locale
   - ADR-003 — Dove vive la memoria di progetto
-  - ADR-004 — Un solo adapter nell'MVP (Claude Code)
+  - ADR-004 — Un solo adapter nell'MVP (Claude Code) — SUPERATA da ADR-012
   - ADR-005 — Ciclo di vita delle sessioni (daemon persistente + Sleep)
   - ADR-006 — Modello dei permessi — SUPERATA da ADR-008
   - ADR-008 — Permessi basati su auto mode (default: zero card, toggle opzionali)
@@ -33,6 +33,9 @@ e va aggiornata a fine sessione prima di cambiare PC.
   - ADR-009 — Agent SDK ufficiale invece del protocollo a mano (supera in parte ADR-001)
   - ADR-010 — Con cosa si scrive la UI (Vite + Svelte 5; il daemon resta senza build)
   - ADR-011 — Notifiche sul telefono via Web Push, e cosa esce dalla macchina
+  - ADR-012 — Il secondo adapter: OpenCode come prova di carico (supera ADR-004)
+  - ADR-013 — Come STARK parla a OpenCode: SDK ufficiale, non ACP
+  - ADR-014 — La modalità dei permessi diventa «opzioni di sessione»
 - **Riferimento tecnico — Claude Code come piattaforma** — https://app.notion.com/p/3c5fef5cacd981f1b556fbe1e2b7bd0e
   Cosa è documentato ufficialmente e cosa no, con le versioni verificate. **Da leggere prima di
   toccare l'adapter**: dice quali pezzi sono garantiti e quali possono cambiare senza preavviso.
@@ -193,7 +196,7 @@ e che non resti niente nell'elenco.
 
 Come si esegue: `README.md`. Node **≥ 22.18** (i `.ts` del daemon girano diretti, senza build;
 la UI invece si compila, vedi ADR-010). `npm run check` prova tutta la catena a costo zero di
-quota — 71 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
+quota — 213 verifiche; `npm run ui:build` poi `npm run stark` aprono STARK nel browser;
 `npm run slice` apre una sessione vera; `npm run tunnel -- https://…` misura se un
 tunnel strozza il flusso.
 
@@ -310,8 +313,11 @@ chiuso**, una riga sola che taglia il flusso («Context cleared · 3 turns befor
 riapre cliccandoci: azzerato non vuol dire cancellato, il journal ce l'ha ancora. Riaperto
 resta rientrato e più spento, se no quei turni tornerebbero identici a quelli veri e sarebbe di
 nuovo invisibile dove il contesto smette di valere.
-Che `/clear` azzeri **davvero** non è stato dedotto dal nome: `spike/clear-probe.ts` lo ha
-misurato con tre prompt veri (BANANA → `/clear` → «che parola?» → «NONLOSO»). Da lì sono usciti
+Che `/clear` azzeri **davvero** non è stato dedotto dal nome: è stato misurato con tre prompt
+veri (una parola nascosta → `/clear` → «che parola?» → «NONLOSO»). La sonda di allora non è
+stata tenuta nel repo — quello che ne è rimasto è il comportamento, in
+`src/adapters/claude-code/translate.ts` e in `docs/event-model.md`; la sonda che c'è,
+`spike/risveglio-dopo-clear.ts`, prova l'altra metà, cioè che il taglio sopravviva allo Sleep. Da lì sono usciti
 due fatti che non si indovinano: il CLI lo annuncia con un messaggio suo, `conversation_reset`,
 dentro il turno del comando — quindi **STARK non legge i prompt** per capire cosa fanno, chiede
 al CLI; e il `new_conversation_id` di quel messaggio **non** è il riferimento per il risveglio
@@ -923,6 +929,11 @@ che avrei usando la CLI»).
 
 **La differenza vera non era il classificatore: era la modalità.** Misurato a costo zero (solo
 handshake): `claude` senza `--permission-mode` parte in **`default`**, STARK chiedeva **`auto`**.
+**Correzione del 27 agosto, sera** (`docs/costo-token.md`): la misura era giusta e la conclusione
+no. La doc ufficiale ha una tabella di *chi* parte in quale modalità, e le righe sono due:
+`claude -p` **e l'Agent SDK** partono in `default`, ma **un piano Pro/Max/Team in un terminale**
+parte in **`auto`**. Cioè il termine di paragone vero — `claude` interattivo, che è quello che
+usa l'utente — era già in `auto`, e STARK non stava aggiungendo nessun classificatore.
 Era l'unica differenza strutturale fra i due, ed era **cablata** — nessun modo di toccarla.
 Adesso è un'impostazione (`Settings.defaultMode`, Permissions → «New chats start in…»), con
 `auto` ancora come default perché ADR-008 non viene rovesciata qui: quella decisione era
@@ -950,6 +961,316 @@ numero del CLI — non c'è un sovrapprezzo di STARK.
 
 Le sonde restano in `spike/`: `modo-default.ts`, `costo-classificatore.ts`, `costo-risveglio.ts`,
 `risveglio-freddo.ts`. Vanno rifatte a ogni salto di versione del CLI.
+
+**Quattro cose per l'MVP, e una di esse era la domanda sbagliata** (27 agosto 2026, chieste
+dall'utente dopo aver domandato «cosa manca per considerare completo l'MVP?»). Erano: la
+**cache dell'elenco**, la **checklist dei todo**, il **plan mode**, la **ricerca**. La seconda
+si è rivelata inesistente, e al suo posto ne è emersa una più grossa.
+
+**L'elenco rileggeva ogni journal da capo, fino a quattro volte al secondo.** `registry.list()`
+faceva `reduce(Journal.read(...))` su **ogni** file a ogni colpetto SSE. Misurato sul journal
+vero da 12 MB (25.143 eventi): **82 ms per una sola conversazione**, 619 ms con dieci — di
+event loop **bloccato**, perché `readFileSync` e `JSON.parse` sono sincroni: a fermarsi era
+tutto, SSE compreso. La correzione non è una cache qualunque: è la prima volta che
+l'append-only del §13 viene **usato** invece che solo rispettato. `Journal.readFrom(path,
+offset)` legge solo la coda, e `reduce` non è altro che `applyTo` ripetuto — quindi lo stato di
+prima più le righe nuove *è* lo stato di adesso. Da 619 ms a **0,13 ms** a riposo, 0,31 ms con
+una riga nuova. Nello stesso giro: il journal di una sessione **viva** non si rilegge affatto,
+perché la sua riga la scrive il processo e la sovrascriveva comunque — era lavoro buttato, e per
+giunta proprio sulla chat più grande e più spesso ricalcolata. Due dettagli che non si
+indovinano e che le prove tengono fermi: l'offset avanza solo oltre le righe **complete** (una
+`writeSync` in corso può lasciare l'ultima a metà), e un file più **corto** dell'offset non è la
+coda dello stesso file — è un altro file, e si rilegge da capo.
+
+**`TodoWrite` non esiste.** Era la mia seconda proposta, e la premessa era sbagliata: la
+checklist che si ricorda dalla TUI **non è fra i 32 tool** che il CLI 2.1.241 dichiara nel suo
+`system:init` (verificato leggendo la cattura nativa di una sessione vera, non i tipi né la
+memoria). È esattamente la regola «non dedurre, verificare» applicata a me stessa: avevo
+descritto come «il pezzo più visibile della TUI che manca a STARK» una cosa che non c'è più.
+Scritto in `docs/event-model.md` §16.10 perché sembra il contrario, e chi verrà dopo rischia di
+rimetterlo.
+
+**Al suo posto: i lavori che continuano da soli.** Cercando cosa il CLI usa *oggi* al posto dei
+todo, sono saltati fuori due messaggi che STARK buttava via — `system:task_started` e
+`system:task_notification`. Non è un dettaglio: un comando lanciato **in background** risponde
+subito «Async agent launched successfully», quindi il suo `tool.ended` arriva positivo una riga
+dopo e la conversazione lo mostrava **finito**. Misurato su un journal reale: `tool_result` alla
+riga 53, esito vero alla riga **810**, cioè in un altro turno. Su una sola conversazione vera:
+**316 lavori, 15 in background, 5 sub-agent e 10 falliti** — quei dieci fallimenti non erano
+visibili da nessuna parte. Due eventi canonici nuovi (`task.started`/`task.ended`, §7) che si
+attaccano alla **riga del tool che li ha lanciati**, non a una riga nuova: un lavoro in
+background non è un secondo fatto, è ciò che si scopre dopo su un fatto già mostrato. Il
+collegamento fra le due metà è il `taskId` e non il `callId`, che nella notifica non c'è —
+e comunque la riga sta in un turno che non è più quello aperto. Verificato **sui dati veri**:
+`spike/task-ui.ts` ripassa una cattura nativa dal traduttore e apre la UI su quel journal —
+312 righe con il loro lavoro attaccato, e a schermo la riga di una sonda uccisa che adesso dice
+`failed` col motivo, dove prima c'era un ✓ verde.
+
+**Il piano si può leggere** (era la terza). `plan` era una delle modalità offerte dalla barra,
+ma `ExitPlanMode` non compariva in `src/` né in `ui/src/`. Verificato dal vivo
+(`spike/piano-todo-subagent.ts`): arriva come richiesta di permesso, con `{plan, planFilePath}`
+— e siccome `plan` non è fra i campi in cui `summarize()` cerca il soggetto di un'azione, quella
+card **non mostrava niente**. Si approvava un piano che non si poteva leggere. Ora è il terzo
+stato bloccante del blocco in basso, accanto ai permessi e alle domande, con un corpo che scorre
+e il markdown reso; e due eventi canonici propri (`plan.proposed`/`plan.replied`), per la stessa
+ragione per cui le domande non sono permessi: un permesso si concede riconoscendo un soggetto,
+un piano si approva **leggendolo**. Le due approvazioni sono due bottoni distinti — «accept
+edits» e «ask me first» — perché nel terminale sono due voci, e `mode` viaggia **con**
+l'approvazione (`updatedPermissions: [{type:'setMode'}]`, che funziona: misurato), se no
+resterebbe una finestra in cui l'agent è ripartito ma la modalità è ancora `plan`.
+
+Quella prova dal vivo ha trovato un bug che nessuna prova offline avrebbe visto: **STARK
+conosceva solo le modalità che imponeva lui**. Il CLI passava davvero ad `acceptEdits` — lo
+dichiarava nel suo `system:status` — e la barra di stato continuava a dire `plan`. Vale anche
+per `EnterPlanMode`, che è un **tool dell'agent**: l'agent può cambiare modalità da sé. Ora il
+traduttore emette `session.mode` ogni volta che un messaggio nativo ne dichiara una diversa
+dall'ultima nota.
+
+**E si cerca** (la quarta). Una casella sopra l'elenco, e i risultati che prendono il posto
+dell'albero: cercare non è un posto dove andare, è un modo di guardare l'elenco. Due ricerche
+tenute separate perché sono due domande diverse — **Titles** (filtro locale: i titoli sono già
+tutti nel browser) e **Inside conversations** (il daemon, che ha i journal). La cosa che decide
+tutto il resto: si cerca negli **snapshot**, non nei file. Quindi trova ciò che la UI mostra —
+una risposta arrivata in trecento `text.delta` non esiste come frase intera in nessuna riga del
+journal, e cercarla riga per riga non la troverebbe mai — e non rilegge niente, perché quegli
+snapshot sono gli stessi della cache di cui sopra. Su dati veri: **16 ms** la prima richiesta,
+**2,9 ms** la seconda. Premere un risultato apre la conversazione **su quel turno**, che si apre
+da sé, si porta in vista e lampeggia; se stava sopra un `/clear`, si apre anche il capitolo che
+lo conteneva.
+Tre difetti trovati **guidando la UI vera**, nessuno visibile leggendo il codice o dalle prove
+offline: una chiave duplicata in un `{#each}` (`each_key_duplicate`) che lasciava la barra su
+«Searching…» per sempre — due corrispondenze possono cadere allo stesso punto dello stesso
+turno; un tetto di cinque risultati che ne lasciava passare **48**, perché il limite si
+controllava solo a fine turno e un turno solo ne conteneva decine; e il salto al turno trovato
+che finiva **fuori vista**, perché l'auto-scroll rileggeva `stick` fuori dal frame e non dentro,
+quindi vinceva la corsa e riportava in fondo (misurato: turno a −684px, scroll incollato al
+massimo; dopo: turno a +45px). Il terzo si è corretto **chiudendo la corsa** — rileggere `stick`
+dentro il `requestAnimationFrame` — invece di inseguirla con un ritardo.
+
+Nello stesso giro è caduta un'ipotesi che sembrava un difetto: un «testo fantasma» dietro il
+bottone «Keep planning» nella prima fotografia. Misurati i rettangoli veri: `sovrapposti: false`,
+tutti e tre premibili con `elementFromPoint`. Era un fotogramma dell'animazione del blocco che
+si espande. Senza la misura si sarebbe «corretto» un bug inesistente.
+
+`npm run check` passa a **143**, `npm run daemon` a **34**. Sonde nuove in `spike/`:
+`piano-todo-subagent.ts` (costa quota), `piano-ui.ts` (costa un turno), `ricerca-ui.ts` e
+`task-ui.ts` (costo zero: rileggono journal e catture già esistenti).
+
+**I capitoli chiusi da un `/clear` stanno sopra il bordo** (27 agosto 2026, chiesto
+dall'utente con uno screenshot: «ha troppo spacing, e li voglio come WhatsApp o
+Telegram»). Due cose. Lo spacing: fra due tagli di fila restava 14+8+14 = **36px**,
+perché in un flex i margini **non collassano** — ora fra due righe consecutive c'è il solo
+`gap` di `.conv` (**8px**, 11 da telefono con lo zoom), e servono due regole
+(`.cleared + .cleared` e `.cleared:has(+ .cleared)`), non una: azzerare solo il
+margine sopra ne lascia comunque 18.
+La seconda è l'impianto: il capitolo vivo è alto **almeno quanto lo scroller**
+(`.chapter.live { min-height: 100% }`), e siccome la conversazione parte già in fondo, il
+primo turno della conversazione nuova cade **esattamente** sul bordo superiore e tutto ciò
+che lo precede resta più in alto — si risale a prenderlo, e per tornare c'è la freccia che
+c'era già. `flex-grow` **non** funziona ed è il pezzo che non si indovina: crescere
+distribuisce lo spazio *avanzato*, quindi il capitolo si sarebbe fermato a riempire la
+vista senza mai sfondarla — niente spazio da scorrere, e le righe sarebbero rimaste
+visibili lo stesso. Il `100%` invece è alto quanto il **content box**, che esclude i 12px
+di padding in basso: è quello che fa cadere l'inizio sul bordo al pixel invece che dodici
+sopra. Subito dopo un `/clear` il capitolo vivo non esiste ancora e va creato vuoto, se no
+le righe resterebbero in mezzo a una schermata deserta; e una schermata **completamente**
+vuota si legge come un guasto, quindi lì (e solo lì) c'è una riga che dice dov'è finito il
+resto. Misurato su Chrome e su **WebKit** (via l'HTTPS di Tailscale, perché su `http://`
+semplice WebKit non carica STARK — vedi più sopra): 0 righe visibili aperta la chat, tutte
+risalendo. `tools/prova-clear.ts` genera i journal per i casi che non capitano a comando.
+
+**E un `/clear` non sopravviveva allo Sleep** (27 agosto 2026, trovato rispondendo a «il
+comportamento è come ce lo aspettiamo?» dopo che l'utente aveva risvegliato la chat).
+`spec.resume.ref` faceva **due mestieri**: dare il nome al journal e dire al CLI quale
+conversazione riprendere. Di norma coincidono — all'apertura STARK passa il proprio id
+come `sessionId` — ma un `/clear` li fa divergere, perché il CLI **sposta la conversazione
+su un id nuovo**, che dichiara nel `system:init` successivo (→ `session.resumeRef`, già
+nel journal e mai letto da `open()`). Risultato: il risveglio riapriva la conversazione di
+**prima** del taglio. Misurato sulla chat vera dell'utente: **129.387** token prima del
+`/clear`, **57.748** dopo, e di nuovo **129.387** al risveglio. Fix: `refDaRiprendere()`,
+tre righe, `snapshot.resumeRef ?? spec.resume.ref` per i risvegli veri (un `fork` resta
+dov'è: lì lo snapshot è quello del journal nuovo, cioè vuoto). Provato con l'A/B che
+chiude il cerchio (`spike/risveglio-dopo-clear.ts`, costa quattro turni corti): parola
+nascosta prima del taglio, `/clear`, Sleep, risveglio → col ref dal journal l'agent
+risponde **NONLOSO**, col ref vecchio risponde **MELANZANA**. Stessa conversazione, stessa
+macchina, minuti di distanza: cambia solo quale ref si passa. Vale la pena sapere perché
+non era mai emerso: `npm run resume` usava già `first.resumeRef`, cioè la cosa giusta — a
+sbagliare era la sola via che usa l'utente, quella della UI. `npm run daemon` passa a
+**38**: le quattro nuove tengono ferma la regola senza aprire una sessione, perché è una
+scelta fra due stringhe.
+
+**Il vocabolario canonico è stato messo sotto carico vero, e il confine del §1 è
+diventato codice** (27 agosto 2026, ADR-012). Due giri nella stessa sessione.
+
+**P21 — la prova di carico.** La §15 della specifica era stata scritta a tavolino sui 94
+schemi `Event*` di OpenCode; questa è la parte scritta dopo averci fatto passare dei
+dati: server 1.17.20 su una cartella di prova, un turno che legge un file, ne scrive uno
+e lancia un comando. Il modello **tiene dove è stato disegnato su OpenCode** — `text.*`,
+`reasoning.*`, `step.*`, `permission.*` corrispondono nome per nome, e non è fortuna: è
+§14 che li aveva presi da lì — e **si piega dove è stato disegnato su Claude Code**.
+Le cose che valgono: `file.edited` e `session.diff` **non arrivano** (una `write` che ha
+creato davvero il file non ne ha prodotto nessuno dei due, in nessun giro: l'effetto sta
+dentro `tool.success.structured`, **senza hunks**, e il diff su OpenCode si *chiede*) —
+quindi la schermata Effetti, che poggia sugli hunks che Claude Code regala, su OpenCode
+richiede che sia l'adapter a costruirli; `session.idle` **non si è mai visto** su quattro
+giri, compreso quello finito bene, quindi «il turno è finito» lì è una *deduzione* del
+client e non un fatto annunciato; e `todo.updated` **esiste**, il che corregge la
+conclusione presa il giorno prima — «`TodoWrite` non esiste» è vero *di Claude Code
+2.1.241*, ma da lì avevo concluso troppo. La domanda giusta non era «il tool esiste?» ma
+«**il fatto** esiste?». È la prima cosa che la prova ha trovato *mancante* nel modello, ed
+è mancante per il motivo che ADR-012 prevedeva: il modello ha seguito un agent solo.
+Un dettaglio che è costato un giro intero: lo spec dichiara il carico utile sotto
+`properties`, **il filo manda `data`** — il permesso *era* arrivato e la sonda non lo
+riconosceva. Detto in chiaro anche cosa non si è potuto misurare: la chiave OpenCode Zen
+di questa macchina può usare **un solo modello** (il catalogo ne elenca 29 a chiunque,
+gli altri danno 401) e quello si rompe spesso a metà turno, quindi `question.v2.asked`,
+il revert, la compattazione e il cambio di agent restano visti solo nello spec.
+
+**Il confine del §1, da parola a codice.** Cercando il contratto da far implementare al
+secondo adapter si è scoperto che **non esisteva**: c'era la sola classe concreta, e a
+importarla non erano le sonde ma `daemon/registry.ts`, `server.ts`, `memoria.ts`. Il
+paletto n.1 dell'ADR era già violato **dalla parte di Claude Code**. Quattro falle, tutte
+con lo stesso modo di fallire — **in silenzio**: `askTools: string[]` portava `Bash` e
+`mcp__*` fino alla rotta HTTP (ora `ask: PermissionCategory[]`, e a tradurre è l'adapter,
+come `events.ts` diceva già a parole); `configDir` era il nome della variabile d'ambiente
+di Claude Code ed era arrivato **fin dentro la UI** (ora `profile`, stringa opaca);
+`PermissionAnswer.remember` era un `PermissionUpdate` **dell'SDK Anthropic costruito
+dentro `registry.ts`**, `destination: 'localSettings'` compreso — il daemon decideva in
+quale file di Claude Code finiva la regola (ora è una stringa: *il soggetto*); e
+`Live.adapter` era la classe concreta come tipo (ora `AgentSession`).
+`memoria.ts` è passato sotto il confine come capacità **opzionale**
+`setCommandDescriptions`, perché «scrivi una `description`» è del dominio ma «scrivila
+nel `CLAUDE.md` globale» è la risposta di *quell'* agent. `src/adapters/index.ts` è ora
+l'unico file che nomina un agent specifico.
+Verificato **dal vivo**, non per esito HTTP: aperta una sessione con un `profile` che
+punta a una cartella nuova, il processo figlio ci ha creato dentro `sessions/`,
+`projects/` e `.claude.json`. Se il rinomino si fosse perso per strada quelle cartelle
+sarebbero nate nel profilo vero — è la sola prova che distingue «il campo arriva» da «il
+campo esiste». `npm run check` passa a **149**, `npm run daemon` resta a 38.
+Scritto anche cosa resta **fuori** dal confine e si sceglie di lasciarcelo: le sonde che
+aprono sessioni vere importano ancora la classe, e la UI spiega cos'è un profilo
+nominando `CLAUDE_CONFIG_DIR` — testo corretto oggi, falso il giorno in cui la stessa
+schermata dovrà descrivere il profilo di un altro agent.
+
+**La prova di carico allargata, e il disegno dell'adapter** (27 agosto 2026, chiesto
+dall'utente: «leggiti la documentazione ufficiale, sperimenta, e quando hai dati veri valuta come
+costruire l'adapter»). Tre sonde nuove, due correzioni a me stessa, due ADR.
+
+**L'SDK ufficiale esisteva e la P21 aveva sbagliato strada.** `@opencode-ai/sdk`, versionato
+**appaiato al CLI** (1.17.20 ↔ 1.17.20) come `@anthropic-ai/claude-agent-sdk` ↔ Claude Code, ed
+espone `createOpencodeServer()` — sa avviare il processo da sé, l'analogo di `query()`. Ora è una
+dipendenza dichiarata (**ADR-013**), con i costi scritti e non nascosti: la superficie giusta per
+una GUI è `/v2`, **ufficiale ma non documentata** (188 rotte pubblicate, un terzo documentate,
+zero della famiglia `/api/*`), e il repo dichiara che quel pacchetto sarà sostituito da
+`sdk-next`.
+
+**ACP valutato a fondo e scartato come modello canonico.** 39 agent lo parlano, OpenCode
+nativamente. Ma l'adapter ACP **ufficiale** di Claude ha dovuto aggiungere **sei estensioni
+proprietarie** per esprimerlo, e ACP dichiara la quota del piano **fuori scope** per iscritto.
+L'elenco di ciò che gli manca — quota, categorie del contesto, compattazione, `/clear`, fila
+FIFO, classificatore, revert, sotto-agent annidati, MCP a caldo, ricerca file — è, una per una,
+la lista delle cose aggiunte a STARK dopo aver misurato che il CLI le faceva e la GUI no. Cioè il
+Principio 5 in forma di elenco. Resta ottimo come **terzo adapter** futuro, dietro lo stesso
+contratto.
+
+**Due correzioni a quello che avevo scritto poche ore prima.** (1) Su OpenCode **gli hunks ci
+sono**: `FileDiff.patch` è in formato git e `step.ended` porta `snapshot` e `files[]` — cambia la
+*porta* (si chiedono invece di arrivare), non la fattibilità. (2) «I tipi non sono i fatti»,
+**terza volta in un giorno**: l'SDK di Claude Code dichiara `TodoWriteInput` e una famiglia
+`TaskCreate/TaskUpdate/TaskList`, il che sembrava smentire §16.10 — ma la lista **runtime** di una
+sessione vera (60 tool) ha `Task`/`TaskOutput`/`TaskStop` e **non** ha `TodoWrite` né i
+`TaskCreate`. §16.10 regge, e ci si aggiunge la regola che l'ha salvata: **la fonte di verità è
+l'handshake, non lo schema**. Stessa forma dell'hook `PermissionDenied` (dichiarato, mai
+chiamato) e di `session.wait` di OpenCode (nei tipi, «not available yet» dal server).
+
+**Il contratto del §1 regge senza modifiche**, ed è il primo risultato vero del secondo adapter:
+il backend di OpenCode tiene **un server condiviso** con N sessioni dentro, quello di Claude Code
+**spawna un processo per sessione**, e chi sta sopra non vede la differenza. Ne segue però che la
+premessa di ADR-005 «risvegliare costa quota» è vera **di Claude Code**, non del dominio: su
+OpenCode non c'è nessun contesto da rileggere.
+
+**Dove si piega, e cosa si è deciso** (§14-bis di `docs/event-model.md`): `PermissionMode` è
+vocabolario di Claude Code **dentro il modello** — OpenCode non ha modalità, ha **agenti** con
+modello e permessi propri — e diventa **«opzioni di sessione» dichiarate dall'agent**
+(**ADR-014**; ci sono arrivati anche gli altri: ACP ha deprecato `session/set_mode` per
+`set_config_option`, e STARK era già a metà strada con `ModelChoice[]`/`ModeChoice[]`). Entrano
+tre fatti nuovi dietro `Capabilities` — **`todo`**, **`session.retried`** e **`revert`**, l'ultimo
+scelto dall'utente sapendo che è il più caro dei tre perché non è un evento ma una schermata da
+disegnare. E nascono tre capacità nuove, che sono i punti in cui i due agent **non** si
+somigliano: `planQuota` (su OpenCode non c'è un piano, c'è una chiave), `mcpPerSession` (là
+`mcp.connect` prende `{name, directory}`, non un `sessionID` — l'unica funzione con cui STARK
+aveva raggiunto il CLI, alla lettera non esprimibile) e `turnEnd` (`session.idle` non si è mai
+visto in otto giri e `session.wait` non è implementato: la fine del turno si **deduce**).
+
+**Quello che NON si è potuto misurare, scritto invece che dedotto.** La chiave OpenCode Zen di
+questa macchina regge **un solo modello**, e quello si rompe a metà turno: la P23 è fallita su
+tre scene su quattro. Restano non visti dal vivo `todo.updated`, `question.v2.*`, il sotto-agent
+e un `file.edited` da un edit vero. Sono nello spec e nei tipi — cioè esattamente il genere di
+certezza che le due correzioni qui sopra insegnano a non prendere per buona.
+
+**Il secondo adapter esiste, e ADR-014 è fatta** (27 agosto 2026, sera). Il giorno più lungo
+del progetto, e vale la pena leggerlo in ordine perché ogni passo è nato da quello prima.
+
+**L'adapter OpenCode gira** (`npm run opencode`, 16/16 dal vivo). Il contratto del §1, scritto
+la mattina guardando **un solo** agent, **non è stato toccato**: il daemon apre una chat
+passando `agent: 'opencode'` e non sa nient'altro. Sotto, `host.ts` tiene **un server condiviso**
+con N conversazioni mentre Claude Code **spawna un processo per conversazione**, e chi chiude
+una sessione non sa quale delle due cose ha fatto. Era la domanda per cui ADR-012 esiste, e la
+risposta è sì. Ne segue però che la premessa di ADR-005 — «risvegliare costa quota» — è vera
+**di Claude Code**, non del dominio.
+Il secondo adapter fa in un punto **meno** lavoro del primo: la fila FIFO dei prompt è nel
+protocollo (`delivery: 'queue'`) e «consenti sempre» è una parola (`reply: 'always'`).
+
+**Tre difetti che solo un secondo agent poteva far emergere**, tutti visti guardando: il menu
+dei modelli **non aveva un tetto** (`max-height` esisteva solo nella media query del telefono —
+con gli 8 modelli di Claude Code non si notava, con i **61** di OpenCode le voci in fondo
+finivano sopra il bordo e non si potevano premere); la barra mostrava `auto`, **una modalità che
+l'adapter aveva appena dichiarato inesistente**; e `'default'` è vocabolario di Claude Code —
+là è un alias vero, su OpenCode non vuol dire niente, e una chat nata così restava sul default
+del server, che qui è `big-pickle`, **morto a monte**: una chat nata rotta senza via d'uscita.
+
+**«Consenti sempre» non consentiva niente** — bug vecchio quanto i toggle dei permessi, trovato
+verificando che il secondo adapter non avesse rotto il primo, e **verificato con `git show` che
+non fosse mio**. Quattro giri misurati con un `Write` (non un `echo`: i comandi innocui sono
+pre-approvati e non chiedono niente — ci sono cascata una volta): l'hook `PreToolUse`
+**scavalca `canUseTool`**, e il suo tipo di ritorno non ha alcun campo per ricordare qualcosa;
+l'hook `PermissionRequest`, che nei tipi sarebbe la porta giusta, **non scatta mai**. Ma l'hook
+è la strada che STARK usa sempre (in `auto` il classificatore risolve prima), quindi ogni volta
+che una categoria era su «chiedi» il bottone si comportava come «Consenti» **e il journal
+scriveva `always`**: la bugia su disco che il commento nel codice prometteva di evitare.
+Il Principio 5 dice che STARK non deve poter meno del CLI, e nella TUI il «sempre» funziona:
+quindi non si toglie il bottone, **si scrive la regola** (`adapters/claude-code/regole.ts`), col
+formato misurato — non inventato — e la condotta di `memoria.ts`: è un file **dell'utente**, non
+si riscrive, e un JSON illeggibile si rifiuta invece di sovrascriverlo.
+
+**ADR-014: la modalità esce dal modello.** `PermissionMode` era l'enumerazione delle sei
+modalità di Claude Code **dentro `core/events.ts`** — la quinta falla del confine, e l'unica che
+stava nel modello e non nel daemon. Ora è una stringa aperta e chi la può usare lo **dichiara
+l'agent**: `SessionOption`, l'evento `session.option`, il comando `session.setOption`. La barra
+di stato è un ciclo su ciò che le arriva, disposto per `kind` — che è presentazione, non un
+elenco di parole da conoscere. Misurato guidando la UI: **OpenCode** mostra `build` · `MCP none`
+· `opencode/big-pickle` con le **sue** descrizioni; **Claude Code** mostra `auto` · `MCP none` ·
+`claude-opus-5[1m]` con le sei e `bypassPermissions` spenta con la ragione vera.
+Tre cose imparate facendola: i **journal già scritti** si disegnano con lo stesso codice dei
+nuovi (se `options` è vuoto la UI chiama la **stessa** `optionsFrom` degli adapter — un solo
+percorso, non due che divergono); **`note` non è `reason`** (uno è un avviso su una scelta che
+si può fare, l'altro dice perché una voce è spenta — ed è la distinzione che ha tolto «no auto
+mode» da tutti e 61 i modelli di OpenCode); e **le descrizioni le scrive l'agent**, perché
+guardando la barra si è visto che su OpenCode la voce `plan` mostrava la frase di *Claude Code*,
+capitata lì per omonimia: vera per caso, falsa nei fatti.
+
+**Regressione su Claude Code: intatta**, provata su sessioni vere e non per esito HTTP —
+`npm run slice` (invariante §4 OK), `slice` con `STARK_ASK=shell,edit` (le categorie diventano
+davvero `Bash`, `Write`, `Edit`), `queue` 6/6, `resume` 4/4, e la UI guidata fino alla risposta.
+
+**Una nota di metodo che si è ripetuta cinque volte in un giorno**: una prova che guarda il
+posto sbagliato **non fallisce — mente, o scade**. `blocks` invece di `parts`; il chip del
+modello; il testo del menu (mostra l'etichetta, non l'id); `pending` invece di
+`pendingPermissions`; e un `echo` pre-approvato che dava «il meccanismo non scatta» quando era
+solo silenzio. Leggere il nome vero costa dieci secondi; indovinarlo costa un giro.
+
+`npm run check` 143 → **171**, `npm run daemon` 38, `npm run opencode` **16** — numeri
+**del ramo del secondo adapter, prima del merge**; i totali di oggi stanno più in basso.
 
 **Il Finder di sistema per "New chat"** (27 agosto 2026, chiesto dall'utente dopo aver
 visto lo screenshot del browser manuale: «non è conveniente»). Accanto — non al posto —
@@ -1032,8 +1353,9 @@ oltre agli screenshot: split orizzontale (594+594×900), split verticale annidat
 destro (tre pannelli, 890/297/297 dopo il ridimensionamento), divisore trascinato e
 **ricaricamento** che restituisce le stesse identiche larghezze, chiusura che collassa il
 genitore rimasto con un figlio solo, e a 390px `.split`, `.pane`, `.hdl` e `×` **tutti a zero**
-col layout salvato intatto. `npm run check` resta **109**, `npm run layout:check` è nuovo a
-**22**, `svelte-check` 0 errori su 107 file.
+col layout salvato intatto. `npm run check` resta **109** (ramo del layout, prima del merge),
+`npm run layout:check` è nuovo a **22**, `svelte-check` 0 errori su 107 file.
+
 **Si arriva da fuori casa senza Tailscale** (27 agosto 2026, chiesto dall'utente:
 «vorrei collegarmi anche fuori casa senza Tailscale»).
 
@@ -1064,29 +1386,191 @@ l'astrazione `Canale` è nata lì, ma regge da sé — è **una** decisione (`ca
 canali, e il bug del progetto silenziato che taceva solo nella UI l'ha corretto quella
 estrazione, non il bot.
 
-Passo corrente: **le due misure mai fatte** (costo in quota del classificatore, costo del
-risveglio di una conversazione lunga), che sono l'ultima cosa fra qui e la Fase 1 dichiarata
-chiusa. Poi **l'adapter per OpenCode** (chiesto dall'utente il 27 agosto 2026). Supera
-ADR-004, che riservava l'MVP a Claude Code: va scritto un ADR nuovo con la motivazione, non
-cambiato quello vecchio. Restano i divieti veri (`deny`), le due misure di quota mai
-fatte, e sul filone telefono la durata della credenziale (§5) e la seconda misura di
-sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto giusto).
+**Dove siamo davvero, dopo il merge del 27 agosto** (`f0cb303`: il ramo del secondo adapter,
+quello del layout multi-pannello e quello dell'accesso da fuori casa, uniti insieme).
+Qui c'era scritto «passo corrente: le due misure mai fatte, poi l'adapter per OpenCode».
+**Sono fatte entrambe**, e lo dice questo stesso file poche righe più su: il merge ne aveva
+lasciate **due copie**, ciascuna ferma al proprio ramo, e ognuna mandava a rifare lavoro
+finito. Cade con loro anche il «va scritto un ADR nuovo»: ADR-012, 013 e 014 esistono.
+
+I numeri delle suite scritti nelle sezioni qui sopra sono **per ramo, prima del merge**.
+Dopo il merge, misurati il 27 agosto: `npm run check` **211**, `npm run layout:check` **22**,
+`npm run telegram` **54**, `npm run opencode` **16**, `npm run daemon` **60**.
+
+**Una prova che dipendeva dalla macchina che la esegue** (trovata nello stesso giro,
+rilanciando le suite per rimettere in fila i numeri dopo il merge). `npm run daemon` dava
+59 su 60, e la rossa era `sub VAPID = il primo host del perimetro`. Non era un guasto del
+push: la prova chiamava `perimetro(['stark.esempio.test'])` e si aspettava che `soggetto()`
+tornasse quell'host, ma `perimetro()` ci **somma** l'hostname Tailscale della macchina, che
+finisce **primo** — misurato, non dedotto: `['deus-stark.tailaa7e75.ts.net',
+'stark.esempio.test']`. Quindi verde su una macchina senza Tailscale e rossa su questa, cioè
+verde sul portatile e rossa sul fisso. Corretta la **prova**, non `soggetto()`: costruisce
+ora un `Perimetro` sintetico invece di chiederlo alla macchina, così misura la regola —
+«il `sub` è il primo host ammesso» — e non la configurazione di rete di chi la lancia.
+Quale dei due host debba avere la precedenza quando ci sono entrambi resta una domanda
+aperta, e adesso è una domanda sul comportamento invece che un rosso da interpretare.
+
+**Il lavoro di un turno sta in un blocco solo** (27 agosto 2026, chiesto dall'utente: «gli
+agent passano molto tempo a informare cosa stanno facendo, e solo alla fine fanno un recap —
+raggrupperei tutto prima del blocco finale»). Aperto un turno, fra la richiesta e la risposta
+c'è una riga sola — `259 operations · 51 notes` — che si apre sull'elenco esatto di prima.
+Dentro ci vanno tool, ragionamenti e le **narrazioni di servizio**; fuori restano la risposta
+finale, le domande/permessi con la risposta data, il testo che introduce una domanda, la
+compattazione, i retry e l'operazione in corso.
+
+Un raggruppamento c'era già, e non serviva quasi a niente: accorpava tool e reasoning
+**consecutivi**, e un testo qualunque lo spezzava. La premessa era scritta a mano lì accanto —
+«se in mezzo l'agent scrive del testo, quel testo è la prova che si è fermato a dire
+qualcosa» — sembrava ovvia, ed è caduta alla prima misura. Sui journal veri di questa
+macchina un testo interstiziale ha **mediana 131 caratteri** (710 casi, solo 2 sopra gli 800):
+è la didascalia di ciò che sta per fare, non un pensiero che finisce. E siccome l'agent ne
+scrive uno ogni tre o quattro tool, spezzare lì voleva dire **non raggruppare mai**: un turno
+vero da 418 parti restava **103 blocchi** in colonna. Adesso ne fa **2**, e il turno intero —
+53 minuti di lavoro — sta in una schermata. Media su 48 turni veri: da **29,6 a 2,5** blocchi.
+
+Il pezzo che non si indovina è **dove tagliare**, e non è una soglia di lunghezza: è la
+posizione. Il testo scritto **subito prima di una domanda** ha mediana **2631** caratteri,
+cioè la taglia del recap finale (**2487**), perché è la stessa cosa — l'agent che smette di
+raccontare e si rivolge a te. Nasconderlo dentro il gruppo avrebbe lasciato nel flusso una
+risposta senza la domanda a cui rispondeva. Sono due specie nette (interstiziali: p90 245
+caratteri), e si separano per posizione senza niente da tarare. Il recap si riconosce così:
+l'ultimo testo **e** ultima parte del turno — su un turno interrotto quel testo non c'è, e
+prendere «il testo più in basso» direbbe che una risposta c'è quando non c'è (la coda è lunga
+esattamente 1 in 46 turni su 48, 0 negli altri due: non serve un caso generale).
+
+Deciso con l'utente, non da sola: **il gruppo resta chiuso anche mentre l'agent lavora** («mi
+va bene più calmo») — si vede il contatore salire e l'operazione in corso, non il muro che
+scorre. E niente conteggio dei falliti nell'intestazione, che avevo proposto e non è stato
+voluto. Il conteggio delle note sta nello **stesso** `.k` delle operazioni, non nel `.v`
+spento accanto: sono due conti della stessa cosa, e darne uno in tono minore direbbe che vale
+meno.
+
+Una conseguenza andava chiusa nello stesso giro: da quando i testi stanno dentro il gruppo, un
+risultato di **ricerca** può cadere lì — e portare in vista un turno in cui la frase trovata è
+dentro una riga chiusa è di nuovo «non portare in vista niente», la stessa malattia del
+capitolo di `/clear` già corretta a suo tempo. Arrivando da una ricerca i gruppi si aprono
+tutti: una `Match` porta il `turnId` e non la parte (`core/search.ts`), e dirlo con precisione
+vorrebbe dire allargare il contratto della ricerca fin dal daemon.
+
+La regola è uscita dal componente: sta in **`ui/src/lib/gruppi.ts`**, pura, e si prova con
+`node` come già fa `layout.ts` per i pannelli — `npm run gruppi:check`, **24** verifiche
+(il recap, il turno che finisce su un tool, il testo che introduce una domanda a una e a tre
+parti di distanza, il ragionamento vuoto, la chiave del gruppo che non cambia mentre il lavoro
+cresce). Una di quelle prove è nata **rossa dicendo la verità**: l'attesa che avevo scritto era
+di prima della regola sul testo-che-introduce, e il codice aveva ragione lui.
+Verificato **guidando la UI vera** su conversazioni reali, non solo per esito: A/B a 1280×900
+sugli stessi turni prima e dopo (418 parti: 103 blocchi/3452px → 2/694px; 48 parti con una
+domanda in mezzo: 26/1800 → 6/1219), a 390px che la riga non sfondi, e il salto da un
+risultato di ricerca che apre davvero il gruppo (`gruppiAperti: 1, gruppiChiusi: 0`).
+
+**Le sessioni giravano senza il system prompt di Claude Code** (27 agosto 2026, chiesto
+dall'utente con priorità massima: «verifica che non stiamo usando più token di quanti ne
+useremmo da CLI»). La risposta è no — e il perché è un difetto, non un merito.
+
+Il fatto che regge tutto il resto, verificato leggendo `/proc/<pid>/exe` del processo figlio e
+non dedotto: l'SDK **lancia il binario vero**,
+`node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude` (`manifest.json`: 2.1.241), con
+`--output-format stream-json --verbose --input-format stream-json`. Quindi la composizione del
+prompt, i breakpoint di cache, la compattazione e il conteggio dei token li fa **lo stesso
+eseguibile** che sta dietro `claude`: STARK non li può sbagliare, può solo passare opzioni
+diverse. Tutta la domanda si riduce a `buildOptions`, un file solo.
+
+E lì mancava una riga. **Non passare `systemPrompt` non vuol dire «lascia fare al CLI»**: l'SDK
+lo sostituisce con una stringa vuota — `if (s === void 0) p = ""`, letto nel bundle, e la doc lo
+dice («the SDK uses a minimal prompt […] This differs from `claude -p`, which uses the full
+Claude Code prompt by default»). Misurato con `getContextUsage()`, che è la stessa domanda a cui
+risponde `/context`: la categoria «System prompt» valeva **677** token invece di **3.969**. Le
+chat di STARK giravano quindi con l'agent **istruito meno** di quello del terminale, e la cosa
+non si vedeva perché fallisce nel modo peggiore: non dà errore, risponde peggio. Non era una
+scelta — `grep -rn "systemPrompt" src/ docs/` non trovava niente: al tempo di ADR-009 quel
+default *era* il prompt di Claude Code, è cambiato nella v0.1.0 dell'SDK, e un'opzione che non
+si passa non compare in nessuna diff.
+Corretto passando il preset. Da qui in avanti STARK manda **+1.348** token rispetto al CLI
+headless nudo, e sono tutti `AskUserQuestion` — cioè spesi per poter *quanto* il terminale, non
+di più: senza `canUseTool` le domande dell'agent spariscono del tutto.
+Cosa **non** si perdeva, e sembra il contrario: `CLAUDE.md` e le skill c'erano (62.414 e 1.875
+token, identici con e senza il preset). Quelli non passano dal system prompt.
+
+Due premesse cadute nello stesso giro. `settingSources`: il cambio della v0.1.0 («nessun setting
+dal filesystem») è stato **annullato**, omettere il campo equivale al CLI — misurato, passarlo o
+no dà lo stesso identico totale. Quindi «Command descriptions» di `memoria.ts` **è letto davvero**
+dalle sessioni STARK, cosa che non era scontata. E la modalità di default: vedi la correzione in
+loco più sopra.
+
+**Sulla cache, la parità è per costruzione e la TTL è un'ora.** Il binario tiene una diagnostica
+interna delle cause di cache miss (`system prompt changed`, `tools changed (+N/-N tools)`,
+`model changed`, `cache_control changed (scope or TTL)`, …), e confrontandola con l'elenco
+ufficiale: la riconciliazione MCP a ogni turno **non** invalida niente (tocca solo in caso di
+delta, e con i tool *deferred* — attivi, 15.030 token nella loro categoria — connettere o
+disconnettere un server «only appends new content»); il chip della modalità è cache-safe per
+dichiarazione esplicita; il chip del modello invalida, esattamente come `/model` nel terminale;
+e `getContextUsage`/`quota`/`file_suggestions` sono canale di controllo, non chiamate all'API.
+La TTL della conversazione principale su abbonamento entro quota è **un'ora**, e gli «Agent SDK
+turns» stanno nello stesso secchiello dei turni interattivi — il che chiude la misura lasciata a
+metà («regge 420 secondi, oltre non misurato»): 420 era ampiamente dentro, il limite è 3.600.
+Ricaduta a favore del layout multi-pannello: la cache è **per macchina e cartella**, quindi N
+chat affiancate sullo stesso progetto **condividono** il prefisso invece di moltiplicarlo.
+
+**L'unico punto in cui STARK spende davvero più del terminale è la fila FIFO**: due prompt
+mandati mentre l'agent lavora aprono due turni, cioè due richieste e due generazioni di output,
+dove il CLI che riceve un lotto li fonde in uno. Non è un difetto da correggere — è la scelta
+già registrata più sopra — ma finora non era scritto da nessuna parte che quello è il costo.
+
+**E il titolo non lo genera più l'agent.** STARK non passava `title`, quindi il CLI se lo
+inventava con una chiamata al modello per rispondere a una domanda a cui `titleOf` risponde
+gratis. Tre fatti misurati prima di toccarlo: le **163** voci `ai-title` di una sessione vera
+sono lo *stesso* valore riscritto (una generazione sola, non 163); il titolo **non arriva nel
+flusso**, quindi non lo si poteva usare invece di buttarlo; e il campo conta **solo alla
+nascita**, perché su un risveglio vince il titolo persistito. Il costo, dichiarato perché è
+una scelta: alla nascita STARK il titolo non ce l'ha ancora, quindi passa il proprio
+segnaposto — e dal terminale quelle chat si chiamano `new chat <id8>` invece di avere un
+riassunto. Deciso dall'utente sul criterio «meno token e costo dell'agent».
+La via per riallineare il segnaposto esiste e **non è percorribile**: `renameSession` è
+filesystem e non quota, ma risolve la cartella dal `CLAUDE_CONFIG_DIR` **del processo che
+chiama** — misurato, non dedotto: con `dir` esplicito e un config dir finto fallisce — e a
+chiamare sarebbe il daemon, che ne ha uno solo mentre STARK tiene un profilo per progetto.
+Sonda `spike/titolo-non-generato.ts`, **costa un turno corto**: verificato dal vivo passando
+dalla via dell'utente, **0** voci `ai-title` e `customTitle` uguale al titolo di STARK.
+
+Il documento è `docs/costo-token.md`, la sonda `spike/costo-vs-cli.ts` (**costo zero di quota**:
+handshake più una richiesta di controllo, nessun turno parte mai). Va rifatta a ogni salto di
+versione del CLI incluso. Due trappole che ha insegnato: un generatore di prompt **vuoto** chiude
+lo stdin e il processo muore prima che si possa chiedere il contesto; e `System tools (deferred)`
+**non** entra nel totale (la somma delle altre categorie dà esattamente `totalTokens`).
+
+Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
+seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
+giusto).
+
+Sul filone «cosa manca all'MVP», dopo il giro del 27 agosto restano tre cose, in
+quest'ordine di valore: il **lavoro dentro un sub-agent** (oggi se ne vede l'incarico e il
+resoconto, non i passi — `parent_tool_use_id` esiste ma il traduttore non lo guarda, ed è una
+schermata da disegnare prima che da scrivere, §16.9); la **memoria** della cache dell'elenco
+(uno snapshot per conversazione tenuto in vita: la rilettura non si paga più, l'occupazione
+sì, ed è l'altra metà della domanda sulla rotazione del journal); e la **ricerca dentro la
+conversazione aperta**, che oggi passa dalla stessa casella dell'elenco e quindi risponde
+«quale chat», non «dove in questa».
 
 Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato e spento: senza
 `deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica
 dell'instradamento.
 
-Due cose non ancora misurate, e toccano la risorsa scarsa: **quanto costa in quota il
-classificatore** di auto mode (§16.6 della specifica) e **quanto costa risvegliare una
-conversazione lunga** (P16). Le sonde usano prompt minuscoli, quindi non dicono niente su un
-trascritto vero: finché non c'è quella misura, lo Sleep non va presentato come indolore.
+~~Due cose non ancora misurate~~ — **fatte** il 27 agosto: vedi «Le due misure mai fatte»
+più sopra. Il classificatore resta sotto la risoluzione della misura; il risveglio arriva
+come `cache_read` e regge almeno 420 secondi di pausa.
 
 Decisioni già prese:
+- **il system prompt si chiede per nome**: `systemPrompt: { type: 'preset', preset: 'claude_code' }`
+  in `buildOptions`. Non passarlo non lascia fare al CLI, lo sostituisce con una stringa vuota —
+  e un agent istruito meno del terminale è il rovescio del Principio 5. Corollario generale, che
+  vale oltre questo campo: **i default dell'SDK non sono i default del CLI**, e quelli che
+  divergono si trovano solo misurando, perché un'opzione non passata non compare in nessuna diff.
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
 - il canale lo implementa l'**Agent SDK ufficiale**, non codice nostro (ADR-009). Il vocabolario
   canonico, il journal e la UI restano nostri: l'SDK sostituisce il trasporto, non la traduzione.
 - web app locale: daemon + UI nel browser, NON app nativa (ADR-002)
-- un solo adapter nell'MVP: Claude Code (ADR-004)
+- ~~un solo adapter nell'MVP: Claude Code (ADR-004)~~ — **superata da ADR-012**: il secondo
+  adapter (OpenCode) è scritto, gira, e il contratto del §1 ha retto senza modifiche.
 - daemon persistente, con Sleep esplicito per sessione; TTL automatico rimandato (ADR-005)
 - permessi: sessioni in `auto`, zero card di default; i toggle aggiungono attrito dove serve (ADR-008)
 - Node + TypeScript, journal JSONL append-only per sessione (ADR-007)
@@ -1158,6 +1642,25 @@ Decisioni già prese:
   ogni token, quindi due chat che lavorano insieme si scavalcherebbero di continuo. `since`
   cambia solo quando cambia lo stato, e chi finisce per primo cambia gruppo con un `since`
   nuovo — quindi sale in cima al suo senza bisogno di un caso speciale.
+- **si cerca dagli snapshot, non dai file**: la ricerca trova ciò che la UI mostra, e su una
+  macchina accesa non rilegge niente. Cercare nelle righe del journal sembrerebbe più diretto ed
+  è sbagliato: una risposta arrivata in trecento `text.delta` non è scritta intera da nessuna
+  parte. Niente espressioni regolari — una casella in cui `(` fa esplodere tutto è peggio di una
+  che trova meno.
+- **un lavoro che continua da solo sta sulla riga che lo ha lanciato**, non su una riga nuova:
+  un comando in background non è un secondo fatto, è ciò che si scopre dopo su un fatto già
+  mostrato. E il suo esito **vince** sull'esito della chiamata, che torna positivo un istante
+  dopo il lancio e direbbe «fatto» su un lavoro in corso.
+- **il piano è un documento, non un permesso**: si approva leggendolo, non riconoscendone il
+  soggetto. Ha i suoi eventi canonici e il suo riquadro, per la stessa ragione per cui le
+  domande non sono permessi. E `mode` viaggia **con** l'approvazione: nel terminale approvare
+  vuol dire anche scegliere come proseguire.
+- **la modalità dei permessi la dichiara il CLI**, non solo STARK: `EnterPlanMode` è un tool
+  dell'agent, e approvare un piano la cambia dall'altra parte. Leggerla solo quando la
+  imponiamo noi vuol dire mostrarne una falsa per il resto della conversazione.
+- **l'append-only del journal è una cosa da usare, non solo da rispettare**: chi rilegge un
+  file che cresce in coda deve leggere la coda. Vale per l'elenco (da 619 ms a 0,13) e vale
+  per chiunque altro dovrà rileggere un journal a ripetizione.
 - le chat si **affiancano** in pannelli ridimensionabili, aperti trascinando una riga
   dell'elenco sul bordo (divide) o sul centro (sostituisce) di un pannello. Un clic
   semplice continua a **sostituire** la chat a fuoco: aggiungere un riquadro è un gesto
@@ -1175,16 +1678,36 @@ Decisioni già prese:
   scrivere verso un processo root. Costo accettato in cambio: il VPS entra nella TCB.
   (Cloudflare Tunnel sarebbe gratis — Zero Trust è libero fino a 50 utenti — quindi la
   scelta non è economica.)
+- **dentro un turno, il lavoro sta in un blocco solo**: operazioni e narrazioni di servizio
+  insieme, chiuso anche mentre l'agent lavora. Restano fuori le tre volte in cui l'agent si
+  rivolge all'utente — il recap finale, la domanda/permesso con la sua risposta, e il testo
+  che introduce la domanda — più i tagli del flusso (compattazione, retry) e l'operazione in
+  corso. Il confine è **la posizione, non la lunghezza**: misurato, un testo di servizio ha
+  mediana 131 caratteri e uno rivolto all'utente 2500 e passa, ma una soglia sarebbe da
+  tarare e la posizione no.
 - pannello terminale per sessione: **dopo** l'MVP
 
-Ancora aperte: accesso (solo localhost o anche LAN con auth), uso da mobile, il nome STARK per il
-branding (vincolo: "Claude Code" non è utilizzabile per il branding di un prodotto;
-"STARK, Powered by Claude" sì).
+Ancora aperte: il nome STARK per il branding (vincolo: "Claude Code" non è utilizzabile per il
+branding di un prodotto; "STARK, Powered by Claude" sì) e la distribuzione (strumento personale
+o cosa che altri installano).
+~~Accesso~~ e ~~uso da mobile~~ non sono più domande: il perimetro si allarga dichiarandolo
+(§Sicurezza) e il telefono è un client intero, PWA e Web Push compresi. **Nessuna delle due è
+però un ADR su Notion**, e ADR-003 dice che è lì che devono stare: finché non ci sono, la
+premessa su cui sono state prese non è rileggibile da nessuna parte.
 
-## Versioni su cui stiamo costruendo (verificate il 23 agosto 2026)
+## Versioni su cui stiamo costruendo (rimisurate il 27 agosto 2026)
 
-Claude Code CLI **2.1.241** · `@anthropic-ai/claude-agent-sdk` **0.3.241** · Node 24.13.1.
-Il patch dell'SDK insegue quello del CLI (0.3.**241** ↔ 2.1.**241**): vanno aggiornati insieme.
+`@anthropic-ai/claude-agent-sdk` **0.3.241** · `@opencode-ai/sdk` **1.17.20** ↔ `opencode`
+**1.17.20** · Node 24.13.1.
+**«Claude Code 2.1.241» va detto con più precisione di così**: sulla macchina il `claude` nel
+`PATH` è ormai **2.1.247**, ma STARK non usa quello — usa l'eseguibile che l'SDK porta con sé,
+appaiato alla propria versione, cioè **2.1.241** (`pathToClaudeCodeExecutable` resta al bundled
+se nessuno passa `executable`, `src/adapters/claude-code/sdk-options.ts`). Le due cose possono
+divergere e divergono: ADR-009 lo aveva previsto, ed è successo in quattro giorni. Quando una
+misura qui sotto dice «verificato su 2.1.241» parla del bundled; le sonde in `spike/` girano
+sulla stessa coppia dell'SDK.
+Il patch dell'SDK insegue quello del CLI bundled (0.3.**241** ↔ 2.1.**241**): vanno aggiornati
+insieme.
 Per capire cosa una versione supporta **non si confrontano stringhe**: `system/init` porta un array
 `capabilities` con i nomi dei comportamenti di protocollo, ed è documentato usare quello.
 
@@ -1272,8 +1795,12 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
   ogni turno.
 - L'utente è su **abbonamento a quota fissa**: `total_cost_usd` è un valore nominale, NON una
   spesa reale. La risorsa scarsa è la quota (rate limit), non i dollari.
-  Corollario per ADR-005: risvegliare una sessione dormiente rilegge tutto il contesto, quindi
-  costa quota. Lo Sleep libera RAM, non quota.
+  Corollario per ADR-005, **corretto il 27 agosto dopo averlo misurato invece di dedurlo**: il
+  risveglio rilegge sì tutto il contesto, ma quel contesto arriva come `cache_read`, non come
+  input nuovo (`input 2` contro `cache-r 20.564` su una conversazione da 20k token), e regge
+  almeno 420 secondi di pausa. Lo Sleep libera RAM; quota ne costa solo oltre la TTL della
+  cache, che non è stata misurata. Ed è una premessa **di Claude Code, non del dominio**: su
+  OpenCode il server è già in piedi e non c'è nessun contesto da rileggere.
 - **Due macchine**, e i trascritti NON si sincronizzano fra loro (vedi il Punto della situazione).
   Node: **24.13.1** sul fisso (`/mnt/m/devs-development/stark/stark`), **22.23.2** sul portatile
   (`/root/DevsMachna/stark`, aggiornato il 24 agosto 2026). Il prerequisito di ADR-007 è ≥ 22.18:

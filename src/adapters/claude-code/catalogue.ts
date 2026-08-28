@@ -16,6 +16,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { listSessions } from '@anthropic-ai/claude-agent-sdk'
+import { configDirOf, listProfiles } from './profiles.ts'
 
 /** Una conversazione della CLI, come la si riconosce nell'elenco di import. */
 export type TranscriptInfo = {
@@ -45,6 +46,31 @@ export const RECENTE_MS = 5 * 60 * 1000
 
 export function isRecent(info: TranscriptInfo, now = Date.now()): boolean {
   return now - info.lastModified < RECENTE_MS
+}
+
+/**
+ * Il trascritto con questo id, cercato prima nel profilo dato e poi in tutti gli
+ * altri della macchina.
+ *
+ * Il secondo giro non e' zelo: `CLAUDE_CONFIG_DIR` cambia da progetto a progetto su
+ * questa stessa macchina (vedi `profiles.ts`), quindi un id perfettamente valido puo'
+ * semplicemente non stare dove il daemon e' partito. Cercarlo solo li' vorrebbe dire
+ * rispondere «non esiste» a una conversazione che esiste.
+ */
+export function findTranscript(
+  sessionId: string, configDir?: string,
+): { ref: string; profile?: string } | undefined {
+  const primo = configDirOf(configDir)
+  const qui = transcriptPath(sessionId, primo)
+  if (qui) return { ref: qui }
+  for (const p of listProfiles(configDir)) {
+    if (resolve(p.path) === primo) continue          // gia' provato sopra
+    const altrove = transcriptPath(sessionId, p.path)
+    // `profile` torna solo qui: dice «non era dove credevi, era in quest'altro»,
+    // ed e' l'unico caso in cui chi ha chiesto impara qualcosa che non sapeva.
+    if (altrove) return { ref: altrove, profile: resolve(p.path) }
+  }
+  return undefined
 }
 
 function configRoot(configDir?: string): string {

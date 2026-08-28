@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "node src/cli/offline-check.ts",
     "layout:check": "tsc -p tools/tsconfig.json --noEmit && node tools/layout-check.ts",
+    "gruppi:check": "tsc -p tools/tsconfig.json --noEmit && node tools/gruppi-check.ts",
     "slice": "node src/cli/vertical-slice.ts",
     "build": "tsc -p tsconfig.json",
     "resume": "node src/cli/resume-check.ts",
@@ -31,7 +32,8 @@
     "ui:build": "vite build",
     "ui:check": "svelte-check --tsconfig ./ui/tsconfig.json",
     "icons": "node tools/gen-icons.mjs",
-    "sonda": "node tools/sonda-telefono/server.mjs"
+    "sonda": "node tools/sonda-telefono/server.mjs",
+    "opencode": "node spike/opencode/p24-adapter.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
@@ -48,6 +50,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.241",
+    "@opencode-ai/sdk": "^1.17.20",
     "dompurify": "^3.4.14",
     "marked": "^18.0.11",
     "web-push": "^3.6.7"

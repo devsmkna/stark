@@ -17,9 +17,21 @@ export type SessionState =
   | 'error'
   | 'closed'
 
-// §11: le sei modalità reali di Claude Code. STARK ne espone tre.
-export type PermissionMode =
-  | 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'
+/**
+ * La modalità dei permessi, **come la chiama l'agent**.
+ *
+ * Era un'enumerazione chiusa delle sei modalità di Claude Code, dentro il modello
+ * canonico: la quinta falla del confine del §1, e l'unica che stava qui invece che nel
+ * daemon. La prova di carico l'ha resa impossibile da ignorare — OpenCode non ha
+ * modalità, ha **agenti** (`build`, `plan`), ciascuno col proprio modello e il proprio
+ * ruleset. Non è la stessa cosa con un altro nome: è un concetto diverso che occupa lo
+ * stesso posto nella barra di stato.
+ *
+ * Adesso è una stringa opaca, e **chi la può usare lo dichiara l'agent** (`options`
+ * in `session.created`). Fuori dall'adapter nessuno deve conoscere questi valori — se
+ * un componente ne confronta uno per nome, quello è il difetto da registrare. ADR-014.
+ */
+export type PermissionMode = string
 
 // ─── tipi di supporto ───────────────────────────────────────────────────────
 
@@ -124,6 +136,15 @@ export type ModelChoice = {
   label?: string
   resolved?: string
   autoMode: boolean
+  /**
+   * Un avviso su questo modello, **scritto dall'agent**.
+   *
+   * Nasce da un difetto vero: `optionsFrom` deduceva la nota da `autoMode`, e su
+   * OpenCode — dove l'auto mode non esiste come concetto e quindi `autoMode` è `false`
+   * per tutti — comparivano 61 triangoli di avviso che non dicevano niente. Un'assenza
+   * è degna di nota solo dove esiste l'alternativa: a saperlo è chi ha i modelli.
+   */
+  note?: string
   /** In token. Stesso motivo di `autoMode`: dipende dal modello, non dall'agent, e
    *  saperlo fuori dall'adapter vorrebbe dire indovinare la finestra di contesto. */
   contextWindow: number
@@ -135,11 +156,62 @@ export type ModelChoice = {
  * `available: false` non e un motivo per nascondere la voce: il Principio 5 vuole che
  * si veda spenta CON la spiegazione. La spiegazione la scrive l'adapter, che e l'unico
  * che sa chi rifiuta e perche.
+ *
+ * `label` esiste da ADR-014: finche' le modalita' erano sei parole note, la UI poteva
+ * saperle a memoria. Ora l'agent le dichiara, e deve poter dire **come si chiamano** —
+ * «build» e «plan» non sono nomi che una GUI possa indovinare.
  */
 export type ModeChoice = {
   mode: PermissionMode
+  label?: string
+  available: boolean
+  /** Perche' NON si puo' usare. Vuoto quando si puo'. */
+  reason?: string
+  /**
+   * A cosa serve, detto dall'agent. Non e' `reason`: quella spiega un rifiuto, questa
+   * descrive una scelta che si puo' fare. Finche' le modalita' erano sei parole note,
+   * la descrizione stava nella UI (`MODE_BLURB`); un agent che ne dichiara di proprie
+   * deve poter dire anche cosa fanno — «build» e «plan» non si spiegano da soli.
+   */
+  note?: string
+}
+
+// ─── §11-bis le opzioni di sessione (ADR-014) ───────────────────────────────
+
+/**
+ * Una scelta dentro un selettore, e se si puo' davvero fare.
+ *
+ * `note` non e' `reason`: `reason` dice **perche' non si puo'**, `note` e' un avviso su
+ * una scelta che si puo' fare lo stesso. Tenerli distinti evita la riga che oggi
+ * compare su tutti i 61 modelli di OpenCode — «no auto mode» — dove l'auto mode non
+ * esiste nemmeno come concetto.
+ */
+export type OptionChoice = {
+  value: string
+  label?: string
   available: boolean
   reason?: string
+  note?: string
+}
+
+/**
+ * Un selettore che l'agent dichiara e la barra di stato disegna **senza conoscerlo**.
+ *
+ * E' la forma generale di cio' che oggi sono `models` e `modes`: due casi particolari
+ * cablati nella UI. Un agent nuovo popola la barra senza una riga di codice nel
+ * browser, e diventano esprimibili scelte che oggi non hanno posto — il livello di
+ * ragionamento, la variante di un modello, quale agent e' attivo.
+ *
+ * `kind` serve **solo alla presentazione** (quale icona, quanto e' importante): non e'
+ * un elenco chiuso di cose che la UI deve saper trattare, ed e' la differenza fra
+ * «disegna cio' che ti dicono» e «conosci le sei parole».
+ */
+export type SessionOption = {
+  id: string
+  label: string
+  value: string
+  choices: OptionChoice[]
+  kind?: 'mode' | 'model' | 'other'
 }
 
 /**
@@ -223,6 +295,10 @@ export type Capabilities = {
   permissionAlways: boolean
   questions: boolean
   revert: boolean
+  /** L'agent racconta i propri ritentativi. Su Claude Code li fa l'SDK e non affiorano. */
+  retries: boolean
+  /** L'agent tiene una checklist mentre lavora (`todo.updated`). */
+  todos: boolean
   toolProgress: boolean
   fileBrowser: boolean
   pty: boolean
@@ -235,11 +311,29 @@ export type Payload =
   | { k: 'session.created'; agent: string; cwd: string; model: string
       capabilities: Capabilities; tools: string[]; commands: SlashCommand[]
       // Cosa si puo scegliere dalla barra di stato, senza che la UI debba saperlo.
-      models?: ModelChoice[]; modes?: ModeChoice[]
+      // `models`/`modes` sono i due casi particolari nati con Claude Code; `options`
+      // e' la forma generale che li supera (ADR-014). Restano tutti e tre perche' un
+      // journal scritto prima ha solo i primi due, e il §4 vuole che si possa
+      // ricostruire com'era — non che si riscriva la storia.
+      models?: ModelChoice[]; modes?: ModeChoice[]; options?: SessionOption[]
       // I comportamenti di protocollo che questa versione implementa. È documentato
       // usare questi nomi per la feature detection invece di confrontare versioni.
       protocolCapabilities?: string[] }
   | { k: 'session.state'; state: SessionState; reason?: string }
+  /**
+   * Una scelta dichiarata dall'agent e' cambiata (ADR-014).
+   *
+   * Sostituisce `session.model` e `session.mode`, che restano **leggibili** perche' i
+   * journal gia' scritti ne sono pieni, ma che nessun adapter emette piu'. Un solo
+   * modo per andare avanti, piu' un lettore per la storia: e' la stessa regola con cui
+   * il §13 tratta un file append-only.
+   *
+   * Due `id` sono **convenzione**, non vocabolario di un agent: `'mode'` e `'model'`.
+   * Servono perche' l'elenco delle chat e le notifiche vogliono sapere quei due valori
+   * senza aprire una conversazione. Un agent che non ha modalita' semplicemente non
+   * dichiara `'mode'`.
+   */
+  | { k: 'session.option'; id: string; value: string }
   | { k: 'session.model'; model: string }
   | { k: 'session.mode'; mode: PermissionMode }
   // La lista dei tool non è nota alla nascita della sessione: arriva col primo turno.
@@ -314,6 +408,39 @@ export type Payload =
   | { k: 'tool.input.ended'; callId: string; input: unknown; summary?: string; intent?: string }
   | { k: 'tool.ended'; callId: string; ok: boolean; output?: unknown; error?: string }
 
+  /**
+   * Un lavoro che l'agent ha avviato e che **il CLI segue per conto suo**, oltre la
+   * fine della chiamata che lo ha lanciato.
+   *
+   * Non è un doppione di `tool.started`, ed è la differenza che rende necessari questi
+   * due eventi. Un comando lanciato in background risponde **subito** — «Async agent
+   * launched successfully» — quindi il suo `tool.ended` arriva con esito positivo una
+   * riga dopo, e la conversazione lo mostra come finito. Non lo è: quello che è finito
+   * è il *lancio*. L'esito vero arriva molto più tardi, spesso in un altro turno.
+   * Misurato su un journal reale: `tool_result` alla riga 53, esito alla riga **810**.
+   * Senza questi due eventi quell'esito non esiste in STARK, e chi guarda vede una
+   * riga verde al posto di un lavoro ancora in corso — cioè la bugia peggiore, quella
+   * su cui si aspetta.
+   *
+   * `callId` è la chiamata che lo ha avviato: il task **non** è una riga nuova nel
+   * flusso, è ciò che si scopre dopo su una riga che c'è già. Attaccarlo lì invece di
+   * inventargli un posto è la stessa scelta della compattazione, che è una riga *nel*
+   * flusso perché nel flusso è avvenuta.
+   *
+   * `kind` è canonico: `local_bash`/`local_agent` sono vocabolario di Claude Code e
+   * restano nell'adapter (§1). `other` non è pigrizia — è la promessa che un tipo
+   * nuovo, aggiunto dal CLI domani, si mostri lo stesso invece di sparire.
+   */
+  | { k: 'task.started'; taskId: string; callId?: string
+      kind: 'command' | 'agent' | 'other'; description?: string; background: boolean }
+  /**
+   * Com'è andata, quando si sa. `summary` è scritto dal CLI, non da noi: su un
+   * sub-agent è il resoconto di cosa ha fatto, ed è l'unica cosa che ne resta —
+   * il suo lavoro interno non passa da questo canale.
+   */
+  | { k: 'task.ended'; taskId: string; status: 'completed' | 'failed'
+      summary?: string; outputFile?: string }
+
   // §8 richieste bloccanti — nel caso normale NON esistono affatto (ADR-008)
   | { k: 'permission.asked'; requestId: string; action: string; resources: string[]
       savable: string[]; source: { callId?: string } }
@@ -323,6 +450,37 @@ export type Payload =
   // `AskUserQuestion`. Non sono un canale a parte, ma restano un evento a parte: per
   // l'utente "scegli fra queste opzioni" e "posso eseguire questo comando?" sono due
   // cose diverse, e una UI che le mostrasse uguali mentirebbe.
+  /**
+   * L'agent ha finito di pianificare e chiede di partire.
+   *
+   * È un evento a sé e non un `permission.asked`, per la stessa ragione per cui lo
+   * sono le domande (§16.1): per chi guarda, «ho scritto un piano, lo approvi?» e
+   * «posso eseguire questo comando?» sono due cose diverse, e una UI che le mostrasse
+   * uguali mentirebbe. Qui la differenza è anche più netta — il permesso si concede
+   * guardando **un soggetto** (un comando, un percorso), il piano si approva
+   * **leggendolo**: è un documento, non una riga.
+   *
+   * Verificato dal vivo il 27 agosto 2026 (`spike/piano-todo-subagent.ts`): arriva
+   * come richiesta di permesso sul tool `ExitPlanMode`, con `{plan, planFilePath}`.
+   * Prima di questo evento finiva nella card generica, e siccome `plan` non è fra i
+   * campi in cui `summarize()` cerca un soggetto, quella card **non mostrava niente**:
+   * si approvava un piano che non si poteva leggere.
+   *
+   * `path` è il file in cui il CLI ha scritto il piano per conto suo. Si riporta e non
+   * si legge: dirlo permette di aprirlo, leggerlo qui vorrebbe dire preferire il disco
+   * a ciò che il protocollo ha già mandato.
+   */
+  | { k: 'plan.proposed'; requestId: string; plan: string; path?: string }
+  /**
+   * Cosa si è deciso. `mode` è la parte che non si può omettere: nel terminale
+   * approvare un piano vuol dire anche scegliere **come** proseguire — accettando le
+   * modifiche da sé o approvandole una per una — e senza quella scelta STARK potrebbe
+   * meno del CLI. `feedback` è cosa cambiare, quando si rimanda a pianificare: senza,
+   * «no» sarebbe un muro invece che una correzione.
+   */
+  | { k: 'plan.replied'; requestId: string; decision: 'approved' | 'rejected'
+      mode?: PermissionMode; feedback?: string }
+
   | { k: 'question.asked'; requestId: string; questions: AgentQuestion[] }
   | { k: 'question.replied'; requestId: string
       answers: Record<string, string | string[]>; response?: string }
@@ -378,8 +536,48 @@ export type Payload =
    * del CLI, non perché serva a riprenderla.
    */
   | { k: 'context.cleared'; ref?: string }
+
+  // ─── §10-bis quello che l'agent rifa' da solo ─────────────────────────────
+
+  /**
+   * Il turno e' stato **ritentato**: il modello non ha risposto e l'agent riprova.
+   *
+   * Entra nel modello dopo la prova di carico su OpenCode (ADR-012), ed e' un fatto
+   * che l'utente non vedeva: un turno che riprova tre volte e uno che parte al primo
+   * colpo erano identici a schermo, e non sono la stessa cosa — spiegano una pausa di
+   * un minuto che altrimenti sembra un blocco.
+   *
+   * Su Claude Code i ritentativi li fa l'SDK sotto e **non affiorano**: la capacita'
+   * `retries` e' `false` la', e non e' un buco — e' un fatto che quell'agent non
+   * racconta. Su OpenCode arriva come `session.next.retried` con `attempt` ed `error`.
+   */
+  | { k: 'session.retried'; attempt: number; reason: string }
+
+  /**
+   * La checklist che l'agent tiene mentre lavora.
+   *
+   * L'elenco arriva **intero ogni volta**, non a differenze: e' cosi' che lo manda
+   * OpenCode (`todo.updated` con `todos[]`), ed e' anche la forma giusta per un journal
+   * append-only — chi rilegge non deve ricostruire uno stato applicando patch, gli
+   * basta l'ultimo evento.
+   *
+   * §16.10 registra che Claude Code 2.1.241 **non ce l'ha** a runtime: verificato due
+   * volte, sulla lista dei tool di una sessione vera. La capacita' `todos` e' quindi
+   * `false` la', e la UI non mostra niente — che e' diverso da mostrare una lista vuota.
+   */
+  | { k: 'todo.updated'; todos: TodoItem[] }
   | { k: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { k: 'action.blocked'; by: 'classifier' | 'denyRule'; callId?: string; reason: string }
+
+/**
+ * Una voce della checklist.
+ *
+ * `status` e `priority` sono stringhe e non enumerazioni di proposito: sono parole
+ * dell'agent (OpenCode manda `pending`/`in_progress`/`completed`/`cancelled` e
+ * `high`/`medium`/`low`), e chiuderle qui vorrebbe dire rifare la falla di
+ * `PermissionMode` in piccolo. La UI ne fa una spunta e un ordine, non un `switch`.
+ */
+export type TodoItem = { content: string; status: string; priority?: string }
 
 export type PayloadKind = Payload['k']
 
@@ -435,6 +633,12 @@ export type Command =
   | { c: 'session.open'; agent: string; cwd: string; model?: string; mode?: PermissionMode }
   | { c: 'session.prompt'; text: string; attachments?: Attachment[] }
   | { c: 'session.interrupt' }
+  /**
+   * Cambia una scelta dichiarata dall'agent (ADR-014). La UI manda l'`id` che ha
+   * ricevuto e il valore scelto, senza sapere cosa significhino: e' la differenza fra
+   * «disegna cio' che ti dicono» e «conosci le sei parole».
+   */
+  | { c: 'session.setOption'; id: string; value: string }
   | { c: 'session.setModel'; model: string }
   | { c: 'session.setMode'; mode: PermissionMode }
   | { c: 'session.setMcp'; server: string; enabled: boolean }
@@ -457,6 +661,14 @@ export type Command =
   | { c: 'question.reply'; requestId: string
       answers: Record<string, string | string[]>; response?: string }
   | { c: 'question.reject'; requestId: string }
+  /**
+   * La risposta a un piano. `mode` viaggia con l'approvazione e non separatamente,
+   * perché nel terminale sono un gesto solo: approvare vuol dire anche dire **come**
+   * proseguire. Mandarli come due comandi lascerebbe una finestra in cui l'agent è
+   * già ripartito nella modalità di prima.
+   */
+  | { c: 'plan.reply'; requestId: string; decision: 'approved' | 'rejected'
+      mode?: PermissionMode; feedback?: string }
 
 export const EMPTY_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 

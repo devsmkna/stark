@@ -13,6 +13,7 @@
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { AgentQuestion } from '$core/events.ts'
   import { permissionHeadline, tilde } from '../lib/view.ts'
+  import { renderMarkdown } from '../lib/markdown.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap, canStop }:
@@ -20,6 +21,44 @@
 
   const permission = $derived(snap.pendingPermissions[0])
   const question = $derived(snap.pendingQuestions[0])
+  /**
+   * Il terzo stato bloccante: l'agent ha finito di pianificare e chiede di partire.
+   *
+   * Sta qui e non nel flusso per la stessa ragione degli altri due — è la cosa che
+   * ferma tutto, e si guarda sempre nello stesso posto. Ma è **l'unico dei tre che
+   * si legge** invece di riconoscersi a colpo d'occhio: un permesso è una riga, una
+   * domanda è un titolo e delle opzioni, un piano è un documento. Per questo ha un
+   * corpo che scorre e non un sommario.
+   */
+  const plan = $derived(snap.pendingPlans[0])
+  /** Cosa cambiare, quando si rimanda a pianificare. Vuoto è legittimo: «no» da solo
+   *  è una risposta, e obbligare a motivarla renderebbe più scomodo dire di no che
+   *  dire di sì — che è esattamente il contrario di quello che serve. */
+  let feedback = $state('')
+  /** Le modalità in cui si può ripartire, prese dalla sessione e non da un elenco
+   *  scritto qui: quali esistano e quali siano rifiutate lo sa l'adapter (§1), e da
+   *  root `bypassPermissions` non c'è. */
+  // L'ordine è imposto qui e non ereditato da `snap.modes`: quello è l'ordine in cui
+  // l'agent elenca le sue modalità, che per questa domanda non vuol dire niente. Qui
+  // la prima è quella che si preme quasi sempre — si è appena letto un piano e lo si
+  // approva — e la seconda è la via più prudente accanto.
+  const modiDopoIlPiano = $derived(
+    (['acceptEdits', 'default'] as const)
+      .map(m => snap.modes.find(x => x.mode === m))
+      .filter(m => m !== undefined),
+  )
+  async function rispondiAlPiano(
+    decision: 'approved' | 'rejected', mode?: string,
+  ): Promise<void> {
+    if (!plan) return
+    const testo = feedback.trim()
+    feedback = ''
+    await store.send({
+      c: 'plan.reply', requestId: plan.requestId, decision,
+      ...(mode ? { mode: mode as never } : {}),
+      ...(decision === 'rejected' && testo ? { feedback: testo } : {}),
+    })
+  }
   const head = $derived(permission ? permissionHeadline(permission.action) : null)
 
   /**
@@ -199,6 +238,61 @@
     </div>
   </div>
 
+{:else if plan}
+  <div class="askbox plan">
+    <div class="h">
+      <Icon name="i-doc" style="color:var(--wait)" />
+      The agent has a plan
+      {#if canStop}
+        <button class="stopb" title="Stop" onclick={() => void store.stop()}>
+          <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
+        </button>
+      {/if}
+    </div>
+
+    <!-- Il piano per intero, come markdown. Non un riassunto e non le prime righe:
+         è la cosa su cui si sta decidendo, e approvare senza poterla leggere è ciò
+         che succedeva prima che questo blocco esistesse. Scorre, perché un piano di
+         tre passi sta in mezzo schermo e uno di dieci no. -->
+    <div class="planbody">{@html renderMarkdown(plan.plan)}</div>
+
+    {#if plan.path}
+      <!-- Il CLI il piano se lo scrive anche su un file. Dirlo permette di aprirlo
+           dove si aprono gli altri file; leggerlo da lì per mostrarlo qui vorrebbe
+           dire preferire il disco a ciò che il protocollo ha già mandato. -->
+      <button class="pathrow" title="Reveal in file manager"
+        onclick={() => void store.reveal(plan.path!)}>
+        <Icon name="i-reveal" /> {tilde(plan.path)}
+      </button>
+    {/if}
+
+    <div class="opts" style="margin-top:8px">
+      <!-- Le due approvazioni sono due, e non una con una spunta accanto, perché nel
+           terminale sono due voci: «sì, e accetta le modifiche» e «sì, e chiedimele».
+           Sono la stessa decisione presa in due modi diversi, e chi approva la sta
+           già prendendo — farla scegliere dopo, da un menu, la nasconderebbe. -->
+      {#each modiDopoIlPiano as m (m.mode)}
+        <button class="opt" class:pri={m.mode === 'acceptEdits'}
+          disabled={!m.available} title={m.reason ?? ''}
+          onclick={() => void rispondiAlPiano('approved', m.mode)}>
+          {m.mode === 'acceptEdits' ? 'Go ahead, accept edits' : 'Go ahead, ask me first'}
+        </button>
+      {/each}
+      {#if modiDopoIlPiano.length === 0}
+        <!-- Su un journal vecchio la sessione non porta l'elenco delle modalità: si
+             approva lo stesso, lasciando decidere al CLI come proseguire. Meglio un
+             bottone in meno che un piano che non si può approvare. -->
+        <button class="opt pri" onclick={() => void rispondiAlPiano('approved')}>Go ahead</button>
+      {/if}
+      <button class="opt alt" onclick={() => void rispondiAlPiano('rejected')}>
+        <Icon name="i-pencil" /> Keep planning
+      </button>
+    </div>
+    <input class="typed" placeholder="What to change — optional, goes with «Keep planning»"
+      bind:value={feedback}
+      onkeydown={e => { if (e.key === 'Enter') void rispondiAlPiano('rejected') }} />
+  </div>
+
 {:else if question && cur}
   <div class="askbox q">
     <div class="h">
@@ -315,6 +409,29 @@
     font-family: var(--mono); font-size: 10px; color: var(--ink-2);
     max-height: 150px; overflow: auto; white-space: pre-wrap;
   }
+  /* Il corpo del piano. Scorre e ha un tetto: un piano di dieci passi non deve
+     spingere i bottoni sotto il bordo della finestra — sarebbero irraggiungibili
+     proprio nel momento in cui tutto è fermo ad aspettarli. Il tetto è in `vh` e non
+     in pixel perché la cosa da non superare è **lo schermo**, e da telefono è un
+     altro numero. */
+  .planbody {
+    max-height: 46vh; overflow: auto; margin: 6px 0 2px;
+    font-size: 12px; line-height: 1.5; color: var(--ink);
+    border-left: 2px solid var(--line); padding: 2px 4px 2px 10px;
+  }
+  .planbody :global(h1), .planbody :global(h2), .planbody :global(h3) {
+    font-size: 12.5px; margin: 8px 0 3px;
+  }
+  .planbody :global(p), .planbody :global(ul), .planbody :global(ol) { margin: 3px 0; }
+  .planbody :global(pre) { font-size: 11px; overflow: auto; }
+  .pathrow {
+    display: flex; align-items: center; gap: 5px; width: 100%;
+    border: 0; background: none; padding: 2px 0; margin-top: 2px;
+    font: inherit; font-size: 10.5px; color: var(--muted); cursor: pointer;
+    text-align: left;
+  }
+  .pathrow:hover { color: var(--ink); }
+
   .typed {
     margin-top: 8px; width: 100%; border: 1px solid var(--line-2); border-radius: 7px;
     padding: 5px 9px; font: inherit; font-size: 11px;

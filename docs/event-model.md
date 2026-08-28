@@ -107,6 +107,20 @@ Un badge che li confondesse mentirebbe, e il Principio 3 lo vieta.
 
 `sleeping` è uno stato di STARK, non dell'agent: nessun evento dell'agent lo produce.
 
+### La modalità dei permessi la decide anche il CLI, non solo noi
+
+`session.mode` nasceva **solo** quando era STARK a imporre una modalità. Non è la stessa cosa di
+«qual è la modalità adesso», e la differenza si è vista dal vivo il 27 agosto 2026: approvando
+un piano con `setMode: acceptEdits`, il CLI passa davvero ad `acceptEdits` — lo dichiara nel
+proprio `system:status` — mentre la barra di stato continuava a mostrare `plan`.
+
+Non è un caso isolato: `EnterPlanMode` è un **tool dell'agent**, quindi l'agent può entrare in
+plan mode da sé, e senza leggere la modalità dichiarata dal CLI STARK mostrerebbe per il resto
+della conversazione quella di prima. La regola è quindi: il traduttore emette `session.mode`
+ogni volta che un messaggio nativo dichiara una modalità **diversa** dall'ultima nota. Solo sui
+cambiamenti — `system:status` arriva più volte per turno, e ripetere lo stesso valore
+riempirebbe il journal di righe che non dicono niente.
+
 ---
 
 ## 6. Eventi di sessione
@@ -445,6 +459,43 @@ direbbe la stessa cosa) o è dichiaratamente inerte (`Workflow`: «Ignored — s
 description in the script's meta block», dai tipi stessi). Vale quindi anche per un domani
 server MCP che scriva il proprio `description`, senza una riga di codice in più.
 
+### Un lavoro che continua dopo la chiamata che lo ha lanciato
+
+```ts
+| { k: 'task.started', taskId: string, callId?: string,
+                       kind: 'command' | 'agent' | 'other',
+                       description?: string, background: boolean }
+| { k: 'task.ended',   taskId: string, status: 'completed' | 'failed',
+                       summary?: string, outputFile?: string }
+```
+
+Non è un doppione di `tool.started`, ed è la differenza che li rende necessari. Un comando
+lanciato **in background** risponde subito — «Async agent launched successfully» — quindi il suo
+`tool.ended` arriva con esito positivo una riga dopo. Ma quello che è finito è il *lancio*.
+
+Misurato su una cattura reale: `tool_result` alla riga 53, esito vero alla riga **810**, cioè in
+un altro turno. Senza questi due eventi quell'esito in STARK non esiste, e la conversazione
+mostra una riga verde al posto di un lavoro ancora in corso — la bugia peggiore, quella su cui
+si aspetta.
+
+`callId` è la chiamata che lo ha avviato: il lavoro **non** è una riga nuova nel flusso, è ciò
+che si scopre dopo su una riga che c'è già. Per questo `applyTo` lo attacca alla `ToolPartView`
+esistente, e `task.ended` la ritrova per `taskId` — non per `callId`, che nella notifica non
+c'è, e comunque la riga sta in un turno che non è più quello aperto.
+
+`kind` è canonico: `local_bash`/`local_agent` sono vocabolario di Claude Code e restano
+nell'adapter (§1). `other` non è pigrizia: è la promessa che un tipo nuovo, aggiunto dal CLI
+domani, si veda lo stesso invece di sparire.
+
+Quanto vale, su journal veri di questa macchina: **316** lavori in una sola conversazione, di
+cui 15 in background, 5 sub-agent e **10 falliti**. Prima del 27 agosto 2026 cadevano tutti nel
+ramo di scarto del traduttore: quei dieci fallimenti non erano visibili da nessuna parte.
+
+Cosa **non** portano: il lavoro interno di un sub-agent. Il CLI ne manda il resoconto finale,
+non i suoi passi. `parent_tool_use_id` esiste sui messaggi (verificato: 3 messaggi, 1 genitore,
+in una sessione di prova) e un domani permetterebbe di annidarli — ma è un'altra cosa, e va
+disegnata prima di scriverla.
+
 `tool.input.delta` esiste perché entrambi gli agent trasmettono l'input del tool in streaming
 (Claude Code con `input_json_delta`, OpenCode con `session.next.tool.input.delta`). La UI può
 ignorarlo e aspettare `tool.input.ended`, ma il modello non deve buttarlo via: è ciò che permette
@@ -485,6 +536,37 @@ della richiesta `POST /api/session/{id}/permission/{requestID}/reply` di OpenCod
 > `suggestions`, un elenco di regole già pronte, e rimandarne una indietro in
 > `updatedPermissions` la scrive in `.claude/settings.local.json`. Le sessioni successive
 > smettono di chiedere da sole. Quindi `always` **non è emulato**: è la strada documentata.
+
+### Il piano: si legge, non si concede
+
+```ts
+| { k: 'plan.proposed', requestId: string, plan: string, path?: string }
+| { k: 'plan.replied',  requestId: string, decision: 'approved' | 'rejected',
+                        mode?: PermissionMode, feedback?: string }
+```
+
+Sono eventi a sé e non `permission.asked`, per la stessa ragione delle domande (vedi §16.1):
+per chi guarda, «ho scritto un piano, lo approvi?» e «posso eseguire questo comando?» sono due
+cose diverse, e una UI che le mostrasse uguali mentirebbe. Qui la differenza è ancora più netta:
+un permesso si concede riconoscendo **un soggetto** (un comando, un percorso), un piano si
+approva **leggendolo**. È un documento.
+
+Verificato dal vivo il 27 agosto 2026 (`spike/piano-todo-subagent.ts`): uscire dal plan mode
+arriva come richiesta di permesso sul tool `ExitPlanMode`, con `{ plan, planFilePath }`. Prima
+di questi eventi finiva nella card generica — e siccome `plan` non è fra i campi in cui
+`summarize()` cerca il soggetto di un'azione, quella card **non mostrava niente**: si approvava
+un piano che non si poteva leggere.
+
+`mode` viaggia **con** l'approvazione, non come comando separato: nel terminale approvare vuol
+dire anche scegliere come proseguire, e mandarli in due tempi lascerebbe una finestra in cui
+l'agent è già ripartito con la modalità di prima, cioè `plan`, che non tocca niente. L'adapter
+lo realizza con `updatedPermissions: [{ type: 'setMode', … }]` dell'SDK — che funziona:
+misurato, il CLI passa davvero ad `acceptEdits` e lo dichiara nel proprio `system:status`.
+
+`feedback` è cosa cambiare quando si rimanda a pianificare. Un rifiuto qui non è un errore: è
+una correzione, e il CLI la intende così — torna al modello come messaggio di `deny` e l'agent
+continua a pianificare. Vuoto è legittimo: obbligare a motivare un «no» renderebbe più scomodo
+dire di no che dire di sì.
 
 ### Quando questi eventi esistono, e quando non esistono affatto
 
@@ -720,6 +802,8 @@ type Command =
   | { c: 'session.close' }
   | { c: 'permission.reply', requestId: string, decision: 'once'|'always'|'reject', scope?: string }
   | { c: 'question.reply',   requestId: string, answer: string }
+  | { c: 'plan.reply',      requestId: string, decision: 'approved'|'rejected',
+                            mode?: PermissionMode, feedback?: string }
 ```
 
 ```ts
@@ -804,6 +888,32 @@ Invarianti:
 Il raw nativo, se lo si vuole per debug, va in un file separato e non versionato — mai mescolato
 al journal.
 
+### Append-only non è solo un vincolo: è una cosa che si può usare
+
+L'invariante 1 è stata a lungo solo rispettata. `Journal.readFrom(path, offset)` è il primo
+posto in cui viene **usata**: se il file è cresciuto di tre righe, lo stato di prima più quelle
+tre righe *è* lo stato di adesso, perché `reduce` non è altro che `applyTo` ripetuto su uno
+snapshot vuoto.
+
+Serviva perché l'elenco delle conversazioni rileggeva **ogni journal per intero** a ogni
+aggiornamento, cioè fino a quattro volte al secondo mentre una chat streama. Misurato su un
+journal reale da 12 MB (25.143 eventi): 82 ms per **una** conversazione; con dieci copie, 619 ms
+di event loop bloccato per giro — `readFileSync` e `JSON.parse` sono sincroni, quindi a fermarsi
+era tutto, SSE compreso. Con la cache incrementale: **0,13 ms** a riposo, 0,31 ms con una riga
+nuova in coda.
+
+Due dettagli che non si indovinano. L'offset avanza solo oltre le righe **complete**: una
+`writeSync` in corso può lasciare l'ultima riga a metà, e ripartire da dentro quella riga
+produrrebbe due frammenti che non sono JSON né l'uno né l'altro. E un file più **corto**
+dell'offset non è la coda dello stesso file: è un altro file (cancellato e ricreato), quindi si
+rilegge da capo — continuare uno snapshot vecchio sopra una storia nuova darebbe uno stato che
+non è mai esistito.
+
+Il corollario è la ricerca (§18): cercare passa dagli stessi snapshot, quindi su una macchina
+già accesa non rilegge niente — e trova ciò che la UI mostra, non ciò che sta scritto su disco.
+Una risposta arrivata in trecento `text.delta` nel journal non esiste come frase intera in
+nessuna riga: cercarla riga per riga non la troverebbe mai.
+
 ---
 
 ## 14. Adapter Claude Code: mappatura
@@ -831,6 +941,46 @@ al journal.
 | `quota.windows` | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`, chiesto da STARK |
 | `context.usage` | `getContextUsage()`, chiesto da STARK — stabile, non sperimentale |
 
+### «Consenti sempre» non consentiva niente — misurato il 27 agosto 2026
+
+Un bug vecchio quanto i toggle dei permessi, trovato mentre si verificava che il secondo
+adapter non avesse rotto il primo. Nessuna prova offline poteva vederlo, e nessuna prova viva
+lo cercava: **rompendosi non dà errore**.
+
+Il «Consenti sempre» non è emulato da STARK — si rimanda indietro una regola `addRules` e la
+scrive l'SDK (ADR-009), che è la cosa giusta. Solo che **non succedeva quasi mai**. Quattro giri
+su sessioni vere, con un `Write` (non un `echo`: i comandi innocui sono pre-approvati e non
+chiedono niente a nessuno — questa sonda ci è cascata una volta):
+
+| modalità | hook `PreToolUse` | chi decide | la regola viene scritta? |
+|---|---|---|---|
+| `default` | assente | `canUseTool` | **sì** — `{"permissions":{"allow":["Write"]}}` |
+| `default` | presente | `PreToolUse` | no |
+| `auto` | presente | `PreToolUse` | no |
+
+**L'hook `PreToolUse` scavalca `canUseTool`.** E `PreToolUseHookSpecificOutput` non ha alcun
+campo per ricordare qualcosa: solo `permissionDecision`, `permissionDecisionReason`,
+`additionalContext`. L'hook `PermissionRequest` — che nei tipi porta
+`decision.updatedPermissions` **e** riceve `permission_suggestions`, cioè sarebbe la porta
+giusta — **non scatta mai**, provato con e senza `matcher`. È la quarta volta in un giorno che
+un tipo dichiarato non è un fatto (le altre tre: l'hook `PermissionDenied`, `session.wait` di
+OpenCode, i `Task*` assenti dalla lista runtime).
+
+Ma l'hook è proprio la strada che STARK usa **sempre**: in `auto` mode il classificatore risolve
+prima e `canUseTool` non viene chiamata, quindi i toggle *devono* passare da lì (ADR-008).
+Conseguenza: ogni volta che una categoria è su «chiedi» — cioè l'unico caso in cui una card
+compare davvero — il bottone si comportava come «Consenti», **e il journal scriveva `always`**.
+Una bugia su disco, che si scopre solo la volta dopo, ed esattamente quella che il commento nel
+codice prometteva di evitare.
+
+Il Principio 5 dice che STARK non deve poter meno del CLI, e nella TUI il «sempre» funziona:
+quindi non si toglie il bottone, **si scrive la regola** (`adapters/claude-code/regole.ts`). Il
+formato non è inventato — è quello che ha scritto l'SDK stesso nel giro con `canUseTool`. Regola
+di condotta identica a `memoria.ts`: è un file **dell'utente**, non si riscrive, si aggiunge una
+voce e tutto il resto passa identico; un JSON illeggibile si rifiuta invece di sovrascriverlo.
+Cinque verifiche offline tengono ferma quella parte, più una viva (`spike/permesso-sempre.ts`)
+che guarda il file sul disco — perché è l'unico posto dove la verità si vede.
+
 > ⚠️ **Corretto dal codice.** Le sorgenti qui sopra non si leggono più a mano: le fornisce
 > l'Agent SDK (ADR-009), che emette le stesse forme di messaggio. Cambia **chi** trasporta, non
 > **cosa** viene tradotto — ed è il punto: senza quel confine il secondo adapter non esiste.
@@ -853,6 +1003,185 @@ Vincoli di lancio, dallo spike:
   STARK non se ne accorge, l'utente si ritrova a chiedere tutto senza sapere perché.
 
 ---
+
+## 14-bis. Adapter OpenCode: mappatura e disegno
+
+Scritto il 27 agosto 2026 dopo le sonde P21/P22/P23, cioè **su dati misurati** e non sullo spec.
+Decisioni prese con l'utente: si parla all'SDK ufficiale (ADR-013), `PermissionMode` si
+generalizza in opzioni di sessione, ed entrano tre fatti nuovi nel modello.
+
+### La differenza che non è nella tabella: il modello di processo
+
+| | Claude Code | OpenCode |
+|---|---|---|
+| processo | **uno per conversazione** (l'SDK lo spawna) | **uno per macchina**, N conversazioni dentro |
+| dove vive lo stato | il nostro journal JSONL | SQLite dell'agent, `event(aggregate_id, seq, type, data)` |
+| riprendere | `--resume`, che **rilegge il contesto** | riusare l'id: non c'è niente da ricostruire |
+| costo del risveglio | quota (mitigata dalla cache, misurato P16) | **zero**: nessun contesto da rileggere |
+
+Il contratto del §1 (`AgentBackend.open(spec, hooks) → AgentSession`) **regge senza modifiche**,
+e questo è il primo risultato del secondo adapter: il backend di OpenCode tiene un server
+condiviso e ne ricava N sessioni, quello di Claude Code spawna un processo per sessione. Chi sta
+sopra non vede la differenza. Era esattamente la domanda per cui ADR-012 esiste.
+
+Ne segue però una conseguenza su ADR-005: la premessa «risvegliare costa quota» è **vera di
+Claude Code, non del dominio**. Su OpenCode lo Sleep libera solo l'attenzione di STARK.
+
+### Il contratto, metodo per metodo
+
+| `AgentSession` | OpenCode | nota |
+|---|---|---|
+| `start()` | `createOpencodeServer()` + `v2.session.create()` | il server è condiviso, la sessione no |
+| `prompt(text, images)` | `v2.session.prompt({ prompt: { text, files } })` | `delivery: 'steer' \| 'queue'` — **la fila FIFO è nel protocollo**, non da costruire |
+| `interrupt()` | `v2.session.interrupt()` | «idle interruption is a no-op» |
+| `setModel()` | `v2.session.switchModel()` | |
+| `setMode()` | `v2.session.switchAgent()` | **non è la stessa cosa**: vedi sotto |
+| `setMcp(nome, on)` | `mcp.connect/disconnect({ name, directory })` | ⚠️ **per cartella, non per conversazione** |
+| `refreshQuota()` | — | ⚠️ **non esiste**: chiave propria, costo per step |
+| `refreshContext()` | evento `session.next.context.updated` | qui si **riceve**, là si **chiede** |
+| `fileSuggestions()` | `v2.fs.find()` | |
+| `settled()` | `v2.session.wait()` | ⚠️ **dichiarato, non implementato** |
+| `sleep()` / `close()` | smettere di guardare | non c'è un processo da fermare |
+
+| Evento canonico | Sorgente OpenCode |
+|---|---|
+| `turn.started` | `session.next.prompt.admitted` + `session.next.prompted` |
+| `turn.ended` | ⚠️ **nessuna sorgente**: `session.idle` mai visto in otto giri, `wait` non implementato. Si **deduce** da `step.ended.finish ≠ 'tool-calls'` |
+| `step.started` / `step.ended` | `session.next.step.started` / `.ended` (`finish`, `cost`, `tokens`, `snapshot`, `files`) |
+| `text.*` / `reasoning.*` | `session.next.text.*` / `.reasoning.*` — nome per nome |
+| `tool.started` | `session.next.tool.input.started` |
+| `tool.input.delta` | `session.next.tool.input.delta` |
+| `tool.input.ended` | `session.next.tool.input.ended` (grezzo) **+** `session.next.tool.called` (parsato) |
+| `tool.ended` | `session.next.tool.success` / `.failed` — due eventi, non un flag |
+| `file.edited` | **chiesto**: `GET /session/{id}/diff` → `FileDiff.patch` (git), guidato da `step.ended.files` |
+| `command.executed` | `session.next.shell.started` / `.ended`, più il risultato del tool `bash` |
+| `permission.asked` / `.replied` | `permission.v2.asked` / `.replied` — quasi identici ai nostri |
+| `question.asked` | `question.v2.asked` (non visto dal vivo: modello troppo debole) |
+| `context.compacted` | `session.next.compaction.started/delta/ended`, con `reason: 'auto' \| 'manual'` |
+| `usage.updated` | `step.ended.cost` + `.tokens` |
+| `quota.*` | **assente per costruzione** |
+
+### Cosa cambia nel modello canonico
+
+**1. `PermissionMode` è diventata «opzioni di sessione» — fatto il 27 agosto (ADR-014).**
+Era `'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'` **dentro
+`core/events.ts`**: la quinta falla del confine, e l'unica che stava nel modello e non nel
+daemon. Ora è una stringa aperta, e chi la può usare lo **dichiara l'agent**: `SessionOption`
+(id, etichetta, valore, scelte) più l'evento `session.option` e il comando `session.setOption`.
+Le sei parole sono tornate in `sdk-options.ts`, con `modoDiClaude()` che le richiude nell'enum
+dell'SDK.
+Due indizi indipendenti dicevano che fosse la forma giusta, e sono risultati veri: ACP c'è
+arrivato da solo (`session/set_config_option`, categorie `mode`/`model`/`thought_level`) e STARK
+era già a metà strada (`ModelChoice[]`/`ModeChoice[]` viaggiavano già in `session.created`).
+**Come si vede a schermo**, misurato guidando la UI vera:
+
+| | chip della barra | tendina delle modalità |
+|---|---|---|
+| OpenCode | `build` · `MCP none` · `opencode/big-pickle` | `build`, `plan`, **con le descrizioni sue** |
+| Claude Code | `auto` · `MCP none` · `claude-opus-5[1m]` | le sei, `bypassPermissions` spenta con la ragione |
+
+Tre cose che non si indovinano e che il lavoro ha insegnato:
+
+- **I journal già scritti si disegnano con lo stesso codice di quelli nuovi.** `session.mode` e
+  `session.model` restano **leggibili** e nessun adapter li emette più; se `options` è vuoto la
+  UI lo ricostruisce chiamando la **stessa** `optionsFrom` che usano gli adapter. Un solo
+  percorso, non due che divergono. E un journal **misto** esiste davvero — una chat aperta prima
+  e risvegliata dopo — quindi le forme vecchie aggiornano anche il selettore: se no la barra
+  mostrerebbe il valore nuovo in un campo e quello vecchio nella tendina.
+- **`note` non è `reason`.** `reason` dice perché una voce è **spenta**, `note` è un avviso su
+  una scelta che si può fare. È la distinzione che ha tolto «no auto mode» da tutti e 61 i
+  modelli di OpenCode, dove l'auto mode non esiste come concetto.
+- **Le descrizioni le scrive l'agent.** Guardando la barra si è visto che su OpenCode la voce
+  `plan` mostrava «*Plans first, touches nothing*» — la frase che la UI conosce per la modalità
+  di **Claude Code**, capitata lì per omonimia: vera per caso, falsa nei fatti. Ora l'adapter
+  descrive i propri agenti, e le frasi della UI restano solo come ripiego per i journal scritti
+  prima.
+
+**2. Entrano tre fatti nuovi**, tutti dietro `Capabilities` — dichiarati, non presunti. **Due
+sono fatti** (§10-bis del modello):
+
+- **`todo.updated`** — la checklist. **Fatta.** Verificata due volte: Claude Code 2.1.241 **non**
+  ce l'ha a runtime, OpenCode sì. L'elenco arriva **intero ogni volta** e si **sostituisce**, non
+  si fonde: è la forma in cui lo manda l'agent ed è quella giusta per un journal append-only —
+  chi rilegge non deve applicare patch, gli basta l'ultimo evento. Nella barra è un chip
+  `fatte/totali` che si apre sull'elenco, e **non è premibile**: la checklist è dell'agent, e una
+  spunta che non cambia niente sarebbe finta. Compare solo dove c'è: `capabilities.todos`
+  distingue «non ce l'ha» da «non ha ancora niente da fare».
+- **`session.retried`** — `{ attempt, reason }`. **Fatto.** Un turno che riprova tre volte e uno
+  che parte al primo colpo erano identici a schermo, e non sono la stessa cosa: è la spiegazione
+  della pausa che si vede sopra. Sta **nel turno**, come la compattazione, perché è successo lì.
+  Su Claude Code lo fa l'SDK sotto e non affiora: capacità a `false`, che non è un buco — è un
+  fatto che quell'agent non racconta.
+  Nessuno dei due si può produrre a comando (la checklist la tiene solo OpenCode, e l'unico
+  modello disponibile si rompe a metà turno), quindi si guardano con un journal costruito a mano:
+  `tools/prova-todo-retry.ts`. Non è barare — il §4 dice che lo stato nasce dal journal, quindi
+  se si disegna bene da lì si disegna bene sempre.
+- **`revert.*`** — annullare le modifiche. **Costo dichiarato in anticipo, perché è il più caro
+  dei tre**: non è un evento da tradurre, è una schermata da disegnare (quali confini, cosa si
+  annulla, cosa succede alla conversazione dopo). OpenCode ha snapshot veri (un git interno) e un
+  revert a tre tempi `stage`/`commit`/`clear` con i patch per file; Claude Code ha
+  `enableFileCheckpointing`, mai usato. Scelta dell'utente, presa sapendo che è la più lunga.
+
+**3. Tre capacità nuove da dichiarare**, che sono i punti in cui i due agent **non** si
+somigliano: `planQuota` (la banda «quota esaurita» non ha dove attaccarsi su OpenCode),
+`mcpPerSession` (là è per cartella — e la UI dovrà mostrare il chip **spento con la
+spiegazione**, mai nascosto: Principio 5), e `turnEnd` — cioè se «il turno è finito» è un fatto
+annunciato o una deduzione del client.
+
+### Cosa ha trovato l'adapter, una volta scritto (27 agosto 2026)
+
+L'adapter minimo esiste e gira: `npm run opencode`, 14/14 dal vivo attraverso il daemon, più
+una conversazione guidata nel browser vero (`tools/prova-opencode-ui.mjs`) — agent scelto in
+«New chat», modello cambiato dalla barra, prompt mandato, risposta a schermo.
+
+**Il contratto del §1 non è stato toccato.** È il risultato che ADR-012 cercava, e va detto per
+esteso: il daemon apre una chat passando `agent: 'opencode'` e non sa nient'altro; dentro,
+`host.ts` tiene un server condiviso con N conversazioni mentre Claude Code spawna un processo
+per conversazione, e chi chiude una sessione non sa quale delle due cose ha fatto.
+
+**Dove il secondo adapter fa MENO lavoro del primo**, che è l'osservazione meno attesa: la fila
+FIFO dei prompt è nel protocollo (`delivery: 'queue'`) invece di essere costruita sopra, e
+«consenti sempre» è una parola (`reply: 'always'`) invece di una regola da scrivere in un file.
+
+**Tre difetti che solo il secondo agent poteva far emergere**, tutti trovati guardando e non
+leggendo:
+
+1. **Il menu dei modelli non aveva un tetto.** `max-height`/`overflow-y` esistevano **solo**
+   nella media query del telefono. Con gli otto modelli di Claude Code non si notava; con i
+   **61** di OpenCode le voci in fondo finiscono sopra il bordo superiore e non si possono
+   premere (misurato: Playwright rifiuta il clic, «element is outside of the viewport»). Il tetto
+   è ora un'invariante, senza media query: un menu non può essere più alto dello schermo.
+2. **La barra mostrava una modalità che l'adapter aveva appena dichiarato inesistente.** Il
+   default del daemon è `auto`, OpenCode non ce l'ha, e `session.mode` la annunciava lo stesso.
+   Ora si declassa a `default` **dicendolo** — lo stesso comportamento che Claude Code ha con un
+   modello che non regge auto mode.
+3. **`'default'` è vocabolario di Claude Code**, ed è la sesta falla del confine. Lì è un alias
+   vero che l'SDK risolve; su OpenCode non vuol dire niente, e una chat nata così restava sulla
+   scelta del server — che su questa macchina è `big-pickle`, **giù a monte**, cioè una chat
+   nata rotta senza via d'uscita. Ora l'adapter chiede a OpenCode quale modello userebbe e lo
+   dichiara, che è l'analogo esatto del `resolveModel` di Claude Code.
+
+**E uno che era stato registrato e poi chiuso lo stesso giorno:** nella tendina dei modelli
+tutte e 61 le voci portavano l'avviso «*No auto mode — this chat would fall back and ask for
+everything*». Su Claude Code è vero e utile; su OpenCode l'auto mode **non esiste come
+concetto**, quindi era rumore su ogni riga. Non si correggeva con un campo in più — si è
+corretto con ADR-014, distinguendo `note` (un avviso su una scelta che si può fare) da `reason`
+(perché una voce è spenta): un agent senza classificatore semplicemente non popola quel campo.
+
+### Perché non ACP
+
+Valutato a fondo il 27 agosto, e scartato **come modello canonico** — non come trasporto futuro.
+ACP è parlato da 39 agent, OpenCode nativamente e Claude Code tramite un adapter ufficiale. Ma
+quell'adapter ufficiale, scritto da chi conosce ACP meglio di chiunque, ha dovuto aggiungere
+**sei estensioni proprietarie** per esprimere Claude Code — fra cui una intera per quota e rate
+limit, e una da 13 KB solo per la presentazione dei permessi. E ACP dichiara la quota del piano
+**fuori scope** per iscritto. L'elenco di ciò che ACP non ha — quota, categorie del contesto,
+compattazione, `/clear`, fila FIFO, classificatore, revert, sotto-agent annidati, MCP a caldo,
+ricerca file del CLI — non è casuale: sono **una per una** le cose aggiunte a STARK dopo aver
+misurato che il CLI le faceva e la GUI no. Un protocollo che deve valere per 39 agent si ferma
+al minimo comune denominatore, e il Principio 5 dice che STARK non può fermarsi lì.
+Resta buono come **terzo adapter**, un domani: dietro lo stesso contratto del §1, comprerebbe
+Codex, Gemini, Copilot e altri 35 al prezzo di uno. Vedi ADR-013.
 
 ## 15. Controprova OpenCode
 
@@ -879,6 +1208,177 @@ scelto è quello giusto.
 Tre cose che OpenCode ha e Claude Code no, già coperte da `Capabilities`:
 `session.next.tool.progress`, `session.next.revert.staged|committed|cleared`, e le domande
 `question.v2.asked`. Nessuna richiede di cambiare la forma del modello: sono eventi in più.
+
+### La prova di carico vera — sonda P21, 27 agosto 2026
+
+Quanto sopra è stato letto in uno spec. ADR-012 esiste perché **leggere uno spec non è farci
+passare dei dati**, e questa è la parte scritta dopo averceli fatti passare: `opencode serve`
+1.17.20 su una cartella di prova, `nemotron-3-ultra-free`, quattro giri, con un turno che legge un
+file, ne scrive uno nuovo e lancia un comando. La sonda è `spike/opencode/p21-tool-permesso.mjs`
+e non traduce niente di proposito: cattura i payload grezzi su un JSONL, così il confronto si
+rifà a costo zero invece di ribruciare un giro ogni volta che ci si accorge di non aver guardato
+un campo.
+
+**Dove il modello regge, regge per la ragione giusta.** `text.*`, `reasoning.*`, `step.*` e
+`permission.*` corrispondono nome per nome, e il payload di un permesso è quasi il nostro:
+`{ id, sessionID, action, resources, save, source }` contro
+`{ requestId, action, resources, savable }`. Non è una coincidenza — è §14 che li aveva presi da
+qui. Il modello tiene dove è stato disegnato **su OpenCode**, e si piega dove è stato disegnato
+su Claude Code. È esattamente l'informazione per cui la prova esisteva.
+
+**1. Lo spec dichiara `properties`, il filo manda `data`.** Ogni evento sul canale SSE ha la forma
+`{ id, type, durable?, location, data }`; gli schemi `Event*` di `GET /doc` dicono `properties`.
+Costato un giro intero: il permesso *era arrivato*, la sonda non lo riconosceva e non lo
+concedeva mai. Sta scritto dentro la sonda perché è il genere di errore che si paga due volte.
+
+**2. `file.edited` e `session.diff` non arrivano.** La riga della tabella qui sopra è corretta a
+tavolino e **falsa sul campo**: una `write` che ha creato davvero un file (verificato su disco)
+non ha prodotto nessuno dei due, in nessun giro. L'effetto c'è, ma **dentro il risultato del
+tool** — `tool.success.structured = { operation:"write", target, resource, existed:false }` —
+e **senza hunks**. Il diff su OpenCode si **chiede** (`GET /session/{sessionID}/diff`), non
+arriva.
+Conseguenza concreta: la schermata Effetti poggia su `file.edited` con `hunks`, che Claude Code
+regala dentro il risultato del tool. Su OpenCode quegli hunks l'adapter deve **costruirseli**.
+Non è un difetto del livello canonico — `file.edited` con gli hunks *è* il fatto che l'utente
+vuole vedere — è un costo dell'adapter, e va messo in conto adesso invece che scoprirlo a
+schermata già scritta.
+
+**3. `turn.ended` non ha una controparte, e `session.idle` non si è mai visto.** Lo schema
+`EventSessionIdle` esiste (`type: "session.idle"`), ma su quattro giri — compreso quello finito
+bene, con il testo conclusivo e il tool riuscito — **non è mai arrivato**. Quello che c'è è
+`session.next.step.ended` con `finish` (`"tool-calls"` quando il turno prosegue). Quindi in
+OpenCode «il turno è finito» è una **deduzione del client**, non un fatto annunciato, mentre in
+Claude Code è annunciato. Il modello canonico è qui più ricco di uno dei due agent, e va bene
+così: `turn.ended` è la cosa che la UI deve sapere, e produrlo è mestiere dell'adapter. Resta da
+capire **a quale condizione** dedurlo senza sbagliare — un `finish` diverso da `tool-calls` è il
+candidato, ma non è ancora misurato su abbastanza casi.
+
+**4. La coppia `tool.input.ended` si compone da due eventi.** `session.next.tool.input.ended`
+porta solo `text`, cioè il grezzo accumulato; l'input **parsato** sta in
+`session.next.tool.called` (`{ tool, input, provider }`). E l'esito non è un flag: sono due
+eventi distinti, `tool.success` e `tool.failed`, contro il nostro `tool.ended { ok }`. Nessuno
+dei due è sbagliato e la traduzione è meccanica — vale la pena notarlo solo perché la tabella
+sopra faceva sembrare la corrispondenza 1:1 e non lo è.
+
+**5. OpenCode numera già gli eventi.** `durable: { aggregateID, seq, version }`, cioè un
+progressivo **per sessione**, che è la stessa cosa che §4 fa assegnare a STARK. Non è un
+conflitto oggi, ma è la prima volta che si vede un agent con un ordinamento proprio, e per un
+journal append-only che deve poter riprendere (§13) quel numero è più autorevole del nostro.
+
+**6. Ogni evento porta `location.directory`.** Un solo `opencode serve` serve più cartelle: il
+flusso è globale e va filtrato. STARK ha una sessione per processo, quindi il modello non cambia
+— ma l'adapter deve filtrare, e dimenticarsene vorrebbe dire mescolare due progetti.
+
+**7. `todo.updated` esiste, e corregge una conclusione di ieri.** §16.10 registra che `TodoWrite`
+non è fra i 32 tool di Claude Code 2.1.241, il che è vero. Da lì era stato concluso troppo: che
+la checklist fosse un ricordo di una TUI che non c'è più. OpenCode ha `todo.updated` con
+`{ sessionID, todos }`, una chiave di permesso `todowrite` e `GET /session/{sessionID}/todo`.
+Quindi non è un residuo: è **un concetto di dominio che il modello canonico non ha**. È la prima
+cosa che la prova di carico ha trovato mancante, ed è mancante per il motivo previsto da ADR-012
+— il modello ha seguito un agent solo.
+
+**8. `session.next.retried` è un fatto che l'utente non vede.** `{ attempt, error }`. Su Claude
+Code il ritentativo lo fa l'SDK sotto e non affiora, quindi STARK non ha mai avuto motivo di
+modellarlo. Un turno che riprova tre volte e uno che parte al primo colpo sono la stessa cosa
+sullo schermo, e non sono la stessa cosa.
+
+### Il confine del §1, da parola a codice
+
+La prova di carico ha prodotto anche un risultato che non richiedeva di far girare
+niente: cercando il contratto da far implementare al secondo adapter, si è scoperto che
+**non esisteva**. C'era la sola classe concreta `ClaudeCodeAdapter`, e a importarla
+direttamente non erano solo le sonde ma `daemon/registry.ts`, `daemon/server.ts`,
+`daemon/memoria.ts`. Il paletto n.1 di ADR-012 era quindi già violato **dalla parte di
+Claude Code**, prima ancora che il secondo adapter cominciasse — e per un anno di
+sviluppo il §1 è stato una frase in un documento, non una cosa che il compilatore
+potesse controllare.
+
+Quattro falle, tutte con lo stesso modo di fallire — **in silenzio**:
+
+| dove | cosa usciva dall'adapter | ora |
+|---|---|---|
+| `OpenSpec.askTools: string[]` | i nomi di tool di Claude Code (`Bash`, `mcp__*`) fino alla rotta HTTP, col registro che chiamava `askToolsFor()` | `ask: PermissionCategory[]`, e a tradurre è l'adapter |
+| `OpenSpec.configDir` | il nome della variabile d'ambiente di Claude Code, arrivato **fin dentro la UI** | `profile`, stringa opaca; `CLAUDE_CONFIG_DIR` si legge solo al confine col mondo |
+| `PermissionAnswer.remember` | un `PermissionUpdate` dell'**SDK Anthropic** costruito dentro `registry.ts`, con `destination: 'localSettings'` | una stringa: **il soggetto** da ricordare. Dove finisca scritto lo sa l'adapter |
+| `Live.adapter: ClaudeCodeAdapter` | la classe concreta come tipo | `AgentSession`, un'interfaccia |
+
+`daemon/memoria.ts` è finito sotto il confine (`adapters/claude-code/memoria.ts`) ed è
+esposto come capacità **opzionale** `setCommandDescriptions`: quel campo lo scrive il
+modello, quindi per Claude Code l'unico modo è una regola nel suo `CLAUDE.md` globale —
+ma è una risposta di *quell'* agent, non del dominio.
+
+Verificato dal vivo, non per esito HTTP: aperta una sessione con un `profile` che punta
+a una cartella nuova, il processo figlio ci ha creato dentro `sessions/`, `projects/` e
+`.claude.json`. Se il rinomino si fosse perso per strada, quelle cartelle sarebbero nate
+nel profilo vero — è la sola prova che distingue «il campo arriva» da «il campo esiste».
+Sei verifiche nuove tengono ferme le quattro traduzioni, perché nessuna delle quattro
+darebbe un errore rompendosi.
+
+**Cosa resta fuori dal confine, e si sceglie di lasciarcelo per ora.** Le sonde in
+`src/cli/` importano `ClaudeCodeAdapter` direttamente, ed è giusto per quelle che
+provano *l'adapter* (`offline-check`, `import-check`); per quelle che aprono una
+sessione vera (`vertical-slice`, `resume-check`, `queue-check`, `takeover-check`,
+`diff-live-check`) sarebbe più onesto passare da `backendFor()`. E la UI **spiega** in
+chiaro cos'è un profilo nominando `CLAUDE_CONFIG_DIR` (in `Settings.svelte` e
+`NewChat.svelte`): quel testo è corretto oggi e diventerà falso il giorno in cui la
+stessa schermata dovrà descrivere il profilo di un altro agent.
+
+### Secondo giro: l'SDK ufficiale, e due correzioni a quanto sopra — P22/P23
+
+La P21 aveva parlato al server con `fetch`. Sbagliato per la regola del progetto: **esiste un
+SDK ufficiale**, `@opencode-ai/sdk`, versionato **appaiato al CLI** (1.17.20 ↔ 1.17.20) — lo
+stesso schema di `@anthropic-ai/claude-agent-sdk` ↔ Claude Code. Espone `createOpencodeServer()`,
+cioè sa avviare il processo da sé: l'analogo di `query()`. La P22 gira tutta su di lui.
+
+**Correzione 1 — gli hunks ci sono.** Sopra è scritto che su OpenCode l'adapter deve
+costruirsi il diff. Falso, e la P22 lo mostra: `FileDiff = { path, status, additions,
+deletions, patch }` con `patch` in **formato git**, e `session.next.step.ended` porta
+`snapshot?: string` e `files?: string[]` — cioè lo step dichiara a quale istantanea e quali file
+ha toccato. Quello che cambia rispetto a Claude Code non è la disponibilità ma **la porta**: là
+il diff arriva dentro il risultato del tool, qui si **chiede** (`GET /session/{id}/diff`, o via
+`RevertState`). Costo per l'adapter: una chiamata per step, non una ricostruzione.
+
+**Correzione 2 — «i tipi non sono i fatti», per la terza volta in un giorno.** §16.10 dice che
+`TodoWrite` non è fra i tool di Claude Code 2.1.241. Cercando la controprova è saltato fuori che
+l'SDK **dichiara** `TodoWriteInput/Output` *e* una famiglia `TaskCreate/TaskUpdate/TaskList/
+TaskGet/TaskStop`. Sembrava la smentita; non lo è. Letta la lista **runtime** di una sessione
+vera (60 tool, MCP compresi) ci sono `Task`, `TaskOutput`, `TaskStop` — il lanciatore di
+sotto-agent — e **non** `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`. Quindi §16.10 regge,
+e ci si aggiunge la regola che l'ha salvata: **un tipo dichiarato in un `.d.ts` non è un tool
+attivo**. È la stessa lezione dell'hook `PermissionDenied` (dichiarato, mai chiamato) e di
+`session.wait` di OpenCode (nei tipi dell'SDK, e il server risponde «not available yet»). Tre
+volte, tre agent diversi, stessa forma: **la fonte di verità è l'handshake, non lo schema.**
+
+**Cosa la P22 ha misurato che regge** (21 chiamate su 23): `session.create/prompt/interrupt/
+switchModel/switchAgent/compact/context/history/messages`, `revert.stage/commit/clear`,
+`session.diff`, `session.todo`, `fs.find`, `permission.saved.list`, `agent.list`, `command.list`,
+`skill.list`, `model.list` (**7.326** modelli), `experimental.capabilities.get`.
+
+**E quello che non c'è, misurato:**
+
+- **`session.wait` è dichiarato e non implementato**: «Session wait is not available yet».
+  Quindi la fine del turno, che già non ha un evento (`session.idle` mai visto in otto giri),
+  non ha nemmeno una chiamata: **l'adapter la deve dedurre**.
+- **`v2.session.context` non dice quanto è pieno il contesto**: torna **i messaggi** dopo
+  l'ultima compattazione. Il consumo arriva invece come evento — `session.next.context.updated`
+  — cioè OpenCode lo **spinge** mentre Claude Code lo fa **chiedere** (`getContextUsage()`).
+- **Gli MCP non sono per conversazione**: `mcp.connect/disconnect` prende `{ name, directory }`,
+  **non** un `sessionID`. Su Claude Code «gli strumenti esterni si scelgono per chat» è la
+  funzione che ha chiuso l'ultimo divario col CLI; su OpenCode, alla lettera, non è esprimibile.
+
+**La P23 è fallita, e il fallimento è il dato.** Quattro scene per i fatti che solo il modello può
+produrre (todo, domanda, sotto-agent, edit vero): con l'unico modello disponibile
+(`nemotron-3-ultra-free`) tre su quattro non partono e la quarta usa `glob` invece di lavorare.
+Restano **non misurati dal vivo**: `todo.updated`, `question.v2.*`, il sotto-agent, e un
+`file.edited` da un edit vero. Sono nello spec e nei tipi — cioè esattamente il genere di
+certezza che le due correzioni qui sopra insegnano a non prendere per buona.
+
+**Cosa NON si è potuto misurare.** La chiave OpenCode Zen di questa macchina può usare **un solo
+modello** (`nemotron-3-ultra-free`): il catalogo ne elenca 29 a chiunque, gli altri rispondono
+`401 Model … is not supported`. E quel modello si rompe spesso a metà turno («Invalid
+opencode/openai-compatible-chat stream event»), il che ha reso necessario spezzare la prova in
+scenari corti. Restano quindi non visti dal vivo: `question.v2.asked`, il `revert`, la
+compattazione, il cambio di agent, `tool.progress`. Sono nello spec, non nei dati.
 
 ### Una premessa di ADR-006 è risultata sbagliata
 
@@ -936,7 +1436,11 @@ cui `Capabilities` dovrà lavorare davvero.
    ancora — nel pannello sta in elenco, spento, con scritto perché.
 6. **Costo in quota del classificatore.** Ogni azione ispezionata è una chiamata a un secondo
    modello. Non è stato misurato, e su abbonamento a quota fissa è la risorsa che conta.
-7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa.
+7. **Rotazione del journal.** Una sessione lunga produce un file grande. Nessuna decisione presa
+   — ma la pressione che la rendeva urgente è scesa: da quando l'elenco legge solo la coda
+   (§13), la dimensione del file non si paga più a ogni aggiornamento, solo alla prima lettura.
+   Restano da guardare la memoria (uno snapshot per conversazione, tenuto in vita) e il tempo di
+   apertura di una chat molto lunga.
 8. ~~**Il risveglio vero.**~~ **Risolto, e misurato (P16).** Rilanciare con `--resume` riaggancia
    il journal esistente e i `seq` **continuano** invece di ripartire da 1 — ripartire produrrebbe
    due eventi con lo stesso numero nello stesso file, e "ho già visto fino a N" smetterebbe di
@@ -944,6 +1448,22 @@ cui `Capabilities` dovrà lavorare davvero.
    dell'agent ripristina il contesto del modello. Per questo `--no-session-persistence` è
    incompatibile con lo Sleep. Resta non misurato **quanto costa in quota** risvegliare una
    conversazione lunga: le sonde usano prompt minuscoli.
+
+9. **Il lavoro *dentro* un sub-agent.** `task.started`/`task.ended` (§7) ne portano l'incarico e
+   il resoconto finale, che è ciò che il CLI manda. I passi interni no: viaggiano su messaggi
+   con `parent_tool_use_id` valorizzato (verificato: 3 messaggi, 1 genitore, in una sessione di
+   prova), che oggi il traduttore non guarda. Annidarli nel flusso è una schermata da disegnare
+   prima che da scrivere: un sub-agent può produrre da solo più blocchi di un turno intero.
+10. **`TodoWrite` non esiste**, e vale la pena che sia scritto qui perché sembra il contrario.
+   La checklist che si ricorda dalla TUI non è fra i 32 tool che il CLI **2.1.241** dichiara nel
+   suo `system:init` (verificato leggendo la cattura nativa di una sessione vera, non i tipi).
+   Il canale con cui il CLI racconta oggi un lavoro in corso è quello del §7. Se un domani il
+   tool tornasse, va rifatta la verifica — non dedotta dal ricordo.
+   **Corretto il 27 agosto dalla sonda P21** (§15): quanto sopra è vero *di Claude Code
+   2.1.241*, e da lì era stato concluso troppo — che la checklist fosse un ricordo di una TUI
+   che non c'è più. OpenCode ha `todo.updated`, la chiave di permesso `todowrite` e
+   `GET /session/{sessionID}/todo`. È un concetto di **dominio** che il modello canonico non
+   ha, non un residuo: la domanda giusta non è «il tool esiste?» ma «il fatto esiste?».
 
 ---
 
@@ -956,8 +1476,10 @@ cui `Capabilities` dovrà lavorare davvero.
 | `src/core/events.ts` | i tipi di questo documento, uno a uno |
 | `src/core/journal.ts` | §13, append-only, `seq` senza buchi (scrittura sincrona di proposito) |
 | `src/core/reduce.ts` | l'invariante del §4 resa eseguibile: eventi → stato della UI |
-| `src/adapters/claude-code/` | l'unico punto che nomina Claude Code; sopra l'Agent SDK (ADR-009) |
-| `src/cli/offline-check.ts` | `npm run check` — 78 verifiche su eventi finti, **costo zero di quota** |
+| `src/core/adapter.ts` | **il contratto**: cosa si può chiedere a un agent, nel vocabolario del §1 |
+| `src/adapters/index.ts` | l'unico file che nomina un agent specifico; `backendFor()` sceglie |
+| `src/adapters/claude-code/` | l'unico punto che *conosce* Claude Code; sopra l'Agent SDK (ADR-009) |
+| `src/cli/offline-check.ts` | `npm run check` — 149 verifiche su eventi finti, **costo zero di quota** |
 | `src/cli/vertical-slice.ts` | `npm run slice` — sessione vera, poi Sleep, poi replay |
 | `src/daemon/` | HTTP + SSE su 127.0.0.1, registro delle sessioni, perimetro di sicurezza |
 | `ui/` | Vite + Svelte 5 (ADR-010). Non tiene un modello proprio: `SessionSnapshot` più lo stesso `applyTo` |
@@ -990,6 +1512,23 @@ protocollo di differenze sarebbe una seconda copia dello stato da tenere allinea
 altro posto in cui la UI può divergere dal journal. Il ritardo di 250 ms non è una comodità: un
 solo turno produce decine di eventi al secondo, e ogni riga dell'elenco che non è viva si
 ricalcola rileggendo il suo journal da disco.
+
+### Cercare non è un comando
+
+`GET /api/search?q=` non cambia niente e non riguarda una conversazione sola, quindi è una GET
+sul registro come `/api/sessions`, non un `Command` del §11. Non tiene stato fra una richiesta e
+l'altra: chi scrive nella casella ne manda una per pausa di digitazione, e ognuna deve poter
+essere l'ultima.
+
+Cerca negli **snapshot**, non nei file (vedi §13): trova quindi ciò che la UI mostra. Due
+caratteri di soglia — con uno solo la risposta è «tutte», che non è una risposta. Nessuna
+espressione regolare, di proposito: una casella in cui scrivere `(` fa esplodere tutto è peggio
+di una che trova meno, e chi cerca `array.map(` intende quei caratteri lì.
+
+Il risultato porta il ritaglio **già fatto** e la posizione da evidenziare al suo interno
+(`at`, `len`). Rifare la ricerca nel browser vorrebbe dire scriverla due volte e sbagliarla in
+un posto solo: dove cade il maiuscolo/minuscolo, e di quanto si è spostato il testo dopo che gli
+a capo sono diventati spazi, è già stato deciso da chi ha cercato.
 
 ### Le due rotte che non sono comandi
 

@@ -9,7 +9,7 @@
 // registrata e ottenere esattamente gli stessi eventi canonici. È ciò che rende
 // verificabile la traduzione senza spendere quota.
 
-import type { Cost, Payload, Usage } from '../../core/events.ts'
+import type { Cost, Payload, PermissionMode, Usage } from '../../core/events.ts'
 import type { NativeEvent } from './raw.ts'
 import { classifyBlock, flattenContent, toolEffect } from './effects.ts'
 import { intentOf, summarize } from './summary.ts'
@@ -23,6 +23,8 @@ export class Translator {
   private blocks = new Map<number, OpenBlock>()
   private messageId = 'm0'
   private pendingThinkingTokens: number | undefined
+  /** L'ultima modalità permessi che si sa. Vedi `modeChange()`. */
+  private mode: string | undefined
   private turnId: string | undefined
   /** callId -> nome del tool e input, per arricchire il tool_result che arriverà dopo. */
   private calls = new Map<string, { name: string; input: unknown }>()
@@ -58,7 +60,42 @@ export class Translator {
 
   // ─── system ───────────────────────────────────────────────────────────────
 
+  /**
+   * La modalità dei permessi come la dichiara **il CLI**, quando la dichiara.
+   *
+   * Esiste perché STARK conosceva solo le modalità che imponeva lui, e non è la
+   * stessa cosa. Misurato dal vivo il 27 agosto 2026: approvando un piano con
+   * `setMode: acceptEdits`, il CLI passa davvero ad `acceptEdits` — lo dice nel suo
+   * `system:status` — ma nessun evento canonico lo raccontava, e la barra di stato
+   * continuava a mostrare `plan`. Lo stesso vale per `EnterPlanMode`, che è un tool
+   * dell'agent: **l'agent può cambiare modalità da sé**, e senza questa riga STARK
+   * mostrerebbe quella di prima per il resto della conversazione.
+   *
+   * Solo sui cambiamenti: ripetere la stessa modalità a ogni `system:status` — che
+   * arriva più volte per turno — riempirebbe il journal di righe che non dicono niente.
+   */
+  private modeChange(e: NativeEvent): Payload[] {
+    const m = e['permissionMode']
+    if (typeof m !== 'string' || !m || m === this.mode) return []
+    this.mode = m
+    // ADR-014: la modalita' e' una delle opzioni dichiarate, non piu' un caso
+    // speciale del modello. Il fatto raccontato e' lo stesso — il CLI ha dichiarato
+    // una modalita' diversa da quella che sapevamo — e resta importante perche'
+    // `EnterPlanMode` e' un tool dell'agent: puo' cambiarla lui.
+    return [{ k: 'session.option', id: 'mode', value: m }]
+  }
+
+  /** Ciò che l'adapter ha già annunciato: senza, il primo `system:init` riemetterebbe
+   *  una modalità che è già nel journal, scritta un istante prima. */
+  seedMode(mode: string): void { this.mode = mode }
+
   private system(e: NativeEvent): Payload[] {
+    const cambioModo = this.modeChange(e)
+    if (cambioModo.length > 0) return [...cambioModo, ...this.systemBody(e)]
+    return this.systemBody(e)
+  }
+
+  private systemBody(e: NativeEvent): Payload[] {
     switch (e['subtype']) {
       case 'init': {
         // `system:init` NON è la nascita della sessione: arriva col primo turno, non
@@ -78,6 +115,46 @@ export class Translator {
         return e['status'] === 'requesting'
           ? [{ k: 'session.state', state: 'busy' }]
           : []
+      // I due messaggi con cui il CLI racconta un lavoro che sopravvive alla chiamata
+      // che lo ha lanciato: un comando in background, o un sub-agent. Fino al 27
+      // agosto 2026 cadevano nel `default` qui sotto, cioè si perdevano — 279 in un
+      // solo giro di journal reali, di cui 7 falliti e 5 sub-agent. Sono l'unica
+      // fonte dell'esito vero: il `tool_result` che arriva subito dice solo che il
+      // lancio è riuscito.
+      case 'task_started': {
+        const taskId = e['task_id']
+        if (typeof taskId !== 'string' || !taskId) return []
+        const tipo = e['task_type']
+        return [{
+          k: 'task.started',
+          taskId,
+          // `local_bash`/`local_agent` sono nomi suoi e restano qui (§1). Un tipo che
+          // non conosciamo diventa `other` e si mostra lo stesso: sparire sarebbe
+          // peggio che essere generici.
+          kind: tipo === 'local_agent' ? 'agent' : tipo === 'local_bash' ? 'command' : 'other',
+          background: e['is_backgrounded'] === true,
+          ...(typeof e['tool_use_id'] === 'string' && e['tool_use_id']
+            ? { callId: e['tool_use_id'] } : {}),
+          ...(typeof e['description'] === 'string' && e['description']
+            ? { description: e['description'] } : {}),
+        }]
+      }
+      case 'task_notification': {
+        const taskId = e['task_id']
+        if (typeof taskId !== 'string' || !taskId) return []
+        const stato = e['status']
+        // Solo i due esiti definitivi diventano un evento. Uno stato intermedio
+        // ridirebbe «sta lavorando», che la riga dice già: qui si aspetta la fine.
+        if (stato !== 'completed' && stato !== 'failed') return []
+        const out = e['output_file']
+        return [{
+          k: 'task.ended',
+          taskId,
+          status: stato,
+          ...(typeof e['summary'] === 'string' && e['summary'] ? { summary: e['summary'] } : {}),
+          ...(typeof out === 'string' && out ? { outputFile: out } : {}),
+        }]
+      }
       case 'thinking_tokens':
         // Non è un evento a sé: è un indicatore di avanzamento dello stesso fatto (§7).
         // Viene agganciato al prossimo reasoning.delta.

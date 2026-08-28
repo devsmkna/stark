@@ -1,5 +1,5 @@
 {
-  "comment": "Le verifiche di `ui/src/lib/layout.ts` girano con node puro, quindi hanno bisogno dei tipi di node — che la UI non ha, e non deve avere: un file del browser che usasse `process` deve restare un errore. Da qui la configurazione separata invece di allargare quella della UI.",
+  "comment": "Le verifiche di `ui/src/lib/layout.ts` e `ui/src/lib/gruppi.ts` girano con node puro, quindi hanno bisogno dei tipi di node — che la UI non ha, e non deve avere: un file del browser che usasse `process` deve restare un errore. Da qui la configurazione separata invece di allargare quella della UI. `paths` ricalca l'alias `$core` di Vite: `gruppi.ts` importa i tipi delle parti dal modello canonico, e senza la mappatura il typecheck non li troverebbe (a runtime non serve — è un `import type`, e sparisce).",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
@@ -11,7 +11,11 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": { "$core/*": ["../src/core/*"] }
   },
-  "include": ["layout-check.ts", "../ui/src/lib/layout.ts"]
+  "include": [
+    "layout-check.ts", "../ui/src/lib/layout.ts",
+    "gruppi-check.ts", "../ui/src/lib/gruppi.ts"
+  ]
 }

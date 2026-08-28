@@ -15,7 +15,7 @@
   import { activityText, since } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
-  // `live` arriva da fuori e non da `store.live`: con più pannelli aperti «la chat a
+  // `live` arriva da fuori e non da `live`: con più pannelli aperti «la chat a
   // fuoco» non è la chat di *questo* dock, e la nota «no process behind it» compariva
   // in tutti i pannelli appena una qualsiasi chat a fuoco era ferma.
   let { store, snap, live }: { store: Store; snap: SessionSnapshot; live: boolean } = $props()
@@ -32,7 +32,10 @@
   // alla lettera mostrerebbe una rotellina che gira su niente e una domanda a cui non
   // c'è più nessuno a rispondere — la bugia peggiore, perché è quella su cui si aspetta.
   const busy = $derived(live && (snap.state === 'busy' || snap.state === 'starting'))
-  const pending = $derived(snap.pendingPermissions.length + snap.pendingQuestions.length > 0)
+  // Il terzo stato bloccante: un piano da approvare. Senza contarlo qui il blocco non
+  // si espande, e `Ask.svelte` disegnerebbe in un contenitore alto zero.
+  const pending = $derived(
+    snap.pendingPermissions.length + snap.pendingQuestions.length + snap.pendingPlans.length > 0)
   const asking = $derived(live && pending)
   const op = $derived(busy ? activity(snap) : null)
 
