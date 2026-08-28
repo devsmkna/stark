@@ -297,6 +297,47 @@
   const linkMostrato = $derived(
     `${location.origin}${store.selected ? `/chat/${store.selected}` : '/'}?token=•••`)
 
+  // ─── riavvio del daemon ────────────────────────────────────────────────────
+  //
+  // Serve a prendersi un aggiornamento senza tornare al terminale: `git pull` e poi
+  // questo bottone. Ricompila anche `ui/dist`, che è un artefatto locale — senza,
+  // dopo un pull che tocca `ui/` il browser continuerebbe a ricevere il pacchetto
+  // vecchio e il riavvio sembrerebbe non aver fatto niente.
+  let riavvio = $state<'no' | 'conferma' | 'in corso'>('no')
+  /** Quante conversazioni hanno un processo dietro: sono figlie del daemon, quindi si
+   *  fermano tutte. È il costo, e va detto **prima**, non scoperto dopo. */
+  const vive = $derived(store.rows.filter(r => r.live).length)
+
+  async function riavvia(): Promise<void> {
+    riavvio = 'in corso'
+    try {
+      await store.api.restart(true)
+      // Non si chiude il dialogo e non si ricarica: il flusso cade da sé e la pagina
+      // si ricollega quando il daemon torna, che è ciò che già fa dopo un riavvio da
+      // terminale. Ricaricare adesso significherebbe chiedere una pagina a un
+      // processo che si sta spegnendo.
+      // E poi si aspetta che torni, per **smettere** di dire «Restarting»: senza, la
+      // riga resterebbe lì anche a daemon tornato — cioè direbbe una cosa falsa
+      // proprio mentre tutto il resto della pagina si è già ricollegato.
+      const torna = async (): Promise<void> => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 500))
+          try {
+            const r = await fetch('/api/health', { headers: store.api.authHeaders })
+            if (r.ok) { riavvio = 'no'; return }
+          } catch { /* ancora spento: è quello che stiamo aspettando */ }
+        }
+        // Un minuto senza risposta non è più «sta ripartendo»: è qualcosa da guardare.
+        riavvio = 'no'
+        store.refused = 'STARK did not come back — check daemon.log'
+      }
+      void torna()
+    } catch (e) {
+      riavvio = 'no'
+      store.refused = `restart failed: ${(e as Error).message}`
+    }
+  }
+
   async function copia(che: string, testo: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(testo)
@@ -973,6 +1014,50 @@
           you keep this tab open. To replace it:
           <code>npm run stark:token -- --new</code>, then restart the daemon — it cannot be done
           from here without cutting this page off mid-sentence.</div>
+        </div>
+
+        <div class="fgroup">
+          <div class="flabel">Updates</div>
+          {#if riavvio === 'no'}
+            <div class="prow">
+              <div>
+                <div class="pn">Restart the daemon</div>
+                <div class="pd">picks up new code, and rebuilds the UI</div>
+              </div>
+              <button class="opt" onclick={() => { riavvio = 'conferma' }}>Restart…</button>
+            </div>
+          {:else if riavvio === 'conferma'}
+            <div class="notice">
+              <Icon name="i-warn" />
+              <span>
+                {#if vive > 0}
+                  <b>This stops {vive} running {vive === 1 ? 'chat' : 'chats'}.</b>
+                  Every agent runs as a child of the daemon, so a turn in progress dies mid-way.
+                  The conversations stay — you wake them again afterwards.
+                {:else}
+                  <b>No chat is running right now</b>, so nothing is interrupted.
+                {/if}
+                This page reconnects on its own once STARK is back.
+              </span>
+            </div>
+            <div class="prow">
+              <div><div class="pd">Rebuilding the UI takes a second or two.</div></div>
+              <span class="kbrow">
+                <button class="opt" onclick={() => { riavvio = 'no' }}>Cancel</button>
+                <button class="opt pri" onclick={() => void riavvia()}>Restart now</button>
+              </span>
+            </div>
+          {:else}
+            <div class="notice">
+              <Icon name="i-loader" />
+              <span><b>Restarting.</b> The connection is about to drop — this page comes back
+              by itself. If it does not, STARK is at <code>{sys.url}</code>.</span>
+            </div>
+          {/if}
+          <div class="hint">The same as <code>stark stop</code> then <code>stark up</code> in a
+          terminal, run from here: a detached helper waits for this process to die, rebuilds
+          <code>ui/dist</code> and starts the new one. A process cannot restart itself — that
+          helper is the whole trick.</div>
         </div>
 
         <div class="fgroup">

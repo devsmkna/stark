@@ -295,6 +295,18 @@ export class Api {
     })
   }
 
+  /**
+   * Riavvia il daemon. La risposta arriva **prima** che si spenga: dopo, il flusso
+   * cade e la pagina si ricollega da sé, come dopo un riavvio da terminale.
+   */
+  restart(rebuildUi = true): Promise<{ ok: boolean; pid?: number }> {
+    return this.json('/api/restart', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rebuildUi }),
+    })
+  }
+
   closeHelper(): Promise<{ ok: boolean }> {
     return this.json('/api/helper', { method: 'DELETE' })
   }
