@@ -930,6 +930,11 @@ che avrei usando la CLI»).
 
 **La differenza vera non era il classificatore: era la modalità.** Misurato a costo zero (solo
 handshake): `claude` senza `--permission-mode` parte in **`default`**, STARK chiedeva **`auto`**.
+**Correzione del 27 agosto, sera** (`docs/costo-token.md`): la misura era giusta e la conclusione
+no. La doc ufficiale ha una tabella di *chi* parte in quale modalità, e le righe sono due:
+`claude -p` **e l'Agent SDK** partono in `default`, ma **un piano Pro/Max/Team in un terminale**
+parte in **`auto`**. Cioè il termine di paragone vero — `claude` interattivo, che è quello che
+usa l'utente — era già in `auto`, e STARK non stava aggiungendo nessun classificatore.
 Era l'unica differenza strutturale fra i due, ed era **cablata** — nessun modo di toccarla.
 Adesso è un'impostazione (`Settings.defaultMode`, Permissions → «New chats start in…»), con
 `auto` ancora come default perché ADR-008 non viene rovesciata qui: quella decisione era
@@ -1493,6 +1498,81 @@ sugli stessi turni prima e dopo (418 parti: 103 blocchi/3452px → 2/694px; 48 p
 domanda in mezzo: 26/1800 → 6/1219), a 390px che la riga non sfondi, e il salto da un
 risultato di ricerca che apre davvero il gruppo (`gruppiAperti: 1, gruppiChiusi: 0`).
 
+**Le sessioni giravano senza il system prompt di Claude Code** (27 agosto 2026, chiesto
+dall'utente con priorità massima: «verifica che non stiamo usando più token di quanti ne
+useremmo da CLI»). La risposta è no — e il perché è un difetto, non un merito.
+
+Il fatto che regge tutto il resto, verificato leggendo `/proc/<pid>/exe` del processo figlio e
+non dedotto: l'SDK **lancia il binario vero**,
+`node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude` (`manifest.json`: 2.1.241), con
+`--output-format stream-json --verbose --input-format stream-json`. Quindi la composizione del
+prompt, i breakpoint di cache, la compattazione e il conteggio dei token li fa **lo stesso
+eseguibile** che sta dietro `claude`: STARK non li può sbagliare, può solo passare opzioni
+diverse. Tutta la domanda si riduce a `buildOptions`, un file solo.
+
+E lì mancava una riga. **Non passare `systemPrompt` non vuol dire «lascia fare al CLI»**: l'SDK
+lo sostituisce con una stringa vuota — `if (s === void 0) p = ""`, letto nel bundle, e la doc lo
+dice («the SDK uses a minimal prompt […] This differs from `claude -p`, which uses the full
+Claude Code prompt by default»). Misurato con `getContextUsage()`, che è la stessa domanda a cui
+risponde `/context`: la categoria «System prompt» valeva **677** token invece di **3.969**. Le
+chat di STARK giravano quindi con l'agent **istruito meno** di quello del terminale, e la cosa
+non si vedeva perché fallisce nel modo peggiore: non dà errore, risponde peggio. Non era una
+scelta — `grep -rn "systemPrompt" src/ docs/` non trovava niente: al tempo di ADR-009 quel
+default *era* il prompt di Claude Code, è cambiato nella v0.1.0 dell'SDK, e un'opzione che non
+si passa non compare in nessuna diff.
+Corretto passando il preset. Da qui in avanti STARK manda **+1.348** token rispetto al CLI
+headless nudo, e sono tutti `AskUserQuestion` — cioè spesi per poter *quanto* il terminale, non
+di più: senza `canUseTool` le domande dell'agent spariscono del tutto.
+Cosa **non** si perdeva, e sembra il contrario: `CLAUDE.md` e le skill c'erano (62.414 e 1.875
+token, identici con e senza il preset). Quelli non passano dal system prompt.
+
+Due premesse cadute nello stesso giro. `settingSources`: il cambio della v0.1.0 («nessun setting
+dal filesystem») è stato **annullato**, omettere il campo equivale al CLI — misurato, passarlo o
+no dà lo stesso identico totale. Quindi «Command descriptions» di `memoria.ts` **è letto davvero**
+dalle sessioni STARK, cosa che non era scontata. E la modalità di default: vedi la correzione in
+loco più sopra.
+
+**Sulla cache, la parità è per costruzione e la TTL è un'ora.** Il binario tiene una diagnostica
+interna delle cause di cache miss (`system prompt changed`, `tools changed (+N/-N tools)`,
+`model changed`, `cache_control changed (scope or TTL)`, …), e confrontandola con l'elenco
+ufficiale: la riconciliazione MCP a ogni turno **non** invalida niente (tocca solo in caso di
+delta, e con i tool *deferred* — attivi, 15.030 token nella loro categoria — connettere o
+disconnettere un server «only appends new content»); il chip della modalità è cache-safe per
+dichiarazione esplicita; il chip del modello invalida, esattamente come `/model` nel terminale;
+e `getContextUsage`/`quota`/`file_suggestions` sono canale di controllo, non chiamate all'API.
+La TTL della conversazione principale su abbonamento entro quota è **un'ora**, e gli «Agent SDK
+turns» stanno nello stesso secchiello dei turni interattivi — il che chiude la misura lasciata a
+metà («regge 420 secondi, oltre non misurato»): 420 era ampiamente dentro, il limite è 3.600.
+Ricaduta a favore del layout multi-pannello: la cache è **per macchina e cartella**, quindi N
+chat affiancate sullo stesso progetto **condividono** il prefisso invece di moltiplicarlo.
+
+**L'unico punto in cui STARK spende davvero più del terminale è la fila FIFO**: due prompt
+mandati mentre l'agent lavora aprono due turni, cioè due richieste e due generazioni di output,
+dove il CLI che riceve un lotto li fonde in uno. Non è un difetto da correggere — è la scelta
+già registrata più sopra — ma finora non era scritto da nessuna parte che quello è il costo.
+
+**E il titolo non lo genera più l'agent.** STARK non passava `title`, quindi il CLI se lo
+inventava con una chiamata al modello per rispondere a una domanda a cui `titleOf` risponde
+gratis. Tre fatti misurati prima di toccarlo: le **163** voci `ai-title` di una sessione vera
+sono lo *stesso* valore riscritto (una generazione sola, non 163); il titolo **non arriva nel
+flusso**, quindi non lo si poteva usare invece di buttarlo; e il campo conta **solo alla
+nascita**, perché su un risveglio vince il titolo persistito. Il costo, dichiarato perché è
+una scelta: alla nascita STARK il titolo non ce l'ha ancora, quindi passa il proprio
+segnaposto — e dal terminale quelle chat si chiamano `new chat <id8>` invece di avere un
+riassunto. Deciso dall'utente sul criterio «meno token e costo dell'agent».
+La via per riallineare il segnaposto esiste e **non è percorribile**: `renameSession` è
+filesystem e non quota, ma risolve la cartella dal `CLAUDE_CONFIG_DIR` **del processo che
+chiama** — misurato, non dedotto: con `dir` esplicito e un config dir finto fallisce — e a
+chiamare sarebbe il daemon, che ne ha uno solo mentre STARK tiene un profilo per progetto.
+Sonda `spike/titolo-non-generato.ts`, **costa un turno corto**: verificato dal vivo passando
+dalla via dell'utente, **0** voci `ai-title` e `customTitle` uguale al titolo di STARK.
+
+Il documento è `docs/costo-token.md`, la sonda `spike/costo-vs-cli.ts` (**costo zero di quota**:
+handshake più una richiesta di controllo, nessun turno parte mai). Va rifatta a ogni salto di
+versione del CLI incluso. Due trappole che ha insegnato: un generatore di prompt **vuoto** chiude
+lo stdin e il processo muore prima che si possa chiedere il contesto; e `System tools (deferred)`
+**non** entra nel totale (la somma delle altre categorie dà esattamente `totalTokens`).
+
 Restano i divieti veri (`deny`), e sul filone telefono la durata della credenziale (§5) e la
 seconda misura di sopravvivenza SSE a schermo spento (§5.4, ora fattibile sul trasporto
 giusto).
@@ -1515,6 +1595,11 @@ più sopra. Il classificatore resta sotto la risoluzione della misura; il risveg
 come `cache_read` e regge almeno 420 secondi di pausa.
 
 Decisioni già prese:
+- **il system prompt si chiede per nome**: `systemPrompt: { type: 'preset', preset: 'claude_code' }`
+  in `buildOptions`. Non passarlo non lascia fare al CLI, lo sostituisce con una stringa vuota —
+  e un agent istruito meno del terminale è il rovescio del Principio 5. Corollario generale, che
+  vale oltre questo campo: **i default dell'SDK non sono i default del CLI**, e quelli che
+  divergono si trovano solo misurando, perché un'opzione non passata non compare in nessuna diff.
 - canale strutturato JSON verso gli agent, NON un PTY (ADR-001)
 - il canale lo implementa l'**Agent SDK ufficiale**, non codice nostro (ADR-009). Il vocabolario
   canonico, il journal e la UI restano nostri: l'SDK sostituisce il trasporto, non la traduzione.

@@ -46,6 +46,33 @@ export function buildOptions(o: LaunchOptions): Options {
     cwd: o.cwd,
     model: o.model,
     permissionMode: modoDiClaude(o.mode),
+    // Il system prompt di Claude Code, chiesto per nome — e la ragione per cui questa
+    // riga non e' un dettaglio e' che **non passarla non vuol dire «lascia fare al CLI»**.
+    //
+    // L'SDK, quando `systemPrompt` e' assente, non si tira indietro: lo sostituisce con
+    // una stringa vuota. La riga esatta nel bundle (`sdk.mjs`, funzione `xP`) e'
+    // `if (s === void 0) p = ""`, e la doc lo dice nei termini che contano: «the SDK uses
+    // a minimal prompt that covers tool calling but omits Claude Code's coding guidelines,
+    // response style, and project context. This differs from `claude -p`, which uses the
+    // full Claude Code prompt by default».
+    //
+    // Misurato prima di correggerlo, non dedotto (`spike/costo-vs-cli.ts`, costo zero di
+    // quota): senza questa riga la categoria «System prompt» di `getContextUsage()` vale
+    // **677** token invece di **3.969**. Cioe' le sessioni di STARK giravano con l'agent
+    // istruito meno di quello del terminale — Principio 5 al contrario, e nessuno se ne
+    // accorgeva perche' fallisce nel modo peggiore: non da' errore, risponde peggio.
+    //
+    // Cosa NON si perdeva, e va detto perche' sembra il contrario: `CLAUDE.md` e le skill
+    // restano (62.414 e 1.875 token, identici con e senza). Quelli non passano dal system
+    // prompt — la doc: «the SDK reads it and injects its content into the conversation as
+    // project context, not into the system prompt».
+    //
+    // `excludeDynamicSections` si lascia spento di proposito: serve a una flotta di
+    // macchine diverse che vuole far combaciare il prefisso di cache fra utenti, al prezzo
+    // di spostare cartella di lavoro e stato git in un messaggio utente, dove pesano meno
+    // sul comportamento. STARK gira su una macchina sola: pagherebbe il prezzo senza
+    // incassare il vantaggio.
+    systemPrompt: { type: 'preset', preset: 'claude_code' },
     // `false`, e la ragione è cambiata nel tempo: vale la pena scriverla intera.
     //
     // Era `true` perché senza, la sessione eredita tutti i server MCP della macchina:
@@ -69,6 +96,13 @@ export function buildOptions(o: LaunchOptions): Options {
     // La callback vera viene innestata dall'adapter.
     canUseTool: async (_n, input) => ({ behavior: 'allow', updatedInput: input }),
   }
+  // Dire come si chiama la conversazione spegne la generazione automatica del titolo
+  // («When provided, the session uses this title instead of auto-generating one from the
+  // first user message»), che e' una chiamata al modello per una cosa che STARK sa gia'.
+  // Su un risveglio non serve e non fa niente: il titolo persistito della sessione vince
+  // comunque, lo dice l'SDK — quindi il campo conta solo alla nascita, che e' l'unico
+  // momento in cui quella chiamata sarebbe partita.
+  if (o.title) opts.title = o.title
   if (o.resume) {
     opts.resume = o.resume.ref
     if (o.resume.fork) opts.forkSession = true

@@ -135,6 +135,25 @@ export type SessionSpec = {
   profile?: string
   /** Quale eseguibile guidare. Si punta altrove dal default solo con una ragione. */
   executable?: string
+  /**
+   * Come si chiama questa conversazione, **detto da STARK**.
+   *
+   * Non e' una preferenza di interfaccia: e' un fatto della sessione, e sta qui perche'
+   * serve a **non far generare un titolo all'agent**. Claude Code, se nessuno gli dice
+   * come si chiama una conversazione, se lo inventa da se' con una chiamata al modello
+   * (misurato: la voce `ai-title` nel journal nativo di ogni sessione STARK). STARK il
+   * titolo se lo calcola gia' per conto suo — primo prompt, o rinomina dell'utente —
+   * quindi quella chiamata e' lavoro pagato e buttato.
+   *
+   * Il costo di dirlo, scritto qui perche' e' una scelta e non un dettaglio: quando la
+   * chat nasce STARK il titolo non ce l'ha ancora (arriva col primo prompt), quindi
+   * quello che passa e' il segnaposto che mostra anche lui. Chi guarda le stesse
+   * conversazioni **dal terminale** vede quel segnaposto invece di un riassunto
+   * leggibile. Si e' scelto il risparmio: e' una decisione dell'utente, presa sapendolo.
+   *
+   * Un agent che non sa nominare le conversazioni ignora il campo — non e' un obbligo.
+   */
+  title?: string
 }
 
 /**

@@ -395,6 +395,13 @@ export class Registry {
       // l'helper, che non ha dove mostrare una card di permesso.
       ...(spec.deny?.length ? { deny: spec.deny } : {}),
       ...(mcp.length ? { mcp } : {}),
+      // Come si chiama, detto da noi. Serve a spegnere la generazione automatica del
+      // titolo dell'agent, che e' una chiamata al modello per rispondere a una domanda
+      // a cui `titleOf` risponde gia' gratis. Si passa **sempre**, anche il segnaposto
+      // di una chat appena nata: il campo conta solo alla nascita — su un risveglio il
+      // titolo persistito vince comunque — ed e' esattamente alla nascita che quella
+      // chiamata sarebbe partita.
+      title: titleOf(snapshot),
       ...(effimera ? { ephemeral: true } : {}),
     }, {
       // Su una effimera non si passa proprio: senza `onRaw` l'adapter non serializza
