@@ -26,6 +26,8 @@ export type OpenSpec = {
   model?: string
   mode?: PermissionMode
   resume?: { ref: string; fork?: boolean }
+  /** Riprendere l'ultima conversazione di `cwd` (`--continue`). Vedi sdk-options. */
+  continue?: boolean
   askTools?: string[]
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
@@ -289,7 +291,9 @@ export class Registry {
       // questa apertura lo dice, vince lui. Altrimenti resta quello con cui il daemon
       // è partito, come sempre.
       ...((spec.configDir ?? this.defaults.configDir) ? { configDir: spec.configDir ?? this.defaults.configDir } : {}),
-      ...(spec.resume ? { resume: spec.resume } : { sessionId: id }),
+      ...(spec.resume ? { resume: spec.resume }
+        : spec.continue ? { continue: true }
+        : { sessionId: id }),
       // Le categorie su cui l'utente vuole essere interrogato diventano matcher per
       // l'hook. Chi apre con `askTools` espliciti sa cosa sta facendo (le prove lo
       // fanno); tutti gli altri prendono la tabella, che è il pannello dei permessi.

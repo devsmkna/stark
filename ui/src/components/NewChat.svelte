@@ -24,6 +24,9 @@
   let { store }: { store: Store } = $props()
 
   let cwd = $state('')
+  /** `--continue`: riprende l'ultima conversazione di quella cartella invece di
+   *  cominciarne una. Spenta di default — «New chat» vuol dire nuova. */
+  let continua = $state(false)
   let chosen = $state<string | null>(null)
   let filter = $state('')
 
@@ -140,7 +143,10 @@
 
   function start(): void {
     if (ready) {
-      void store.newChat(cwd.trim(), showProfiles && effectiveProfile ? { profile: effectiveProfile } : {})
+      void store.newChat(cwd.trim(), {
+        ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
+        ...(continua ? { continue: true } : {}),
+      })
     }
   }
 
@@ -269,6 +275,19 @@
           <div class="hint">The folder decides the project and its colour. Type the full path,
             <b>Open path…</b> to browse the machine, or <b>Finder…</b> for the native picker.</div>
         {/if}
+      </div>
+
+      <div class="fgroup">
+        <div class="flabel">Start</div>
+        <label class="chk">
+          <input type="checkbox" bind:checked={continua} />
+          <span>Continue the last conversation in this folder</span>
+        </label>
+        <div class="hint">The same as <code>claude --continue</code>: the agent keeps the
+          context of the most recent chat in that folder. STARK can't know which one it is
+          before the handshake, so <b>the previous turns won't be shown here</b> — they count
+          for the model, not on screen. If that folder has no earlier conversation, this
+          starts a new chat.</div>
       </div>
 
       {#if showProfiles}
@@ -428,6 +447,9 @@
      riconoscerlo senza allargare la riga quanto "Browse (system Finder)…". */
   .pathrow .btn.finder { display: inline-flex; align-items: center; gap: 5px; }
   .pathrow .btn.finder :global(svg.ic) { width: 12px; height: 12px; }
+
+  .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .chk input { margin: 0; }
 
   /* Il browser di cartelle: stesso posto della casella che sostituisce, non un
      dialogo sopra il dialogo — aprirne un secondo sopra il primo per scegliere

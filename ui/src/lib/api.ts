@@ -42,6 +42,8 @@ export type OpenSpec = {
   model?: string
   mode?: string
   resume?: { ref: string; fork?: boolean }
+  /** `--continue`: riprende l'ultima conversazione di quella cartella. */
+  continue?: boolean
   /** Quale profilo Claude (`CLAUDE_CONFIG_DIR`) usare. Omesso: quello di default. */
   configDir?: string
 }

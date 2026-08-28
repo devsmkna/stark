@@ -17,6 +17,15 @@ export type LaunchOptions = {
   mode: PermissionMode
   /** Riprendere una conversazione esistente. `ref` è l'id di sessione di Claude Code. */
   resume?: { ref: string; fork?: boolean }
+  /**
+   * `--continue` della CLI: riprende **l'ultima** conversazione di `cwd` senza
+   * saperne l'id in anticipo. Mutuamente esclusivo con `resume` e con `sessionId`
+   * (lo dice l'SDK), quindi l'id vero si scopre solo all'handshake — arriva col
+   * `system:init` e finisce nel journal come `session.resumeRef`, che è ciò con cui
+   * il risveglio tornerà lì. Conseguenza da sapere: il journal STARK nasce **vuoto**,
+   * quindi i turni precedenti valgono per il modello ma non si vedono a schermo.
+   */
+  continue?: boolean
   /** Imporre l'id invece di scoprirlo: così STARK sa come risvegliare già in partenza. */
   sessionId?: string
   /**
@@ -64,8 +73,14 @@ export function buildOptions(o: LaunchOptions): Options {
     canUseTool: async (_n, input) => ({ behavior: 'allow', updatedInput: input }),
   }
   if (o.resume) {
+    // `resume` per primo: chi sa già quale conversazione vuole vince su chi chiede
+    // «l'ultima», e i due sono incompatibili per l'SDK.
     opts.resume = o.resume.ref
     if (o.resume.fork) opts.forkSession = true
+  } else if (o.continue) {
+    // Niente `sessionId`: l'SDK li dichiara incompatibili, e passarli insieme fa
+    // fallire l'avvio invece di ignorarne uno.
+    opts.continue = true
   } else if (o.sessionId) {
     opts.sessionId = o.sessionId
   }

@@ -699,7 +699,10 @@ export class Store {
    * come fatto del progetto, così la prossima chat sulla stessa cartella lo eredita senza
    * chiederlo di nuovo — «il profilo è deciso» vuol dire deciso da qui in poi.
    */
-  async newChat(cwd: string, opts: { model?: string; profile?: string } = {}): Promise<void> {
+  async newChat(
+    cwd: string,
+    opts: { model?: string; profile?: string; continue?: boolean } = {},
+  ): Promise<void> {
     this.working = true
     this.refused = null
     try {
@@ -713,6 +716,7 @@ export class Store {
         cwd,
         ...(opts.model ? { model: opts.model } : {}),
         ...(profile ? { configDir: profile } : {}),
+        ...(opts.continue ? { continue: true } : {}),
       })
       if (opts.profile && this.project(cwd).profile !== opts.profile) {
         void this.setProject(cwd, { profile: opts.profile })
