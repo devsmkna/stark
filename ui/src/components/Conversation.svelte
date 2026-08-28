@@ -46,13 +46,23 @@
   // nessun turno è attivo si torna alla regola semplice: l'ultimo. `!id` marca un
   // turno chiuso a mano: senza, richiuderlo non avrebbe effetto, perché la regola di
   // default lo riaprirebbe subito.
+  //
+  // Aperti sono **due**, non uno: quello in corso e quello prima. Mandare un prompt
+  // nuovo, con un turno solo, richiudeva sotto il naso di chi stava ancora leggendo la
+  // risposta appena arrivata — e quella risposta è spesso il motivo per cui si sta
+  // scrivendo il prompt dopo. Due basta e tre no: il penultimo si chiude da sé quando
+  // ne parte un altro, se no dopo dieci prompt la conversazione è di nuovo un muro.
+  // Chi vuole tenerne aperto un terzo lo apre a mano, e resta aperto: `opened` vince
+  // sempre sulla regola di default.
   let opened = $state<Set<string>>(new Set())
   const defaultOpenIdx = $derived.by((): number => {
     const attivo = snap.turns.findIndex(t => !t.ended)
     return attivo !== -1 ? attivo : snap.turns.length - 1
   })
   const isOpen = (t: TurnView, i: number): boolean =>
-    opened.has(t.turnId) ? true : (i === defaultOpenIdx && !opened.has(`!${t.turnId}`))
+    opened.has(t.turnId)
+      ? true
+      : ((i === defaultOpenIdx || i === defaultOpenIdx - 1) && !opened.has(`!${t.turnId}`))
 
   function toggle(t: TurnView, i: number): void {
     const next = new Set(opened)
