@@ -98,11 +98,15 @@
 </div>
 
 <style>
-  /* Al centro e in alto: l'occhio sta già sulla casella, e l'elenco cresce in giù
-     senza che il riquadro salti mentre si scrive. */
+  /* Centrata, come ogni altra modale: la posizione la dà `.dlg` in app.css
+     (`top:50%` più la traslazione), e qui non si tocca — un riquadro che si apre in
+     un punto diverso dagli altri fa cercare due volte dove guardare.
+     `max-height` in `vh` invece del `calc(100% - 26px)` ereditato perché l'elenco
+     cresce mentre si scrive: senza un tetto più basso, con molte chat il riquadro
+     arriverebbe a filo di finestra e la casella finirebbe attaccata al bordo. */
   .pal {
-    width: 560px; max-width: calc(100% - 26px);
-    top: 12vh; bottom: auto; max-height: 70vh;
+    width: 560px;
+    max-height: 70vh;
     display: flex; flex-direction: column;
   }
   .pq { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }

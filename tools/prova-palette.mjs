@@ -57,6 +57,9 @@ for (const [w, h, tag] of [[1400, 900, 'desktop'], [390, 844, 'mobile']]) {
     return {
       righe: document.querySelectorAll('.pal .prow').length,
       dentroSchermo: r.right <= innerWidth + .5 && r.left >= -.5 && r.bottom <= innerHeight + .5,
+      // Centrata davvero: lo scarto fra l'aria sopra e quella sotto, in pixel.
+      scartoVerticale: +Math.abs(r.top - (innerHeight - r.bottom)).toFixed(1),
+      scartoOrizzontale: +Math.abs(r.left - (innerWidth - r.right)).toFixed(1),
       fuocoInCasella: document.activeElement?.classList.contains('field'),
       primaScelta: document.querySelector('.pal .prow.on') === document.querySelector('.pal .prow'),
     }
