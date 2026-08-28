@@ -339,7 +339,18 @@
       void torna()
     } catch (e) {
       riavvio = 'no'
-      store.refused = `restart failed: ${(e as Error).message}`
+      const msg = (e as Error).message
+      // Il caso che capita **per primo a chiunque**, e che senza questa riga sembra un
+      // bottone rotto: il daemon acceso è più vecchio di questa pagina. Node legge i
+      // `.ts` all'avvio, quindi un processo partito prima che questa rotta esistesse
+      // non ce l'ha e risponde 404 — e la UI, che invece è appena stata ricompilata, il
+      // bottone ce l'ha. È l'uovo e la gallina di ogni riavvio-da-dentro: la prima
+      // volta si passa dal terminale, dalla seconda in poi basta questo bottone.
+      store.refused = msg.startsWith('404')
+        ? 'This daemon is older than this page: it does not have the restart route yet. '
+          + 'Restart it once from a terminal (`stark stop` then `stark up`) — after that, '
+          + 'this button works.'
+        : `restart failed: ${msg}`
     }
   }
 
