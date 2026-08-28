@@ -227,6 +227,33 @@
 
   const migliaia = (n: number): string => n.toLocaleString()
 
+  /**
+   * I giorni **senza uso** vanno disegnati lo stesso, a zero.
+   *
+   * `perGiorno` riporta solo i giorni in cui è successo qualcosa, che è la cosa
+   * giusta per un dato; ma incollare quelle barre una accanto all'altra disegna un
+   * asse falso — sei giorni sparsi su due settimane sembrerebbero sei giorni di fila.
+   * Il buco è un'informazione: dice che quel giorno STARK non l'hai aperto.
+   */
+  function giorniPieni(righe: Stats['perGiorno']): { day: string; prompts: number; ms: number }[] {
+    const primo = righe[0]?.day
+    const ultimo = righe[righe.length - 1]?.day
+    if (!primo || !ultimo) return []
+    const visti = new Map(righe.map(r => [r.day, r.c]))
+    const out: { day: string; prompts: number; ms: number }[] = []
+    // Mezzogiorno e non mezzanotte: sommando 24 ore da mezzanotte si inciampa nel
+    // cambio dell'ora legale, e una giornata sparirebbe o si sdoppierebbe.
+    const d = new Date(`${primo}T12:00:00`)
+    const fine = new Date(`${ultimo}T12:00:00`)
+    while (d <= fine && out.length < 400) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const c = visti.get(key)
+      out.push({ day: key, prompts: c?.prompts ?? 0, ms: c?.agentMs ?? 0 })
+      d.setDate(d.getDate() + 1)
+    }
+    return out
+  }
+
   /** Un tempo che si legge a colpo d'occhio. I secondi spariscono oltre l'ora: su
    *  quaranta ore di lavoro non dicono niente e allungano la riga. */
   function durata(ms: number): string {
@@ -744,7 +771,7 @@
           <div class="hint">Reading the journals…</div>
         {:else}
           <div class="fgroup">
-            <div class="ugrid">
+            <div class="ucells">
               <div class="ucell"><b>{migliaia(uso.totale.prompts)}</b><span>prompts</span></div>
               <div class="ucell"><b>{migliaia(uso.totale.chars)}</b><span>characters typed</span></div>
               <div class="ucell"><b>{migliaia(uso.totale.conversations)}</b><span>conversations</span></div>
@@ -760,7 +787,7 @@
 
           <div class="fgroup">
             <div class="flabel">Tokens</div>
-            <div class="ugrid">
+            <div class="ucells">
               <div class="ucell"><b>{migliaia(uso.totale.tokens.input)}</b><span>input</span></div>
               <div class="ucell"><b>{migliaia(uso.totale.tokens.output)}</b><span>output</span></div>
               <div class="ucell"><b>{migliaia(uso.totale.tokens.cacheRead)}</b><span>cache read</span></div>
@@ -784,20 +811,25 @@
           {/if}
 
           {#if uso.perGiorno.length > 1}
+            {@const giorni = giorniPieni(uso.perGiorno)}
+            {@const max = Math.max(...giorni.map(x => x.prompts), 1)}
             <div class="fgroup">
               <div class="flabel">By day</div>
               <!-- Nessuna libreria di grafici: sono N div con un'altezza in percentuale.
                    Aggiungere una dipendenza per un istogramma sarebbe sproporzionato. -->
               <div class="ubars">
-                {#each uso.perGiorno as g (g.day)}
-                  {@const max = Math.max(...uso.perGiorno.map(x => x.c.prompts), 1)}
-                  <div class="ubar" title="{g.day} · {g.c.prompts} prompts · {durata(g.c.agentMs)}">
-                    <div style="height:{Math.max(2, (g.c.prompts / max) * 100)}%"></div>
+                {#each giorni as g (g.day)}
+                  <div class="ubar" title="{g.day} · {g.prompts} prompts · {durata(g.ms)}">
+                    <!-- Un giorno a zero resta **vuoto**: un moncherino alto due pixel si
+                         leggerebbe come «poco», e poco non è niente. -->
+                    {#if g.prompts > 0}
+                      <div style="height:{Math.max(4, (g.prompts / max) * 100)}%"></div>
+                    {/if}
                   </div>
                 {/each}
               </div>
-              <div class="hint">{uso.perGiorno[0]?.day} → {uso.perGiorno[uso.perGiorno.length - 1]?.day}
-              · tallest bar is {Math.max(...uso.perGiorno.map(x => x.c.prompts))} prompts</div>
+              <div class="hint">{giorni[0]?.day} → {giorni[giorni.length - 1]?.day}
+              · tallest bar is {max} prompts</div>
             </div>
           {/if}
 
@@ -1048,7 +1080,10 @@
   /* I numeri dell'uso. `auto-fill` invece di un numero di colonne: la stessa griglia
      serve su schermo largo e sotto gli 860px, dove ci stanno due celle invece di tre,
      e una media query direbbe la stessa cosa in due posti. */
-  .ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+  /* `.ucells` e non `.ugrid`: quel nome esiste gia' in app.css (`26px 1fr`, la griglia
+     dell'uso della quota) e vinceva su questa — la stessa collisione gia' costata una
+     volta con `.row`/`.split`. Un nome nuovo, non una gara di specificita'. */
+  .ucells { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
   .ucell {
     display: flex; flex-direction: column; gap: 2px;
     padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
@@ -1060,8 +1095,10 @@
   /* L'istogramma: le barre crescono dal basso, quindi `align-items:flex-end`. Il
      contenitore ha un'altezza fissa perché una percentuale ha bisogno di qualcosa di
      cui essere una percentuale. */
-  .ubars { display: flex; align-items: flex-end; gap: 2px; height: 64px; }
-  .ubar { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
+  /* `justify-content:flex-start` con un tetto per barra: senza, sei giorni si
+     spartiscono la larghezza e diventano lastre, che si leggono come un'altra cosa. */
+  .ubars { display: flex; align-items: flex-end; justify-content: flex-start; gap: 2px; height: 64px; }
+  .ubar { flex: 1 1 0; max-width: 22px; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
   .ubar > div { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; }
   /* ─── Le modalità di partenza ──────────────────────────────────────────────
      Il pannello è quello globale — `.menu` e `.mi` in `app.css`, gli stessi che la
