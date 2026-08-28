@@ -561,6 +561,13 @@ check('il codice è 8 caratteri, senza quelli che si leggono male',
   /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/.test(codice.codice), codice.codice)
 check('con un codice vivo, /pair si apre senza credenziale',
   (await pair()).status === 200)
+// Il **link fisso** è la radice, ed è quello che il pannello dice di aprire: un telefono
+// mai accoppiato ci arriva senza credenziale, e rispondergli 403 lo lasciava davanti a un
+// muro bianco. Trovato provando il giro da un telefono vero, non leggendo il codice.
+const radice = await fetch(`${url}/`, { redirect: 'manual' })
+check('il link fisso rimanda alla pagina del codice, non a un muro',
+  radice.status === 302 && radice.headers.get('location') === '/pair',
+  `${radice.status} ${radice.headers.get('location')}`)
 
 const claim = (code: string): Promise<Response> => fetch(`${url}/api/phone/claim`, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }),
@@ -587,9 +594,28 @@ check('la credenziale del telefono apre le rotte come quella della macchina',
 check('un uso solo: lo stesso codice non accoppia due volte',
   (await claim(codice.codice)).status === 403)
 check('consumato il codice, /pair torna 403', (await pair()).status === 403)
+// Il rimando **non** deve sopravvivere alla finestra: fuori dai cinque minuti la radice
+// torna 403 muto, se no direbbe a chiunque bussi che dietro c'è uno STARK acceso.
+const radiceChiusa = await fetch(`${url}/`, { redirect: 'manual' })
+check('senza codice vivo la radice non rimanda: 403 muto',
+  radiceChiusa.status === 403, String(radiceChiusa.status))
+
+// Chi sta chiedendo: senza questo, dal telefono si vedrebbero N righe uguali e l'unico
+// modo di scollegarsi sarebbe indovinare quale riga è la propria.
+const suoElenco = await (await fetch(`${url}/api/phone`, { headers: suo })).json() as
+  { devices: { id: string }[]; questo: string | null; conTokenMacchina: boolean }
+check('il telefono riconosce sé stesso nell\'elenco',
+  suoElenco.questo !== null && suoElenco.questo === suoElenco.devices[0]?.id
+  && suoElenco.conTokenMacchina === false,
+  JSON.stringify({ questo: suoElenco.questo, con: suoElenco.conTokenMacchina }))
 
 const elenco = await (await fetch(`${url}/api/phone`, { headers: auth })).json() as
-  { devices: { id: string; nome: string }[] }
+  { devices: { id: string; nome: string }[]; questo: string | null; conTokenMacchina: boolean }
+// Dal computer: il token della macchina non è di nessun dispositivo, e va detto — è la
+// credenziale del vecchio segnalibro, quella che il pannello non può revocare.
+check('il token della macchina non è un dispositivo, e il pannello lo dice',
+  elenco.questo === null && elenco.conTokenMacchina === true,
+  JSON.stringify({ questo: elenco.questo, con: elenco.conTokenMacchina }))
 check('il dispositivo compare nell\'elenco, con un nome leggibile',
   elenco.devices.length === 1 && typeof elenco.devices[0]?.nome === 'string',
   JSON.stringify(elenco.devices))

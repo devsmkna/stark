@@ -144,6 +144,20 @@ export class Telefono {
     return true
   }
 
+  /**
+   * Di quale dispositivo è questa credenziale, se di uno. `null` quando chi chiede usa il
+   * **token della macchina**: quello non appartiene a nessun telefono e non si revoca.
+   *
+   * Serve alla UI per una cosa sola, ma che senza è impossibile: dire «questo sei tu» nel
+   * proprio elenco. Senza, dal telefono si vedono N righe uguali e l'unico modo di
+   * scollegarsi è indovinare quale riga è la propria.
+   */
+  idDi(token: string): string | null {
+    if (token.length !== 64) return null
+    const h = impronta(token)
+    return this.#dati.devices.find(d => pari(d.hash, h))?.id ?? null
+  }
+
   get dispositivi(): Omit<Dispositivo, 'hash'>[] {
     return this.#dati.devices.map(({ hash: _h, ...resto }) => resto)
   }

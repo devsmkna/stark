@@ -47,6 +47,11 @@ export type StatoTelefono = {
   tailscale: { passi: PassoTelefono[]; pronto: boolean; url?: string; host?: string }
   codice: { scade: number } | null
   devices: { id: string; nome: string; da: number; visto: number }[]
+  /** L'id del dispositivo da cui stai guardando, se ne sei uno. */
+  questo?: string | null
+  /** Stai usando il **token della macchina**, che non appartiene a nessun telefono e
+   *  non si può revocare. È il caso di chi entrava col vecchio segnalibro `?token=…`. */
+  conTokenMacchina?: boolean
 }
 
 /** Il ramo della cartella di una chat. `repo:false` vale anche quando `git` non è

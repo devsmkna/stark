@@ -190,6 +190,40 @@ async function route(
     // vivo un rifiuto da telefono senza nessun modo di sapere quale delle quattro
     // difese fosse stata.
     console.error(`[guard] ${motivo} — ${req.method ?? 'GET'} ${req.url ?? ''}`)
+    // Un telefono che non è ancora entrato apre il **link fisso**, cioè la radice: è
+    // quello che il pannello gli dice di aprire, e rispondergli 403 lo lasciava davanti
+    // a un muro bianco (difetto trovato provando il giro da un telefono mai accoppiato,
+    // 28 agosto 2026 — l'indirizzo pubblicizzato non funzionava).
+    //
+    // Si trasforma **questo** rifiuto in un rimando, e non si allarga il perimetro: la
+    // pagina del codice era già raggiungibile a queste stesse condizioni, e ci si arriva
+    // solo mentre un codice è vivo. Fuori da quella finestra resta il 403 di prima —
+    // niente rimando, niente indizio che dietro ci sia uno STARK acceso.
+    const radice = (req.url ?? '/').split('?')[0] === '/'
+    if (radice && (req.method ?? 'GET') === 'GET' && telefono?.codiceVivo()) {
+      res.writeHead(302, { location: '/pair', 'cache-control': 'no-store' })
+      res.end()
+      return
+    }
+    // Un telefono scollegato — o mai collegato, fuori dalla finestra di un codice —
+    // atterrava su `{"error":"vietato"}` grezzo, subito dopo aver premuto «Disconnect
+    // this phone». Lo status resta **403** e la superficie non si allarga di un byte:
+    // quell'indirizzo rispondeva già, cambia solo che adesso risponde a un umano.
+    // Non dice niente di più di prima — chi bussa sapeva già che qui c'è qualcosa.
+    if (radice && (req.method ?? 'GET') === 'GET'
+        && (req.headers.accept ?? '').includes('text/html')) {
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end('<!doctype html><meta charset="utf-8">'
+        + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<title>STARK</title><style>body{margin:0;min-height:100dvh;display:flex;'
+        + 'align-items:center;justify-content:center;font:15px/1.6 system-ui,sans-serif;'
+        + 'background:#FBFBFD;color:#171A22;padding:24px;text-align:center}'
+        + '@media(prefers-color-scheme:dark){body{background:#0E1118;color:#E8EAF0}}'
+        + 'p{max-width:300px;color:#767D90}b{letter-spacing:.14em}</style>'
+        + '<div><p><b>S T A R K</b><br><br>This device is not connected.<br>'
+        + 'Ask for a code on your computer, then open this page again.</p></div>')
+      return
+    }
     send(res, 403, { error: 'vietato' })
     return
   }
@@ -388,10 +422,17 @@ async function route(
     // Da qui in giù serve il token: sono le rotte che si usano **dal computer**.
     if (method === 'GET' && path === '/api/phone') {
       if (!telefono) return send(res, 503, { error: 'non disponibile' })
+      // `questo` e `conTokenMacchina` descrivono **chi sta chiedendo**, non lo stato
+      // della macchina: sono l'unico modo perché il pannello, aperto da un telefono,
+      // sappia quale riga dell'elenco è quella da cui lo stai guardando.
+      const mia = guard.credenziale(req)
+      const questo = mia ? telefono.idDi(mia) : null
       return send(res, 200, {
         tailscale: await statoTailscale(port()),
         codice: telefono.codiceVivo(),
         devices: telefono.dispositivi,
+        questo,
+        conTokenMacchina: mia !== null && questo === null,
       })
     }
     if (method === 'POST' && path === '/api/phone/code') {

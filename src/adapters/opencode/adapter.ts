@@ -712,8 +712,8 @@ function capacita(): Capabilities {
  * fatto. Si leggono quindi tutte e tre le forme, e a decidere e' quella che arriva.
  *
  * `attachment` da solo **non** vuol dire «accetta immagini»: sulla stessa macchina ci
- * sono 67 modelli con `attachment: true` di cui sei con `image: false` — sono i modelli
- * voce e video di nvidia. Dedurne le immagini avrebbe riacceso la graffetta proprio dove
+ * sono 67 modelli con `attachment: true` di cui **otto** non leggono ne' immagini ne'
+ * PDF — sono i modelli voce e video di nvidia (`nemotron-voicechat`, `streampetr`, …). Dedurne le immagini avrebbe riacceso la graffetta proprio dove
  * il modello ha appena detto di no. Resta come ripiego solo quando `input` non c'e'
  * affatto, che e' il caso di un server piu' vecchio di questa forma.
  *

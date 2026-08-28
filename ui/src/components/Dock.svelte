@@ -74,9 +74,14 @@
   const modello = $derived(modelloInUso(snap.models, snap.model))
   const tipi = $derived(tipiAccettati(modello))
   const puoAllegare = $derived(tipi.length > 0)
-  /** Come si chiama il modello quando glielo si rinfaccia: l'etichetta se c'è, se no
-   *  l'id — «claude-opus-5[1m]» è brutto ma è pur sempre quello che hai scelto. */
-  const nomeModello = $derived(modello?.label ?? snap.model ?? 'this model')
+  /**
+   * Come si chiama il modello quando glielo si rinfaccia.
+   *
+   * Il nome risolto e non l'etichetta della voce: `snap.model` è esattamente ciò che
+   * la barra di stato mostra due centimetri più sotto. L'etichetta sarebbe «Default
+   * (recommended)», che in mezzo a un rifiuto è una frase invece di un nome.
+   */
+  const nomeModello = $derived(snap.model ?? modello?.label ?? 'this model')
   /** Oltre questo, l'allegato non parte. Il numero è nostro, e il messaggio lo dice. */
   const MASSIMO = 10 * 1024 * 1024
 
@@ -89,7 +94,8 @@
     // Non `file.type`: su `.md` e `.csv` il browser lo lascia spesso vuoto. Vedi `tipoDi`.
     const mediaType = tipoDi(file)
     if (!tipi.includes(mediaType)) {
-      store.refused = `${file.name || 'that file'} is a ${mediaType || 'file'} — ${nomeModello} takes ${nomiBrevi(tipi)}`
+      const che = mediaType ? ` (${mediaType})` : ''
+      store.refused = `${file.name || 'That file'}${che} — ${nomeModello} takes ${nomiBrevi(tipi)}`
       return
     }
     if (file.size > MASSIMO) {

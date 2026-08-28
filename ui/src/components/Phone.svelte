@@ -98,6 +98,27 @@
     } finally { daFare = null; await leggi() }
   }
 
+  /**
+   * Scollega **questo** telefono, da questo telefono.
+   *
+   * Due metà, e l'ordine conta. Prima si revoca sul daemon — è quella che vale, ed è
+   * l'unica che ferma anche un cookie che il JavaScript non può toccare (è `HttpOnly`):
+   * revocato, quel cookie non viene più riconosciuto e diventa inerte. Poi si butta via
+   * la credenziale tenuta qui, se no la pagina continuerebbe a rimandarla a ogni
+   * richiesta e a prendersi 403 senza sapere perché.
+   *
+   * Alla fine si ricarica la radice, non si chiude la modale: da lì in poi questo
+   * telefono non ha più titolo per stare dentro, e restare a guardare una UI che non
+   * può più chiedere niente sarebbe peggio di uscire.
+   */
+  async function scollegaQuesto(): Promise<void> {
+    const id = stato?.questo
+    if (!id) return
+    try { await store.api.phoneRevoke(id) } catch { /* revocato o daemon giù: si esce comunque */ }
+    try { localStorage.removeItem('stark.token'); sessionStorage.removeItem('stark.token') } catch { /* modalità privata */ }
+    location.replace('/')
+  }
+
   const quando = (ts: number): string =>
     new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 </script>
@@ -176,19 +197,45 @@
 
     {#if errore}<div class="hint bad"><Icon name="i-warn" /><span>{errore}</span></div>{/if}
 
+    <!-- Il caso che si scopre solo da un telefono entrato col vecchio segnalibro: sei
+         dentro, ma con la credenziale della **macchina**, che non appartiene a nessun
+         dispositivo e non compare in nessun elenco. Da fuori sembra «collegato»; in
+         realtà è l'unica cosa che il pannello non può togliere. Si dice, e si dice come
+         uscirne — accoppiarsi la sostituisce con una revocabile. -->
+    {#if stato?.conTokenMacchina}
+      <div class="hint">
+        <Icon name="i-warn" />
+        <span>
+          This browser is signed in with the <b>machine token</b>, not a phone
+          credential: it is not in the list below and cannot be disconnected from here.
+          Entering a code swaps it for one you can.
+        </span>
+      </div>
+    {/if}
+
     {#if stato && stato.devices.length > 0}
       <div class="sez">Connected phones</div>
       {#each stato.devices as d (d.id)}
+        {@const mio = d.id === stato.questo}
         <div class="dev">
           <div>
-            <div class="t">{d.nome}</div>
+            <div class="t">{d.nome}{#if mio}<span class="qui">this device</span>{/if}</div>
             <div class="d">connected {quando(d.da)}</div>
           </div>
-          <!-- La revoca è la difesa che abbiamo scelto al posto della scadenza: se non
-               fosse a un clic da qui, non lo sarebbe. -->
-          <button class="btn" onclick={() => { void store.api.phoneRevoke(d.id).then(leggi) }}>
-            Disconnect
-          </button>
+          <!-- La revoca è la difesa scelta al posto della scadenza: se non fosse a un
+               clic da qui, non lo sarebbe. Sulla propria riga il bottone fa una cosa in
+               più — butta via anche la credenziale tenuta in questo browser — quindi
+               dice un'altra cosa: scollegare un altro telefono è amministrazione,
+               scollegare il proprio è uscire. -->
+          {#if mio}
+            <button class="btn dgr" onclick={() => void scollegaQuesto()}>
+              Disconnect this phone
+            </button>
+          {:else}
+            <button class="btn" onclick={() => { void store.api.phoneRevoke(d.id).then(leggi) }}>
+              Disconnect
+            </button>
+          {/if}
         </div>
       {/each}
     {/if}
@@ -240,8 +287,20 @@
     font-size: 9.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
     color: var(--muted);
   }
-  .dev { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
-  .dev > div:first-child { flex: 1; min-width: 0; }
+  /* La riga va a capo invece di strozzarsi: «Disconnect this phone» è lungo, e su uno
+     schermo stretto lasciava al nome una colonna da 80px — che lo spezzava in tre righe,
+     badge compreso. Con `flex-basis` sul nome è il **bottone** a scendere sotto quando
+     non ci sta, che è l'ordine giusto: il nome dice di quale telefono si parla. */
+  .dev { display: flex; align-items: center; gap: 10px; padding: 7px 0; flex-wrap: wrap; }
+  .dev > div:first-child { flex: 1 1 150px; min-width: 0; }
+  .dev .btn { flex: none; margin-left: auto; }
   .dev .t { font-size: 11.5px; font-weight: 600; }
   .dev .d { font-size: 10px; color: var(--muted); }
+  /* «questo sei tu». Un'etichetta e non un colore sulla riga: le righe sono già poche e
+     un colore in più direbbe «attenzione» invece di «sei qui». */
+  .qui {
+    margin-left: 6px; padding: 1px 6px; border-radius: 20px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 9px; font-weight: 600; letter-spacing: .02em;
+  }
 </style>

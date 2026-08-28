@@ -799,11 +799,19 @@ screenshot o si **trascina** un'immagine sul blocco in basso — su tutto il blo
 rettangolo di ventiquattro pixel: chi arriva con un'immagine in mano punta *in basso*. Gli
 allegati restano in attesa sopra la casella finché non si manda.
 
-- **PNG, JPEG, GIF, WebP**, che sono i quattro che il modello accetta. Un file di un altro tipo
-  lo dice, invece di sparire nel nulla.
-- **un file di testo non si allega**: si incolla, o si nomina per percorso. L'agent sa leggerlo
-  da solo, ed è il motivo per cui non serve spedirglielo.
-- **nella conversazione l'immagine resta**, sopra la risposta, com'era davanti al modello.
+- **quali tipi, lo dice il modello** (28 agosto 2026, chiesto dall'utente). Non è una lista di
+  STARK: ogni modello dichiara cosa accetta, e la casella filtra con quella. Su Claude Code sono
+  le quattro immagini più PDF, TXT, Markdown e CSV; su OpenCode dipende dal modello — 61 dei 151
+  di questa macchina leggono immagini, 4 anche i PDF. Un file di un altro tipo lo **dice**,
+  invece di sparire nel nulla, e dice anche cosa avrebbe preso.
+- **un modello che non legge allegati spegne la graffetta**, con la ragione nel tooltip: spenta e
+  spiegata, mai nascosta. Cambiando modello a caldo il bottone si riaccende da sé, perché la
+  domanda è del modello e non della chat.
+- **un file di testo si allega**, e la regola di prima («si nomina per percorso, l'agent sa
+  leggerlo») resta vera solo per i file **del progetto**, che infatti si citano con `@`. Dal
+  telefono, un percorso da nominare non c'è.
+- **nella conversazione l'allegato resta**, sopra la risposta, com'era davanti al modello:
+  l'immagine come immagine, tutto il resto come una scheda col nome e il peso, che si apre.
   Riaprendo il lavoro due giorni dopo si capisce di cosa si stava parlando.
 
 ### I comandi slash

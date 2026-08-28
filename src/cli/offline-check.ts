@@ -1817,9 +1817,9 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   // Il caso per cui esiste la meta' del lavoro: un modello di solo testo.
   check('OpenCode: un modello di solo testo non accetta niente',
     allegabiliDi(cap({ text: true })).length === 0)
-  // Misurato: 67 modelli con `attachment: true`, sei dei quali con `image: false` —
-  // sono i modelli voce e video. Dedurre le immagini da quel flag riaccenderebbe la
-  // graffetta proprio dove il modello ha appena detto di no.
+  // Misurato: 67 modelli con `attachment: true`, otto dei quali senza ne' immagini ne'
+  // PDF — sono i modelli voce e video. Dedurre le immagini da quel flag riaccenderebbe
+  // la graffetta proprio dove il modello ha appena detto di no.
   check('OpenCode: `attachment` da solo non vuol dire immagini',
     allegabiliDi(cap({ text: true, audio: true, image: false })).length === 0)
   check('OpenCode: si legge anche la forma piatta dei tipi',
