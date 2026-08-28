@@ -1,0 +1,46 @@
+{
+  "expectations": [
+    {
+      "text": "Il task t2 (Traefik) passa a \"done\"",
+      "passed": true,
+      "evidence": "done"
+    },
+    {
+      "text": "Il task t3 (tunnel) passa a \"blocked\"",
+      "passed": true,
+      "evidence": "blocked"
+    },
+    {
+      "text": "Il task t3 ha una note che spiega il DNS proxied su Cloudflare",
+      "passed": true,
+      "evidence": "bloccato: sul vps il dns punta ancora a cloudflare in modalità proxied. finché il record non passa a dns-only (grigio) il tunnel non è misurabile."
+    },
+    {
+      "text": "La seconda lista (bugfix barra di stato) è rimasta intatta",
+      "passed": true,
+      "evidence": "intatta"
+    },
+    {
+      "text": "__status della lista attiva resta \"active\": non è finita",
+      "passed": true,
+      "evidence": "active"
+    },
+    {
+      "text": "Il campo created non è stato toccato",
+      "passed": true,
+      "evidence": "1787900000000"
+    },
+    {
+      "text": "Gli id dei task non sono stati rinumerati",
+      "passed": true,
+      "evidence": "['t1', 't2', 't3']"
+    },
+    {
+      "text": "Il file è ancora JSON valido",
+      "passed": true,
+      "evidence": "ok"
+    }
+  ],
+  "passed": 8,
+  "total": 8
+}

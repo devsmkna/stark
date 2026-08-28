@@ -2,7 +2,7 @@
 // flusso SSE, comando, e coerenza fra ciò che è arrivato dal flusso e ciò che sta sul
 // disco. Le prove di sicurezza non costano quota; il turno finale costa pochissimo.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -368,6 +368,100 @@ check('la ricerca dei file è dietro il token come tutto il resto',
 check('una sessione che non esiste torna vuoto, non un\'eccezione',
   (await (await fetch(`${url}/api/sessions/${'0'.repeat(36)}/files?q=x`,
     { headers: auth })).json() as { files?: string[] }).files?.length === 0)
+
+// ─── todo del progetto ──────────────────────────────────────────────────────
+//
+// Il file `.stark/todo.json` lo scrive l'agent, non il journal: è una risorsa a parte, e
+// va provata come tale. Costo quota: zero, non serve nessun turno.
+{
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const prog = resolve(tmpdir(), 'stark-daemon-check-todo')
+  rmSync(prog, { recursive: true, force: true })
+  mkdirSync(prog, { recursive: true })
+
+  const r = await fetch(`${url}/api/sessions`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ cwd: prog }),
+  })
+  const tid = ((await r.json()) as { id: string }).id
+  const todo = async (): Promise<Record<string, unknown>> =>
+    (await fetch(`${url}/api/sessions/${tid}/todo`, { headers: auth })).json() as Promise<Record<string, unknown>>
+
+  check('§todo: senza file, «assente» invece di una lista vuota',
+    (await todo())['assente'] === true)
+
+  // Il flusso si apre **prima** che `.stark` esista: è la condizione normale di un
+  // progetto nuovo, ed è il caso in cui un watcher appeso al file non partirebbe mai.
+  const visti: Record<string, unknown>[] = []
+  const ts = await fetch(`${url}/api/sessions/${tid}/todostream`, { headers: auth })
+  const tl = ts.body!.getReader()
+  const td = new TextDecoder()
+  let tb = ''
+  void (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await tl.read()
+        if (done) break
+        tb += td.decode(value, { stream: true })
+        let i: number
+        while ((i = tb.indexOf('\n\n')) >= 0) {
+          const blocco = tb.slice(0, i); tb = tb.slice(i + 2)
+          const riga = blocco.split('\n').find(x => x.startsWith('data: '))
+          if (riga) visti.push(JSON.parse(riga.slice(6)) as Record<string, unknown>)
+        }
+      }
+    } catch { /* il daemon si ferma alla fine: atteso */ }
+  })()
+  await new Promise(r2 => setTimeout(r2, 300))
+  check('§todo: il flusso manda subito lo stato di partenza', visti.length === 1, `${visti.length}`)
+
+  const scrivi = (o: unknown): void => {
+    mkdirSync(resolve(prog, '.stark'), { recursive: true })
+    // Scrittura atomica, come quella dello script della skill: è il caso che rompe un
+    // watcher appeso al file invece che alla cartella, perché `rename` cambia l'inode.
+    const tmp = resolve(prog, '.stark', 'todo.json.tmp')
+    writeFileSync(tmp, JSON.stringify(o))
+    renameSync(tmp, resolve(prog, '.stark', 'todo.json'))
+  }
+  const LISTA = {
+    'aaaaaaaa-1111-2222-3333-444444444444': {
+      title: 'Prima lista', created: 1, __status: 'active',
+      tasks: [{ id: 't1', text: 'uno', state: 'done' }, { id: 't2', text: 'due', state: 'blocked', note: 'il dns' }],
+    },
+  }
+  scrivi(LISTA)
+  await new Promise(r2 => setTimeout(r2, 900))
+  check('§todo: il watcher vede nascere la cartella e spinge', visti.length >= 2, `${visti.length}`)
+
+  scrivi({ ...LISTA, 'bbbbbbbb-1111-2222-3333-444444444444': { title: 'Chiusa', created: 2, __status: 'done', tasks: [] } })
+  await new Promise(r2 => setTimeout(r2, 900))
+  check('§todo: sopravvive alla riscrittura atomica (rename cambia l\'inode)',
+    visti.length >= 3, `${visti.length}`)
+  const ultimo = visti[visti.length - 1] as { lists?: { status: string }[] }
+  check('§todo: le liste vive stanno sopra quelle chiuse',
+    ultimo.lists?.[0]?.status === 'active' && ultimo.lists?.[1]?.status === 'done',
+    (ultimo.lists ?? []).map(l => l.status).join(','))
+
+  // Una voce malformata non deve far sparire dalla barra le altre scritte bene.
+  scrivi({ ...LISTA, rotta: { title: 'senza tasks' } })
+  const t2 = await todo() as { lists: unknown[]; scartate: number; motivo?: string }
+  check('§todo: una lista malformata si salta, le altre restano',
+    t2.lists.length === 1 && t2.scartate === 1, `${t2.lists.length} liste, ${t2.scartate} scartate`)
+  check('§todo: e il motivo si può leggere', (t2.motivo ?? '').includes('rotta'), String(t2.motivo))
+
+  writeFileSync(resolve(prog, '.stark', 'todo.json'), '{rotto')
+  const t3 = await todo() as { lists: unknown[]; motivo?: string }
+  check('§todo: un file illeggibile non fa fallire la rotta',
+    t3.lists.length === 0 && (t3.motivo ?? '').includes('JSON'), String(t3.motivo))
+
+  // Il perimetro vale anche qui, e una chat senza cartella non ha un progetto da leggere.
+  check('§todo: la rotta è dietro il token come tutto il resto',
+    (await fetch(`${url}/api/sessions/${tid}/todo`)).status === 403)
+
+  await tl.cancel().catch(() => {})
+  await fetch(`${url}/api/sessions/${tid}`, { method: 'DELETE', headers: auth })
+  rmSync(prog, { recursive: true, force: true })
+}
 
 // ─── flusso ─────────────────────────────────────────────────────────────────
 
