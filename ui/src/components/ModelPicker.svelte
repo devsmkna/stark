@@ -36,6 +36,8 @@
 
   /** Quale agent si sta guardando dentro. `null` = si è al primo livello. */
   let dentro = $state<string | null>(null)
+  /** Quale provider si sta guardando dentro, quando l'agent ne ha più di uno. */
+  let dentroProvider = $state<string | null>(null)
   let cerca = $state('')
 
   /**
@@ -81,6 +83,31 @@
 
   const gruppo = $derived((catalogo ?? []).find(a => a.id === dentro) ?? null)
 
+  /**
+   * I provider dentro l'agent aperto, solo quando ce n'è più di uno.
+   *
+   * Claude Code ha un solo provider — se stesso — e non lo dichiara: `group` è
+   * assente, e questo livello non compare, esattamente come prima. OpenCode invece ne
+   * smista decine sulla stessa macchina (`neuralwatt`, `baseten`, `opencode`, …): senza
+   * questo passaggio la voce «OpenCode» apriva una colonna di 151 modelli in cui *chi*
+   * li serve si leggeva solo nell'id per esteso, riga per riga.
+   */
+  const providers = $derived.by(() => {
+    if (!gruppo) return null
+    const nomi = new Set(gruppo.models.map(m => m.group).filter((g): g is string => Boolean(g)))
+    if (nomi.size < 2) return null
+    return [...nomi].sort((a, b) => a.localeCompare(b)).map(g => ({
+      id: g,
+      models: gruppo.models.filter(m => m.group === g),
+    }))
+  })
+  const providerGruppo = $derived(providers?.find(p => p.id === dentroProvider) ?? null)
+
+  function apriAgent(id: string): void {
+    dentro = id
+    dentroProvider = null
+  }
+
   /** L'id sotto il nome, ma solo quando aggiunge qualcosa: per `Fable` l'etichetta e
    *  l'id coincidono, e ripeterlo sarebbe rumore su ogni riga. */
   const sotto = (m: { id: string; label?: string }): string =>
@@ -98,7 +125,8 @@
     <button class="mi" class:on={scelto(r.m)}
       title={r.m.note ?? r.m.id}
       onclick={() => onScegli(r.a.id, r.m.id)}>
-      <span class="tx"><span class="lb">{r.m.label ?? r.m.id}</span><span class="sub">{r.a.label}</span></span>
+      <span class="tx"><span class="lb">{r.m.label ?? r.m.id}</span><span class="sub"
+        >{r.m.group ? `${r.a.label} · ${r.m.group}` : r.a.label}</span></span>
       {#if r.m.note}<Icon name="i-warn" style="color:var(--wait)" />{/if}
       {#if nota?.(r.a.id)}<span class="tag">{nota(r.a.id)}</span>{/if}
       {#if scelto(r.m)}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
@@ -110,6 +138,35 @@
   {#if risultati.length > 60}
     <div class="mi dis"><span>{risultati.length - 60} more — keep typing to narrow</span></div>
   {/if}
+{:else if gruppo && providerGruppo}
+  <button class="mi" onclick={() => { dentroProvider = null }}>
+    <Icon name="i-back" /><span class="tx"><span class="lb">{providerGruppo.id}</span><span class="sub">{gruppo.label} · {providerGruppo.models.length} models</span></span>
+  </button>
+  {#each providerGruppo.models as m (m.id)}
+    <button class="mi" class:on={scelto(m)}
+      title={m.note ?? m.id}
+      onclick={() => onScegli(gruppo.id, m.id)}>
+      <span class="tx"><span class="lb">{m.label ?? m.id}</span><span class="sub">{sotto(m)}</span></span>
+      {#if m.note}<Icon name="i-warn" style="color:var(--wait)" />{/if}
+      {#if nota?.(gruppo.id)}<span class="tag">{nota(gruppo.id)}</span>{/if}
+      {#if scelto(m)}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+    </button>
+  {/each}
+{:else if gruppo && providers}
+  <!-- Il livello dei provider: solo quando l'agent ne serve più di uno (OpenCode). Su
+       Claude Code `providers` è `null` e questo ramo non compare mai. -->
+  <button class="mi" onclick={() => { dentro = null }}>
+    <Icon name="i-back" /><span class="tx"><span class="lb">{gruppo.label}</span><span class="sub">{providers.length} providers</span></span>
+  </button>
+  {#if gruppo.note}
+    <div class="mi dis"><Icon name="i-warn" style="color:var(--wait)" /><span>{gruppo.note}</span></div>
+  {/if}
+  {#each providers as p (p.id)}
+    <button class="mi" onclick={() => { dentroProvider = p.id }}>
+      <span class="tx"><span class="lb">{p.id}</span><span class="sub">{p.models.length} models</span></span>
+      <Icon name="i-fwd" style="margin-left:auto" />
+    </button>
+  {/each}
 {:else if gruppo}
   <button class="mi" onclick={() => { dentro = null }}>
     <Icon name="i-back" /><span class="tx"><span class="lb">{gruppo.label}</span><span class="sub">{gruppo.models.length} models</span></span>
@@ -133,7 +190,7 @@
   {#each catalogo as a (a.id)}
     <button class="mi" class:dis={!a.available} disabled={!a.available}
       title={a.reason ?? a.note ?? ''}
-      onclick={() => { dentro = a.id }}>
+      onclick={() => apriAgent(a.id)}>
       {#if !a.available}<Icon name="i-block" />{/if}
       <span class="tx"><span class="lb">{a.label}</span><span class="sub"
         >{a.available ? `${a.models.length} models` : (a.reason ?? 'not available')}</span></span>

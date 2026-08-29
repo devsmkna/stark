@@ -134,6 +134,16 @@ export type SlashCommand = {
 export type ModelChoice = {
   id: string
   label?: string
+  /**
+   * Il provider che serve questo modello (`neuralwatt`, `baseten`, `opencode`, …).
+   *
+   * Claude Code ha un solo provider (se stesso) e non lo dichiara. OpenCode invece
+   * smista fra decine di provider autenticati sulla stessa macchina — l'`id` porta già
+   * il prefisso (`neuralwatt/glm-4.6`), ma un `id` non è una presentazione: senza un
+   * campo suo, raggrupparli per provider vorrebbe dire tagliare stringhe nella UI, che
+   * è vocabolario dell'agent travestito da parsing.
+   */
+  group?: string
   resolved?: string
   autoMode: boolean
   /**

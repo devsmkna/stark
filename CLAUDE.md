@@ -471,14 +471,40 @@ Il dettaglio sta in `docs/ui-schermate.md`; il perché, e cosa è stato scartato
   almeno 420 secondi di pausa. Lo Sleep libera RAM; quota ne costa solo oltre la TTL della
   cache, che non è stata misurata. Ed è una premessa **di Claude Code, non del dominio**: su
   OpenCode il server è già in piedi e non c'è nessun contesto da rileggere.
-- **Due macchine**, e i trascritti NON si sincronizzano fra loro (vedi il Punto della situazione).
+- **Tre macchine**, e i trascritti NON si sincronizzano fra loro (vedi il Punto della situazione).
   Node: **24.13.1** sul fisso (`/mnt/m/devs-development/stark/stark`), **22.23.2** sul portatile
-  (`/root/DevsMachna/stark`, aggiornato il 24 agosto 2026). Il prerequisito di ADR-007 è ≥ 22.18:
-  ora è soddisfatto su entrambe.
-- **`CLAUDE_CONFIG_DIR` non vale uguale sulle due macchine**: sul fisso punta a
-  `/root/.claude-digitizers`; sul portatile non è impostata e le sessioni stanno in `~/.claude`.
+  (`/root/DevsMachna/stark`, aggiornato il 24 agosto 2026), **26.0.0** sul **MacBook**
+  (`/Users/veenz/Documents/projects/stark`, macOS 26.5.2 arm64 — aggiunta il 29 agosto 2026). Il
+  prerequisito di ADR-007 è ≥ 22.18: soddisfatto su tutte e tre.
+  Attenzione: le due macchine storiche sono **WSL2**, la terza no. Ogni volta che qui sotto si
+  legge «su WSL» va riletto come «sulle due WSL» — il MacBook prende il ramo `darwin`, che in
+  `reveal.ts`, `platform.ts` e nel selettore di cartelle nativo esiste ma è **il meno provato dei
+  tre**.
+- **`CLAUDE_CONFIG_DIR` non vale uguale sulle tre macchine**: sul fisso punta a
+  `/root/.claude-digitizers`; sul portatile e sul MacBook non è impostata e le sessioni stanno in
+  `~/.claude`.
   Va propagata al processo figlio (opzione `env` dell'SDK), altrimenti quello guarda nella
   cartella sbagliata, non trova sessioni da riprendere e sembra rotto senza motivo apparente.
+- **Su macOS il CLI di Tailscale non sta nel `PATH`, e il symlink non funziona** (29 agosto
+  2026). L'app è la build **App Store** (`Contents/_MASReceipt` presente), che non può scrivere in
+  `/usr/local/bin`: il CLI è lo stesso binario multi-call della GUI, dentro il bundle
+  (`/Applications/Tailscale.app/Contents/MacOS/Tailscale`). Un `ln -s` verso `/usr/local/bin` si
+  installa senza errori e poi **muore a ogni invocazione** — `Bundle.main` non risolve il symlink,
+  quindi il processo si vede lanciato da `/usr/local/bin`, non trova lì l'`Info.plist` e si ferma
+  con `BundleIdentifiers.swift:47: Fatal error: The current bundleIdentifier is unknown to the
+  registry`. Serve un **wrapper** che faccia `exec` sul percorso vero, cioè la stessa forma del
+  lanciatore installato da `npm run stark:install`. Verificato per confronto, non dedotto: stesso
+  comando, percorso pieno → `1.102.3`, via symlink → trap, via wrapper → `1.102.3`.
+  Perché riguarda STARK e non solo la shell: `security.ts` invoca `tailscale` **dal `PATH`** e non
+  ha un override via variabile d'ambiente, quindi senza il wrapper `detectTailnetHost()` torna
+  `null` e l'hostname della tailnet resta **fuori dal perimetro** — il telefono si becca un `403`
+  che sembra un problema di token. La via che non dipende dal `PATH` è `STARK_PUBLIC_HOST`, che il
+  perimetro **somma** a Tailscale. Vale in entrambi i casi la trappola già nota: il rilevamento
+  gira **una volta sola** alla costruzione del guard, quindi va **riavviato il daemon** dopo aver
+  sistemato il `PATH`.
+  Nota che va nella direzione opposta al sospetto iniziale: `tailscale serve` **funzionava già** —
+  `https://macbook-pro-di-vincenzo.tailac3c9e.ts.net` → `proxy http://127.0.0.1:4571`, cioè la
+  `PORTA` di `server.ts`. A non funzionare era `which tailscale`.
 - **Sul fisso** il repo vive su un mount DrvFs (`/mnt/…`): `git status` segnala come modificati
   file il cui contenuto è identico a HEAD. È una limitazione dello stat cache di git su quel
   filesystem, non una modifica reale — verificare sempre con `git diff` prima di crederci.

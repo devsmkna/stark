@@ -234,6 +234,17 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 | `npm run stark` | in primo piano, per guardarlo lavorare. Ctrl-C lo ferma |
 | `npm run stark:token -- --new` | ne fa uno nuovo, se il vecchio è finito dove non doveva |
 
+## La skill dei todo
+
+La colonna Todo legge `.stark/todo.json` dentro il progetto; a scriverlo è l'agent, e a
+insegnarglielo è la skill in **`.claude/skills/stark-todo/`**.
+
+**Non c'è niente da installare.** Sta lì e non in `~/.claude/skills/` perché è una skill
+*di progetto*: Claude Code carica `.claude/skills/<nome>/SKILL.md` dal repo in cui si sta
+lavorando, quindi clonando è già attiva. Un comando di installazione avrebbe voluto dire un
+passo in più da ricordare, una copia da tenere allineata a mano, e una skill che può
+divergere dal codice che la usa.
+
 ## Comandi
 
 | | |

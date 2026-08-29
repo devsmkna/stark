@@ -750,7 +750,7 @@ export function allegabiliDi(m: Record<string, unknown>): string[] {
 async function elencoModelli(c: Client): Promise<ModelChoice[]> {
   try {
     const v = dato(await c.config.providers()) as {
-      providers?: Array<{ id?: string; models?: Record<string, Record<string, unknown>> }>
+      providers?: Array<{ id?: string; name?: string; models?: Record<string, Record<string, unknown>> }>
     } | undefined
     const out: ModelChoice[] = []
     for (const p of v?.providers ?? []) {
@@ -759,6 +759,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
         out.push({
           id: `${p.id}/${mid}`,
           ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
+          ...(p.id ? { group: p.name && p.name !== p.id ? p.name : p.id } : {}),
           // Nessun classificatore su OpenCode: nessun modello «regge auto mode», e
           // dirlo per tutti e' piu' onesto che lasciare il campo a caso.
           autoMode: false,
