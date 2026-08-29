@@ -44,8 +44,12 @@ export type PassoTelefono = {
   azione?: 'collega' | 'pubblica'
 }
 
+/** Su che sistema gira il **daemon** — non il browser da cui stai guardando. */
+export type SistemaOperativo = 'windows' | 'wsl' | 'macos' | 'linux'
+
 export type StatoTelefono = {
   tailscale: { passi: PassoTelefono[]; pronto: boolean; url?: string; host?: string }
+  so: SistemaOperativo
   codice: { scade: number } | null
   devices: { id: string; nome: string; da: number; visto: number }[]
   /** L'id del dispositivo da cui stai guardando, se ne sei uno. */
@@ -247,6 +251,16 @@ function ricorda(t: string): void {
   try { localStorage.setItem('stark.token', t) } catch { /* idem */ }
 }
 
+/** Cosa risponde `GET /api/update`. Lo stesso oggetto di `daemon/aggiornamenti.ts`:
+ *  se cambia lì va cambiato qui, ed è il motivo per cui i nomi sono identici. */
+export type StatoAggiornamento = {
+  installata: string
+  ultima: string | null
+  tag: string | null
+  disponibile: boolean
+  errore?: string
+}
+
 export class Api {
   constructor(private readonly token: string) {}
 
@@ -353,6 +367,17 @@ export class Api {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rebuildUi }),
     })
+  }
+
+  // ── aggiornamenti ────────────────────────────────────────────────────────
+  /** Cosa sa il daemon sulle versioni. Il controllo l'ha fatto lui all'accensione:
+   *  questa è una lettura, non una domanda al remoto. */
+  update(): Promise<StatoAggiornamento> { return this.json('/api/update') }
+  /** Aggiorna e riavvia. La risposta arriva **prima** che il daemon muoia, quindi un
+   *  200 vuol dire «è partito», non «è finito»: a dire che è finito è il ritorno del
+   *  daemon, che la UI aspetta come già fa per il riavvio. */
+  runUpdate(): Promise<{ ok: boolean; tag?: string }> {
+    return this.json('/api/update', { method: 'POST' })
   }
 
   closeHelper(): Promise<{ ok: boolean }> {

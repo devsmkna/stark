@@ -9,7 +9,119 @@
 
 ---
 
-## Che problema risolve
+## Cos'è
+
+STARK è un **cruscotto per gli agent AI che scrivono codice** — Claude Code, OpenCode —
+installati sulla tua macchina. Gira in locale, si apre nel browser, e non è un terminale
+dentro una pagina web: è una GUI che **sostituisce** la TUI.
+
+- **Tante conversazioni insieme**, in un elenco che dice chi lavora, chi ha finito e chi
+  ti sta aspettando. Anche affiancate, in pannelli ridimensionabili.
+- **Turni richiudibili**: un turno da quattrocento blocchi diventa una riga che si apre.
+- **Permessi, domande e piani** in un blocco solo in basso, con la risposta che resta nel
+  flusso — invece di scorrere via.
+- **Effetti**: cosa è stato toccato, per file o in ordine di tempo, col confronto affiancato.
+- **Ti chiama quando guardi altrove**: notifica di sistema, suono, push sul telefono a
+  schermo spento, e un bot Telegram da cui la sessione si guida per intero.
+- Il tutto **senza poter meno del CLI**: modello, modalità, server MCP, comandi slash,
+  citazione dei file con `@`, quota e finestra di contesto.
+
+Tutto resta sulla tua macchina. Le uniche due cose che escono sono il push sul telefono e
+Telegram, entrambi spenti finché non li accendi, col costo scritto dove si accendono.
+
+## Installazione
+
+Un comando solo. Non chiede privilegi di amministratore, e non tocca il Node di sistema.
+
+**Linux**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+```
+
+**WSL2** — dentro la distribuzione Linux, non in PowerShell
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+```
+
+**macOS**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+```
+
+**Windows** — in PowerShell, senza WSL
+
+```powershell
+irm https://raw.githubusercontent.com/devsmkna/stark/main/install.ps1 | iex
+```
+
+Poi apri un terminale **nuovo** (il `PATH` è appena cambiato) e, da qualunque cartella:
+
+```sh
+stark
+```
+
+Si accende, e il browser si apre sulla pagina già autenticata.
+
+Serve un login di Claude Code. Il CLI **non** va installato a parte: l'SDK porta il proprio
+eseguibile, appaiato alla propria versione dal lockfile.
+
+### I comandi
+
+| | |
+|---|---|
+| `stark` | accendi se serve e aprimi STARK |
+| `stark --no-open` | come sopra ma senza browser, per quando sei entrato da SSH |
+| `stark status` | se è vivo, dove, quante conversazioni, e chi altro lo raggiunge |
+| `stark stop` | lo ferma con garbo: gli agent si chiudono e i journal restano coerenti |
+| `stark update` | prende l'ultima versione, ricompila, e riavvia se era acceso |
+| `stark token --new` | ne fa uno nuovo, se il vecchio è finito dove non doveva |
+
+`stark` senza altro vuol dire **«voglio usare STARK adesso»**: compila la UI se manca,
+accende il daemon se non c'è, e apre il browser. È idempotente — se gira già non è un
+errore, è la condizione normale. Chi lo scrive la mattina non deve ricordarsi se ieri sera
+l'ha lasciato acceso.
+
+### Cosa fa l'installer, e cosa non fa
+
+**Niente `sudo`, e non è una comodità.** Servirebbe solo a *scrivere* il file del
+lanciatore, che non ha il bit setuid: un eseguibile di proprietà di root, lanciato da un
+altro utente, gira **come quell'utente**. Cioè installare da root non darebbe all'agent
+nessun permesso in più — a decidere cosa l'agent può fare è **chi digita `stark`**,
+esattamente come chi digita `claude` dal terminale. Lanciarlo da root non sarebbe «lo
+stesso STARK con più poteri» ma **un altro STARK**: `~/.claude` e `~/.stark` seguono
+l'utente, quindi cambierebbero login, journal, token e impostazioni tutti insieme. (Il
+CLI, da root, per giunta *toglie* una modalità: rifiuta `bypassPermissions`.)
+
+**Non tocca il Node di sistema.** Se quello installato è troppo vecchio, o non c'è, il
+Node ufficiale finisce dentro la cartella di STARK e ci punta solo il lanciatore, con
+percorso assoluto. Il tuo `PATH` resta quello che era.
+
+**Non registra niente per l'avvio automatico.** STARK si accende quando digiti `stark`,
+resta acceso anche se chiudi il terminale, e a macchina spenta resta spento: al riavvio lo
+riaccendi tu. È una scelta — il daemon tiene in piedi processi di agent, e uno che riparte
+da solo al boot è uno che lavora senza che nessuno gliel'abbia chiesto.
+
+Come resta acceso dopo che hai chiuso il terminale, senza essere un servizio di sistema:
+su Linux e WSL2 il daemon nasce come **unità transiente di systemd** — di sistema se sei
+root, del tuo utente se non lo sei — perché `setsid()` da solo non basta: systemd traccia i
+processi per cgroup, e alla chiusura di un terminale logind ferma lo scope e porta via
+tutto ciò che sta dentro. Su Windows nasce con `DETACHED_PROCESS`, che è la stessa garanzia
+detta nella lingua di lì: senza console ereditata, la finestra che si chiude non lo tocca.
+Su macOS basta `detached`, e non c'è nessuno scope da cui scappare. Transiente vuol dire
+che allo spegnimento muore e non risuscita: è esattamente ciò che si vuole.
+
+Un limite che va detto invece di lasciarlo scoprire: da utente non root, senza
+`loginctl enable-linger <utente>`, l'unità viene chiusa all'**ultimo logout**. Chiudere una
+finestra di terminale va bene; disconnettersi dall'ultima sessione SSH no.
+
+Dove finisce la roba: il codice in `~/.local/share/stark/app` (su Windows
+`%LOCALAPPDATA%\stark\app`), il comando in `~/.local/bin/stark`, le conversazioni in
+`~/.stark`. Le prime due si spostano con `STARK_DIR=…` davanti al comando.
+
+## Perché esiste
 
 Claude Code e simili si usano dal terminale, e funzionano bene. L'interfaccia però è un
 flusso di testo che scorre: tutto ha lo stesso aspetto, niente si può richiudere, e ciò che
@@ -80,33 +192,23 @@ Il disegno di tutte le schermate, con il perché di ogni scelta, sta in
 [`docs/ui-schermate.md`](docs/ui-schermate.md) e nell'anteprima
 [`docs/ui-anteprima.html`](docs/ui-anteprima.html).
 
-## Requisiti
+## Dal repo, per svilupparci
 
-Node **≥ 22.18**. Claude Code **non** va installato a parte: l'SDK porta il proprio
-eseguibile, appaiato alla propria versione dal lockfile. I sorgenti TypeScript girano
-direttamente (`node src/….ts`), senza build — è da 22.18 che l'esecuzione dei `.ts` è attiva
-senza flag. `tsc` resta necessario per il controllo dei tipi, che lo stripping **non** fa.
+Node **≥ 22.18**. I sorgenti TypeScript girano direttamente (`node src/….ts`), senza
+build — è da 22.18 che l'esecuzione dei `.ts` è attiva senza flag. `tsc` resta necessario
+per il controllo dei tipi, che lo stripping **non** fa.
 
 ```
 npm install
-npm run stark:install   # mette `stark` in /usr/local/bin — una volta sola
-stark                   # e da qui in poi, da qualunque cartella, è solo questo
+npm run stark:install   # mette `stark` nel PATH dell'utente — una volta sola
+stark
 ```
 
-`stark` senza altro vuol dire **«voglio usare STARK adesso»**: compila la UI se manca,
-accende il daemon se non c'è, e apre il browser sulla pagina già autenticata. È
-idempotente — se gira già non è un errore, è la condizione normale, e apre e basta.
-Chi lo scrive la mattina non deve ricordarsi se ieri sera l'ha lasciato acceso.
-
-| | |
-|---|---|
-| `stark` | accendi se serve e aprimi STARK |
-| `stark --no-open` | come sopra ma senza browser, per quando sei entrato da SSH |
-| `stark status` · `stark stop` · `stark token` | come i corrispondenti `npm run stark:*` |
-
-Il lanciatore è uno script di tre righe con dentro due percorsi assoluti: il codice resta
-quello del repo, quindi un `git pull` lo aggiorna da sé. Va rigenerato solo se sposti il
-repo — e lo dice il file stesso, in testa.
+Il lanciatore è uno script di poche righe con dentro due percorsi assoluti — il Node e
+questo repo: il codice resta quello del repo, quindi un `git pull` lo aggiorna da sé. Va
+rigenerato solo se sposti il repo o cambi Node, e lo dice il file stesso, in testa.
+`npm run stark:install -- --system` lo mette invece in `/usr/local/bin` (vuole root, e
+vedi sopra perché di norma non conviene).
 
 A mano, senza installare niente, restano le due righe di prima:
 
@@ -125,8 +227,7 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 
 | | |
 |---|---|
-| `stark` | accende se serve e apre STARK. Il modo normale (vedi sopra) |
-| `npm run stark:install` | installa quel comando. Una volta per macchina |
+| `npm run stark:install` | installa il comando `stark`. Una volta per macchina |
 | `npm run stark:start` | lo avvia **staccato**: chiudere il terminale non lo tocca |
 | `npm run stark:status` | se è vivo, dove, e quante conversazioni ha |
 | `npm run stark:stop` | lo ferma con garbo: gli agent si chiudono e i journal restano coerenti |
@@ -140,13 +241,13 @@ agent, e riaprire una conversazione rilegge tutto il contesto — cioè **costa 
 | `npm run stark` | il daemon in primo piano (staccato: `stark:start`, vedi sopra) |
 | `npm run ui:dev` | la UI con ricarica a caldo, in parallelo al daemon |
 | `npm run ui:build` | compila la UI in `ui/dist`, che è ciò che il daemon serve |
-| `npm run check` | catena completa su eventi finti: 89 verifiche, **zero quota spesa** |
+| `npm run check` | catena completa su eventi finti: 269 verifiche, **zero quota spesa** |
 | `npm run typecheck` · `npm run ui:check` | controllo dei tipi, motore e UI |
 | `npm run slice` | sessione Claude Code vera, poi Sleep, poi replay del journal |
 | `npm run resume` | prova il risveglio: spegne la sessione e verifica che il modello ricordi |
 | `npm run takeover` | cosa succede con due processi sulla stessa sessione |
 | `npm run import -- <trascritto.jsonl>` | apre in STARK una conversazione nata nella CLI |
-| `npm run daemon` | prova il daemon da capo a fondo: 25 verifiche, perimetro compreso (con `-- --reveal` una in più, che apre una finestra vera) |
+| `npm run daemon` | prova il daemon da capo a fondo: 103 verifiche, perimetro compreso (con `-- --reveal` una in più, che apre una finestra vera) |
 | `npm run diff` | fa modificare un file davvero e disegna il confronto affiancato |
 | `npm run queue` | manda due prompt ravvicinati e verifica che restino due turni, in fila |
 | `npm run icons` · `python3 tools/gen-logo.py` | rigenerano icone e marchio dalle sorgenti |

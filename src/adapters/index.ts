@@ -77,7 +77,9 @@ async function presente(): Promise<boolean> {
  *  o un wrapper, che e' come `opencode` viene installato di solito. */
 function risolve(cmd: string): Promise<boolean> {
   return new Promise(res => {
-    const p = spawn(cmd, ['--version'], { stdio: 'ignore' })
+    // `windowsHide`: il daemon non ha console, quindi senza questo la sonda fa
+    // lampeggiare una finestra nera. Vedi `core/platform.ts`.
+    const p = spawn(cmd, ['--version'], { stdio: 'ignore', windowsHide: true })
     p.on('error', () => res(false))
     p.on('exit', code => res(code === 0))
   })

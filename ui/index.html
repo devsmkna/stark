@@ -20,6 +20,16 @@
          `start_url` è quello composto dal daemon — col token dentro. -->
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="apple-touch-icon" href="/icona-180.png" />
+    <!-- La favicon è lo stesso segno delle icone dell'app — la «A» di `Logo.svelte` —
+         ma su fondo **chiaro**, perché sta nella barra delle schede e non su una
+         schermata Home: lì un quadratino scuro sarebbe una macchia, non un marchio.
+         Le due righe sono una sola icona in due formati: l'SVG è quello vero (una
+         scheda la disegna a 16, a 32 e al doppio su schermo denso, e un vettore le
+         regge tutte), il PNG è il ripiego per chi l'SVG non lo guarda. Chi capisce
+         entrambi prende l'ultimo dichiarato, quindi l'SVG va dopo.
+         Si rigenerano con `node tools/gen-app-icons.mjs`: il sorgente resta il logo. -->
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="STARK" />
     <meta name="theme-color" content="#0E1118" />

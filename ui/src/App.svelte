@@ -14,6 +14,7 @@
   import { Store } from './lib/store.svelte.ts'
   import { AZIONI, combos } from './lib/actions.ts'
   import { matches, parse } from './lib/shortcuts.ts'
+  import { zoomRoot } from './lib/zoom.ts'
 
   const store = new Store()
 
@@ -74,6 +75,30 @@
 
   const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
 
+  // Dove disegnare il menu del tasto destro. Non è `store.menu` così com'è: quelle
+  // sono le coordinate del puntatore, cioè **pixel veri della finestra**, mentre un
+  // `left` scritto su un elemento dentro il root zoomato è in unità del root. Al 135%
+  // dello schermo stretto il menu finiva a 1,35 volte la distanza dall'angolo — misurato
+  // in Chromium: clic a (189, 290), menu disegnato a (255, 391). Vedi lib/zoom.ts.
+  let menuEl = $state<HTMLElement | null>(null)
+  let menuPos = $state<{ x: number, y: number } | null>(null)
+
+  // La misura vera dell'elemento serve solo per l'altra metà: un menu aperto in fondo
+  // all'elenco sfonderebbe il bordo, e le sue ultime voci non si potrebbero premere.
+  // Il rettangolo è già in pixel veri, quindi il confronto con la finestra è diretto e
+  // la divisione arriva una volta sola, alla fine.
+  $effect(() => {
+    const m = store.menu
+    const el = menuEl
+    if (!m || !el) { menuPos = null; return }
+    const f = zoomRoot()
+    const r = el.getBoundingClientRect()
+    const bordo = 6
+    const x = Math.max(bordo, Math.min(m.x, window.innerWidth - r.width - bordo))
+    const y = Math.max(bordo, Math.min(m.y, window.innerHeight - r.height - bordo))
+    menuPos = { x: x / f, y: y / f }
+  })
+
   // §8 di docs/ui-schermate.md, deciso il 24 agosto 2026: sotto la soglia stretta non
   // ci sono due colonne rimpicciolite, ce n'è una alla volta — come WhatsApp e
   // Telegram. L'elenco è la schermata quando non c'è una chat aperta; la chat (o gli
@@ -89,6 +114,48 @@
 </script>
 
 <Sprite />
+
+<!-- ─── c'è una versione nuova ──────────────────────────────────────────────────
+     In cima e per tutta la larghezza, non dentro la barra laterale come la banda della
+     quota: quella parla delle **chat** che si sono fermate, e sta accanto all'elenco
+     delle chat. Questa parla dell'installazione intera, che non appartiene a nessuna
+     delle due colonne.
+     Compare solo se il daemon, accendendosi, ha visto una **release** più nuova di
+     quella su disco: un push su `main` non fa comparire niente (vedi core/release.ts).
+     Si può chiudere, e resta chiusa per quella versione: ricorda senza insistere. -->
+{#if store.mostraAggiornamento}
+  <div class="upd" role="status">
+    <!-- `i-import` e non `i-down`: il secondo e' un chevron, cioe' «apri», e qui non
+         c'e' niente da aprire. Questo e' la freccia che scende dentro un contenitore —
+         l'icona che ovunque vuol dire «scarica». -->
+    <Icon name={store.aggiornamentoInCorso ? 'i-loader' : 'i-import'} />
+    <div class="ut">
+      {#if store.aggiornamentoInCorso}
+        Updating to {store.aggiornamento?.ultima}… STARK restarts and this tab reloads.
+      {:else}
+        <!-- Da telefono restano le parole che dicono il fatto: quale versione c'e'.
+             Quella che si ha e' scritta nelle impostazioni, e su una riga larga 390px
+             costava tre righe su quattro. `&nbsp;` e non uno spazio normale: Svelte
+             taglia lo spazio iniziale dentro un elemento, e senza questo le due meta'
+             si attaccherebbero su schermo largo (stessa trappola gia' trovata sul chip
+             del contesto nella barra di stato). -->
+        STARK <b>{store.aggiornamento?.ultima}</b> is available<span class="lbl"
+          >&nbsp;— you have {store.aggiornamento?.installata}</span>.
+      {/if}
+    </div>
+    {#if !store.aggiornamentoInCorso}
+      <button class="ub" onclick={() => void store.aggiorna()}
+        >Update<span class="lbl">&nbsp;to the last version</span></button>
+      <!-- Il comando c'è comunque, e non è una ripetizione del bottone: il riavvio del
+           daemon passa da `/bin/sh` (riavvio.ts), quindi su Windows nativo il bottone
+           non ha ancora una strada. Lì questa riga è l'unica via, e vale la pena che ci
+           sia per tutti invece di comparire solo dove serve. -->
+      <code class="uc">stark update</code>
+      <button class="ux" title="Not now" aria-label="Dismiss"
+        onclick={() => store.chiudiAggiornamento()}><Icon name="i-x" /></button>
+    {/if}
+  </div>
+{/if}
 
 <div class="shell">
   <!-- Si prova comunque, e ci si arrende solo se il daemon dice davvero di no.
@@ -121,13 +188,27 @@
       <!-- Il testo era «The daemon is not answering: the daemon is not answering»: il
            motivo dal negozio ripeteva la frase del riquadro. Qui la frase sta in un
            posto solo, e dice anche cosa fare — che è l'unica cosa utile in quel momento. -->
+      <!-- Durante un aggiornamento il daemon **deve** essere giù: è il momento in cui si
+           spegne per riaccendersi col codice nuovo. Il testo di sotto manderebbe a
+           riavviarlo a mano, cioè a fare esattamente la cosa sbagliata proprio mentre
+           tutto sta funzionando. Trovato guardando lo screenshot del giro vero, non
+           leggendo il codice: la banda in cima diceva «STARK restarts», e due righe
+           sotto la pagina diceva il contrario. -->
       <div class="mid">
-        <div>
-          <p><b>The daemon is not answering.</b></p>
-          <p>STARK keeps trying. If you stopped it, start it again with
-          <code>npm run stark:start</code>: this tab reconnects on its own, and the
-          address stays the same.</p>
-        </div>
+        {#if store.aggiornamentoInCorso}
+          <div>
+            <p><b>Updating.</b></p>
+            <p>STARK is off for a moment — it comes back on its own, and this tab
+            reloads. Nothing to do.</p>
+          </div>
+        {:else}
+          <div>
+            <p><b>The daemon is not answering.</b></p>
+            <p>STARK keeps trying. If you stopped it, start it again with
+            <code>npm run stark:start</code>: this tab reconnects on its own, and the
+            address stays the same.</p>
+          </div>
+        {/if}
       </div>
     <!-- Schermo largo: il posto della conversazione lo prende l'albero, **anche con
          una foglia sola**. Non è una cornice in più — con un pannello solo `Workspace`
@@ -189,7 +270,11 @@
        una schermata «modifica chat» perché, con cartella e agent bloccati per
        costruzione, sarebbe un contenitore con dentro un campo solo. -->
   {#if store.menu && menuRow}
-    <div class="ctx-menu" style="left:{store.menu.x}px;top:{store.menu.y}px">
+    <!-- La prima posizione è già quella giusta rispetto al cursore: l'effetto qui
+         sopra la ritocca solo se il menu sfonda un bordo, così non c'è un fotogramma
+         in cui compare nell'angolo sbagliato. -->
+    <div class="ctx-menu" bind:this={menuEl}
+      style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
       <!-- Sta in cima e ha una riga sua perché è l'unica voce che NON agisce su questa
            chat: agisce sul suo progetto. Aprire la seconda conversazione su una cartella
            su cui stai già lavorando non deve passare da «New chat» e da un percorso da

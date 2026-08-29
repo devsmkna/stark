@@ -5,7 +5,8 @@
 // sotto servono a tre attacchi diversi, e nessuna copre il buco delle altre.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { eseguiSync } from '../core/platform.ts'
+import { vieTailscale } from './tailscale.ts'
 import type { IncomingMessage } from 'node:http'
 
 export type Guard = {
@@ -234,9 +235,17 @@ export function detectTailnetHost(): string | null {
   if (tailnetCache) return tailnetCache.host
   let host: string | null = null
   try {
-    const j = JSON.parse(execFileSync('tailscale', ['status', '--json'], { timeout: 2000 }).toString())
-    const dns = (j.Self?.DNSName as string | undefined)?.replace(/\.$/, '')
-    host = dns || null
+    // Le **stesse vie** del pannello, non un `tailscale` dal `PATH` scritto qui: due
+    // elenchi vorrebbero dire un perimetro chiuso mentre la schermata dice «tutto
+    // verde», ed è la classe di bug già corretta quando `soggetto()` in `push.ts`
+    // faceva il rilevamento per conto suo.
+    for (const via of vieTailscale()) {
+      try {
+        const j = JSON.parse(eseguiSync(via.cmd, [...via.pre, 'status', '--json'], { timeout: 2000 }).toString())
+        const dns = (j.Self?.DNSName as string | undefined)?.replace(/\.$/, '')
+        if (dns) { host = dns; break }
+      } catch { /* questa via non risponde: si prova la prossima */ }
+    }
   } catch { host = null }
   tailnetCache = { host }
   return host

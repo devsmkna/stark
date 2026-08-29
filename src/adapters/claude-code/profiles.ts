@@ -9,13 +9,12 @@
 // rompersi — l'agent non trova nessuna conversazione da riprendere e forse nemmeno il
 // login, con l'aria di essere guasto invece che mal configurato.
 
-import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { esegui } from '../../core/platform.ts'
 
-const run = promisify(execFile)
 
 /** Una configurazione di Claude Code trovata sul disco. */
 export type Profile = {
@@ -53,15 +52,37 @@ function versionOf(pkg: string): string | undefined {
   } catch { return undefined }
 }
 
-/** L'eseguibile che l'SDK si porta dietro, se il pacchetto della piattaforma c'è. */
+/**
+ * L'eseguibile che l'SDK si porta dietro, se il pacchetto della piattaforma c'è.
+ *
+ * Il nome del pacchetto si **compone** da `platform`/`arch` invece di essere scelto da
+ * un elenco scritto a mano: quello ne conosceva tre (`linux-x64`, `linux-x64-musl`,
+ * `darwin-arm64`) mentre l'SDK ne pubblica **otto**, e le cinque mancanti non davano un
+ * errore — davano `bundled: false` nella diagnostica, cioè una pagina che dice il falso
+ * proprio a chi la sta leggendo perché qualcosa non torna. La lacuna è diventata reale
+ * il giorno in cui STARK ha imparato a girare su Windows nativo.
+ *
+ * `createRequire(...).resolve` e non un percorso costruito a mano: è così che ci arriva
+ * l'SDK, quindi funziona anche quando `node_modules` non è dove ci si aspetta (npm che
+ * lo issa più in alto, un monorepo, un'installazione fatta altrove). Il ripiego sul
+ * percorso relativo resta per il caso in cui la risoluzione fallisca.
+ *
+ * `-musl` è un suffisso in più e non un caso a parte: `process.platform` dice `linux` e
+ * basta, la libc non la dichiara nessuno, quindi si prova il pacchetto normale e poi
+ * quello musl — e a decidere è quale dei due è stato davvero installato, che è
+ * esattamente la domanda a cui `optionalDependencies` risponde installandone uno solo.
+ */
 function bundledExecutable(): string | undefined {
-  for (const p of [
-    'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude',
-    'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude',
-    'node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
-  ]) {
-    const abs = resolve(p)
-    if (existsSync(abs)) return abs
+  const eseguibile = process.platform === 'win32' ? 'claude.exe' : 'claude'
+  const req = createRequire(import.meta.url)
+  for (const suffisso of ['', '-musl']) {
+    const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}${suffisso}`
+    try {
+      const abs = resolve(req.resolve(`${pkg}/package.json`), '..', eseguibile)
+      if (existsSync(abs)) return abs
+    } catch { /* pacchetto non installato per questa piattaforma: si prova il prossimo */ }
+    const rel = resolve(`node_modules/${pkg}/${eseguibile}`)
+    if (existsSync(rel)) return rel
   }
   return undefined
 }
@@ -147,7 +168,7 @@ let versione: Promise<string | undefined> | null = null
 
 function cliVersion(executable: string | undefined): Promise<string | undefined> {
   if (!executable) return Promise.resolve(undefined)
-  versione ??= run(executable, ['--version'], { timeout: 30_000 })
+  versione ??= esegui(executable, ['--version'], { timeout: 30_000 })
     .then(({ stdout }) => stdout.trim().split(/\s+/)[0])
     // Un fallimento non si tiene: la prossima volta si riprova, magari l'eseguibile
     // era solo occupato. Tenere «non lo so» per sempre sarebbe una bugia stabile.

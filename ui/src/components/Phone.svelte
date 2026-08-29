@@ -29,11 +29,52 @@
    * daemon manda un `id` e un fatto, la UI decide come si dice. Il `come` è la riga che
    * compare solo quando il passo non è fatto: a passo verde sarebbe rumore.
    */
+  /**
+   * Come si installa Tailscale, **su questa macchina**. Quale sia lo dice il daemon
+   * (`so` nel payload), non il browser: il `userAgent` racconta del telefono da cui stai
+   * guardando, non del computer su cui STARK gira — e sono spesso due cose diverse.
+   *
+   * Su Windows sono **due** comandi e non uno, per scelta: STARK cerca Tailscale sia fra
+   * i programmi di Windows sia dentro una distro WSL (vedi `vieTailscale()`), quindi
+   * mostrarne uno solo escluderebbe metà dei casi che sa gestire. Dentro WSL è il posto
+   * giusto quando è lì che gira STARK, perché è quel `serve` a raggiungere il loopback
+   * su cui sta ascoltando.
+   *
+   * I nomi dei pacchetti sono verificati, non ricordati: `Tailscale.Tailscale` esiste in
+   * winget-pkgs, e il cask di Homebrew si chiama `tailscale-app` (`tailscale` da solo è
+   * la formula, cioè la sola CLI senza l'app).
+   */
+  const INSTALLA: Record<string, { come: string; comandi: { dove?: string; cmd: string }[] }> = {
+    macos: {
+      come: 'Not installed, or the daemon is not answering.',
+      comandi: [{ cmd: 'brew install --cask tailscale-app' }],
+    },
+    linux: {
+      come: 'Not installed, or the daemon is not answering.',
+      comandi: [{ cmd: 'curl -fsSL https://tailscale.com/install.sh | sh' }],
+    },
+    wsl: {
+      come: 'Not installed, or the daemon is not answering. It goes inside the Linux '
+        + 'distro, not on Windows: that is the one whose network reaches STARK.',
+      comandi: [{ cmd: 'curl -fsSL https://tailscale.com/install.sh | sh' }],
+    },
+    windows: {
+      come: 'Not installed, or the daemon is not answering. Either one works — STARK '
+        + 'looks in both places.',
+      comandi: [
+        { dove: 'on Windows', cmd: 'winget install --id Tailscale.Tailscale -e' },
+        { dove: 'or inside WSL', cmd: 'wsl -- curl -fsSL https://tailscale.com/install.sh | sh' },
+      ],
+    },
+  }
+
   const PASSI: Record<string, { titolo: string; come: string; link?: [string, string] }> = {
     installato: {
       titolo: 'Tailscale on this machine',
-      come: 'Not installed, or the daemon is not answering. On WSL it goes inside Linux, '
-        + 'not on Windows: `curl -fsSL https://tailscale.com/install.sh | sh`.',
+      // Rimpiazzato a runtime da quello del sistema vero: questo è il ripiego per un
+      // daemon vecchio che non manda ancora `so`.
+      come: 'Not installed, or the daemon is not answering.',
+      link: ['How to install it', 'https://tailscale.com/download'],
     },
     collegato: {
       titolo: 'This machine signed in',
@@ -159,6 +200,7 @@
       <div class="passi">
         {#each stato.tailscale.passi as p (p.id)}
           {@const t = PASSI[p.id]}
+          {@const ist = p.id === 'installato' ? INSTALLA[stato.so] : undefined}
           <div class="passo" class:ok={p.fatto}>
             <span class="mk">{#if p.fatto}<Icon name="i-check" />{/if}</span>
             <div class="body">
@@ -166,7 +208,17 @@
               {#if p.fatto && p.dettaglio}
                 <div class="d">{p.dettaglio}</div>
               {:else if !p.fatto}
-                <div class="d">{t?.come}</div>
+                <div class="d">{ist?.come ?? t?.come}</div>
+                {#if ist}
+                  <div class="cmds">
+                    {#each ist.comandi as c (c.cmd)}
+                      <div class="cmd">
+                        {#if c.dove}<span class="dove">{c.dove}</span>{/if}
+                        <code>{c.cmd}</code>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
                 <div class="fai">
                   {#if p.azione}
                     <button class="btn" disabled={daFare !== null}
@@ -257,6 +309,21 @@
   .wide { width: 100%; }
 
   .passi { display: flex; flex-direction: column; gap: 2px; }
+  /* I comandi da copiare: uno per riga, in monospazio, con l'etichetta del *dove* prima
+     quando ce n'è più di uno (Windows). Sotto il testo del passo e sopra i bottoni, che
+     è l'ordine in cui si legge: cosa manca, cosa digitare, cosa premere. */
+  .cmds { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 2px; }
+  .cmd { display: flex; align-items: baseline; gap: 6px; }
+  .cmd .dove { flex: none; font-size: 10px; color: var(--muted); }
+  /* Va a capo invece di scorrere: `overflow-x:auto` teneva la riga intera ma ne
+     mostrava un pezzo — misurato, il `| sh` finale del comando WSL cadeva fuori dal
+     riquadro — e un comando da copiare tagliato a metà è peggio di uno su due righe.
+     `anywhere` e non `break-word`: solo il primo lascia stringere davvero il riquadro. */
+  .cmd code {
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 5px;
+    padding: 2px 6px; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
   .passo { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
   .passo:first-child { border-top: 0; }
   /* Il pallino è **vuoto** finché il passo non è fatto, non rosso: non è un guasto, è

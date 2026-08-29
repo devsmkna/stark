@@ -17,11 +17,9 @@
 // un commit. Sono quattro casi che `git` conosce già: rifarli qui vorrebbe dire
 // riscrivere una cosa ufficiale che cambia, cioè esattamente ciò che ADR-009 evita.
 
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { isDir } from './registry.ts'
+import { esegui } from '../core/platform.ts'
 
-const run = promisify(execFile)
 
 export type GitInfo = {
   /** Falso anche quando `git` non è installato: da fuori è lo stesso fatto — non c'è
@@ -46,7 +44,7 @@ const NO: GitInfo = { repo: false }
 export async function ramoDi(cwd: string): Promise<GitInfo> {
   if (!isDir(cwd)) return NO
   const git = (args: string[]): Promise<string> =>
-    run('git', ['-C', cwd, ...args], { timeout: 2000 }).then(r => r.stdout.trim())
+    esegui('git', ['-C', cwd, ...args], { timeout: 2000 }).then(r => r.stdout.trim())
   try {
     return { repo: true, branch: await git(['symbolic-ref', '--quiet', '--short', 'HEAD']) }
   } catch { /* testa staccata, oppure non è un repo: le distingue il colpo dopo */ }
