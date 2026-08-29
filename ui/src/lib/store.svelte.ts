@@ -905,8 +905,12 @@ export class Store {
       // con quello sbagliato è esattamente il modo in cui questa cosa si rompe senza
       // motivo apparente (nessuna conversazione da riprendere, forse nemmeno il login).
       const profile = this.project(row.cwd).profile
+      // `row.agent`, non quello di default: risvegliare una chat OpenCode senza dirlo
+      // la fa ripartire come Claude Code, che prova a `--resume` un id che non è un
+      // UUID e fallisce a ripetizione — vedi il commento sopra `wake`.
       await this.api.open({
-        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { profile } : {}),
+        cwd: row.cwd, resume: { ref: row.id },
+        ...(profile ? { profile } : {}), ...(row.agent ? { agent: row.agent } : {}),
       })
       this.dialog = null
       // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso, nel
