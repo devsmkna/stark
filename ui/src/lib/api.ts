@@ -164,6 +164,46 @@ export type TodoProject = Todos
 /** Tutti i progetti conosciuti che hanno qualcosa da mostrare. */
 export type AllTodos = { projects: TodoProject[] }
 
+/** Un task della board, come lo espone `kanban-md list --json`. */
+export type BoardTask = {
+  id: number
+  title: string
+  status: string
+  priority?: string
+  assignee?: string
+  tags?: string[]
+  due?: string
+  estimate?: string
+  class?: string
+  claimed_by?: string
+  blocked?: string
+  created?: string
+  updated?: string
+  body?: string
+}
+
+/** Una colonna della board: uno status con le sue card, nell'ordine del config. */
+export type BoardColumn = {
+  status: string
+  tasks: BoardTask[]
+}
+
+/**
+ * La board del **progetto**, non della chat: il file sta accanto al codice, quindi due
+ * conversazioni sulla stessa cartella vedono la stessa board.
+ *
+ * `assente` distingue «non c'è ancora nessuna board» da «c'è ed è vuota»; `binarioMancante`
+ * dice che manca lo strumento che la legge, che è un errore da mostrare, non un vuoto.
+ */
+export type Board = {
+  cwd: string
+  name?: string
+  columns: BoardColumn[]
+  assente: boolean
+  binarioMancante: boolean
+  motivo?: string
+}
+
 /** Un agent della macchina e i suoi modelli, come li elenca il selettore dell'helper. */
 export type AgentModels = {
   id: string
@@ -581,6 +621,52 @@ export class Api {
       data => onTodos(JSON.parse(data) as AllTodos),
       onStatus,
     )
+  }
+
+  /** La board del progetto della chat. Come `/todo`: il `cwd` lo risolve il daemon. */
+  board(id: string): Promise<Board> { return this.json(`/api/sessions/${id}/board`) }
+
+  /** Il flusso della board: stato intero a ogni cambio, come quello dei todo. */
+  boardStream(
+    id: string,
+    onBoard: (b: Board) => void,
+    onStatus: (s: LinkStatus) => void,
+  ): () => void {
+    return this.sse(
+      () => `/api/sessions/${id}/boardstream`,
+      data => onBoard(JSON.parse(data) as Board),
+      onStatus,
+    )
+  }
+
+  /** Inizializza la board del progetto (se non c'è già). */
+  boardInit(id: string): Promise<{ ok: boolean; motivo?: string }> {
+    return this.json(`/api/sessions/${id}/board/init`, { method: 'POST' })
+  }
+
+  /** Crea una card. */
+  boardCreate(
+    id: string,
+    input: { title: string; priority?: string; body?: string },
+  ): Promise<{ ok: boolean; motivo?: string }> {
+    return this.json(`/api/sessions/${id}/board/task`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** Modifica una card (stato, titolo, priorità). */
+  boardEdit(
+    id: string,
+    taskId: number,
+    input: { status?: string; title?: string; priority?: string },
+  ): Promise<{ ok: boolean; motivo?: string }> {
+    return this.json(`/api/sessions/${id}/board/task/${taskId}/edit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
   }
 
   sessionsStream(

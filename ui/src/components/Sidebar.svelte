@@ -237,6 +237,15 @@
       onclick={() => store.toggleTodo()}>
       <Icon name="i-check" />
     </button>
+    <!-- Il «modo» board: una vista a tutto schermo, non una colonna. Sta accanto al
+         Todo perché sono le due facce del lavoro: la lista veloce e la gestione del
+         progetto. -->
+    <button class="iconb" class:on={store.boardOpen}
+      title={store.boardOpen ? 'Close the board' : 'Open the board'}
+      aria-label="Board" aria-pressed={store.boardOpen}
+      onclick={() => store.toggleBoard()}>
+      <Icon name="i-brick" />
+    </button>
 
     <!-- L'helper non e' di una chat: e' della macchina, come la campanella accanto.
          Nella barra di una conversazione comparirebbe una volta **per pannello aperto**,

@@ -21,6 +21,7 @@ import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.t
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
+import { leggiBoard, guardaBoard, initBoard, creaTask, modificaTask } from './board.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -794,6 +795,49 @@ async function route(
       }
     }
 
+    // ─── la board del progetto ──────────────────────────────────────────────────
+    // Come `/todo`: il `cwd` lo risolve il daemon dall'id, mai un percorso dal browser.
+    // Le rotte hanno forme diverse (`/board`, `/boardstream`, `/board/init`,
+    // `/board/task`, `/board/task/<n>/edit`), quindi si leggono a parte dalla regex
+    // delle sessioni, che accetta un solo segmento di lettere.
+    const bm = /^\/api\/sessions\/([0-9a-f-]{8,})\/board(.*)$/.exec(path)
+    if (bm) {
+      const bid = bm[1]!
+      const resto = bm[2] ?? ''
+      const cwd = registry.snapshot(bid)?.cwd
+      const senzaCwd = (): boolean => {
+        if (cwd) return false
+        send(res, 404, { error: 'questa conversazione non ha una cartella' })
+        return true
+      }
+      if (method === 'GET' && resto === '') {
+        if (senzaCwd()) return
+        return send(res, 200, await leggiBoard(cwd!))
+      }
+      if (method === 'GET' && resto === 'stream') {
+        if (senzaCwd()) return
+        return boardStream(req, res, cwd!)
+      }
+      if (method === 'POST' && resto === '/init') {
+        if (senzaCwd()) return
+        return send(res, 200, await initBoard(cwd!))
+      }
+      if (method === 'POST' && resto === '/task') {
+        if (senzaCwd()) return
+        const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
+        if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
+        return send(res, 200, await creaTask(cwd!, {
+          title: body.title.slice(0, 500), priority: body.priority, body: body.body,
+        }))
+      }
+      const em = /^\/task\/(\d+)\/edit$/.exec(resto)
+      if (method === 'POST' && em) {
+        if (senzaCwd()) return
+        const body = await readJson<{ status?: string; title?: string; priority?: string }>(req)
+        return send(res, 200, await modificaTask(cwd!, Number(em[1]), body ?? {}))
+      }
+    }
+
     // Il manifest si compone qui invece di essere servito com'è, e la ragione è una
     // riga sola: `start_url`.
     //
@@ -930,6 +974,46 @@ function todoStream(req: IncomingMessage, res: ServerResponse, cwd: string): voi
 /** Le cartelle distinte delle conversazioni che il registro conosce. */
 function cartelleNote(registry: Registry): string[] {
   return [...new Set(registry.list().flatMap(r => (r.cwd ? [r.cwd] : [])))]
+}
+
+/**
+ * Il flusso della board di un progetto.
+ *
+ * Un flusso **suo**, e non un evento in più dentro quello della sessione: là dentro
+ * passano eventi canonici con un `seq` che nasce dal journal, e questo file nel journal
+ * non c'è (vedi `board.ts`). Infilarcelo vorrebbe dire rompere il §4 nell'unico punto
+ * in cui è comodo farlo — la stessa ragione per cui `todoStream` è un flusso a parte.
+ *
+ * Si manda lo stato **intero** a ogni cambio: è la forma che rende impossibile restare
+ * disallineati dopo una riconnessione.
+ */
+async function boardStream(req: IncomingMessage, res: ServerResponse, cwd: string): Promise<void> {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  })
+  res.write(': collegato\n\n')
+
+  const invia = async (): Promise<void> => {
+    res.write(`event: board\ndata: ${JSON.stringify(await leggiBoard(cwd))}\n\n`)
+  }
+  void invia()
+
+  // Il watcher spara più volte per una scrittura sola: senza questa attesa la board si
+  // ridisegnerebbe due o tre volte per ogni modifica, e con essa si legge una volta a
+  // file fermo.
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stacca = guardaBoard(cwd, () => {
+    if (timer === null) timer = setTimeout(() => { timer = null; void invia() }, 120)
+  })
+
+  const battito = setInterval(() => res.write(': .\n\n'), 15000)
+  req.on('close', () => {
+    clearInterval(battito)
+    if (timer) clearTimeout(timer)
+    stacca()
+  })
 }
 
 /**

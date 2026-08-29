@@ -105,6 +105,30 @@ if (NodeVaBene $MioNode) {
   Verde "           Node $(& $NodeExe -v) pronto"
 }
 
+# ── kanban-md, il motore della board ─────────────────────────────────────────
+# La board di progetto (kanban.md) è un binario Go: STARK lo scarica qui, dentro la
+# cartella di STARK, e il daemon lo chiama con **percorso assoluto** — la lezione di
+# Tailscale su macOS, dove il `PATH` non è affidabile. Uno per piattaforma.
+$KanbanVersione = if ($env:STARK_KANBAN_VERSION) { $env:STARK_KANBAN_VERSION } else { 'v0.38.0' }
+$KanbanBin = Join-Path $Base 'bin\kanban-md.exe'
+$KanbanArch = if ($Arch -eq 'x64') { 'amd64' } else { 'arm64' }
+if ((Test-Path $KanbanBin) -and (& $KanbanBin --version 2>$null)) {
+  Grigio "kanban-md:  già scaricato"
+} else {
+  Grigio "kanban-md:  scarico $KanbanVersione (windows-$KanbanArch)"
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("stark-" + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+  try {
+    Invoke-WebRequest -Uri "https://github.com/antopolskiy/kanban-md/releases/download/$KanbanVersione/kanban-md_$($KanbanVersione.TrimStart('v'))_windows_$KanbanArch.zip" -OutFile "$tmp\kb.zip"
+    Expand-Archive -Path "$tmp\kb.zip" -DestinationPath $tmp -Force
+    New-Item -ItemType Directory -Path (Split-Path $KanbanBin) -Force | Out-Null
+    Move-Item (Join-Path $tmp 'kanban-md.exe') $KanbanBin -Force
+  } finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  Verde "           kanban-md pronto"
+}
+
 $NodeBin = Split-Path $NodeExe
 $Npm = Join-Path $NodeBin 'npm.cmd'
 if (-not (Test-Path $Npm)) {

@@ -8,6 +8,7 @@
   import Phone from './components/Phone.svelte'
   import Settings from './components/Settings.svelte'
   import Todo from './components/Todo.svelte'
+  import Board from './components/Board.svelte'
   import Icon from './components/Icon.svelte'
   import Workspace from './components/Workspace.svelte'
   import Palette from './components/Palette.svelte'
@@ -47,6 +48,7 @@
   }
 
   function esegui(id: string): void {
+    if (id === 'board') { store.toggleBoard(); return }
     if (id !== 'palette') return
     // Premerla di nuovo mentre è aperta la chiude: è la stessa combinazione, e
     // riaprirla sopra sé stessa non vuol dire niente.
@@ -328,8 +330,7 @@
     <NewChat {store} />
   {:else if store.dialog?.kind === 'phone'}
     <Phone {store} />
-  {:else if store.dialog?.kind === 'delete'}
-    {@const row = store.dialog.row}
+  {:else if store.dialog?.kind === 'delete'}    {@const row = store.dialog.row}
     <div class="scrim" role="presentation" onclick={() => { store.dialog = null }}></div>
     <div class="dlg" style="width:380px">
       <div class="dlgh"><div class="dt">Delete this chat?</div></div>
@@ -351,6 +352,12 @@
         </button>
       </div>
     </div>
+  {/if}
+
+  <!-- Il «modo» board: una vista a tutto schermo, come le impostazioni. Non è un
+       dialog (non c'è un `kind`): è un modo che si apre e si chiude col bottone. -->
+  {#if store.boardOpen}
+    <Board {store} />
   {/if}
 </div>
 

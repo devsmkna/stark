@@ -30,6 +30,15 @@ type Legacy = Awaited<ReturnType<typeof clientLegacyPer>>
 const RITENTATIVI = 3
 
 /**
+ * Workaround «turn interrupted» (task #2 della board): quando un turno viene interrotto,
+ * STARK lo riprende da solo, fino a tre volte, con attese crescenti — 5s, 15s, 30s — e
+ * mandando un messaggio di ripresa invece di ripartire da capo. La conversazione ha gia'
+ * il prompt originale in cronologia: basta dire all'agent di continuare da dove era.
+ */
+const ATTESE_RIPRESA = [5000, 15000, 30000]
+const RIPRESA = "C'è stata un'interruzione dovuta a turn interrupted. Riprendi il lavoro da dove l'hai interrotto."
+
+/**
  * Quanto si aspetta il **primo segno di vita** di un turno prima di dichiararlo perso.
  *
  * ─── Perche' esiste, misurato il 27 agosto 2026 ───────────────────────────────
@@ -139,6 +148,8 @@ export class OpenCodeAdapter implements AgentSession {
   /** L'ultimo prompt mandato, per poterlo rimandare se lo step fallisce di striscio. */
   private ultimoPrompt: { parts: unknown[] } | null = null
   private tentativi = 0
+  /** L'ultimo errore del turno: dice se un turno finito male è da riprovare (rate limit). */
+  private ultimoErrore = ''
   /** Lo Stop dell'utente: da li' in poi non si ritenta piu' niente. */
   private fermato = false
   /** Il guardiano del turno muto. Vedi `ATTESA_PRIMO_SEGNO`. */
@@ -325,8 +336,38 @@ export class OpenCodeAdapter implements AgentSession {
 
     for (const p of this.tr.translate(e)) {
       this.emit(p)
-      if (p.k === 'turn.ended') this.sveglia()
+      if (p.k === 'session.error') this.ultimoErrore = p.message
+      if (p.k === 'turn.ended') {
+        this.sveglia()
+        // Workaround «turn interrupted»: è il rate limit del provider, che in STARK
+        // chiude il turno come `error` (motivoDa non produce mai `interrupted` nel
+        // flusso normale). Il turno si riprende da solo, fino a tre volte.
+        if (p.reason === 'error' || p.reason === 'interrupted') void this.riprovaInterrotto()
+      }
     }
+  }
+
+  /**
+   * Riprende un turno interrotto, fino a tre volte, con attese 5s/15s/30s.
+   *
+   * Non si riprende se l'utente ha premuto Stop (`fermato`), se non c'è un prompt da
+   * riprendere, o se si è già al tetto dei tentativi. Il messaggio di ripresa va al
+   * runner come un prompt nuovo: la cronologia ha già il lavoro, e il testo dice solo
+   * di continuare da dove si era.
+   */
+  private async riprovaInterrotto(): Promise<void> {
+    if (!this.ultimoPrompt || this.fermato) return
+    if (this.tentativi >= RITENTATIVI) return
+    // Non si si riprende su un errore vero (modello non supportato, chiave sbagliata):
+    // solo un intoppo passeggero — il rate limit — merita di riprovare.
+    if (!passeggero(this.ultimoErrore)) return
+    this.tentativi++
+    this.emit({ k: 'session.retried', attempt: this.tentativi, reason: 'interrupted' })
+    await new Promise(r => setTimeout(r, ATTESE_RIPRESA[this.tentativi - 1]))
+    if (this.fermato) return
+    this.montaGuardia()
+    await this.mandaAlRunner({ parts: [{ type: 'text' as const, text: RIPRESA }] })
+      .catch(() => { /* il prossimo errore chiuderà il turno */ })
   }
 
   /**
