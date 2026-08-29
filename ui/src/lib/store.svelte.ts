@@ -171,6 +171,18 @@ export class Store {
     try { localStorage.setItem('stark.todoScope', s) } catch { /* modalità privata */ }
   }
 
+  /**
+   * Il «modo» board è aperto? È una vista a tutto schermo, come il Todo è una colonna.
+   * Sta nel browser e non sul daemon, per la stessa ragione del Todo: «su questo schermo
+   * tengo aperta la board» è un fatto del dispositivo, non del progetto.
+   */
+  boardOpen = $state(leggiPreferenza('stark.board'))
+
+  toggleBoard(): void {
+    this.boardOpen = !this.boardOpen
+    try { localStorage.setItem('stark.board', this.boardOpen ? '1' : '0') } catch { /* modalità privata */ }
+  }
+
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
   renaming = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */

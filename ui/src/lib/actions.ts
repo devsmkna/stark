@@ -21,6 +21,12 @@ export const AZIONI: Azione[] = [
     hint: 'Jump to a chat by typing its name or its project.',
     default: 'mod+k',
   },
+  {
+    id: 'board',
+    label: 'Open the board',
+    hint: 'Open or close the project board.',
+    default: 'mod+l',
+  },
 ]
 
 /** La combinazione in vigore per ogni azione: quella scelta, o quella di partenza. */

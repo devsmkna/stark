@@ -140,6 +140,31 @@ else
   verde "           Node $("$NODE" -v) pronto"
 fi
 
+# ── kanban-md, il motore della board ─────────────────────────────────────────
+# La board di progetto (kanban.md) è un binario Go: STARK lo scarica qui, dentro la
+# cartella di STARK, e il daemon lo chiama con **percorso assoluto** — la lezione di
+# Tailscale su macOS, dove il `PATH` non è affidabile. Uno per piattaforma.
+KANBAN_VERSIONE="${STARK_KANBAN_VERSION:-v0.38.0}"
+KANBAN_BIN="$STARK_DIR/bin/kanban-md"
+case "$ARCH" in
+  x64)  KANBAN_ARCH=amd64 ;;
+  arm64) KANBAN_ARCH=arm64 ;;
+esac
+if [ -x "$KANBAN_BIN" ] && "$KANBAN_BIN" --version >/dev/null 2>&1; then
+  grigio "kanban-md:  già scaricato"
+else
+  grigio "kanban-md:  scarico $KANBAN_VERSIONE ($SO-$KANBAN_ARCH)"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT INT TERM
+  scarica "https://github.com/antopolskiy/kanban-md/releases/download/$KANBAN_VERSIONE/kanban-md_${KANBAN_VERSIONE#v}_${SO}_${KANBAN_ARCH}.tar.gz" "$TMP/kb.tar.gz" \
+    || muori "Non sono riuscito a scaricare kanban-md $KANBAN_VERSIONE."
+  tar -xzf "$TMP/kb.tar.gz" -C "$TMP"
+  mkdir -p "$STARK_DIR/bin"
+  mv "$TMP/kanban-md" "$KANBAN_BIN"
+  chmod +x "$KANBAN_BIN"
+  verde "           kanban-md pronto"
+fi
+
 NPM="$(dirname "$NODE")/npm"
 esiste "$NPM" || [ -x "$NPM" ] || NPM="$(command -v npm)" || muori "Trovato node ma non npm."
 
