@@ -170,8 +170,12 @@ export class OpenCodeTranslator {
       }
 
       case 'session.error': {
-        const msg = str(ogg(d['error'])['message']) || str(d['message']) || 'errore'
-        return [{ k: 'session.error', message: msg, fatal: false }, ...this.chiudiTurno('error')]
+        // Il messaggio vero sta in `error.data.message`, non in `error.message` — quel
+        // campo non esiste mai, verificato su un rate limit reale (Baseten, 429): senza
+        // questo la UI mostrava «Turn error» e basta, e il motivo restava solo nel raw log.
+        const err = ogg(d['error'])
+        const msg = str(ogg(err['data'])['message']) || str(err['message']) || str(d['message']) || 'errore'
+        return [{ k: 'session.error', message: msg, fatal: false }, ...this.chiudiTurno('error', msg)]
       }
 
       // ─── quello che cambia sotto i piedi ────────────────────────────────
@@ -359,7 +363,7 @@ export class OpenCodeTranslator {
   }
 
   /** Chiudi il turno aperto, se c'e'. Chiamarlo due volte non fa niente. */
-  chiudiTurno(reason: 'completed' | 'aborted' | 'error' | 'interrupted'): Payload[] {
+  chiudiTurno(reason: 'completed' | 'aborted' | 'error' | 'interrupted', detail?: string): Payload[] {
     if (!this.turno) return []
     const turnId = this.turno
     this.turno = null
@@ -370,7 +374,10 @@ export class OpenCodeTranslator {
     this.ultimoFinish = ''
     return [
       ...coda,
-      { k: 'turn.ended', turnId, reason, usage: EMPTY_USAGE, cost: { nominalUsd: 0 } },
+      {
+        k: 'turn.ended', turnId, reason, usage: EMPTY_USAGE, cost: { nominalUsd: 0 },
+        ...(detail ? { detail } : {}),
+      },
       { k: 'session.state', state: 'idle' },
     ]
   }

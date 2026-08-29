@@ -862,7 +862,10 @@
             {/each}
 
             {#if turn.ended && turn.reason !== 'completed'}
-              <div class="row bad"><Icon name="i-warn" /><span class="k">Turn {turn.reason}</span></div>
+              <div class="row bad">
+                <Icon name="i-warn" /><span class="k">Turn {turn.reason}</span>
+                {#if turn.detail}<span class="v plain">{turn.detail}</span>{/if}
+              </div>
             {/if}
           </div>
         {/if}

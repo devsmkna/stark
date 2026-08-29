@@ -339,11 +339,15 @@ export class Translator {
     const cost: Cost = { nominalUsd: num(e['total_cost_usd']) ?? 0 }
     const out: Payload[] = [{ k: 'usage.updated', usage, cost }]
     if (this.turnId) {
+      const isError = e['is_error'] === true
       out.push({
         k: 'turn.ended', turnId: this.turnId,
-        reason: e['subtype'] === 'success' ? 'completed'
-          : e['is_error'] === true ? 'error' : 'aborted',
+        reason: e['subtype'] === 'success' ? 'completed' : isError ? 'error' : 'aborted',
         usage, cost,
+        // Il CLI le mette qui su un `result` d'errore — verificato sulla sessione che
+        // ha sbattuto sul bug del §10bis (`--resume` con un id non-UUID): la UI mostrava
+        // «Turn error» spoglio mentre il testo vero era già nel journal grezzo, solo mai letto.
+        ...(isError ? { detail: erroreDi(e) } : {}),
       })
       this.turnId = undefined
     }
@@ -369,6 +373,19 @@ const EMPTY: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
 function num(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+/**
+ * Il messaggio vero di un `result` d'errore. Il CLI lo manda in `errors` (un array —
+ * verificato, non `result`, che su un errore non c'è); più di uno capita quando lo
+ * stesso guasto si ripete a ogni retry, e si riportano tutti perché il primo può
+ * differire dall'ultimo (visto: quota finita che diventa poi errore di rete).
+ */
+function erroreDi(e: NativeEvent): string | undefined {
+  const errs = e['errors']
+  if (Array.isArray(errs) && errs.length > 0) return errs.map(String).join('\n')
+  const r = e['result']
+  return typeof r === 'string' && r ? r : undefined
 }
 
 function parseJson(s: string): unknown {

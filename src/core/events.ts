@@ -429,7 +429,14 @@ export type Payload =
    */
   | { k: 'turn.promptAdded'; turnId: string; prompt: PromptPart[] }
   | { k: 'turn.ended'; turnId: string; reason: 'completed' | 'aborted' | 'error' | 'interrupted'
-      usage: Usage; cost: Cost }
+      usage: Usage; cost: Cost
+      /**
+       * Il messaggio vero dietro `reason: 'error'` — quello che l'agent ha detto, non
+       * la parola generica. Assente sugli altri motivi, e a volte anche su `error`
+       * quando l'adapter non ce l'ha (§10bis): la UI mostra «Turn error» spoglio, ma
+       * non un dettaglio falso.
+       */
+      detail?: string }
   | { k: 'step.started'; stepId: string }
   | { k: 'step.ended'; stepId: string; finish: string; usage: Usage }
 

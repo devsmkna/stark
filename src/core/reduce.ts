@@ -116,6 +116,8 @@ export type TurnView = {
   endedAt?: number
   ended: boolean
   reason?: 'completed' | 'aborted' | 'error' | 'interrupted'
+  /** Il messaggio vero dietro `reason: 'error'`, quando l'adapter ce l'ha. */
+  detail?: string
   usage?: Usage
   cost?: Cost
   /**
@@ -389,6 +391,7 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       if (t) {
         t.ended = true; t.reason = p.reason; t.usage = p.usage; t.cost = p.cost
         t.endedAt = e.ts
+        if (p.detail) t.detail = p.detail
       }
       break
     }
