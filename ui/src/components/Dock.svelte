@@ -21,7 +21,11 @@
   // `live` arriva da fuori e non da `live`: con più pannelli aperti «la chat a
   // fuoco» non è la chat di *questo* dock, e la nota «no process behind it» compariva
   // in tutti i pannelli appena una qualsiasi chat a fuoco era ferma.
-  let { store, snap, live }: { store: Store; snap: SessionSnapshot; live: boolean } = $props()
+  // `id` per la stessa ragione di `live`: con piu' pannelli aperti, «la chat a fuoco»
+  // non e' quella di questo dock, e il ritorno del fuoco alla finestra deve riempire
+  // una casella sola — quella del pannello a fuoco.
+  let { store, snap, live, id }:
+    { store: Store; snap: SessionSnapshot; live: boolean; id: string } = $props()
 
   let text = $state('')
   let box = $state<HTMLTextAreaElement | null>(null)
@@ -46,6 +50,27 @@
     if (!busy) return
     const t = setInterval(() => { now = Date.now() }, 1000)
     return () => clearInterval(t)
+  })
+
+  /**
+   * Tornando sulla finestra si riprende a scrivere da dove si era: il fuoco torna
+   * nella casella del pannello a fuoco.
+   *
+   * Le due guardie non sono zelo. `store.selected === id` perche' con N pannelli
+   * aperti ci sono N dock montati, e senza quella si contenderebbero il fuoco a
+   * ogni ritorno sulla finestra. E si agisce solo se **nessuno** stava gia' a
+   * fuoco (`body` o niente): chi torna con le impostazioni aperte, o dopo aver
+   * lasciato il cursore nella ricerca, non vuole vederselo portare via.
+   */
+  $effect(() => {
+    const onFocus = (): void => {
+      if (store.selected !== id) return
+      const a = document.activeElement
+      if (a && a !== document.body) return
+      box?.focus()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   })
 
   async function send(): Promise<void> {

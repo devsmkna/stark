@@ -894,7 +894,7 @@
     {/if}
   </div>
 
-  <Dock {store} {snap} {live} />
+  <Dock {store} {snap} {live} {id} />
 </div>
 
 <!-- Il prompt per intero. Stesso riquadro di ogni altra finestra dell'app — `.dlg` ha

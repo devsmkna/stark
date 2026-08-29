@@ -15,6 +15,9 @@ spike/sandbox/
 .env.*
 !.env.example
 .claude/settings.local.json
+# `.claude/skills/` invece va versionato: e' la skill dei todo, e sta li' perche' chi
+# clona se la trovi attiva senza installare niente. Il resto di `.claude/` e' locale.
+.claude/worktrees/
 *.local.json
 
 # --- Dipendenze e build ---
