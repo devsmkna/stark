@@ -152,6 +152,11 @@ export class OpenCodeAdapter implements AgentSession {
   private fermato = false
   /** Il guardiano del turno muto. Vedi `ATTESA_PRIMO_SEGNO`. */
   private guardia: ReturnType<typeof setTimeout> | null = null
+  /** Il permesso o la domanda attualmente in attesa di risposta, se ce n'e' uno — per
+   *  poterlo chiudere d'ufficio se il turno finisce per un'altra strada (errore,
+   *  interrupt) mentre e' ancora appeso, invece di lasciarlo in `pendingPermissions`
+   *  o `pendingQuestions` per sempre. */
+  private bloccantePendente: { tipo: 'permission' | 'question'; requestId: string } | null = null
 
   constructor(spec: SessionSpec, hooks: AdapterHooks) {
     this.spec = spec
@@ -288,7 +293,33 @@ export class OpenCodeAdapter implements AgentSession {
    */
   private vivo(tipo: string): boolean {
     if (tipo === 'session.next.prompt.admitted' || tipo === 'session.next.prompted') return false
+    // Un permesso o una domanda chiesti sono un segno di vita a tutti gli effetti: il
+    // runner sta aspettando l'utente, non e' morto. Senza questo il guardiano scadeva
+    // *mentre* si aspettava la risposta, chiudeva il turno in errore e lasciava il
+    // permesso appeso per sempre in `pendingPermissions` — la sessione sembrava bloccata.
+    if (tipo === 'permission.asked' || tipo === 'question.asked') return true
     return tipo.startsWith('session.next.') || tipo.startsWith('message.part.')
+  }
+
+  /**
+   * Chiude d'ufficio il permesso o la domanda rimasti appesi, se il turno finisce per
+   * un'altra strada mentre uno dei due era ancora in attesa — altrimenti resterebbe
+   * in `pendingPermissions`/`pendingQuestions` per sempre, e il blocco in basso
+   * mostrerebbe una card senza nessuno a doverla piu' leggere (§Aug 30 2026).
+   */
+  private abbandonaBloccantePendente(): void {
+    const b = this.bloccantePendente
+    if (!b) return
+    this.bloccantePendente = null
+    if (b.tipo === 'permission') {
+      this.emit({ k: 'permission.replied', requestId: b.requestId, decision: 'reject' })
+      void this.rispondiPermesso(b.requestId, 'reject')
+    } else {
+      this.emit({ k: 'question.rejected', requestId: b.requestId })
+      void this.client?.v2.session.question.reject(
+        { sessionID: this.sessionId, requestID: b.requestId },
+      ).catch(() => { /* gia' ferma, o il server e' andato */ })
+    }
   }
 
   private smontaGuardia(): void {
@@ -309,6 +340,7 @@ export class OpenCodeAdapter implements AgentSession {
         + `riesce a usare il modello scelto: provane un altro dalla barra qui sotto.`
       this.emit({ k: 'notice', level: 'error', text: motivo })
       this.emit({ k: 'session.error', message: motivo, fatal: false })
+      this.abbandonaBloccantePendente()
       for (const p of this.tr.chiudiTurno('error')) this.emit(p)
       this.emit({ k: 'session.state', state: 'idle' })
       this.sveglia()
@@ -431,10 +463,17 @@ export class OpenCodeAdapter implements AgentSession {
       resources: risorse, savable: salvabili, source: {},
     })
     this.emit({ k: 'session.state', state: 'awaiting', reason: azione })
+    this.bloccantePendente = { tipo: 'permission', requestId }
 
     const verdetto = this.hooks.onPermission
       ? await this.hooks.onPermission({ requestId, toolName: azione, input: (d['metadata'] ?? {}) as Record<string, unknown> })
       : { allow: true as const }
+
+    // Nel frattempo il turno potrebbe essere gia' stato chiuso d'ufficio (vedi
+    // `abbandonaBloccantePendente`): rispondere di nuovo qui manderebbe un
+    // `permission.replied` doppio su un requestId gia' risolto.
+    if (this.bloccantePendente?.requestId !== requestId) return
+    this.bloccantePendente = null
 
     this.emit({ k: 'session.state', state: 'busy' })
     if (!verdetto.allow) {
@@ -498,9 +537,13 @@ export class OpenCodeAdapter implements AgentSession {
 
     this.emit({ k: 'question.asked', requestId, questions: domande })
     this.emit({ k: 'session.state', state: 'awaiting', reason: 'domanda' })
+    this.bloccantePendente = { tipo: 'question', requestId }
     const risposta = this.hooks.onQuestion
       ? await this.hooks.onQuestion({ requestId, questions: domande })
       : null
+
+    if (this.bloccantePendente?.requestId !== requestId) return
+    this.bloccantePendente = null
     this.emit({ k: 'session.state', state: 'busy' })
 
     if (!risposta) {
@@ -566,6 +609,7 @@ export class OpenCodeAdapter implements AgentSession {
     // E' il posto in cui il secondo adapter fa **meno** lavoro del primo, non di piu'.
     void this.mandaAlRunner(invio).catch((err: unknown) => {
       this.emit({ k: 'session.error', message: String(err), fatal: false })
+      this.abbandonaBloccantePendente()
       for (const p of this.tr.chiudiTurno('error')) this.emit(p)
       this.sveglia()
     })
@@ -604,6 +648,7 @@ export class OpenCodeAdapter implements AgentSession {
     await this.legacy?.session.abort({
       path: { id: this.sessionId }, query: { directory: this.spec.cwd },
     } as never).catch(() => { /* gia' ferma, o il server e' andato */ })
+    this.abbandonaBloccantePendente()
     for (const p of this.tr.chiudiTurno('aborted')) this.emit(p)
     this.sveglia()
   }

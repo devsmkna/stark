@@ -328,6 +328,35 @@
   const colour = $derived(colours(store.rows).get(project(snap.cwd)) ?? 0)
   const title = $derived(row?.title ?? project(snap.cwd))
 
+  /** Info utili per un bug report, in un blocco solo: id, titolo, agent, modello,
+   *  stato, cwd. Presa dallo snapshot — nessun dato nuovo, solo raccolto in un posto. */
+  let debugCopiato = $state(false)
+  async function copiaDebug(): Promise<void> {
+    const righe = [
+      `ID: ${snap.sessionId}`,
+      `Titolo: ${title}`,
+      `Agent: ${snap.agent ?? '—'}`,
+      `Modello: ${snap.model ?? '—'}`,
+      `Modalità: ${snap.mode ?? '—'}`,
+      `Stato: ${snap.state}${snap.stateReason ? ` (${snap.stateReason})` : ''}`,
+      `Errore: ${snap.error ?? '—'}`,
+      `Cartella: ${snap.cwd ?? '—'}`,
+      `Ultimo evento (seq): ${snap.lastSeq}`,
+      `Ultimo evento (ora): ${new Date(snap.lastTs).toISOString()}`,
+      `Da quanto in questo stato: ${new Date(snap.stateSince).toISOString()}`,
+      `Resume ref: ${snap.resumeRef ?? '—'}`,
+      `Turni: ${snap.turns.length}`,
+      `File toccati: ${snap.files.length}`,
+      `Comandi shell: ${snap.shell.length}`,
+      `Live: ${live}`,
+    ].join('\n')
+    try {
+      await navigator.clipboard.writeText(righe)
+      debugCopiato = true
+      setTimeout(() => { debugCopiato = false }, 1500)
+    } catch { store.refused = 'the browser did not allow copying' }
+  }
+
   /**
    * Su cosa ha lavorato un tool — il *cosa*, non il *perché* (quello è `part.intent`,
    * F2, mostrato al suo posto nella riga qui sotto). Arriva **già pronto** dal
@@ -417,6 +446,11 @@
            un'altra. Così la riga resta una, e il testo pieno resta a un dito. -->
       <button class="t" ondblclick={startRename} title="{title} — double-click to rename">{title}</button>
     {/if}
+
+    <button class="iconb" title={debugCopiato ? 'Copied' : 'Copy debug info'}
+      onclick={() => void copiaDebug()}>
+      <Icon name={debugCopiato ? 'i-check' : 'i-copy'} />
+    </button>
 
     <button class="iconb" title="Put to sleep — frees memory, not quota"
       style="margin-left:auto" disabled={!live}

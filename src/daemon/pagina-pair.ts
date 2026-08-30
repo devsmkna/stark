@@ -54,8 +54,7 @@ export function paginaAccoppiamento(): string {
 <script>
 const f=document.getElementById('f'),c=document.getElementById('c'),
       b=document.getElementById('b'),e=document.getElementById('e')
-f.addEventListener('submit',async ev=>{
-  ev.preventDefault()
+async function manda(){
   b.disabled=true; e.textContent=''
   try{
     const r=await fetch('/api/phone/claim',{method:'POST',
@@ -67,7 +66,13 @@ f.addEventListener('submit',async ev=>{
     try{localStorage.setItem('stark.token',j.token);sessionStorage.setItem('stark.token',j.token)}catch{}
     location.replace('/')
   }catch{ e.textContent='No answer from STARK'; b.disabled=false }
-})
+}
+f.addEventListener('submit',ev=>{ev.preventDefault();void manda()})
+// Chi arriva da un QR porta il codice già scritto in \`?c=\`: STARK lo mette lì
+// (vedi Phone.svelte) cifrando nel QR esattamente ciò che altrimenti si batterebbe a
+// mano. Lo si manda subito, così scansionare basta — nessuna tastiera in mezzo.
+const dallaQuery=new URLSearchParams(location.search).get('c')
+if(dallaQuery){c.value=dallaQuery.toUpperCase();void manda()}
 </script>
 </body></html>`
 }

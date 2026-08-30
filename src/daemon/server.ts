@@ -22,6 +22,7 @@ import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
 import { leggiBoard, guardaBoard, initBoard, creaTask, modificaTask } from './board.ts'
+import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -393,8 +394,24 @@ async function route(
       // preferenza che ha effetto «più tardi» è una preferenza che sembra rotta.
       const memoria = descrizioniComandi(configDir, salvate.toolDescriptions)
       // L'esito torna al client perché è l'unica cosa che l'utente non può dedurre:
-      // *quale* file è stato toccato, e se non si è potuto scriverlo.
+      // *quale* file è stato toccato, e se non non si è potuto scriverlo.
       return send(res, 200, { settings: salvate, memoria })
+    }
+    // ─── il cloud: login, logout, stato ────────────────────────────────────────
+    // Il server cloud (VPS + Traefik) gestisce l'identità; il daemon tiene il token in
+    // `~/.stark/cloud-token` e lo usa per le feature cloud (la board sincronizzata).
+    if (method === 'GET' && path === '/api/cloud/status') {
+      return send(res, 200, await cloudStatus(STARK_HOME))
+    }
+    if (method === 'POST' && path === '/api/cloud/login') {
+      const body = await readJson<{ email?: string; password?: string }>(req)
+      if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
+      const esito = await loginCloud(STARK_HOME, body.email, body.password)
+      return send(res, esito.ok ? 200 : 401, esito)
+    }
+    if (method === 'POST' && path === '/api/cloud/logout') {
+      await logoutCloud(STARK_HOME)
+      return send(res, 200, { ok: true })
     }
     // Su quale ramo sta la cartella di una chat. Sta qui e non nel journal perché è un
     // fatto del filesystem, non dell'agent: chi fa `git checkout` in un terminale

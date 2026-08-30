@@ -12,6 +12,7 @@
   // stato normale — la configurazione si fa una volta, il codice si chiede ogni volta
   // che colleghi un telefono nuovo.
   import Icon from './Icon.svelte'
+  import QRCode from 'qrcode'
   import type { StatoTelefono } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -19,6 +20,23 @@
 
   let stato = $state<StatoTelefono | null>(null)
   let codice = $state<{ codice: string; scade: number } | null>(null)
+  let qr = $state<string | null>(null)
+
+  /**
+   * Il QR non porta un link «vuoto»: porta `/pair?c=<codice>`, cioè lo stesso codice
+   * che si batterebbe a mano — vedi `pagina-pair.ts`, che lo legge e manda da sé.
+   * Scansionare sostituisce la tastiera, non il codice: stessa scadenza, stesso uso
+   * unico, stesso elenco di dispositivi collegati alla fine.
+   */
+  $effect(() => {
+    const url = stato?.tailscale.url
+    if (!codice || !url) { qr = null; return }
+    let vivo = true
+    void QRCode.toDataURL(`${url}/pair?c=${codice.codice}`, { margin: 1, width: 220 })
+      .then(d => { if (vivo) qr = d })
+      .catch(() => { if (vivo) qr = null })
+    return () => { vivo = false }
+  })
   let daFare = $state<string | null>(null)
   let loginUrl = $state<string | null>(null)
   let errore = $state<string | null>(null)
@@ -183,6 +201,10 @@
         Open <b>{stato.tailscale.url}</b> on your phone and type this code.
       </p>
       {#if codice}
+        {#if qr}
+          <div class="qrwrap"><img src={qr} alt="QR code — scan to connect" width="220" height="220" /></div>
+          <div class="sub mid">Or type the code below by hand.</div>
+        {/if}
         <div class="code">{codice.codice}</div>
         <div class="sub">Expires in {Math.floor(restano / 60)}:{String(restano % 60).padStart(2, '0')} · one use</div>
       {:else}
@@ -297,6 +319,16 @@
 <style>
   .lead { margin: 0 0 12px; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
   .sub { margin-top: 7px; font-size: 10px; line-height: 1.45; color: var(--muted); }
+  .sub.mid { text-align: center; margin: 10px 0 4px; }
+
+  /* Il bianco è **fisso**, non un token: un QR letto da una fotocamera dipende dal
+     contrasto reale dei pixel, non dal tema — su sfondo scuro un riquadro trasparente
+     ne abbasserebbe il contrasto e lo renderebbe più lento da inquadrare. */
+  .qrwrap {
+    display: flex; justify-content: center; padding: 14px; margin-top: 6px;
+    background: #fff; border-radius: 11px; border: 1px solid var(--line-2);
+  }
+  .qrwrap img { display: block; width: 100%; max-width: 220px; height: auto; }
 
   /* Il codice è la cosa da leggere da due metri, sopra una tastiera di telefono:
      monospace e spaziato, perché è fatto per essere ribattuto carattere per carattere. */
