@@ -810,9 +810,9 @@ export class Store {
    * macchina — vale anche su una chat che dorme, dove non c'è nessun processo a cui
    * chiedere niente.
    */
-  async reveal(path: string): Promise<void> {
+  async reveal(path: string, sessionId?: string): Promise<void> {
     this.refused = null
-    const esito = await this.api.reveal(path)
+    const esito = await this.api.reveal(path, sessionId)
     if (!esito.ok) this.refused = esito.error ?? 'could not open the file manager'
   }
 
@@ -921,8 +921,15 @@ export class Store {
       // la fa ripartire come Claude Code, che prova a `--resume` un id che non è un
       // UUID e fallisce a ripetizione — vedi il commento sopra `wake`.
       await this.api.open({
-        cwd: row.cwd, resume: { ref: row.id },
-        ...(profile ? { profile } : {}), ...(row.agent ? { agent: row.agent } : {}),
+        cwd: row.cwd, resume: { ref: row.id }, ...(profile ? { profile } : {}),
+        // Senza questo il registro riapre col backend di default (Claude Code),
+        // qualunque fosse l'agent vero — bug segnalato dall'utente il 29 agosto 2026:
+        // «reopen su OpenCode risponde 500». Riprodotto: Claude Code riceveva
+        // `--resume ses_...` (l'id è di OpenCode, non un UUID) e lo rifiutava.
+        // Assente su una riga che non porta ancora `agent` (journal vecchio): resta
+        // il comportamento di prima, cioè Claude Code — che è comunque quello giusto
+        // per una chat nata prima che questo campo esistesse.
+        ...(row.agent ? { agent: row.agent } : {}),
       })
       this.dialog = null
       // La chat era già aperta: si rilegge lo snapshot e si riaggancia il flusso, nel
@@ -1061,20 +1068,42 @@ export class Store {
   }
 
   /** Apre una conversazione helper nuova. Chiude quella di prima, se c'era: ce n'e'
-   *  una sola, e il daemon lo impone dalla sua parte. */
-  async apriHelper(pick?: { agent: string; model: string }): Promise<void> {
+   *  una sola, e il daemon lo impone dalla sua parte.
+   *
+   *  Se **esiste già** una sessione helper viva nel daemon, ci si riaggancia invece
+   *  di ricrearla: dopo un reload la pagina non deve ripagare l'handshake
+   *  (l'«Avvio…») né avviare un secondo processo. E' il motivo per cui prima si
+   *  chiede al daemon (che la tiene) e solo se non c'è si crea. */
+  async apriHelper(pick?: { agent: string; model: string }, force = false): Promise<void> {
     this.helperBusy = true
     this.helperRefused = null
     const vecchio = this.helper
     this.helper = null
     vecchio?.close()
     try {
+      const vivo = await this.api.helperAttuale()
+      if (vivo && !pick && !force) {
+        const pane = new Pane(vivo.id)
+        // `helper` va assegnato **prima** di `pane.open`: la UI mostra «Avvio…»
+        // quando `snap` è null e `helperBusy` è true, e senza questa assegnazione
+        // `snap` resterebbe null per tutto il round-trip dello stream — cioè
+        // l'«avvio» che si voleva far sparire. Lo snapshot è già qui, si mostra.
+        this.helper = pane
+        pane.snap = vivo.snapshot
+        const esito = await pane.open(this.api)
+        if (!esito.ok) { this.helperRefused = esito.error; this.helper = null; return }
+        return
+      }
       const scelta = pick ?? this.helperPick ?? undefined
       const { id } = await this.api.openHelper(scelta ?? {})
       const pane = new Pane(id)
-      const esito = await pane.open(this.api)
-      if (!esito.ok) { this.helperRefused = esito.error; return }
+      // Stessa regola del ramo di riuso: per una sessione nuova lo snapshot non
+      // c'è ancora (arriva con l'handshake), quindi qui «Avvio…» è vero — la chat
+      // sta davvero nascendo. Ma il Pane va a posto comunque subito: chi scrive
+      // durante l'apertura non deve trovare un `helper` null.
       this.helper = pane
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.helperRefused = esito.error; this.helper = null; return }
       if (pick) this.helperPick = pick
     } catch (e) {
       this.helperRefused = (e as Error).message
@@ -1083,9 +1112,15 @@ export class Store {
     }
   }
 
-  /** Butta la conversazione e ne apre una vuota. E' il cestino in cima al pannello. */
+  /** Butta la conversazione e ne apre una vuota. E' il cestino in cima al pannello.
+   *  Prima chiude davvero la sessione del daemon (il DELETE è l'unico gesto che la
+   *  toglie: il riuso di `openHelper` la lascerebbe lì), poi ne apre una nuova. */
   async svuotaHelper(): Promise<void> {
-    await this.apriHelper()
+    const vecchio = this.helper
+    this.helper = null
+    vecchio?.close()
+    await this.api.closeHelper().catch(() => {})
+    await this.apriHelper(undefined, true)
   }
 
   async helperPrompt(text: string): Promise<void> {
@@ -1113,7 +1148,8 @@ export class Store {
     const stessoAgent = this.helperPick?.agent === agent || (!this.helperPick && agent === this.helper?.snap?.agent)
     if (stessoAgent && this.helper) {
       this.helperPick = { agent, model }
-      await this.api.command(this.helper.chatId, { c: 'session.setOption', id: 'model', value: model })
+      const esito = await this.api.command(this.helper.chatId, { c: 'session.setOption', id: 'model', value: model })
+      if (!esito.ok) this.helperRefused = esito.error ?? 'model refused'
       return
     }
     await this.apriHelper({ agent, model })

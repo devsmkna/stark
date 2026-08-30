@@ -174,6 +174,21 @@ export type ModelChoice = {
    * `core/allegati.ts`, che e' anche l'unico posto in cui esiste un elenco di tipi.
    */
   accepts?: string[]
+  /** Il nome leggibile del **provider** a cui questo modello è collegato (es.
+   *  "OpenCode Zen", "Baseten"). Un modello può essere disponibile su più provider
+   *  con costi diversi: questo campo dice da quale proviene, e senza di esso chi
+   *  sceglie non sa quanto paga. Assente su agent che non lo dichiarano (Claude Code
+   *  ha un provider solo) e su journal scritti prima del campo. */
+  providerName?: string
+  /** La famiglia del modello (es. "claude-opus", "kimi-k2", "glm"). La dichiara
+   *  l'agent quando lo sa (OpenCode la porta nel campo `family`); assente altrimenti.
+   *  La UI la usa per raggruppare, ripiegando su `getProviderForModel` quando manca. */
+  family?: string
+  /** Il costo per milione di token, come lo dichiara l'agent. Su OpenCode ogni
+   *  provider ha il suo prezzo per lo stesso modello, quindi un GLM 5.2 su tre
+   *  provider ha tre costi diversi — e chi sceglie deve poterli confrontare.
+   *  Assente quando l'agent non lo dichiara o su journal precedenti al campo. */
+  cost?: { input: number; output: number }
 }
 
 /**

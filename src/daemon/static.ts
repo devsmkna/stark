@@ -12,7 +12,7 @@
 // della pagina ha motivo di leggerlo.
 
 import { createReadStream, existsSync, statSync } from 'node:fs'
-import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { dirname, extname, join, normalize, resolve, sep, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -69,12 +69,20 @@ export function serveUi(
   // ricaricamento su /qualcosa deve riaprire l'app, non dare 404.
   const target = file ?? join(UI_DIR, 'index.html')
   const isPage = extname(target) === '.html'
+  // Il service worker e il manifest **non** sono asset immutabili come i bundle con
+  // l'impronta nel nome: il browser deve poterli ri-verificare, o una PWA salvata su
+  // homescreen (iOS soprattutto) tiene la UI vecchia per sempre. `sw.js` immutable
+  // non viene mai ricontrollato, quindi il nuovo service worker non si installa mai.
+  const isRuntime = isPage || basename(target) === 'sw.js' || basename(target) === 'manifest.webmanifest'
 
   const headers: Record<string, string> = {
     'content-type': TYPES[extname(target)] ?? 'application/octet-stream',
     // Gli asset hanno l'impronta nel nome, quindi si possono tenere per sempre.
-    // La pagina no: cambia a ogni build e deve essere richiesta ogni volta.
-    'cache-control': isPage ? 'no-store' : 'public, max-age=31536000, immutable',
+    // La pagina no: cambia a ogni build e deve essere richiesta ogni volta. Stessa
+    // regola per service worker e manifest: il primo deve poter cambiare codice senza
+    // aspettare la scadenza della cache, il secondo senza aspettare che iOS se ne
+    // accorga da solo.
+    'cache-control': isRuntime ? 'no-store' : 'public, max-age=31536000, immutable',
     // Il primo caricamento porta il token in query string (`/?token=…`, ed è così che
     // funziona l'icona sulla schermata Home: iOS congela `start_url`). Senza questo,
     // un link cliccato da dentro STARK se lo porterebbe dietro nel `Referer` fino a un

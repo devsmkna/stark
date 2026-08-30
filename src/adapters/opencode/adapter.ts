@@ -841,6 +841,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
     for (const p of v?.providers ?? []) {
       for (const [mid, m] of Object.entries(p.models ?? {})) {
         const limit = (m['limit'] ?? {}) as Record<string, unknown>
+        const cost = (m['cost'] ?? {}) as Record<string, unknown>
         out.push({
           id: `${p.id}/${mid}`,
           ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
@@ -850,6 +851,13 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           autoMode: false,
           contextWindow: typeof limit['context'] === 'number' ? limit['context'] : 0,
           accepts: allegabiliDi(m),
+          // Il nome del provider (es. "OpenCode Zen") e il costo per-token: su OpenCode
+          // lo stesso modello può stare su più provider con prezzi diversi, e senza
+          // questi due campi chi sceglie non sa da chi sta pagando.
+          ...(typeof p.name === 'string' ? { providerName: String(p.name) } : {}),
+          ...(typeof m['family'] === 'string' ? { family: String(m['family']) } : {}),
+          ...(typeof cost['input'] === 'number' && typeof cost['output'] === 'number'
+            ? { cost: { input: cost['input'], output: cost['output'] } } : {}),
         })
       }
     }

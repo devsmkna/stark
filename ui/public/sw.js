@@ -11,7 +11,18 @@
 // solo un posto in più in cui la UI può restare indietro rispetto al codice servito.
 
 self.addEventListener('install', () => { self.skipWaiting() })
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()))
+
+self.addEventListener('activate', e => e.waitUntil((async () => {
+  await self.clients.claim()
+  // Un service worker nuovo è arrivato: la UI è cambiata. Le pagine che questo SW
+  // controlla — una PWA salvata sulla homescreen di iOS, per dirne una — resterebbero
+  // sulla versione vecchia finché l'utente non le chiude e le riapre a mano. Si
+  // ricaricano da sole, una volta sola, al momento del passaggio di controllo.
+  const pagine = await self.clients.matchAll({ type: 'window', includeUncontrolled: false })
+  for (const c of pagine) {
+    try { await c.navigate(c.url) } catch { /* è già in navigazione o non navigabile */ }
+  }
+}))())
 
 self.addEventListener('push', e => {
   const d = (() => { try { return e.data ? e.data.json() : {} } catch { return {} } })()

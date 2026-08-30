@@ -10,6 +10,7 @@
   // rifiuta** (Principio 5). Nasconderle farebbe sembrare STARK meno capace del CLI.
   import Icon from './Icon.svelte'
   import ModelPicker from './ModelPicker.svelte'
+  import { getLobeIconUrl } from '../lib/lobe.ts'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { QuotaWindow, SessionOption } from '$core/events.ts'
   import { optionsFrom } from '$core/adapter.ts'
@@ -83,11 +84,6 @@
     if (o.kind === 'model') return snap.capabilities?.switchModel !== false
     return true
   }
-  /** Quante voci della checklist sono chiuse. `cancelled` conta: non resta da fare. */
-  const fatti = $derived(
-    snap.todos.filter(t => t.status === 'completed' || t.status === 'cancelled').length,
-  )
-
   /** Come si chiama una scelta: l'etichetta dell'agent, o il valore nudo. */
   const nome = (v: string, l?: string): string => l ?? v
 
@@ -363,36 +359,6 @@
       </span>
     {/each}
 
-    <!-- La checklist, se l'agent ne tiene una. Il chip dice **quante ne restano**, che
-         è la cosa che cambia da un turno all'altro; l'elenco si apre al tocco.
-         Compare solo quando c'è: una lista vuota su un agent che la checklist non ce
-         l'ha proprio (Claude Code 2.1.241, verificato) sarebbe un chip che non dice
-         niente e non lo dirà mai. -->
-    {#if snap.todos.length > 0}
-      <span class="pop">
-        <button class="tune" onclick={() => choose('todo')}
-          aria-label="Checklist: {fatti} of {snap.todos.length} done"
-          title="What the agent is working through">
-          <Icon name="i-check" style="color:var(--accent)" />
-          <span class="lbl">{fatti}/{snap.todos.length}</span><Icon name="i-down" />
-        </button>
-        {#if open === 'todo'}
-          <div class="menu" style={store.narrow ? '' : 'width:290px'}>
-            {#each snap.todos as t, i (i)}
-              <!-- Non è un bottone: non si può spuntare da qui. La checklist è
-                   dell'agent, e una spunta che non cambia niente sarebbe finta. -->
-              <div class="mi" class:dis={t.status === 'completed' || t.status === 'cancelled'}>
-                <Icon name={t.status === 'completed' ? 'i-check'
-                  : t.status === 'in_progress' ? 'i-bolt' : 'i-doc'}
-                  style={t.status === 'in_progress' ? 'color:var(--accent)' : ''} />
-                <span>{t.content}<span class="sub">{t.status}{#if t.priority} · {t.priority}{/if}</span></span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </span>
-    {/if}
-
     <span class="pop">
       <!-- Gli strumenti esterni si accendono per chat, e di partenza sono spenti: una
            conversazione che ereditasse tutti i server della macchina costerebbe circa
@@ -470,6 +436,8 @@
     <!-- Il selettore del modello, che ha una presentazione sua: il valore e' l'unico
          della barra la cui lunghezza non si conosce in anticipo, quindi va troncato. -->
     {#each destra as o (o.id)}
+      {@const iconUrl = getLobeIconUrl(o.value)}
+      {@const scelta = o.choices.find(c => c.value === o.value)}
       <span class="pop">
         <button class="tune" disabled={!modificabile(o) || o.choices.length === 0}
           onclick={() => choose(o.id)}
@@ -477,9 +445,13 @@
           title={o.choices.length === 0
             ? 'This chat was recorded before STARK carried the model list'
             : o.label}>
-          <!-- In uno span, non come testo nudo: un nodo di testo dentro un flex diventa
-               un elemento anonimo, che nessuna regola CSS può raggiungere. -->
-          <span class="mname">{o.value || '—'}</span>
+          {#if iconUrl}
+            <img src={iconUrl} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy"
+              onerror={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display='none' }} />
+          {:else}
+            <span class="mdot"></span>
+          {/if}
+          <span class="mname">{nome(o.value, scelta?.label) || '—'}</span>
           {#if o.choices.length > 0}<Icon name="i-down" />{/if}
         </button>
         {#if open === o.id}
@@ -545,14 +517,8 @@
          non sono la risorsa che scarseggia. Si dice quanto lavoro è passato di qui e
          quando la finestra si riapre. -->
     <button class="ctx" type="button" onpointerenter={peek} onfocus={peek}>
-      <!-- Da telefono resta la sola percentuale: «context» è la parola che si può
-           togliere senza perdere niente, perché il pannellino che si apre al tocco
-           comincia proprio con «Context window» e lo dice per esteso. -->
-      <!-- `&nbsp;` e non uno spazio normale: Svelte **taglia** lo spazio iniziale dentro
-           un elemento, e su schermo largo si leggeva «27%context» attaccato. Misurato,
-           non supposto: il bordo destro di «27%» e quello sinistro dello span cadevano
-           sullo stesso pixel. Uno spazio non collassabile non si può perdere per strada. -->
-      {#if pct !== null}{pct}%<span class="lbl">&nbsp;context</span>{:else}{fmt(total)} tokens{/if}
+      <span class="cprog" style="--pct:{pct ?? 0}" aria-hidden="true"></span>
+      {#if pct !== null}{pct}%{:else}{fmt(total)} tokens{/if}
       <span class="tip">
         <div class="tr"><span>Context window</span>
           <b>{pct !== null ? `${pct}%` : '—'}</b></div>
@@ -656,10 +622,8 @@
   .tune { font: inherit; font-size: 10px; cursor: pointer; }
   .tune[disabled] { cursor: default; opacity: .6; }
   .tune:focus-visible, .ctx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  /* Il pannellino si apre al passaggio del mouse e col fuoco da tastiera: è un
-     <button> perché quella seconda strada esista, non perché ci sia da premerlo. */
-  button.ctx { border: 0; border-bottom: 1px dotted var(--muted); background: none;
-    font: inherit; font-size: 10px; color: inherit; padding: 0; cursor: default; }
+  /* Pill context con anello progresso — niente underline */
+  button.ctx { font: inherit; font-size: 10px; cursor: default; }
 
   /* La barra segmentata: un blocco per ciascuna delle quattro voci che già
      esistevano come numeri qui sotto — non un dato nuovo, solo un modo di

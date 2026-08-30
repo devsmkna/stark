@@ -12,6 +12,7 @@
   import {
     ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, stamp,
   } from '../lib/view.ts'
+  import { getLobeIconUrl } from '../lib/lobe.ts'
   import { quandoRiparte, quotaFerma } from '$core/quota.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -104,7 +105,9 @@
    * nuovo — è così che finisce in cima al suo, senza bisogno di un caso speciale per
    * «chi ha risposto per primo».
    */
-  const recenti = $derived([...store.rows].sort((a, b) => b.since - a.since))
+  const recentiAll = $derived([...store.rows].sort((a, b) => b.since - a.since))
+  // Filtro "Solo non lette" dal menu … — se attivo mostra solo ciò che ti aspetta.
+  const recenti = $derived(soloNonLette ? recentiAll.filter(r => needsYou(r.state)) : recentiAll)
 
   /** Le righe di una lista, raccolte per progetto e i progetti in ordine alfabetico. */
   function perProgetto(righe: SessionRow[]): [string, SessionRow[]][] {
@@ -209,64 +212,81 @@
     const id = store.renaming
     if (id) draft = store.rows.find(r => r.id === id)?.title ?? ''
   })
+
+  // Overflow "…" : raggruppa Notifiche / Todo / Helper / Telefono, come da screenshot 2.
+  // Resta in testata solo [+] e […] — "Segui sistema" quindi niente forzatura dark.
+  let moreOpen = $state(false)
+  let soloNonLette = $state(false)
+
+  function closeMore(): void { moreOpen = false }
+
+  $effect(() => {
+    if (!moreOpen) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') moreOpen = false }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 </script>
 
 <div class="side">
   <div class="sidetop">
-    <Logo height={13} />
-    <!-- I tre comandi in un contenitore loro, e non sciolti nella riga: spinge a destra
-         **il gruppo**, con un passo uguale fra le icone. Sciolti, `margin-left:auto` era
-         su entrambe le `.bell` e i due margini automatici si spartivano lo spazio libero
-         (misurato: 23.9 · 23.9 · 7). -->
+    <Logo height={16} />
     <div class="acts">
-    <!-- La campanella sta qui e non nella barra di stato perché le notifiche non sono
-         di una chat ma di tutte. Premerla la prima volta è anche il momento in cui si
-         chiede il permesso al browser: fuori da un gesto non si può nemmeno chiedere. -->
-    <button class="bell" class:off={!store.calls.on}
-      title={store.calls.explain} aria-label="Notifications"
-      onclick={() => void store.calls.toggle()}>
-      <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
-      {#if store.calls.on && store.calls.permission === 'default'}<i class="ask"></i>{/if}
-    </button>
-    <!-- L'interruttore della colonna dei task. Sta qui e non nella barra della chat
-         perché la colonna è **una sola** per tutta la finestra: coi pannelli affiancati
-         un bottone per pannello lascerebbe credere che ognuno abbia la sua. -->
-    <button class="iconb" class:on={store.todoOpen}
-      title={store.todoOpen ? 'Hide the todo column' : 'Show the todo column'}
-      aria-label="Todo column" aria-pressed={store.todoOpen}
-      onclick={() => store.toggleTodo()}>
-      <Icon name="i-check" />
-    </button>
-    <!-- Il «modo» board: una vista a tutto schermo, non una colonna. Sta accanto al
-         Todo perché sono le due facce del lavoro: la lista veloce e la gestione del
-         progetto. -->
-    <button class="iconb" class:on={store.boardOpen}
-      title={store.boardOpen ? 'Close the board' : 'Open the board'}
-      aria-label="Board" aria-pressed={store.boardOpen}
-      onclick={() => store.toggleBoard()}>
-      <Icon name="i-brick" />
-    </button>
-
-    <!-- L'helper non e' di una chat: e' della macchina, come la campanella accanto.
-         Nella barra di una conversazione comparirebbe una volta **per pannello aperto**,
-         da quando le chat si affiancano. -->
-    <button class="bell" class:off={!store.helperOn}
-      title="Helper — a quick question, on the side" aria-label="Helper"
-      onclick={() => void store.toggleHelper()}>
-      <Icon name="i-chat" />
-    </button>
-    <!-- Il telefono sta qui, accanto a campanella e helper, e non nella barra di una
-         conversazione: collegare un telefono è della **macchina**, non della chat che
-         hai aperto — e dal telefono si arriva comunque all'elenco intero. -->
-    <button class="bell" title="Use STARK from your phone" aria-label="Use STARK from your phone"
-      onclick={() => { store.refused = null; store.dialog = { kind: 'phone' } }}>
-      <Icon name="i-phone" />
-    </button>
-    <button class="plus" title="New chat" aria-label="New chat"
-      onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
-      <Icon name="i-plus" />
-    </button>
+      <button class="plus" title="New chat" aria-label="New chat"
+        onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
+        <Icon name="i-plus" />
+      </button>
+      <button class="more" title="More" aria-label="More" aria-expanded={moreOpen}
+        aria-haspopup="menu"
+        onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen }}>
+        <Icon name="i-more" />
+      </button>
     </div>
+    {#if moreOpen}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="more-scrim" onclick={closeMore} oncontextmenu={e => { e.preventDefault(); closeMore() }}></div>
+      <div class="more-pop" role="menu">
+        <button class="mp-item" role="menuitem"
+          onclick={() => { void store.calls.toggle(); closeMore() }}>
+          <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
+          <span class="mp-label">Notifiche</span>
+          {#if store.calls.on}<span class="mp-check"><Icon name="i-check" /></span>{/if}
+        </button>
+        <button class="mp-item" role="menuitem"
+          onclick={() => { soloNonLette = false; closeMore() }}>
+          <span class="mp-ico">{#if !soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
+          <span class="mp-label">Mostra completate</span>
+        </button>
+        <button class="mp-item" role="menuitem"
+          onclick={() => { soloNonLette = true; closeMore() }}>
+          <span class="mp-ico">{#if soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
+          <span class="mp-label">Solo non lette</span>
+        </button>
+        <hr class="mp-sep" />
+        <!-- La board arriva da main e sta qui, non in testata: il design ha svuotato
+             la barra a [+] e […] di proposito («come da screenshot 2»), e un modo a
+             tutto schermo come le impostazioni è roba dell'overflow, non un bottone
+             sempre visibile. -->
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.toggleBoard(); closeMore() }}>
+          <Icon name="i-brick" />
+          <span class="mp-label">Board</span>
+        </button>
+        <hr class="mp-sep" />
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.refused = null; store.dialog = { kind: 'phone' }; closeMore() }}>
+          <Icon name="i-phone" />
+          <span class="mp-label">Dispositivi collegati</span>
+        </button>
+        <hr class="mp-sep" />
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.refused = null; store.dialog = { kind: 'settings' }; closeMore() }}>
+          <Icon name="i-gear" />
+          <span class="mp-label">Settings</span>
+        </button>
+      </div>
+    {/if}
   </div>
 
   <!-- La ricerca sta **sopra** l'elenco e non dentro un pannello suo: cercare è un
@@ -323,6 +343,12 @@
           <button class="sit" class:on={row.id === store.selected}
             onclick={() => void store.select(row.id)}
             oncontextmenu={e => openMenu(e, row)}>
+            {#if row.model && getLobeIconUrl(row.model)}
+              <img class="micon" src={getLobeIconUrl(row.model) ?? ''} alt="" width="14" height="14"
+                loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+            {:else}
+              <span class="micon"></span>
+            {/if}
             <div style="flex:1;text-align:left">
               <div class="ttl">{row.title}</div>
               <div class="meta">
@@ -405,6 +431,12 @@
               ondragend={() => { store.draggingChat = null }}
               oncontextmenu={e => openMenu(e, row)}
             >
+              {#if row.model && getLobeIconUrl(row.model)}
+                <img class="micon" src={getLobeIconUrl(row.model) ?? ''} alt="" width="14" height="14"
+                  loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}
+                <span class="micon"></span>
+              {/if}
               <div style="flex:1;text-align:left">
                 <div class="ttl">{row.title}</div>
                 <div class="meta">
@@ -434,37 +466,43 @@
     {/if}
   </div>
 
-  <button class="sidefoot" title="Settings"
-    onclick={() => { store.refused = null; store.dialog = { kind: 'settings' } }}>
-    <Icon name="i-gear" /> Settings
-  </button>
 </div>
 
 <style>
   /* Le righe sono <button> perché si premono: il vestito viene da app.css, qui c'è
      solo ciò che serve a togliere l'aspetto di pulsante senza perderne il mestiere. */
-  /* La casella di ricerca. `type="search"` per averla svuotabile da tastiera e
-     riconoscibile dal browser; l'aspetto è tutto qui, perché il reset di WebKit
-     porterebbe con sé una lente e una X di sistema che non c'entrano con nessuna
-     delle due qui presenti. */
+  /* La casella di ricerca — pill tonda come nello screenshot 1: lente a sinistra,
+     placeholder "Search chats", X a destra. Resta `type="search"` per tastiera. */
+  /* 1) Sidebar sinistra stesso sfondo del pannello agente (#080C18) */
+  :global(.side){
+    background:#080C18; border-right:1px solid #1C2333;
+    --side:#080C18; --surface:#131A2A; --surface-2:#1A1F2E; --surface-3:#1C2333;
+    --ink:#E6E8F0; --ink-2:#C2C8D6; --muted:#6B7488;
+    --line:#1C2333; --line-2:#242B3D;
+    --accent:#7A5CFA; --accent-soft:#1E1A3A;
+  }
+  /* Header senza linea — nello screenshot non c'è separatore. */
+  :global(.side .sidetop) { border-bottom: none; padding: 10px 10px 8px 12px; }
   .find {
-    display: flex; align-items: center; gap: 6px;
-    margin: 0 5px 6px; padding: 3px 6px;
-    border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
+    display: flex; align-items: center; gap: 7px;
+    margin: 6px 8px 10px; padding: 4px 10px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
     color: var(--muted);
   }
-  .find:focus-within { border-color: var(--accent); }
+  .find :global(svg.ic) { width: 13px; height: 13px; opacity: .85; }
+  .find:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .find input {
-    flex: 1; min-width: 0; font: inherit; font-size: 11.5px;
-    border: 0; background: none; color: var(--ink); outline: none; padding: 1px 0;
+    flex: 1; min-width: 0; font: inherit; font-size: 11px;
+    border: 0; background: none; color: var(--ink); outline: none; padding: 1px 0; line-height: 1.2;
   }
+  .find input::placeholder { color: var(--muted); }
   .find input::-webkit-search-decoration,
   .find input::-webkit-search-cancel-button { display: none; }
   .clr {
-    display: flex; border: 0; background: none; padding: 0; cursor: pointer;
-    color: var(--muted); flex: none;
+    display: flex; border: 0; background: none; padding: 2px; cursor: pointer;
+    color: var(--muted); flex: none; border-radius: 50%;
   }
-  .clr:hover { color: var(--ink); }
+  .clr:hover { color: var(--ink); background: var(--surface-2); }
 
   /* Una riga di risultato non è una riga dell'elenco: non è una conversazione, è un
      punto **dentro** una. Per questo è rientrata sotto il titolo della chat e più
@@ -548,38 +586,77 @@
      solo raggruppando per progetto. Senza, il pallino resterebbe un carattere in linea
      e cadrebbe sotto la riga di base del testo invece che al suo centro. */
   .gstate.dotted { display: flex; align-items: center; gap: 6px; }
+  /* Nomi progetto più grandi — nello screenshot STARK sotto WAITING è più grande del section header. */
+  :global(.side .gstate) { font-size: 10px; letter-spacing: .10em; padding: 10px 10px 4px; }
+  :global(.side .gproj) { font-size: 11.5px; font-weight: 700; letter-spacing: .02em; padding: 6px 10px 4px 12px; }
 
-  .sit, .sidefoot, .plus, .bell {
+  .sit, .sidefoot, .plus, .more {
     background: none;
     border: 0;
     width: 100%;
     font: inherit;
     color: inherit;
   }
-  /* Niente `padding` qui dentro. Ce n'era uno a zero, e vinceva su quello di `app.css`
-     — `.plus.svelte-xxx` e `.sidetop .plus` hanno la stessa specificità, quindi decide
-     l'ordine, e lo stile del componente viene dopo. Risultato: area premibile grande
-     quanto l'icona, e i 4px con cui è calcolato il margine destro della testata
-     semplicemente non c'erano. È la stessa trappola già registrata per `.seg` in
-     Settings.svelte: due fogli che si contendono la stessa proprietà, e quello che
-     sembra la fonte non lo è. La forma di questi bottoni sta tutta in `app.css`. */
-  .plus, .bell { width: auto; display: flex; cursor: pointer; }
-  /* Il puntino dice che il browser non ha ancora dato il permesso, e che premendo lo
-     si chiede. Non è un errore: il suono intanto funziona già. */
-  .bell { position: relative; }
-  .bell .ask {
-    position: absolute; top: -1px; right: -1px; width: 5px; height: 5px;
-    border-radius: 50%; background: var(--accent);
+  /* Testata: Logo a sinistra, a destra solo [+] viola e […] — il resto è nel menu.
+     [+] è l'unico bottone pieno della barra, come nello screenshot 1 (viola #8b5cf6). */
+  .plus, .more { width: auto; display: flex; cursor: pointer; align-items: center; justify-content: center; }
+  /* Plus più piccola nello screenshot: quadrato viola compatto, icona più piccola. */
+  .plus {
+    width: 22px; height: 22px; border-radius: 7px; background: var(--accent); color: #fff;
+    border: 1px solid transparent; box-shadow: 0 1px 2px rgba(16,20,32,.10);
   }
-  .sit { width: calc(100% - 10px); }
-  .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible, .bell:focus-visible {
+  .plus :global(svg.ic) { width: 11px; height: 11px; }
+  :root[data-theme="dark"] .plus, :root:not([data-theme="light"]) .plus { color: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .plus { color: #fff; } }
+  .plus:hover { filter: brightness(1.06); }
+  .more {
+    width: 22px; height: 22px; border-radius: 7px; color: var(--muted);
+  }
+  .more :global(svg.ic) { width: 14px; height: 14px; }
+  .more:hover { background: var(--surface-3); color: var(--ink); }
+  .more[aria-expanded="true"] { background: var(--surface-3); color: var(--ink); }
+
+  /* Menu … — fedele allo screenshot 2: card scura con bordi arrotondati, voci con icone a sinistra
+     e spunta a destra, separator sottili. Segue il tema (surface/line) quindi "Segui sistema". */
+  .more-scrim { position: fixed; inset: 0; z-index: 9; }
+  .more-pop {
+    position: absolute; top: 40px; left: 8px; right: 8px; z-index: 10;
+    width: auto; padding: 6px;
+    background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(16,20,32,.18); display: flex; flex-direction: column; gap: 1px;
+  }
+  .mp-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0;
+    border-radius: 8px; background: none; font: inherit; font-size: 11.5px; color: var(--ink);
+    cursor: pointer; text-align: left;
+  }
+  .mp-item:hover { background: var(--surface-2); }
+  .mp-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .mp-item svg.ic { width: 14px; height: 14px; flex: none; color: var(--muted); }
+  .mp-label { flex: 1; min-width: 0; }
+  .mp-ico { width: 14px; height: 14px; display: grid; place-items: center; flex: none; color: var(--muted); }
+  .mp-ico svg.ic { width: 11px; height: 11px; }
+  .mp-check { margin-left: auto; display: flex; color: var(--accent); }
+  .mp-check svg.ic { width: 12px; height: 12px; color: var(--accent); }
+  .mp-sep { margin: 4px 2px; border: 0; border-top: 1px solid var(--line); }
+
+  /* Posizionamento del menu rispetto alla testata. */
+  :global(.side) { position: relative; }
+
+  .sit { width: calc(100% - 10px); border-radius: 10px; }
+  .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible, .more:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
   .sidefoot { cursor: pointer; }
   .rn {
     width: 100%; font: inherit; font-size: 11.5px; font-weight: 600;
-    border: 1px solid var(--accent); border-radius: 6px; padding: 1px 5px;
+    border: 1px solid var(--accent); border-radius: 10px; padding: 4px 8px;
     background: var(--surface); color: var(--ink); outline: none;
   }
+  /* L'icona del modello a sinistra della riga. Il placeholder vuoto (`span.micon`)
+     occupa lo stesso spazio dell'immagine, così le righe senza modello — o con un
+     modello che non ha icona — restano allineate con le altre. */
+  .micon { flex: none; width: 14px; height: 14px; display: inline-flex; border-radius: 3px; }
+  img.micon { filter: brightness(0) invert(1); opacity: .8; }
 </style>

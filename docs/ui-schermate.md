@@ -432,8 +432,17 @@ essere interrogato su categorie precise, e allora compaiono più spesso.
 ### Più domande insieme: uno stepper, non un modulo
 
 Una richiesta può portare **fino a quattro domande**, e sono domande diverse. Il riquadro
-ne mostra **una per passo**, con i passi in cima: quante sono in tutto, a quale si è, e
-quali hanno già una risposta. I passi si **premono**: rivedere la prima dopo aver letto la
+ne mostra **una per passo**, con i passi **nella riga del titolo**: quante sono in tutto, a
+quale si è, e quali hanno già una risposta.
+
+Stavano su una riga loro fino al 28 agosto 2026, e con l'etichetta di stato («asking»)
+facevano **tre righe di cornice** prima della domanda vera — su telefono, misurato, un terzo
+del riquadro. Ora sono una riga sola: titolo a sinistra, passi al centro, Stop a destra.
+Se n'è andato con loro anche il contatore «3 answers total»: diceva un numero che adesso si
+**conta guardando** (tre pastiglie sono tre domande), e in fondo il bottone dice comunque
+«Send 3 answers». E se n'è andata l'etichetta di stato, perché la stessa parola sta già sulla
+riga dell'elenco a sinistra: chi è arrivato a leggere la domanda sa che gli si sta chiedendo
+qualcosa. I passi si **premono**: rivedere la prima dopo aver letto la
 terza è esattamente ciò che si vuole fare, e con quattro domande *quale mi manca* è la
 domanda che ci si fa davvero — a cui un avanzamento lineare non saprebbe rispondere.
 
@@ -457,8 +466,36 @@ In una riga piena ci sta anche la **descrizione** che l'assistente scrive per og
 Prima era in un tooltip: cioè la sola cosa che dice *cosa costa* una scelta si raggiungeva
 solo fermandoci sopra il mouse, e da telefono per niente.
 
+Le righe stanno in **una scheda sola con dei filetti**, non in otto riquadri staccati
+(28 agosto 2026). Non è una preferenza: otto bordi più sette spazi da 6px sono **quindici
+linee orizzontali** per una lista di otto voci, e il riquadro cresceva di una cinquantina di
+pixel senza dire niente di più. Con i filetti restano sette linee, tutte più leggere, e da
+telefono la differenza è fra vedere quattro opzioni e vederne sei. L'opzione scelta si segna
+col fondo e una **barretta a sinistra** invece che con un bordo attorno: dentro una scheda un
+bordo colorato dovrebbe combattere coi filetti dei vicini, e sulla prima e sull'ultima riga
+cadrebbe sopra il bordo della scheda stessa.
+
+### Domande e risposte sono Markdown (28 agosto 2026)
+
+Il testo della domanda, l'**etichetta** di ogni opzione e la sua **descrizione** passano da
+`renderMarkdown` come il resto della conversazione. Prima erano testo semplice, e la
+conseguenza si vedeva: una domanda che citava tre file li mostrava **coi backtick attorno**, e
+nessuno dei tre era raggiungibile. Ora un percorso citato dentro una domanda si copia e si apre
+come ovunque (vedi «Un percorso citato nel testo si copia e si apre»), compresi i percorsi
+citati in un'etichetta o in una descrizione.
+
+Le etichette usano una resa **in linea** (`renderInline`) e non quella per blocchi: dentro una
+riga il cui layout è già deciso, un `<p>` porterebbe i suoi margini. Il testo della domanda
+invece passa da quella per blocchi, perché lì l'agent può portarsi dietro un elenco — è il
+posto dove spiega, non un'etichetta.
+
 Quando l'assistente **consiglia** un'opzione, quella porta un badge blu **«Recommended»**
-appoggiato sul bordo in alto a destra. Non è un campo del protocollo: il CLI dice al modello
+in fondo a destra della riga dell'etichetta. Stava **appoggiato sul bordo** in alto fino al
+28 agosto, e la ragione scritta allora era buona — «si vede scorrendo con l'occhio senza
+entrare nel testo» — ma dentro una scheda con i filetti quel bordo non c'è più, e su schermo
+stretto il badge finiva **sopra** l'etichetta (misurato a 430px). Un'etichetta coperta è un
+difetto più grosso di un badge meno sporgente, e all'estremo destro della riga l'occhio lo
+trova comunque scorrendo la colonna. Non è un campo del protocollo: il CLI dice al modello
 di scriverlo in fondo all'etichetta, quindi STARK lo riconosce lì, lo toglie dal testo — il
 badge lo dice meglio — e lo rimanda indietro **intero**, perché la risposta è indicizzata per
 etichetta esatta.
@@ -658,10 +695,74 @@ STARK sappia qual è l'editor preferito, basta arrivarci.
 - **non sostituisce il clic esistente.** Il blocco di un file modificato si apre ancora sul
   confronto affiancato, come sempre: il bottone nuovo è un secondo bottone, attaccato di fianco,
   non un rimpiazzo — un bottone dentro un bottone non è nemmeno HTML valido.
-- **solo dove STARK sa già che è un percorso.** `file_path`, `path`, `notebook_path`: gli stessi
-  campi che il riassunto del tool riconosce già (`summary.ts`). Non scandaglia il testo libero
-  della risposta in cerca di qualcosa che somiglia a un percorso — riconoscere un percorso in
-  Markdown non fidato è un problema diverso, e più fragile.
+- ~~**solo dove STARK sa già che è un percorso.**~~ — **rovesciata il 28 agosto 2026**, su
+  richiesta dell'utente: «quando citi i file usa un blocco inline che abbia il tasto copia path
+  e apri accanto, così che possa consumare subito quell'informazione». Vale ora anche nel **testo
+  libero** delle risposte. Vedi il capitolo qui sotto: la ragione per cui era stata esclusa resta
+  giusta, ed è il modo di aggirarla che è cambiato.
+
+### Un percorso citato nel testo si copia e si apre (28 agosto 2026)
+
+Un `code` in linea che è davvero un file porta due bottoni dentro di sé — **copia il percorso**
+e **rivela nel gestore di file** — e una sottolineatura punteggiata che lo dice anche col mouse
+altrove. Vale nelle **risposte dell'agent** e nel **riquadro del piano**; nei prompt vale solo
+per le citazioni con `@`, che sono dichiarate e non indovinate.
+
+**La ragione per cui era stato escluso era giusta, e non è stata ignorata.** Una regola
+tipografica non può decidere: non distingue `and/or` da una cartella, e sbaglia anche
+all'incontrario — `core/reduce.ts` *sembra* un percorso e non esiste (il file è
+`src/core/reduce.ts`). Un bottone «apri» che non apre niente è peggio di nessun bottone, perché
+insegna a non fidarsi nemmeno degli altri.
+
+**La cura non è una regola più furba: è non indovinare.** La regola serve solo a fare una rosa
+(niente spazi, niente `--opzione`, o una barra o un'estensione plausibile); a decidere è il
+**disco**, che il daemon guarda relativamente al `cwd` della chat — `POST /api/sessions/:id/paths`,
+una domanda sola per messaggio, e le risposte si tengono. Un percorso o c'è o non c'è: smette di
+essere un giudizio e diventa un fatto. È la stessa mossa di `file_suggestions`, dove a cercare
+i file è il CLI e STARK mostra. Funziona anche su una chat che **dorme**: non serve un processo
+dietro, serve solo sapere da dove partire, e quello lo dice il journal.
+
+- **la decorazione è asincrona di proposito.** Il testo compare subito com'è sempre comparso,
+  i bottoni arrivano dopo: legare il rendering alla richiesta vorrebbe dire che un daemon lento
+  ritarda la **lettura** della risposta.
+- **i bottoni stanno dentro il `code`, non accanto.** Accanto, una riga potrebbe andare a capo
+  fra il percorso e i suoi bottoni, lasciando due icone orfane a inizio riga.
+- **nel prompt le citazioni stanno nella finestra «Your prompt», non nella riga del turno.**
+  Quella riga *è* un bottone (apre il turno), e un bottone dentro un bottone non è HTML valido —
+  è scritto tre righe sopra di essa nel sorgente, e ci si è cascati lo stesso alla prima
+  stesura. È anche il posto giusto: la riga serve a **riconoscere** un turno, la finestra a
+  **rileggerlo**, e agire appartiene alla seconda.
+- **i due bottoni si vedono sempre**, non al passaggio del mouse (richiesta dell'utente).
+  Prima comparivano in hover, e c'è stata per mezz'ora una sottolineatura punteggiata a dire
+  «questo porta a un file» in loro assenza. Con i bottoni sempre presenti quel segno era
+  diventato il doppio della stessa cosa — lo stesso difetto del pallino ripetuto su ogni riga
+  dell'elenco — ed è stato tolto. Un comando che si scopre solo passandoci sopra è un comando
+  che chi non lo sa già non trova; e su un telefono, dove il passaggio del mouse non esiste,
+  non lo trova nessuno. Costo accettato e detto: in un paragrafo con cinque percorsi ci sono
+  dieci icone.
+- **si tiene decorato, non si decora una volta.** Difetto segnalato dall'utente: richiudendo
+  e riaprendo un turno i percorsi tornavano nudi. La causa non era la decorazione ma **quando**
+  la si chiamava — un effetto che dipendeva da «quanti turni» e «quante parti», due numeri che
+  richiudere un turno non cambia, mentre il `{@html}` rifà il DOM da zero. Misurato:
+  all'apertura 5 candidati e 6 bottoni, alla riapertura 5 candidati e **0** bottoni.
+  Aggiungere lo stato aperto/chiuso alle dipendenze avrebbe chiuso *quel* caso e lasciato
+  aperti quelli non ancora incontrati (un salto da una ricerca, un pannello che cambia chat):
+  il difetto vero era che le dipendenze erano **indovinate**. Ora si osserva il DOM
+  (`MutationObserver`), che è la cosa che deve essere vera, invece dell'elenco dei motivi per
+  cui potrebbe essere cambiata.
+- **la prova guarda anche i negativi**, ed è metà del suo valore: `npm run percorsi:check`
+  verifica che `core/reduce.ts`, `addAppLinks`, `and/or`, `--permission-mode` e `npm run check`
+  restino testo, non solo che i tre percorsi veri si accendano. La funzione fallisce in silenzio
+  in **entrambi** i versi, e il verso «non scatta» è indistinguibile dal non averla scritta.
+
+Cosa resta fuori, e detto invece che scoperto: il **testo della domanda** (`.qtext`) è stampato
+come testo semplice, non come Markdown, quindi lì un percorso fra backtick resta backtick.
+Renderlo Markdown si può, ma cambierebbe l'aspetto di ogni domanda — è una decisione a parte,
+non una ricaduta di questa.
+
+- **il resto vale come prima:** `file_path`, `path`, `notebook_path` — gli stessi
+  campi che il riassunto del tool riconosce già (`summary.ts`) — continuano ad avere il loro
+  bottone sulla riga del tool e sul blocco del file modificato.
 - **su WSL2 apre Explorer di Windows**, col percorso tradotto da `wslpath` — funziona sia per un
   repo su `/mnt/…` sia per uno nativo, verificato su entrambe le forme. Su macOS apre Finder. Su
   Linux nativo usa Nautilus se c'è, altrimenti apre la cartella (senza garanzia di selezione: non

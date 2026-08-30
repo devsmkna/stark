@@ -585,32 +585,51 @@
 </div>
 
 <style>
-  /* La riga che porta graffetta, casella e invio. I margini che stavano sulla
-     casella (vedi `.input` in app.css) stanno ora qui: lei è tornata a riempire lo
-     spazio che le lascia la riga, come qualunque figlio flessibile. */
-  .row-input { display: flex; align-items: flex-end; gap: 4px; margin: 8px 12px; }
+  /* La riga che porta graffetta, casella e invio — variante «pillola compatta»:
+     bottoni quadrati/circolari ai lati, casella arrotondata che riempie lo spazio.
+     Il padding sta sulla riga, non sulla casella: lei è tornata a riempire lo
+     spazio che la riga le lascia, come qualunque figlio flessibile. */
+  .row-input { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
   .row-input .input { flex: 1; margin: 0; width: auto; }
-  .row-input .iconb { margin-bottom: 3px; }
-  /* Visibile solo finché ha qualcosa da mandare: senza testo né allegati non c'è
-     comando da dare, e un bottone acceso lo lascerebbe credere. */
+  /* La casella è un <textarea> vestito da pillola: stessa cornice, stesso passo,
+     senza il bordo e la barra di scorrimento che il browser ci mette. */
+  textarea.input {
+    display: block; resize: none; overflow-y: auto;
+    font: inherit; font-size: 12.5px; line-height: 1.45;
+    background: var(--surface); color: var(--ink-2); max-height: 160px;
+    border: 1px solid var(--line-2); border-radius: 20px; padding: 9px 14px;
+  }
+  textarea.input::placeholder { color: var(--muted); }
+
+  /* La graffetta: un quadrato leggero, spento finché non ci si passa sopra. */
+  .row-input .attach {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); background: transparent; border: none;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .row-input .attach:hover { background: var(--surface-2); color: var(--ink-2); }
+  .row-input .attach :global(svg) { width: 16px; height: 16px; }
+  /* L'Invio: un cerchio pieno del colore di STARK. Spento finché non ha qualcosa
+     da mandare: senza testo né allegati non c'è comando da dare, e un bottone
+     acceso lo lascerebbe credere. */
+  .row-input .send {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent); color: #fff; border: none;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .row-input .send:hover { background: #8b7cf5; }
   .row-input .send[disabled] { opacity: .35; cursor: default; }
-  .row-input .send:not([disabled]):hover { background: var(--surface-2); color: var(--ink); }
-  .row-input .attach:hover { background: var(--surface-2); color: var(--ink); }
+  .row-input .send :global(svg) { width: 15px; height: 15px; }
+  .row-input .attach:disabled { opacity: .45; cursor: default; }
+  .row-input .attach:disabled:hover { background: none; color: var(--muted); }
   /* L'`<input type=file>` reale resta invisibile ma raggiungibile da tastiera: un
      `display:none` lo toglierebbe anche da lì. */
   .filepick {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
-
-  /* La casella è un <textarea> vestito come il riquadro del disegno: stessa cornice,
-     stesso passo, senza il bordo e la barra di scorrimento che il browser ci mette. */
-  textarea.input {
-    display: block; resize: none; overflow-y: auto;
-    font: inherit; font-size: 11px; line-height: 1.45;
-    background: var(--surface); color: var(--ink); max-height: 160px;
-  }
-  textarea.input::placeholder { color: var(--muted); }
 
   /* Le righe sono <button> perché si premono; il vestito viene da app.css. */
   .slash .mi {
@@ -652,9 +671,6 @@
     background: var(--surface); color: var(--muted);
   }
   .all .doc :global(svg) { width: 13px; height: 13px; }
-  /* Un bottone spento continua a dire cosa sarebbe: il `title` spiega perché non si può. */
-  .row-input .attach:disabled { opacity: .45; cursor: default; }
-  .row-input .attach:disabled:hover { background: none; color: var(--muted); }
   .all .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
   .all .x {
     border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px;
@@ -685,4 +701,16 @@
   .asleep .d { font-size: 10px; color: var(--muted); flex: 1; }
   .asleep .btn { flex: none; }
   .asleep .btn[disabled] { opacity: .6; cursor: default; }
+  /* Più aria ai lati da telefono: in un'app della schermata Home non c'è la cornice
+     del browser attorno, e i chip finivano incollati al vetro. `env(safe-area-inset-*)`
+     è quanto iOS chiede di stare lontani da notch e angoli arrotondati; `max()` fa sì
+     che in una scheda normale, dove quegli inset sono zero, resti comunque il margine
+     nostro. Sta qui e non in app.css perché la riga è scoped: il padding della pillola
+     lo decide questo blocco. */
+  @media (max-width: 860px) {
+    .row-input {
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right));
+    }
+  }
 </style>

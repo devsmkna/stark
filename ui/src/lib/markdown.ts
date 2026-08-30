@@ -24,6 +24,8 @@ import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 import { appUrlFor, serviceFor } from '$core/services.ts'
+import { candidato } from './percorsi.ts'
+import { decoraColoriDom } from './colori.ts'
 
 /**
  * I linguaggi che vale la pena caricare, scelti contando invece che immaginando.
@@ -76,7 +78,29 @@ export function renderMarkdown(text: string, opts: { asked?: boolean } = {}): st
   highlightCode(doc)
   addCopyButtons(doc)
   addAppLinks(doc)
+  markPaths(doc)
+  decoraColoriDom(doc)
   if (opts.asked) markAsked(doc)
+  return doc.body.innerHTML
+}
+
+/**
+ * Markdown **in linea**: niente paragrafo attorno, niente titoli, niente liste.
+ *
+ * Serve dove il testo è un frammento dentro una riga già disegnata — l'etichetta di
+ * un'opzione, la sua descrizione — e dove un `<p>` porterebbe i suoi margini dentro un
+ * layout che li ha già decisi. `marked.parseInline` fa esattamente questo taglio, ed è
+ * la ragione per cui non si riusa `renderMarkdown` togliendo i margini col CSS: il
+ * problema non è come si vede un blocco, è che lì un blocco non ci va.
+ *
+ * Passa dalle stesse due difese dell'altro: `DOMPurify` prima, e i percorsi marcati
+ * dopo — così un file citato nell'etichetta di un'opzione si accende come ovunque.
+ */
+export function renderInline(text: string): string {
+  const html = marked.parseInline(text, { async: false }) as string
+  const doc = new DOMParser().parseFromString(DOMPurify.sanitize(html), 'text/html')
+  markPaths(doc)
+  decoraColoriDom(doc)
   return doc.body.innerHTML
 }
 
@@ -195,6 +219,28 @@ function addAppLinks(doc: Document): void {
     btn.setAttribute('aria-label', `Open in ${servizio.label}`)
     btn.innerHTML = `<svg class="ic"><use href="#i-open"></use></svg><span>Open in ${servizio.label}</span>`
     a.after(btn)
+  }
+}
+
+/**
+ * Marca i `code` in linea che **potrebbero** essere percorsi. Qui si marca soltanto:
+ * a dire se esistono è il daemon, e a vestirli è `decoraPercorsi` (`percorsi.ts`).
+ *
+ * La divisione dei compiti non è pignoleria. Questa funzione è sincrona perché
+ * `renderMarkdown` restituisce una stringa — il testo deve comparire subito, senza
+ * aspettare nessuno. La domanda sul disco è per forza asincrona, quindi non può stare
+ * qui: se ci stesse, una risposta lenta del daemon ritarderebbe la **lettura** della
+ * risposta dell'agent, che è l'ultima cosa che si vuole rallentare.
+ *
+ * Solo i `code` **in linea**: dentro un `<pre>` c'è un blocco di codice, dove un
+ * percorso è parte di un comando e ha già il suo bottone Copy per l'intero blocco.
+ */
+function markPaths(doc: Document): void {
+  for (const code of doc.querySelectorAll('code')) {
+    if (code.closest('pre')) continue
+    const t = code.textContent ?? ''
+    if (!candidato(t)) continue
+    code.setAttribute('data-path-cand', t.trim())
   }
 }
 

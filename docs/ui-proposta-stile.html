@@ -1,0 +1,226 @@
+<!doctype html><html lang="it"><meta charset="utf-8">
+<title>STARK — proposta di stile (28 agosto 2026)</title>
+<style>
+:root{
+  --ground:#FBFBFD;--surface:#FFF;--surface-2:#F5F6FA;--surface-3:#EEF0F6;
+  --ink:#171A22;--ink-2:#454B5C;--muted:#767D90;--muted-aa:#6A7183;
+  --line:#E7E9F0;--line-2:#DCDFE9;--accent:#3B5BF5;--accent-soft:#E9EDFE;
+  --wait:#B45309;--work:#1D5FBF;--stop:#D0342C;--done:#186A3B;
+  --p1:#3B5BF5;--p2:#D97706;--p3:#0F9D76;--p4:#8B5CF6;--p5:#DB2777;--p6:#0891B2;--p7:#65A30D;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--sans);background:var(--ground);color:var(--ink);
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:48px 32px 96px}
+h1{font-size:30px;letter-spacing:-.02em;margin:0 0 6px}
+.sub{color:var(--muted-aa);margin:0 0 40px;max-width:70ch}
+h2{font-size:20px;letter-spacing:-.01em;margin:56px 0 4px;padding-top:24px;border-top:1px solid var(--line)}
+h2 .n{color:var(--muted-aa);font-weight:400;font-variant-numeric:tabular-nums;margin-right:10px}
+.lead{color:var(--ink-2);margin:0 0 24px;max-width:72ch}
+.ab{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.card>.h{font-size:11px;letter-spacing:.09em;text-transform:uppercase;padding:10px 14px;
+  border-bottom:1px solid var(--line);color:var(--muted-aa);display:flex;justify-content:space-between}
+.card>.b{padding:18px}
+.bad .h{color:var(--stop)} .good .h{color:var(--done)}
+.tag{font-family:var(--mono);font-size:11px}
+.note{font-size:13px;color:var(--muted-aa);margin:12px 0 0;max-width:72ch}
+.sw{display:flex;flex-wrap:wrap;gap:6px}
+.sw i{width:34px;height:34px;border-radius:8px;display:block;border:1px solid rgba(0,0,0,.08)}
+.scale{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.scale b{font-weight:600}
+.chip{font-family:var(--mono);font-size:11px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:6px;padding:2px 7px;color:var(--ink-2)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-aa);font-weight:500}
+.ko{color:var(--stop);font-weight:600} .ok{color:var(--done);font-weight:600}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:1px 5px;border-radius:5px}
+
+/* ── finti pezzi di UI ─────────────────────────────────────── */
+.ui{font-size:11px;background:var(--surface);border-radius:8px}
+.row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px}
+.row .t{font-weight:600;font-size:11px}
+.row .m{font-size:10px;color:var(--muted)}
+.row .m2{font-size:11px;color:var(--muted-aa)}
+.dotk{width:7px;height:7px;border-radius:50%;flex:none}
+.unread{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;margin-left:auto}
+.bar{width:3px;align-self:stretch;border-radius:2px;flex:none}
+.ghead{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 10px 4px}
+.ghead2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-aa);padding:12px 10px 6px;font-weight:600}
+.prosa{font-size:11.5px;line-height:1.5;color:var(--ink)}
+.prosa-new{font-size:14px;line-height:1.65;max-width:72ch;color:var(--ink)}
+.icons{display:flex;gap:2px;align-items:center;padding:6px}
+.icons b{width:18px;height:22px;display:grid;place-items:center;font-size:12px;color:var(--ink-2);
+  border-radius:5px;font-weight:400}
+.icons2{display:flex;gap:4px;align-items:center;padding:6px}
+.icons2 b{width:28px;height:28px;display:grid;place-items:center;font-size:13px;color:var(--ink-2);
+  border-radius:8px;font-weight:400;background:var(--surface-2)}
+.sep{width:1px;height:18px;background:var(--line-2);margin:0 6px}
+.hit{outline:1px dashed var(--stop);outline-offset:0}
+.hit2{outline:1px dashed var(--done)}
+</style>
+<div class="wrap">
+
+<h1>STARK — proposta di stile</h1>
+<p class="sub">Quattro assi, misurati sulla UI vera del 28 agosto 2026 (finestra 1440×900, journal finti).
+Ogni numero qui sotto viene da una misura, non da un'impressione. A sinistra com'è, a destra la proposta.</p>
+
+<h2><span class="n">1</span>Coerenza — le scale non esistono</h2>
+<p class="lead">Non è un problema di gusto: è che gli stessi ruoli hanno valori diversi in punti diversi,
+quindi ogni componente nuovo ne inventa uno. Contati in <code>app.css</code>.</p>
+<div class="ab">
+  <div class="card bad"><div class="h"><span>Oggi</span><span class="tag">11 raggi · 14 testi · 8 spazi</span></div>
+    <div class="b">
+      <div class="scale" style="margin-bottom:16px">
+        <b style="font-size:11px">raggi</b>
+        <span class="chip">2</span><span class="chip">3</span><span class="chip">5</span><span class="chip">6</span>
+        <span class="chip">7</span><span class="chip">8</span><span class="chip">9</span><span class="chip">10</span>
+        <span class="chip">12</span><span class="chip">20</span><span class="chip">50%</span>
+      </div>
+      <div class="scale" style="margin-bottom:16px">
+        <b style="font-size:11px">testo</b>
+        <span class="chip">9</span><span class="chip">9.5</span><span class="chip">10</span><span class="chip">10.5</span>
+        <span class="chip">11</span><span class="chip">11.5</span><span class="chip">12</span><span class="chip">12.5</span>
+        <span class="chip">14</span><span class="chip">15</span><span class="chip">16</span>
+      </div>
+      <div class="scale"><b style="font-size:11px">spazi</b>
+        <span class="chip">2</span><span class="chip">3</span><span class="chip">4</span><span class="chip">5</span>
+        <span class="chip">6</span><span class="chip">7</span><span class="chip">8</span><span class="chip">10</span>
+      </div>
+      <p class="note">Undici valori di raggio fra 2 e 20px. Otto spaziature: ogni intero da 2 a 8.
+      Il testo più grande della <b>risposta</b> è 11.5px.</p>
+    </div>
+  </div>
+  <div class="card good"><div class="h"><span>Proposta</span><span class="tag">4 raggi · 6 testi · 6 spazi</span></div>
+    <div class="b">
+      <div class="scale" style="margin-bottom:16px">
+        <b style="font-size:11px">raggi</b>
+        <span class="chip">4 · dentro</span><span class="chip">8 · controlli</span>
+        <span class="chip">12 · riquadri</span><span class="chip">999 · pillole</span>
+      </div>
+      <div class="scale" style="margin-bottom:16px">
+        <b style="font-size:11px">testo</b>
+        <span class="chip">11 · minuti</span><span class="chip">12 · meta</span><span class="chip">13 · UI</span>
+        <span class="chip">14 · lettura</span><span class="chip">16 · titoli</span><span class="chip">20 · testate</span>
+      </div>
+      <div class="scale"><b style="font-size:11px">spazi</b>
+        <span class="chip">4</span><span class="chip">8</span><span class="chip">12</span>
+        <span class="chip">16</span><span class="chip">24</span><span class="chip">32</span>
+      </div>
+      <p class="note">Ogni valore ha un <b>ruolo dichiarato</b>: chi scrive un componente nuovo sceglie il ruolo,
+      non il numero. È la differenza fra una scala e una collezione.</p>
+    </div>
+  </div>
+</div>
+
+<h2><span class="n">2</span>Leggibilità — 205 caratteri per riga, e un grigio sotto la soglia</h2>
+<p class="lead">Misurato nel browser: la riga di prosa della risposta è larga <b>1180px a 11.5px</b>,
+cioè <b>~205 caratteri</b>. La tipografia consiglia 45–75. È l'unica cosa scritta per l'utente,
+ed è quella che si legge peggio.</p>
+<div class="ab">
+  <div class="card bad"><div class="h"><span>Oggi</span><span class="tag">11.5px · 205 car/riga</span></div>
+    <div class="b"><div class="prosa">Il traduttore riscritto assorbe le otto sonde di diagnosi che erano state buttate lì per guardare un evento alla volta, e la suite porta diciassette verifiche nuove sul lato OpenCode. Resta fuori una prova che dipendeva dalla macchina che la esegue.</div>
+      <p class="note">Alla fine di una riga così l'occhio deve ritrovare l'inizio della successiva:
+      è il salto che fa perdere il segno.</p></div></div>
+  <div class="card good"><div class="h"><span>Proposta</span><span class="tag">14px · 72ch</span></div>
+    <div class="b"><div class="prosa-new">Il traduttore riscritto assorbe le otto sonde di diagnosi che erano state buttate lì per guardare un evento alla volta, e la suite porta diciassette verifiche nuove sul lato OpenCode.</div>
+      <p class="note"><code>max-width:72ch</code> sulla sola prosa — <b>codice e diff restano larghi</b>,
+      perché lì la riga lunga serve. Il tetto è in <code>ch</code>, quindi segue il font invece di
+      essere un pixel da ritarare.</p></div></div>
+</div>
+
+<h3 style="font-size:14px;margin:28px 0 10px">Il grigio secondario non passa lo standard, e solo in chiaro</h3>
+<table>
+<tr><th>Testo</th><th>Su bianco</th><th>Sulla barra laterale</th><th>Esito</th></tr>
+<tr><td><code>--muted</code> #767D90 · <b>oggi</b></td><td>4.11</td><td class="ko">3.81</td><td class="ko">sotto AA (4.5)</td></tr>
+<tr><td><code>--muted</code> #6A7183 · <b>proposta</b></td><td>4.88</td><td class="ok">4.52</td><td class="ok">passa AA</td></tr>
+<tr><td>tema scuro #8A91A2 · invariato</td><td>5.5</td><td class="ok">5.7</td><td class="ok">già a posto</td></tr>
+</table>
+<p class="note">Stessa tinta, solo più scura: il grigio porta l'orario, lo stato e i commenti nel codice —
+cioè il testo più piccolo che c'è. Il tema scuro non va toccato, e questo è il punto:
+oggi i due temi <b>non</b> hanno la stessa leggibilità.</p>
+
+<h2><span class="n">3</span>Colore — tre lingue che si sovrappongono</h2>
+<p class="lead">In <code>app.css</code> convivono tre sistemi: lo <b>stato</b> (attesa, lavoro, fermo, fatto),
+il <b>progetto</b> (7 tinte) e la <b>sintassi</b> del codice (6 tinte). Otto coppie condividono lo stesso valore
+esatto, quindi non si può ritoccarne uno senza spostare l'altro.</p>
+<table>
+<tr><th>Valore</th><th>Chi lo usa</th><th>Perché è un problema</th></tr>
+<tr><td><code>#3B5BF5</code></td><td><code>--accent</code> · <code>--p1</code> · <code>--syn-fn</code></td>
+    <td class="ko">Il pallino «ti serve» e il pallino del progetto&nbsp;1 sono <b>identici</b></td></tr>
+<tr><td><code>#186A3B</code></td><td><code>--done</code> · <code>--add</code> · <code>--syn-str</code></td>
+    <td>«finito», «riga aggiunta» e «stringa» sono lo stesso verde</td></tr>
+<tr><td><code>#B45309</code></td><td><code>--wait</code> · <code>--syn-num</code></td><td>«in attesa» = «numero»</td></tr>
+<tr><td><code>#8B5CF6</code> · <code>#0891B2</code></td><td><code>--p4/--syn-key</code> · <code>--p6/--syn-var</code></td>
+    <td>la tavolozza dei progetti entra dentro il codice</td></tr>
+</table>
+<p class="note"><b>La regola proposta:</b> il colore risponde a <i>una</i> domanda per volta.
+<b>Accento</b> = si può premere. <b>Stato</b> = come sta andando. <b>Progetto</b> = di chi è.
+<b>Sintassi</b> = che pezzo di codice è. Nessun valore condiviso fra i quattro insiemi:
+otto valori nuovi, e ognuno si può ritoccare da solo.</p>
+
+<h2><span class="n">4</span>Densità — due segnali per lo stesso fatto, e bersagli da 18px</h2>
+<p class="lead">Nella riga dell'elenco ci sono <b>due pallini</b>: a sinistra colorato (il progetto),
+a destra blu (ti serve). Stessa forma, significati diversi. E il blu compare <b>esattamente</b> quando la riga
+sta nel gruppo «Waiting» — <code>needsYou(s) === (group(s)==='Waiting')</code> — quindi raggruppando per stato
+ripete l'intestazione su ogni riga e su nessun'altra.</p>
+<div class="ab">
+  <div class="card bad"><div class="h"><span>Oggi · raggruppato per stato</span><span class="tag">2 pallini</span></div>
+    <div class="b"><div class="ui">
+      <div class="ghead">Waiting</div>
+      <div class="row" style="padding-left:10px"><i class="dotk" style="background:var(--p2)"></i>
+        <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Stark</span></div>
+      <div class="row"><div><div class="t">la sidebar si raggruppa</div>
+        <div class="m">18:06 <b style="color:var(--stop)">stopped</b></div></div><span class="unread"></span></div>
+      <div class="row"><div><div class="t">ridisegno del box domande</div>
+        <div class="m">17:46 <b style="color:var(--stop)">stopped</b></div></div><span class="unread"></span></div>
+      <div class="row"><div><div class="t">import da csv</div>
+        <div class="m">18:46 <b style="color:var(--done)">done</b></div></div><span class="unread"></span></div>
+    </div>
+    <p class="note">Il pallino è su <b>tutte</b> le righe del gruppo: è lo sfondo, non un avviso.
+    E «Waiting» contiene righe <i>done</i> e <i>stopped</i>.</p></div></div>
+  <div class="card good"><div class="h"><span>Proposta</span><span class="tag">1 segnale per fatto</span></div>
+    <div class="b"><div class="ui">
+      <div class="ghead2">Ti aspettano</div>
+      <div class="row" style="gap:10px"><i class="bar" style="background:var(--p2)"></i>
+        <div><div class="t" style="font-size:12px">la sidebar si raggruppa</div>
+        <div class="m2">Stark · 18:06 · <b style="color:var(--stop)">fermata</b></div></div></div>
+      <div class="row" style="gap:10px"><i class="bar" style="background:var(--p2)"></i>
+        <div><div class="t" style="font-size:12px">ridisegno del box domande</div>
+        <div class="m2">Stark · 17:46 · <b style="color:var(--stop)">fermata</b></div></div></div>
+      <div class="row" style="gap:10px"><i class="bar" style="background:var(--p1)"></i>
+        <div><div class="t" style="font-size:12px">import da csv</div>
+        <div class="m2">Acme · 18:46 · <b style="color:var(--done)">finita</b></div></div></div>
+    </div>
+    <p class="note">Il progetto diventa una <b>barretta di bordo</b>, che non si può confondere con un pallino.
+    Il pallino blu resta <b>solo</b> raggruppando per progetto, dove è l'unico segnale che esista.
+    Meta su una riga sola, a 12px invece di 10.</p></div></div>
+</div>
+
+<h3 style="font-size:14px;margin:28px 0 10px">I comandi in cima misurano 18×22</h3>
+<div class="ab">
+  <div class="card bad"><div class="h"><span>Oggi</span><span class="tag">18×22 · sotto il minimo</span></div>
+    <div class="b"><div class="icons"><b class="hit">◔</b><b class="hit">✓</b><b class="hit">◌</b><b class="hit">▭</b><b class="hit">+</b></div>
+    <p class="note">Cinque bersagli attaccati, senza etichetta e senza separazione.
+    Il minimo di WCAG 2.2 è <b>24×24</b>; quattro dei cinque non ci arrivano.
+    E non c'è niente che dica che «+» è di un'altra specie rispetto alla campanella.</p></div></div>
+  <div class="card good"><div class="h"><span>Proposta</span><span class="tag">28×28 · raggruppati</span></div>
+    <div class="b"><div class="icons2"><b class="hit2">◔</b><b class="hit2">✓</b><b class="hit2">◌</b><b class="hit2">▭</b>
+      <span class="sep"></span><b class="hit2" style="background:var(--accent-soft);color:var(--accent)">+</b></div>
+    <p class="note">Stessa icona, area premibile 28×28 (l'ingombro visivo non cambia).
+    Un separatore stacca l'azione che <b>crea</b> da quelle che <b>mostrano</b>,
+    e l'accento la marca come l'azione principale.</p></div></div>
+</div>
+
+<h2><span class="n">5</span>Cosa non tocco</h2>
+<p class="lead">Perché funziona già, e cambiarlo sarebbe rumore:</p>
+<ul style="max-width:72ch;color:var(--ink-2)">
+<li>i <b>blocchi di codice</b> — bottone Copy, etichetta del linguaggio, colori: coerenti ovunque, e già corretti il 28 agosto</li>
+<li>il <b>tema scuro</b>, che sui contrasti sta meglio del chiaro (5.1–5.7 contro 3.8–4.1)</li>
+<li>le <b>impostazioni</b>: dieci sezioni, ognuna che dice la verità su cosa fa, comprese le voci spente con la spiegazione</li>
+<li>i <b>colori di stato</b> come idea (attesa/lavoro/fermo/fatto): cambiano solo i valori che oggi condividono con altro</li>
+</ul>
+
+</div></html>

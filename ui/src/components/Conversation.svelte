@@ -15,6 +15,8 @@
   import { promptText } from '$core/events.ts'
   import { colours, hhmm, project, since, toolIcon, turnStatus } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { osservaPercorsi, pezziConCitazioni } from '../lib/percorsi.ts'
+  import { decoraColoriTesto } from '../lib/colori.ts'
   import {
     conta, groupParts, isLive, keyOf, type Grp, type OpPart,
   } from '../lib/gruppi.ts'
@@ -176,6 +178,23 @@
       return
     }
 
+    // I due bottoni dentro un percorso citato. Stessa delegazione dei blocchi di
+    // codice e per la stessa ragione: nascono come DOM grezzo dentro `decoraPercorsi`,
+    // quindi non c'è nessun elemento Svelte a cui attaccare un `onclick`.
+    const cp = target.closest<HTMLElement>('[data-copy-path]')
+    if (cp) {
+      const p = cp.getAttribute('data-copy-path') ?? ''
+      try { await navigator.clipboard.writeText(p) }
+      catch { store.refused = 'the browser did not allow copying'; return }
+      // La spunta si scrive sul nodo, non in uno stato: il prossimo delta rifà
+      // l'HTML e se la porta via da sé.
+      cp.classList.add('done')
+      setTimeout(() => cp.classList.remove('done'), 3000)
+      return
+    }
+    const rv = target.closest<HTMLElement>('[data-reveal-path]')
+    if (rv) { await store.reveal(rv.getAttribute('data-reveal-path') ?? '', snap.sessionId); return }
+
     const btn = target.closest<HTMLElement>('[data-copy]')
     const pre = btn?.closest('.codeblock')?.querySelector('pre')
     if (!btn || !pre) return
@@ -208,6 +227,24 @@
   let lastSession = $state('')
   $effect(() => {
     if (snap.sessionId !== lastSession) { lastSession = snap.sessionId; stick = true }
+  })
+
+  /**
+   * I percorsi citati diventano copiabili e apribili — **dopo** che il testo è
+   * comparso, mai prima: la domanda «questo file esiste?» va al daemon, cioè è
+   * asincrona, e legarla al rendering vorrebbe dire che un daemon lento ritarda la
+   * **lettura** della risposta.
+   *
+   * Si osserva il DOM invece di elencare le dipendenze. La prima versione dipendeva da
+   * «quanti turni» e «quante parti», e richiudere e riaprire un turno non cambia né
+   * l'uno né l'altro — ma rifà l'HTML da zero, quindi i percorsi tornavano nudi
+   * (misurato: 5 candidati, 0 bottoni). Aggiungere `open` alle dipendenze avrebbe
+   * chiuso quel caso e lasciato aperti quelli che non ho ancora incontrato.
+   */
+  $effect(() => {
+    const el = scrollerEl
+    if (!el) return
+    return osservaPercorsi(el, snap.sessionId, store.api)
   })
   $effect(() => {
     // Letture che fanno da dipendenza: quanti turni, e quanto contenuto c'è **in tutti**
@@ -369,6 +406,24 @@
   const subject = (part: Extract<PartView, { kind: 'tool' }>): string =>
     part.summary ?? part.inputRaw.slice(0, 120)
 
+  /** L'operazione ancora in corso, se c'è: al più una per turno. Non ha un blocco suo
+   *  — sta in testa alla pill del gruppo («ops · notes · duration»), perché è la stessa
+   *  cosa che quella pill riassume: l'ultima operazione, quella non ancora finita. */
+  const livePart = (groups: Grp[]): OpPart | undefined => {
+    const g = groups.find((x) => x.kind === 'live')
+    return g ? g.part : undefined
+  }
+
+  /** La chiave dell'ultimo gruppo `done`, o `undefined` se non ce n'è. L'operazione
+   *  in corso sta in testa alla riga di **quell'** gruppo: è l'ultima cosa accaduta,
+   *  e i gruppi prima sono lavoro già finito che non la riguarda. */
+  const lastDoneKey = (groups: Grp[]): string | undefined => {
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (groups[i]!.kind === 'done') return groups[i]!.key
+    }
+    return undefined
+  }
+
   /**
    * Il percorso che questo tool ha nominato, se ce n'è uno — non indovinato dal
    * testo, letto dagli stessi campi che `summary.ts` già riconosce come «un
@@ -415,6 +470,20 @@
     renaming = false
     if (draft.trim() && draft !== title) {
       await store.rename(id, draft)
+    }
+  }
+
+  function toggleAgent(): void {
+    const open = store.todoOpen || store.helperOn
+    if (open) {
+      if (store.todoOpen) store.toggleTodo()
+      if (store.helperOn) store.helperOn = false
+    } else {
+      if (store.helperW === 0) {
+        const w = Math.max(220, Math.min(Math.round(innerWidth / 2.5), Math.round(innerWidth / 6)))
+        store.setHelperW(w)
+      }
+      store.toggleTodo()
     }
   }
 </script>
@@ -469,6 +538,10 @@
       <Icon name="i-bars" />
     </button>
 
+    <button class="iconb" title="Toggle agent panel" aria-label="Toggle agent panel"
+      aria-pressed={store.todoOpen || store.helperOn}
+      onclick={toggleAgent}><Icon name="i-panel" /></button>
+
     {#if onClose}
       <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
     {/if}
@@ -491,8 +564,13 @@
       <button class="row think clickable" onclick={() => toggleBlock(key)}>
         <Icon name="i-brain" />
         <span class="k">Reasoning</span>
-        <span class="v">{part.estimatedTokens ? `${part.estimatedTokens} tokens` : ''}</span>
-        <span class="end">{ropen ? '▾' : '▸'}</span>
+        <!-- Solo se c'è: senza token lo span sarebbe un code-chip vuoto, un
+             rettangolino scuro senza testo — aberrazione visiva segnalata dall'utente
+             il 29 agosto 2026. -->
+        {#if part.estimatedTokens}
+          <span class="v">{part.estimatedTokens} tokens</span>
+        {/if}
+        <span class="end chev" class:open={ropen}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
       </button>
       {#if ropen}
         <div class="blockbody">{part.text || '…'}</div>
@@ -519,7 +597,7 @@
             <!-- F2: quando l'agent ha scritto PERCHÉ (`intent`), è quella la riga
                  principale — dice dove sta andando, non solo cosa sta eseguendo. -->
             <span class="v" class:plain={!!part.intent}>{part.intent ?? subject(part)}</span>
-            <span class="end">
+            <span class="end" style="display:inline-flex;align-items:center;gap:4px">
               <!-- Un lavoro che continua per conto suo **vince** sull'esito della
                    chiamata, e non è un dettaglio di stile: il `tool_result` del
                    lancio torna positivo subito, quindi senza questa riga si
@@ -530,8 +608,9 @@
               {:else if part.task?.status === 'failed'}failed
               {:else if part.blocked}stopped for safety
               {:else if !part.done}…
-              {:else if part.ok}✓{:else}✗{/if}
-              {topen ? '▾' : '▸'}
+              {:else if part.ok}<Icon name="i-check" style="width:11px;height:11px;color:var(--done)" />
+              {:else}<Icon name="i-x" style="width:11px;height:11px;color:var(--stop)" />{/if}
+              <span class="chev" class:open={topen}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
             </span>
           </div>
           {#if part.intent}
@@ -552,7 +631,7 @@
         </button>
         {#if revealPath}
           <button class="reveal" title="Reveal in file manager" aria-label="Reveal in file manager"
-            onclick={() => void store.reveal(revealPath)}>
+            onclick={() => void store.reveal(revealPath, snap.sessionId)}>
             <Icon name="i-reveal" />
           </button>
         {/if}
@@ -614,6 +693,21 @@
     {/if}
   {/snippet}
 
+  <!-- L'operazione in corso, ridotta a icona e testo: sta in testa alla pill del
+       gruppo («ops · notes · duration»), non in un blocco suo. Per un comando bash che
+       ha sia descrizione sia comando si mostra solo la descrizione (`intent`): è ciò
+       che l'agent ha scritto per dire *perché*, e il comando esatto resta nel
+       dettaglio quando il gruppo si apre. -->
+  {#snippet liveTag(part: OpPart)}
+    {#if part.kind === 'reasoning'}
+      <Icon name="i-brain" />
+      <span class="m live">Thinking</span>
+    {:else}
+      <Icon name={toolIcon(part.name)} />
+      <span class="m live">{part.intent ?? subject(part)}</span>
+    {/if}
+  {/snippet}
+
   <div class="scroller conv" bind:this={scrollerEl} onscroll={onScroll}>
     {#each chapters as ch (ch.key)}
     {#if ch.clearedAt !== undefined}
@@ -626,7 +720,7 @@
         title="The context was reset here: nothing above is still in the model's memory">
         <span class="l"></span>
         <span class="t">
-          <span class="cx">{openedChapters.has(ch.key) ? '▾' : '▸'}</span>
+          <span class="cx chev" class:open={openedChapters.has(ch.key)}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
           Context cleared · {chapterTurns(ch)} {chapterTurns(ch) === 1 ? 'turn' : 'turns'} before
           · {hhmm(ch.clearedAt)}
         </span>
@@ -655,32 +749,25 @@
     {#each ch.items as { turn, i } (turn.turnId)}
       {@const open = isOpen(turn, i)}
       {@const status = turnStatus(snap.turns, i)}
+      {@const groups = groupParts(turn.parts)}
+      {@const opLive = livePart(groups)}
+      {@const doneTail = lastDoneKey(groups)}
       <div class="turn" data-turn={turn.turnId}
         class:open class:active={status === 'active'} class:queued={status === 'queued'}>
         <!-- Il contenitore è un `div` e non più il bottone stesso: dentro ce ne stanno
              due, e un bottone dentro un bottone non è HTML valido. È la stessa forma di
              `.oprow`, dove la riga del tool e la lente per il file sono fratelli. -->
         <div class="th">
-          <button class="thmain" onclick={() => toggle(turn, i)}>
-            <span class="cx">{open ? '▾' : '▸'}</span>
-            <span class="tm">{hhmm(turn.startedAt)}</span>
-            <span class="q">{promptOf(turn)}</span>
-            <span class="n">
-              {#if status === 'queued'}queued — waiting its turn
-              {:else if status === 'active'}<span class="blk">{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'} · </span>working…
-              {:else}<span class="blk">{turn.parts.length} {turn.parts.length === 1 ? 'block' : 'blocks'}{#if turn.endedAt}{' · '}{/if}</span>{#if turn.endedAt}{since(turn.startedAt, turn.endedAt)}{/if}{/if}
-            </span>
+          <button class="thmain" onclick={() => toggle(turn, i)} title={promptOf(turn)}>
+            <span class="q">{@html decoraColoriTesto(promptOf(turn))}</span>
           </button>
-          <!-- La riga tronca il prompt coi puntini, e fin qui va bene: serve a
-               riconoscere il turno, non a rileggerlo. Ma senza una via per vederlo
-               **intero** quel testo diventa irraggiungibile — su un turno vecchio è
-               spesso l'unica cosa che dice di cosa si stava parlando. Questo bottone è
-               quella via, ed è separato dal clic che apre il turno perché sono due
-               intenzioni diverse: «fammi vedere cosa avevo chiesto» non è «aprimi le
-               diciotto operazioni che ne sono seguite». -->
           <button class="thmore" title="Show the full prompt"
             aria-label="Show the full prompt"
             onclick={() => { promptAperto = promptOf(turn) }}>…</button>
+          <span class="tm">{hhmm(turn.startedAt)}</span>
+          <button class="thacc" aria-label="Toggle turn" onclick={() => toggle(turn, i)}>
+            <span class="cx chev" class:open={open}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
+          </button>
         </div>
 
         {#if open}
@@ -726,7 +813,7 @@
                 {/each}
               </div>
             {/if}
-            {#each groupParts(turn.parts) as g (g.key)}
+            {#each groups as g (g.key)}
               {#if g.kind === 'solo'}
                 {@const part = g.part}
                 {#if part.kind === 'text'}
@@ -803,8 +890,9 @@
                       <Icon name="i-doc" />
                       <span class="k">You</span>
                       <span class="v">{part.refused ? 'sent the plan back' : 'approved the plan'}</span>
-                      <span class="end" class:no={part.refused}>
-                        {part.answer}{' '}{popen ? '▾' : '▸'}
+                      <span class="end" class:no={part.refused} style="display:inline-flex;align-items:center;gap:4px">
+                        {part.answer}
+                        <span class="chev" class:open={popen}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
                       </span>
                     </button>
                     {#if popen}
@@ -845,33 +933,28 @@
                     </div>
                   {/if}
                 {/if}
-
-              {:else if g.kind === 'live'}
-                <!-- L'unica operazione ancora in corso: resta in piena vista, perché
-                     è l'unica di cui ha senso chiedersi «a che punto è». -->
-                {@render opRow(g.part)}
-
-              {:else}
+              {:else if g.kind === 'done'}
                 <!-- Finite, e accorpate: il *come* non serve più una volta che il
-                     *cosa* è successo, a meno che non lo si chieda apposta. -->
+                     *cosa* è successo, a meno che non lo si chieda apposta. Ogni
+                     gruppo sta al suo posto cronologico — è lì che è successo. -->
                 {@const gkey = g.key}
                 {@const gopen = blockOpen(gkey)}
                 {@const c = conta(g.parts)}
                 {@const nOps = c.ops}
                 {@const nNote = c.note}
                 <button class="row clickable ops" onclick={() => toggleBlock(gkey)}>
-                  <Icon name="i-bars" />
-                  <!-- Le note stanno nello stesso `.k` delle operazioni, non nel `.v`
-                       spento accanto: sono due conteggi della stessa cosa — cosa c'è
-                       qui dentro — e darne uno in tono minore direbbe che uno dei due
-                       vale meno. Quando i tool sono zero il conteggio è uno solo:
-                       «0 operations · 2 notes» è una riga che parla del nulla. -->
-                  <span class="k">
-                    {#if nOps > 0}{nOps} {nOps === 1 ? 'operation' : 'operations'}{/if}
-                    {#if nOps > 0 && nNote > 0}&nbsp;· {/if}
-                    {#if nNote > 0}{nNote} {nNote === 1 ? 'note' : 'notes'}{/if}
+                  <span class="ops-meta">
+                    {#if g.key === doneTail && opLive}
+                      {@render liveTag(opLive)}
+                      <span class="dot">·</span>
+                    {/if}
+                    <span class="m">{nOps} ops</span>
+                    <span class="dot">·</span>
+                    <span class="m">{nNote} notes</span>
+                    <span class="dot">·</span>
+                    <span class="m">{#if turn.endedAt}{since(turn.startedAt, turn.endedAt)}{:else}…{/if}</span>
                   </span>
-                  <span class="end">{gopen ? '▾' : '▸'}</span>
+                  <span class="end chev" class:open={gopen}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
                 </button>
                 {#if gopen}
                   <div class="opgroup">
@@ -899,6 +982,15 @@
               <div class="row bad">
                 <Icon name="i-warn" /><span class="k">Turn {turn.reason}</span>
                 {#if turn.detail}<span class="v plain">{turn.detail}</span>{/if}
+              </div>
+            {/if}
+
+            {#if opLive && doneTail === undefined}
+              <!-- Il turno è appena partito e non c'è ancora un gruppo di lavoro
+                   finito: l'operazione in corso sta da sola, nella stessa pill che
+                   altrimenti riassumerebbe «ops · notes · duration». -->
+              <div class="row ops">
+                <span class="ops-meta">{@render liveTag(opLive)}</span>
               </div>
             {/if}
           </div>
@@ -949,7 +1041,18 @@
       </button>
     </div>
     <div class="dlgb">
-      <pre class="fullp">{promptAperto}</pre>
+      <!-- Le citazioni con `@` diventano premibili **qui** e non nella riga del turno,
+           e la ragione è strutturale, non estetica: quella riga *è* un bottone (apre il
+           turno), e un bottone dentro un bottone non è HTML valido — è scritto tre righe
+           sopra di essa, e ci sono cascato lo stesso. Qui invece il prompt sta per conto
+           suo, ed è anche il posto giusto: la riga serve a **riconoscere** il turno,
+           questa finestra a **rileggerlo**, e agire appartiene alla seconda.
+           Si riconoscono dalla `@` e solo da quella: è una citazione dichiarata, scelta
+           da un menu che il CLI ha riempito, non una somiglianza tipografica — quindi
+           non serve chiedere al daemon se esiste, lo sapeva già chi l'ha scritta. -->
+      <pre class="fullp">{#each pezziConCitazioni(promptAperto) as pz}{#if pz.cita}<button
+        class="cita" title="Reveal in file manager: {pz.t}"
+        onclick={() => void store.reveal(pz.t, snap.sessionId)}>@{pz.t}</button>{:else}{@html decoraColoriTesto(pz.t)}{/if}{/each}</pre>
     </div>
   </div>
 {/if}
@@ -974,76 +1077,112 @@
     width: 100%; border: 0; text-align: left; cursor: pointer;
     background: var(--surface-2); color: inherit; font: inherit;
   }
-  .row.clickable.block { background: var(--wait-bg); color: var(--wait); }
-  .row.clickable.bad { background: var(--stop-bg); color: var(--stop); }
-  .row.clickable.think { color: var(--muted); }
-  /* `.v` è monospace di default perché di solito porta un comando o un percorso —
-     codice. La motivazione (F2) è una frase, non codice: qui riprende il font della
-     UI, altrimenti «Look for the quota panel» si legge come un identificatore. */
-  .row .v.plain { font-family: var(--sans); color: var(--ink-2); }
+  /* I singoli blocchi operations (reasoning, tool) non sono contenitori: niente
+     pill, niente bordo, niente fondo — sono righe a tutta larghezza, e a separarle
+     è il solo gap del gruppo. L'unica cosa che porta un fondo qui dentro è il testo
+     monospace, che si legge come un tag `code`: fondo scuro e lilla. Ciò che è una
+     frase resta sul fondo della riga, nel font della UI. */
+  .row.clickable.think,
+  .row.clickable.tool {
+    border: 0; border-radius: 0; background: none; color: var(--muted); font-size: 11px;
+  }
+  .row.clickable.think { display: flex; align-items: center; gap: 5px; }
   /* La riga di un tool era un `<button class="row">` flex diretto; ora il flex sta
      su `.rtop` dentro di lui, per poter aggiungere sotto — solo quando c'è una
      motivazione (F2) — una seconda riga più piccola col comando esatto. Senza
-     motivazione `.rtop` è tutto ciò che il bottone contiene: identica a prima.
-     Scoperto su `.tool`, non su `.row.clickable` in generale: il reasoning e il
-     gruppo «N operations» sono anche loro `.row.clickable`, ma restano un flex
-     diretto — non hanno `.rtop`, e diventare un blocco li spezzerebbe su due righe
-     senza motivo. */
+     motivazione `.rtop` è tutto ciò che il bottone contiene: identica a prima. */
   .row.clickable.tool { display: block; }
-  .row.clickable.tool .rtop { display: flex; align-items: center; gap: 7px; }
+  .row.clickable.tool .rtop { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .row.clickable.tool .rtop .v { min-width: 0; }
   .row.clickable.tool .rsub {
-    margin: 2px 0 0 21px; font-family: var(--mono); font-size: 9px; color: var(--muted);
+    display: inline-block; max-width: 100%; vertical-align: top;
+    margin: 2px 0 0 21px;
+    font-family: var(--mono); font-size: 9px;
+    color: #c7bfff; background: #0a0c14;
+    padding: 1px 5px; border-radius: 5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-
-  /* F3: il bottone che arriva al file, attaccato alla riga del tool. `.oprow` senza
-     `.withreveal` non cambia niente — è il caso normale, senza percorso da rivelare
-     — quindi non tocca il disegno di ogni altra riga. */
-  .oprow.withreveal { display: flex; align-items: stretch; border-radius: 7px; overflow: hidden; }
-  .oprow.withreveal .row { border-radius: 0; }
-  .oprow .reveal {
-    flex: none; border: 0; border-left: 1px solid var(--line-2);
-    background: var(--surface-2); color: var(--muted); padding: 0 9px; cursor: pointer;
+  /* Gli stati di un tool restano segnali di colore sul testo della riga — un
+     fallimento è rosso, un'azione fermata dal classificatore ambra — ma senza
+     fondo: la riga è testo, non un riquadro. */
+  .row.clickable.bad { color: var(--stop); }
+  .row.clickable.block { color: var(--wait); }
+  /* Il testo monospace dentro le righe operations si legge come un tag `code`:
+     JetBrains Mono, fondo scuro `#0a0c14` e lilla `#c7bfff`, con lo stesso piccolo
+     padding e angolo. Vale SOLO per il codice — soggetto, percorso, comando — e
+     non per la motivazione (F2), che è una frase e resta sul fondo della riga. */
+  .row.clickable.think .v:not(.plain),
+  .row.clickable.tool .rtop .v:not(.plain) {
+    font-family: var(--mono); font-size: 10px;
+    color: #c7bfff; background: #0a0c14;
+    padding: 1px 5px; border-radius: 5px;
   }
-  .oprow .reveal:hover { color: var(--ink); background: var(--surface-3); }
-  .oprow .reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .row .v.plain { font-family: var(--sans); color: var(--ink-2); }
 
-  /* Il gruppo di operazioni finite: stesso disegno di una riga singola, ma il
-     colore resta neutro apposta — non è successo niente lì dentro che meriti
-     l'attenzione che un tool fallito o bloccato chiede con il suo colore. */
-  .row.ops { color: var(--muted); }
-  .row.ops .k { font-weight: 500; }
+  /* F3: il bottone che arriva al file, accanto alla riga del tool. `.oprow` senza
+     `.withreveal` non cambia niente — è il caso normale, senza percorso da rivelare
+     — quindi non tocca il disegno di ogni altra riga. È un controllo tondo e
+     leggero: sta a fianco della riga, che ora è a tutta larghezza, quindi la lente
+     finisce al bordo destro del turno. */
+  .oprow.withreveal { display: flex; align-items: center; gap: 6px; }
+  .oprow .reveal {
+    flex: none; border: 1px solid var(--line-2); border-radius: 50%;
+    background: none; color: var(--muted); width: 26px; height: 26px;
+    padding: 0; cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center;
+  }
+  .oprow .reveal :global(svg) { width: 12px; height: 12px; }
+  .oprow .reveal:hover { color: var(--ink); background: var(--surface-2); }
+  .oprow .reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Il gruppo di operazioni finite: una pill arrotondata con bordo sottile,
+     non più una riga a tutta larghezza. Testo "X ops · Y notes · MMm SSs"
+     separato da dot, con chevron per aprire/chiudere. Allineata a sinistra
+     nel corpo del turno (22px) e rientrata rispetto al prompt (12px). */
+  .row.ops { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-2); border-radius: 20px; padding: 5px 12px; margin: 0; color: var(--muted); font-size: 11px; background: none; align-self: flex-start; }
+  .row.ops .ops-meta { display: flex; align-items: center; gap: 6px; justify-content: flex-start; }
+  .row.ops .ops-meta .m { flex: none; text-align: left; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .row.ops .ops-meta .dot { flex: none; color: var(--muted); opacity: .5; font-size: 11px; line-height: 1; }
+  /* L'operazione in corso, in testa alla riga: icona piccola e testo un filo più
+     scuro del resto, perché è la cosa che sta succedendo *adesso* mentre il resto
+     della riga è già passato. */
+  .row.ops .ops-meta :global(svg.ic) { width: 11px; height: 11px; }
+  .row.ops .ops-meta .m.live { color: var(--ink-2); font-weight: 500; }
+  .row.ops .end { color: var(--muted); font-size: 11px; flex: none; display: inline-flex; align-items: center; }
+  .row.clickable.ops { background: none; align-self: flex-start; }
   .opgroup {
-    display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px 8px;
+    display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 8px;
     padding-left: 8px; border-left: 2px solid var(--line-2);
   }
   /* La narrazione dentro il gruppo. Stesso testo di sempre, tono minore: è la
      didascalia delle righe che le stanno sotto, e messa allo stesso peso della
      risposta finale tornerebbe a competere con lei, che è la ragione per cui il
-     gruppo esiste. La barretta a sinistra la stacca dalle righe dei tool, che
-     sono rettangoli pieni: senza, un paragrafo in mezzo a loro sembra un errore
-     di impaginazione. */
+     gruppo esiste. Nessun bordo suo: a delimitare il gruppo è già la barretta
+     complessiva del blocco espanso, e una seconda sotto ogni nota la raddoppia
+     senza aggiungere niente. */
   .opgroup .prose.note {
     font-size: .92em; color: var(--muted);
-    margin: 4px 0 6px; padding-left: 8px; border-left: 2px solid var(--line-2);
+    margin: 2px 0 4px;
   }
   .opgroup .prose.note :global(p) { margin: .3em 0; }
   .opgroup .prose.note :global(h1),
   .opgroup .prose.note :global(h2),
   .opgroup .prose.note :global(h3) { font-size: 1em; margin: .4em 0 .2em; }
   .row.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .chev { display: inline-flex; transition: transform .15s; }
+  .chev.open { transform: rotate(90deg); }
   .blockbody {
     white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
-    font-size: 10.5px; color: var(--ink-2); background: var(--surface);
+    font-size: 10.5px; color: #c7bfff; background: #0a0c14;
     border: 1px solid var(--line-2); border-radius: 7px; padding: 7px 9px;
     margin: 2px 0 6px; max-height: 360px; overflow: auto;
   }
   .bblabel {
     font-family: var(--sans); font-size: 9px; font-weight: 700; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--muted); margin: 6px 0 2px;
+    text-transform: uppercase; color: #9aa3b8; margin: 6px 0 2px;
   }
   .bblabel:first-child { margin-top: 0; }
-  .bblabel.err { color: var(--stop); }
+  .bblabel.err { color: #f0736a; }
 
   /* La risposta che finisce con un punto di domanda: è quella che si perde più
      facilmente in un muro di testo, e per questo prende lo stesso ambra di ogni
@@ -1098,7 +1237,7 @@
      un'etichetta — ma con un tetto: un sub-agent può scrivere venti righe, e venti
      righe dentro una riga di elenco non sono più una riga di elenco. */
   .tsum {
-    margin: 3px 0 0 22px; font-size: 11px; line-height: 1.4; color: var(--muted);
+    margin: 3px 0 0 21px; font-size: 11px; line-height: 1.4; color: var(--muted);
     border-left: 2px solid var(--line); padding-left: 8px;
     display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
     overflow: hidden; text-align: left; white-space: normal;
@@ -1188,9 +1327,14 @@
      contenitore che li tiene insieme e che si appiccica in cima. */
   .thmain, .thmore, .iconb, .effbtn { background: none; font: inherit; color: inherit; }
   .thmain {
-    width: 100%; border: 0; text-align: left; padding: 0;
-    display: flex; align-items: center; gap: 8px; min-width: 0;
+    flex: 1; border: 0; text-align: left; padding: 0;
+    display: flex; align-items: center; gap: 8px; min-width: 0; background: none; cursor: pointer;
   }
+  .thacc {
+    flex: none; border: 0; background: none; padding: 0 2px; cursor: pointer;
+    color: var(--muted); font-size: 10px; display: flex; align-items: center;
+  }
+  .thacc:hover { color: var(--ink); }
   /* Il bottone del prompt intero. Piccolo e spento: è una seconda via, non l'azione
      principale della riga — quella resta aprire il turno. `flex:none` perché non ceda
      spazio quando il prompt è lungo, che è esattamente il caso in cui serve. */
@@ -1200,7 +1344,7 @@
     align-self: stretch; display: flex; align-items: center;
   }
   .thmore:hover { color: var(--ink); }
-  .thmain:focus-visible, .thmore:focus-visible,
+  .thmain:focus-visible, .thmore:focus-visible, .thacc:focus-visible,
   .iconb:focus-visible, .effbtn:focus-visible {
     outline: 2px solid var(--accent); outline-offset: -2px;
   }

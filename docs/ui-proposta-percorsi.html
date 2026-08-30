@@ -1,0 +1,78 @@
+<!doctype html><html lang="it"><meta charset="utf-8"><title>Percorsi cliccabili</title>
+<style>
+:root{--ground:#FBFBFD;--surface:#FFF;--surface-2:#F5F6FA;--surface-3:#EEF0F6;--ink:#171A22;
+--ink-2:#454B5C;--muted:#6A7183;--line:#E7E9F0;--line-2:#DCDFE9;--accent:#3B5BF5;--accent-soft:#E9EDFE;
+--stop:#D0342C;--done:#186A3B;--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--sans);background:var(--ground);color:var(--ink);font-size:15px;line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:44px 32px 72px}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 36px;max-width:72ch}
+h2{font-size:17px;margin:44px 0 4px;padding-top:22px;border-top:1px solid var(--line)}
+.lead{color:var(--ink-2);margin:0 0 20px;max-width:72ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.card>.h{font-size:11px;letter-spacing:.09em;text-transform:uppercase;padding:10px 14px;
+border-bottom:1px solid var(--line);color:var(--muted)}
+.card>.b{padding:18px 20px}
+.bad .h{color:var(--stop)}.good .h{color:var(--done)}
+.prosa{font-size:14px;line-height:1.65;max-width:72ch}
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);border:1px solid var(--line);
+padding:1px 5px;border-radius:4px;color:var(--ink-2)}
+/* la proposta */
+.pth{display:inline-flex;align-items:center;gap:0;vertical-align:baseline;
+background:var(--surface-2);border:1px solid var(--line-2);border-radius:4px;
+font-family:var(--mono);font-size:.86em;line-height:1.5;overflow:hidden}
+.pth .p{padding:1px 5px;color:var(--ink-2)}
+.pth .b{width:20px;height:20px;display:inline-grid;place-items:center;border:0;background:none;
+cursor:pointer;color:var(--muted);border-left:1px solid var(--line-2);padding:0}
+.pth .b:hover{background:var(--accent-soft);color:var(--accent)}
+.pth svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.8;
+stroke-linecap:round;stroke-linejoin:round}
+.note{font-size:13px;color:var(--muted);margin:14px 0 0;max-width:72ch}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin-top:6px}
+td,th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.ok{color:var(--done);font-weight:600}.ko{color:var(--stop);font-weight:600}
+</style>
+<div class="wrap">
+<h1>Percorsi citati: copiabili e apribili</h1>
+<p class="sub">Il bottone accanto ai link «Open in Notion» esiste già e fa esattamente questo:
+non tocca l'elemento, gliene mette uno di fianco. Qui la stessa forma applicata ai percorsi
+che compaiono nel testo di una risposta.</p>
+
+<h2>Com'è e come sarebbe</h2>
+<div class="card bad"><div class="h">Oggi — il percorso è testo, e basta</div><div class="b">
+<div class="prosa">L'anteprima è in <code>docs/ui-proposta-stile.html</code>, e la funzione da copiare
+è <code>addAppLinks</code> in <code>ui/src/lib/markdown.ts</code>.</div>
+<p class="note">Per aprirlo devi selezionarlo, copiarlo, e cercarlo altrove.</p>
+</div></div>
+
+<div class="card good"><div class="h">Proposta — due bottoni attaccati, come per i link</div><div class="b">
+<div class="prosa">L'anteprima è in <span class="pth"><span class="p">docs/ui-proposta-stile.html</span><button class="b" title="Copia il percorso"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button><button class="b" title="Apri"><svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button></span>, e la funzione da
+copiare è <code>addAppLinks</code> in <span class="pth"><span class="p">ui/src/lib/markdown.ts</span><button class="b" title="Copia il percorso"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button><button class="b" title="Apri"><svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button></span>.</div>
+<p class="note"><b>Solo i percorsi veri prendono i bottoni.</b> <code>addAppLinks</code> qui sopra
+resta un <code>code</code> normale, perché è un nome di funzione — non esiste come file.
+Il resto della riga non cambia: stessa altezza, stesso font, nessun a capo.</p>
+</div></div>
+
+<h2>Il problema che aveva fermato la cosa il 26 agosto, e come si scioglie</h2>
+<p class="lead"><code>docs/ui-schermate.md</code> dice: «non scandaglia il testo libero della risposta
+in cerca di qualcosa che somiglia a un percorso — riconoscere un percorso in Markdown non fidato
+è un problema diverso, e più fragile». Vero: <b>una regola tipografica non può decidere</b>.</p>
+<table>
+<tr><th>Testo nel messaggio</th><th>Regola tipografica</th><th>Chiedendo al daemon</th></tr>
+<tr><td><code>docs/ui-schermate.md</code></td><td class="ok">percorso</td><td class="ok">esiste → bottoni</td></tr>
+<tr><td><code>addAppLinks</code></td><td class="ok">non è un percorso</td><td class="ok">niente</td></tr>
+<tr><td><code>core/reduce.ts</code></td><td class="ok">percorso</td><td class="ko">non esiste (è <code>src/core/reduce.ts</code>) → niente</td></tr>
+<tr><td><code>--permission-mode</code></td><td class="ko">nessuna barra… ma nemmeno un file</td><td class="ok">niente</td></tr>
+<tr><td><code>N/A</code>, <code>and/or</code>, <code>km/h</code></td><td class="ko">hanno una barra → falsi positivi</td><td class="ok">niente</td></tr>
+<tr><td><code>ui/src/lib/markdown.ts</code></td><td class="ok">percorso</td><td class="ok">esiste → bottoni</td></tr>
+</table>
+<p class="note"><b>La cura è non indovinare.</b> La regola tipografica serve solo a fare una rosa
+(contiene <code>/</code> oppure finisce con un'estensione nota); a decidere è il daemon, che
+<b>guarda sul disco</b> relativamente al <code>cwd</code> della chat. Un percorso o c'è o non c'è:
+smette di essere un giudizio e diventa un fatto — la stessa mossa già fatta per
+<code>file_suggestions</code>, dove a cercare i file è il CLI e noi mostriamo.
+Una domanda sola per messaggio, in blocco, e la risposta si tiene: non costa quota,
+è una lettura di filesystem.</p>
+</div></html>

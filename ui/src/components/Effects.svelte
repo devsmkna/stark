@@ -71,17 +71,33 @@
   const nf = $derived(byFile.length)
   const nc = $derived(snap.shell.length)
 
-  /** L'esito di un comando in due parole. Interrotto non è fallito. */
-  function outcome(r: CommandRunView): { text: string; bad: boolean } {
+  /** L'esito di un comando: icona reale invece del glifo testuale. Interrotto non è
+   *  fallito, e «exit N» resta testo perché porta l'informazione — l'icona da sola
+   *  non direbbe quale codice. */
+  function outcome(r: CommandRunView): { icon?: string; text: string; bad: boolean } {
     if (r.interrupted) return { text: 'interrupted', bad: false }
     if (r.exitCode === undefined) return { text: '', bad: false }
     return r.exitCode === 0
-      ? { text: '✓', bad: false }
-      : { text: `✗ exit ${r.exitCode}`, bad: true }
+      ? { icon: 'i-check', text: '', bad: false }
+      : { icon: 'i-x', text: `exit ${r.exitCode}`, bad: true }
   }
 
   const short = (s: string): string =>
     s.replace(/\s+/g, ' ').trim().slice(0, 200)
+
+  function toggleAgent(): void {
+    const open = store.todoOpen || store.helperOn
+    if (open) {
+      if (store.todoOpen) store.toggleTodo()
+      if (store.helperOn) store.helperOn = false
+    } else {
+      if (store.helperW === 0) {
+        const w = Math.max(220, Math.min(Math.round(innerWidth / 2.5), Math.round(innerWidth / 6)))
+        store.setHelperW(w)
+      }
+      store.toggleTodo()
+    }
+  }
 </script>
 
 <div class="col">
@@ -96,6 +112,9 @@
       <button class:on={mode === 'file'} onclick={() => { mode = 'file' }}>By file</button>
       <button class:on={mode === 'time'} onclick={() => { mode = 'time' }}>By time</button>
     </div>
+    <button class="iconb" title="Toggle agent panel" aria-label="Toggle agent panel"
+      aria-pressed={store.todoOpen || store.helperOn}
+      onclick={toggleAgent}><Icon name="i-panel" /></button>
     {#if onClose}
       <button class="iconb" title="Close panel" onclick={onClose}><Icon name="i-x" /></button>
     {/if}
@@ -122,7 +141,12 @@
               <div class="row" class:bad={o.bad}>
                 <Icon name="i-term" />
                 <span class="v">{short(m.run.command)}</span>
-                <span class="end" style={o.bad ? 'color:var(--stop)' : ''}>{o.text}</span>
+                <span class="end" style={o.bad ? 'color:var(--stop)' : ''}>
+                  {#if o.icon}
+                    <Icon name={o.icon} style="width:11px;height:11px;color:{o.bad ? 'var(--stop)' : 'var(--done)'}" />
+                  {/if}
+                  {o.text}
+                </span>
               </div>
             {:else}
               <!-- Bloccato non è un fallimento: è «fermato, e puoi consentirlo tu». -->

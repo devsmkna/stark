@@ -212,7 +212,41 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 /* I passi di una richiesta con più domande. Il pallino dice se quel passo ha già una
    risposta, non solo dove sei: con quattro domande, «quale mi manca» è la domanda che
    ci si fa davvero, e un avanzamento lineare non saprebbe rispondere. */
-.steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 9px}
+/* I passi stanno nella riga del titolo (28 agosto 2026), non su una riga loro: prima
+   erano una fascia a parte e, con l'etichetta di stato, facevano tre righe di cornice
+   prima della domanda. `margin:auto` sui due lati li centra senza sapere quanto e'
+   largo il titolo. */
+.steps{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-left:auto;margin-right:auto;min-width:0}
+/* Il box delle domande: markdown nel testo, e le opzioni come UNA scheda con dei
+   filetti invece di otto riquadri staccati. Otto bordi piu' sette spazi erano quindici
+   linee per otto voci; adesso sono sette, e da telefono si vedono due opzioni in piu'. */
+.qtext{font-size:12.5px;line-height:1.5;color:var(--ink);margin:8px 0 0;max-width:78ch}
+.qtext code{font-size:.86em;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:4px;padding:1px 4px;font-family:var(--mono)}
+.qopts{display:flex;flex-direction:column;margin-top:9px;border:1px solid var(--line-2);
+  border-radius:10px;background:var(--surface);overflow:hidden}
+.qopt,.qwrite{position:relative;display:flex;align-items:flex-start;gap:9px;width:100%;
+  text-align:left;border:0;border-top:1px solid var(--line);background:none;padding:9px 11px}
+.qopts>:first-child{border-top:0}
+/* La scelta si vede dal fondo e da una barretta a sinistra: dentro una scheda un bordo
+   colorato dovrebbe combattere coi filetti dei vicini. */
+.qopt.on,.qwrite.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.mk{width:13px;height:13px;flex:none;margin-top:1.5px;border:1.5px solid var(--line-2);
+  border-radius:50%;background:var(--surface)}
+.mk.sq{border-radius:4px}
+.qopt.on .mk{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 2.5px var(--surface)}
+.bd{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.lb{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;flex-wrap:wrap}
+.lb .ic{width:12px;height:12px;flex:none}
+.ds{font-size:10px;line-height:1.4;color:var(--muted)}
+.ds code{font-size:.9em;font-family:var(--mono);color:var(--ink-2)}
+/* Il badge sta NELLA riga dell'etichetta, non sporgente sul bordo: dentro una scheda
+   quel bordo non c'e' piu', e su schermo stretto finiva sopra l'etichetta. */
+.reco{order:2;margin-left:auto;flex:none;padding:1.5px 7px;border-radius:20px;
+  background:var(--accent);color:#fff;font-size:8.5px;font-weight:700;letter-spacing:.03em}
+.qwrite{align-items:center}
+.qwrite .ic{width:12px;height:12px;flex:none;color:var(--muted)}
+.qwrite .ph{font-size:11px;color:var(--muted)}
 .stp{display:flex;align-items:center;gap:5px;max-width:160px;padding:2px 8px 2px 4px;border:0;border-radius:20px;background:none;font:inherit;font-size:10px;color:var(--muted);cursor:pointer}
 .stp .d{width:7px;height:7px;border-radius:50%;flex:none;border:1.5px solid var(--line-2);background:var(--surface)}
 .stp .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -768,10 +802,19 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="mock" style="display:block;margin-top:6px">
           <div class="dock" style="border-top:0">
             <div class="askbox q">
-              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> Tabs or spaces?
+              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> A question
                 <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button></div>
-              <div class="s">For the file I&rsquo;m about to generate</div>
-              <div class="opts"><span class="opt pri">Tabs</span><span class="opt">Spaces</span><span class="opt alt"><svg class="ic"><use href="#i-pencil"/></svg>Type in your answer</span><span class="opt alt"><svg class="ic"><use href="#i-chat"/></svg>Chat about this</span></div>
+              <div class="qtext">Tabs o spazi per <code>src/core/reduce.ts</code>? Il file
+                <b>non ha ancora</b> uno stile suo.</div>
+              <div class="qopts">
+                <div class="qopt on"><span class="mk"></span><span class="bd"><span class="lb">Tabs</span>
+                  <span class="ds">Come il resto del repo.</span></span></div>
+                <div class="qopt"><span class="mk"></span><span class="bd"><span class="lb">Spazi</span>
+                  <span class="ds">Due, come <code>package.json</code>.</span></span></div>
+                <div class="qopt"><span class="mk"></span><span class="bd"><span class="lb"><svg class="ic"><use href="#i-chat"/></svg>Chat about this</span>
+                  <span class="ds">Le altre risposte passano com&rsquo;erano.</span></span></div>
+                <div class="qwrite"><span class="mk"></span><svg class="ic"><use href="#i-pencil"/></svg><span class="ph">Type in your answer</span></div>
+              </div>
             </div>
             <div class="input">Message the agent&hellip;</div>
           </div>
@@ -782,18 +825,25 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
         <div class="mock" style="display:block;margin-top:6px">
           <div class="dock" style="border-top:0">
             <div class="askbox q">
-              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> Storage
-                <span class="stepn">2 of 3</span>
+              <div class="h"><svg class="ic" style="color:var(--wait)"><use href="#i-ask"/></svg> Question 2 of 3
+                <span class="steps">
+                  <span class="stp ok"><span class="d"></span><span class="t">Auth</span></span>
+                  <span class="stp on"><span class="d"></span><span class="t">Storage</span></span>
+                  <span class="stp"><span class="d"></span><span class="t">Targets</span></span>
+                </span>
                 <button class="stopb" title="Stop"><svg viewBox="0 0 24 24"><use href="#i-stop"/></svg></button></div>
-              <div class="steps">
-                <span class="stp ok"><span class="d"></span><span class="t">Auth</span></span>
-                <span class="stp on"><span class="d"></span><span class="t">Storage</span></span>
-                <span class="stp"><span class="d"></span><span class="t">Targets</span></span>
+              <div class="qtext">Dove vivono le sessioni? Oggi il journal sta in
+                <code>~/.stark/sessioni</code>.</div>
+              <div class="qopts">
+                <div class="qopt"><span class="mk sq"></span><span class="bd"><span class="lb"><span class="reco">Recommended</span>On disk</span>
+                  <span class="ds">Sopravvivono al riavvio.</span></span></div>
+                <div class="qopt on"><span class="mk sq"></span><span class="bd"><span class="lb">In memory</span>
+                  <span class="ds">Niente resta su disco.</span></span></div>
+                <div class="qopt"><span class="mk sq"></span><span class="bd"><span class="lb"><svg class="ic"><use href="#i-chat"/></svg>Chat about this</span>
+                  <span class="ds">The other answers go through as they are. This one comes back as a question to talk about, and the agent asks you again after.</span></span></div>
+                <div class="qwrite"><span class="mk"></span><svg class="ic"><use href="#i-pencil"/></svg><span class="ph">Type in your answer</span></div>
               </div>
-              <div class="s">Where should the sessions live?</div>
-              <div class="opts"><span class="opt">On disk</span><span class="opt">In memory</span><span class="opt alt"><svg class="ic"><use href="#i-pencil"/></svg>Type in your answer</span><span class="opt alt pri"><svg class="ic"><use href="#i-chat"/></svg>Chat about this</span></div>
-              <div class="hintline"><svg class="ic"><use href="#i-chat"/></svg>The other answers go through as they are. This one comes back as a question to talk about, and the agent asks you again after.</div>
-              <div class="opts" style="margin-top:8px"><span class="opt"><svg class="ic"><use href="#i-back"/></svg>Back</span><span class="opt">Next <svg class="ic"><use href="#i-fwd"/></svg></span><span class="opt">Dismiss</span></div>
+              <div class="opts" style="margin-top:8px"><span class="opt"><svg class="ic"><use href="#i-back"/></svg>Back</span><span class="opt">Next <svg class="ic"><use href="#i-fwd"/></svg></span><span class="opt pri">Send 3 answers</span><span class="opt">Dismiss</span></div>
             </div>
             <div class="input">Message the agent&hellip;</div>
           </div>

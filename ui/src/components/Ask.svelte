@@ -13,7 +13,8 @@
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { AgentQuestion } from '$core/events.ts'
   import { label, permissionHeadline, tilde } from '../lib/view.ts'
-  import { renderMarkdown } from '../lib/markdown.ts'
+  import { renderMarkdown, renderInline } from '../lib/markdown.ts'
+  import { osservaPercorsi } from '../lib/percorsi.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store, snap, canStop }:
@@ -35,6 +36,29 @@
    *  è una risposta, e obbligare a motivarla renderebbe più scomodo dire di no che
    *  dire di sì — che è esattamente il contrario di quello che serve. */
   let feedback = $state('')
+
+  /**
+   * I due bottoni dentro un percorso citato nel piano. Delegazione e non `onclick` per
+   * bottone, perche' quei bottoni non sono elementi Svelte: li scrive `decoraPercorsi`
+   * come DOM grezzo dentro l'HTML gia' reso. E' lo stesso gesto che la conversazione
+   * gia' fa in `onProseClick`; qui e' ripetuto invece di condiviso perche' i due
+   * componenti non hanno un contenitore in comune, ed estrarne uno per due chiamanti
+   * costerebbe piu' di quanto risparmi.
+   */
+  async function onPathClick(e: MouseEvent): Promise<void> {
+    const t = e.target as HTMLElement
+    const cp = t.closest<HTMLElement>('[data-copy-path]')
+    if (cp) {
+      const p = cp.getAttribute('data-copy-path') ?? ''
+      try { await navigator.clipboard.writeText(p) }
+      catch { store.refused = 'the browser did not allow copying'; return }
+      cp.classList.add('done')
+      setTimeout(() => cp.classList.remove('done'), 3000)
+      return
+    }
+    const rv = t.closest<HTMLElement>('[data-reveal-path]')
+    if (rv) await store.reveal(rv.getAttribute('data-reveal-path') ?? '', snap.sessionId)
+  }
   /** Le modalità in cui si può ripartire, prese dalla sessione e non da un elenco
    *  scritto qui: quali esistano e quali siano rifiutate lo sa l'adapter (§1), e da
    *  root `bypassPermissions` non c'è. */
@@ -293,14 +317,21 @@
          è la cosa su cui si sta decidendo, e approvare senza poterla leggere è ciò
          che succedeva prima che questo blocco esistesse. Scorre, perché un piano di
          tre passi sta in mezzo schermo e uno di dieci no. -->
-    <div class="planbody">{@html renderMarkdown(plan.plan)}</div>
+    <!-- Stessa delegazione della conversazione, e per la stessa ragione: i bottoni di
+         un percorso nascono come DOM grezzo dentro `decoraPercorsi`. Il piano cita
+         file quanto e più di una risposta — è il posto dove si decide *su quali file*. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="planbody" onclick={onPathClick}
+      {@attach el => osservaPercorsi(el, snap.sessionId, store.api)}
+    >{@html renderMarkdown(plan.plan)}</div>
 
     {#if plan.path}
       <!-- Il CLI il piano se lo scrive anche su un file. Dirlo permette di aprirlo
            dove si aprono gli altri file; leggerlo da lì per mostrarlo qui vorrebbe
            dire preferire il disco a ciò che il protocollo ha già mandato. -->
       <button class="pathrow" title="Reveal in file manager"
-        onclick={() => void store.reveal(plan.path!)}>
+        onclick={() => void store.reveal(plan.path!, snap.sessionId)}>
         <Icon name="i-reveal" /> {tilde(plan.path)}
       </button>
     {/if}
@@ -333,16 +364,35 @@
   </div>
 
 {:else if question && cur}
-  <div class="askbox q">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- Stessa delegazione del piano: i bottoni di un percorso citato nascono come DOM
+       grezzo dentro `decoraPercorsi`, quindi non c'è nessun elemento Svelte a cui
+       attaccare un `onclick`. Qui serve quanto nel piano — una domanda su quale file
+       toccare cita dei file, ed è la ragione per cui il testo è diventato Markdown. -->
+  <div class="askbox q" onclick={onPathClick}
+    {@attach el => osservaPercorsi(el, snap.sessionId, store.api)}>
     <div class="qhead">
       <Icon name="i-ask" style="color:var(--wait)" />
       <span class="qtitle">
         {qs.length > 1 ? `Question ${step + 1} of ${qs.length}` : (cur.header || 'A question')}
       </span>
-      <!-- Quante ne arrivano in tutto, detto in cima: una domanda alla volta è la forma
-           giusta per rispondere, ma da sola nasconde quanto è lunga la richiesta — e
-           saperlo cambia se ci si mette adesso o dopo. -->
-      {#if qs.length > 1}<span class="qtot">{qs.length} answers total</span>{/if}
+      <!-- I passi, sulla stessa riga del titolo. Portano due cose insieme: **dove sei**
+           (quello acceso) e **quanto è lunga la richiesta** — tre pastiglie sono tre
+           domande. È per questo che il contatore «3 answers total», che stava qui, non
+           c'è più: diceva un numero che adesso si conta guardando, e in fondo il bottone
+           dice comunque «Send 3 answers». -->
+      {#if qs.length > 1}
+        <div class="qsteps">
+          {#each qs as q, i (q.question)}
+            <button class="stp" class:on={i === step} class:ok={answered(q)}
+              title={q.question} aria-current={i === step ? 'step' : undefined}
+              onclick={() => { step = i }}>
+              <span class="d"></span><span class="t">{q.header || `Question ${i + 1}`}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
       {#if canStop}
         <button class="stopb" title="Stop" onclick={() => void store.stop()}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
@@ -350,26 +400,8 @@
       {/if}
     </div>
 
-    <!-- Lo stato con la stessa parola dell'elenco (`label`), non una scritta apposta per
-         qui: se la riga a sinistra dice «asking», dirlo in un altro modo qui obbligherebbe
-         a tradurre fra due vocabolari per capire che è la stessa chat.
-         I passi non sono una decorazione di avanzamento: sono la mappa della richiesta —
-         dicono quante domande sono in tutto e si premono, perché rivedere la prima dopo
-         aver letto la terza è esattamente ciò che si vuole fare. -->
-    <div class="qmeta">
-      <span class="st"><span class="dot"></span>{label(snap.state)}</span>
-      {#if qs.length > 1}
-        {#each qs as q, i (q.question)}
-          <button class="stp" class:on={i === step} class:ok={answered(q)}
-            title={q.question} aria-current={i === step ? 'step' : undefined}
-            onclick={() => { step = i }}>
-            <span class="d"></span><span class="t">{q.header || `Question ${i + 1}`}</span>
-          </button>
-        {/each}
-      {/if}
-    </div>
-
-    <div class="qtext">{cur.question}</div>
+    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+    <div class="qtext">{@html renderMarkdown(cur.question)}</div>
 
     <!-- Righe piene con un pallino, non pillole in fila. La forma dice da sé «una di
          queste» — o «quante vuoi», col quadrato, quando la domanda è a scelta multipla —
@@ -382,10 +414,13 @@
           onclick={() => pick(cur, o.label)}>
           <span class="mk" class:sq={cur.multiSelect}></span>
           <span class="bd">
-            <span class="lb">{clean(o.label)}</span>
-            {#if o.description}<span class="ds">{o.description}</span>{/if}
+            <!-- `renderInline` e non `renderMarkdown`: qui un `<p>` porterebbe i suoi
+                 margini dentro una riga il cui layout è già deciso. -->
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            <span class="lb">{#if isReco(o.label)}<span class="reco">Recommended</span>{/if}{@html renderInline(clean(o.label))}</span>
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            {#if o.description}<span class="ds">{@html renderInline(o.description)}</span>{/if}
           </span>
-          {#if isReco(o.label)}<span class="reco">Recommended</span>{/if}
         </button>
       {/each}
 
@@ -499,49 +534,69 @@
     display: flex; align-items: center; gap: 7px;
     font-weight: 700; font-size: 11.5px; color: var(--wait);
   }
-  .qtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .qtot {
-    margin-left: auto; flex: none; padding: 2px 8px; border-radius: 20px;
-    border: 1px solid var(--line-2); background: var(--surface);
-    font-size: 9.5px; font-weight: 500; color: var(--muted);
-  }
-  /* Lo Stop va a destra di tutto. `margin-left:auto` sta su chi viene prima: con il
-     conteggio presente ce l'ha già lui, e metterlo su entrambi spingerebbe i due
-     lontani l'uno dall'altro invece che il gruppo a destra. */
-  .qhead .stopb { margin-left: auto; }
-  .qtot + .stopb { margin-left: 6px; }
+  .qhead { flex-wrap: wrap; }
+  .qtitle { flex: none; }
+  /* I passi al centro, lo Stop a destra: `margin-left:auto` su entrambi i lati del
+     gruppo, che è il modo di centrarlo senza sapere quanto è largo il titolo. */
+  .qsteps { display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    margin-left: auto; margin-right: auto; min-width: 0; }
+  .qhead .stopb { margin-left: auto; flex: none; }
+  /* I passi sono pastiglie con un bordo. Senza, su fondo giallo restavano un pallino e
+     una parola — cioè la stessa forma delle opzioni qui sotto, a mezzo centimetro di
+     distanza: due cose che si premono, disegnate uguali, che vogliono dire l'una «di
+     cosa stiamo parlando» e l'altra «cosa rispondo». */
+  .qsteps .stp { border: 1px solid var(--line-2); background: var(--surface); }
+  .qsteps .stp.on { border-color: var(--wait); }
 
-  .qmeta {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    margin: 3px 0 8px;
-  }
-  .st { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
-  .st .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--wait); flex: none; }
-  /* I passi diventano pastiglie con un bordo. Senza, su fondo giallo restavano un
-     pallino e una parola — cioè la stessa forma delle opzioni qui sotto, a mezzo
-     centimetro di distanza: due cose che si premono, disegnate uguali, che vogliono
-     dire l'una «di cosa stiamo parlando» e l'altra «cosa rispondo». */
-  .qmeta .stp { border: 1px solid var(--line-2); background: var(--surface); }
-  .qmeta .stp.on { border-color: var(--wait); }
-  .qtext { font-size: 11.5px; line-height: 1.45; color: var(--ink); }
+  /* La domanda è la cosa da leggere, quindi è la più grande del riquadro: 12.5px
+     contro gli 11 delle etichette. Prima era 11.5, cioè mezzo punto sopra le opzioni —
+     una differenza che non si vede, su una gerarchia che invece esiste. */
+  /* Il tetto alla misura vale anche qui, e qui si vede prima che altrove: il riquadro
+     è largo quanto la conversazione, quindi su schermo largo una domanda di due righe
+     diventa una riga sola da 150 caratteri. È in `ch` e non in pixel, così segue il
+     corpo del testo invece di essere un numero da ritarare quando cambia. */
+  .qtext { font-size: 12.5px; line-height: 1.5; color: var(--ink); margin-top: 8px;
+    max-width: 78ch; }
+  /* Markdown dentro una riga già disegnata: i margini del primo e dell'ultimo blocco
+     li decide questo riquadro, non `marked`. */
+  .qtext :global(> :first-child) { margin-top: 0; }
+  .qtext :global(> :last-child) { margin-bottom: 0; }
+  .qtext :global(p) { margin: 6px 0; }
+  .qtext :global(ul), .qtext :global(ol) { margin: 6px 0; padding-left: 18px; }
+  .qtext :global(code) { font-size: .86em; }
 
   /* Il tetto è in `vh` e non in pixel per la stessa ragione del corpo di un piano: la
      cosa da non superare è **lo schermo**, e da telefono è un altro numero. I 7px sopra
      non sono aria: è lo spazio in cui sporge il badge della prima opzione. */
+  /* Le opzioni sono **una scheda sola** con dei filetti, non otto riquadri staccati.
+     Il cambiamento non è di gusto: otto bordi più sette spazi da 6px sono quindici
+     linee orizzontali per una lista di otto voci, e il riquadro cresceva di 50px senza
+     dire niente di più. Con i filetti restano sette linee, tutte più leggere, e su
+     telefono la differenza è quella fra vedere quattro opzioni e vederne sei.
+     Il tetto è in `vh` e non in pixel per la stessa ragione del corpo di un piano: la
+     cosa da non superare è **lo schermo**, e da telefono è un altro numero. */
   .qopts {
-    display: flex; flex-direction: column; gap: 6px;
-    margin-top: 9px; padding-top: 7px; max-height: 42vh; overflow: auto;
+    display: flex; flex-direction: column;
+    margin-top: 9px; max-height: 42vh; overflow: auto;
+    border: 1px solid var(--line-2); border-radius: 10px;
+    background: var(--surface);
   }
   .qopt, .qwrite {
     position: relative; display: flex; align-items: flex-start; gap: 9px;
     width: 100%; text-align: left; font: inherit; color: var(--ink);
-    border: 1px solid var(--line-2); border-radius: 9px;
-    background: var(--surface); padding: 8px 11px;
+    border: 0; border-top: 1px solid var(--line); border-radius: 0;
+    background: none; padding: 9px 11px;
   }
+  /* La prima non porta il filetto: sarebbe una linea appoggiata sul bordo della scheda,
+     cioè due linee a un pixel di distanza. */
+  .qopts > :first-child { border-top: 0; }
   .qopt { cursor: pointer; }
   .qopt:hover { background: var(--surface-2); }
-  .qopt.on, .qwrite.on { border-color: var(--accent); background: var(--accent-soft); }
-  .qopt:focus-visible, .qwrite:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* La scelta si vede dal fondo e da una barretta a sinistra, non da un bordo attorno:
+     dentro una scheda un bordo colorato dovrebbe combattere coi filetti dei vicini, e
+     alla prima e all'ultima riga cadrebbe sopra il bordo della scheda stessa. */
+  .qopt.on, .qwrite.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .qopt:focus-visible, .qwrite:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   /* Il segno di scelta. Tondo quando se ne prende una, quadrato quando se ne possono
      prendere quante si vuole: `multiSelect` è un fatto della domanda che prima non si
@@ -557,16 +612,21 @@
     box-shadow: inset 0 0 0 2.5px var(--surface);
   }
 
-  .bd { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .lb { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+  .bd { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .lb { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    flex-wrap: wrap; }
   .lb :global(svg.ic) { width: 12px; height: 12px; flex: none; }
   .ds { font-size: 10px; line-height: 1.4; color: var(--muted); }
 
-  /* Il badge sporge **sul** bordo, non dentro il riquadro: dentro sarebbe una riga in
-     più da leggere in mezzo alle altre, sul bordo è un'etichetta appiccicata sopra —
-     si vede scorrendo con l'occhio senza entrare nel testo dell'opzione. */
+  /* Il badge sta **nella riga dell'etichetta**, in fondo a destra. Prima sporgeva sul
+     bordo dell'opzione, e la ragione scritta allora era buona — «si vede scorrendo con
+     l'occhio senza entrare nel testo» — ma dentro una scheda con i filetti quel bordo
+     non c'è più, e su schermo stretto il badge finiva **sopra** l'etichetta: misurato,
+     430px di larghezza. Un'etichetta coperta è un difetto più grosso di un badge meno
+     sporgente, e `margin-left:auto` lo tiene comunque all'estremo destro della riga,
+     dove l'occhio lo trova scorrendo la colonna. */
   .reco {
-    position: absolute; top: -7px; right: 10px;
+    order: 2; margin-left: auto; flex: none;
     padding: 1.5px 7px; border-radius: 20px;
     background: var(--accent); color: #fff;
     font-size: 8.5px; font-weight: 700; letter-spacing: .03em; line-height: 1.55;
@@ -574,8 +634,7 @@
   :root[data-theme="dark"] .reco { color: #0E1118; }
   @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) .reco { color: #0E1118; } }
 
-  .qwrite { border-style: dashed; align-items: center; }
-  .qwrite.on { border-style: solid; }
+  .qwrite { align-items: center; }
   .qwrite :global(svg.ic) { width: 12px; height: 12px; flex: none; color: var(--muted); }
   .qin {
     flex: 1; min-width: 0; border: 0; background: none; padding: 0;

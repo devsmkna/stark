@@ -73,6 +73,15 @@ export type SessionRow = {
    *  scritto dal modello si somiglia sempre; la prima frase scritta da te no. */
   title: string
   state: string
+  /**
+   * Chi la guida. Serve a `wake()` lato UI: senza, il risveglio non sa a chi
+   * appartiene la chat e riapre col backend di **default** (Claude Code), qualunque
+   * fosse l'agent vero — bug segnalato dall'utente il 29 agosto 2026 («reopen di una
+   * chat OpenCode risponde sempre 500»). Assente su un journal scritto prima che
+   * `session.created` portasse `agent` (§16.10): quelle righe restano senza, che è
+   * comunque corretto — a quel tempo Claude Code era l'unico agent.
+   */
+  agent?: string
   cwd?: string
   model?: string
   turns: number
@@ -547,6 +556,14 @@ export class Registry {
         rows.set(id, {
           id, title: titleOf(s), state, turns: s.turns.length,
           lastSeq: s.lastSeq, lastTs: s.lastTs,
+          // Senza questo, `wake()` non sa a chi appartiene la chat e la riapre col
+          // backend di default — bug segnalato dall'utente il 29 agosto 2026:
+          // «reopen su OpenCode risponde 500». Riprodotto: senza `agent` il registro
+          // apriva Claude Code con `--resume ses_...`, e il CLI lo rifiutava perché
+          // non è un UUID. Assente su un journal scritto prima che l'evento
+          // `session.created` portasse `agent` (§16.10): quelle righe restano
+          // «Claude Code», che era l'unico agent quando sono nate.
+          ...(s.agent ? { agent: s.agent } : {}),
           // Quando `settled` ha corretto lo stato, `stateSince` conta da quando era
           // diventata `busy`: direbbe «ferma da due minuti» di una che è ferma da ieri.
           // Il momento vero in cui si è fermata è quando il journal ha smesso di crescere.
@@ -803,6 +820,44 @@ export class Registry {
   }
 
   /**
+   * Quali di questi percorsi **esistono davvero**, relativamente alla cartella della chat.
+   *
+   * Serve a rendere cliccabile un percorso citato nel testo di una risposta, e nasce da
+   * una decisione **rovesciata**: il 26 agosto si era scelto di non farlo, e la ragione
+   * scritta allora resta giusta — «riconoscere un percorso in Markdown non fidato è un
+   * problema diverso, e più fragile». Una regola tipografica infatti non distingue
+   * `and/or` da una cartella, e sbaglia anche al contrario: `core/reduce.ts` *sembra* un
+   * percorso e non esiste (è `src/core/reduce.ts`), e un bottone «apri» che non apre
+   * niente è peggio di nessun bottone.
+   *
+   * La cura non è una regola migliore: è **non indovinare**. Chi chiama fa una rosa di
+   * candidati con una regola grossolana, e a decidere è il disco. Un percorso o c'è o non
+   * c'è — smette di essere un giudizio e diventa un fatto, che è la stessa mossa già
+   * fatta per `file_suggestions` (a cercare è il CLI, noi mostriamo).
+   *
+   * Funziona anche su una chat che **dorme**, a differenza di `fileSuggestions`: qui non
+   * serve un CLI dietro, serve solo sapere da dove partire, e quello lo dice il journal.
+   *
+   * Due limiti che non sono prudenza ma misura: al massimo 200 candidati per domanda e
+   * 512 caratteri l'uno. Senza, questa diventerebbe «prova mille percorsi in una
+   * richiesta», che è un altro attrezzo — e lo diventerebbe in silenzio.
+   */
+  pathsThatExist(id: string, paths: string[]): string[] {
+    const cwd = this.snapshot(id)?.cwd
+    if (!cwd) return []
+    const out: string[] = []
+    for (const p of paths.slice(0, 200)) {
+      if (typeof p !== 'string' || !p || p.length > 512) continue
+      // `resolve` normalizza anche i `..`: un percorso che esce dalla cartella della
+      // chat non viene nascosto — esiste o non esiste come qualunque altro — ma il
+      // confronto avviene sul percorso vero, non su quello scritto.
+      const assoluto = p.startsWith('/') ? p : resolve(cwd, p)
+      try { if (existsSync(assoluto)) out.push(p) } catch { /* non esiste, ed è la risposta */ }
+    }
+    return out
+  }
+
+  /**
    * I file del progetto che somigliano a quello che si sta scrivendo dopo una `@`.
    *
    * Passa dall'adapter perché è il CLI a rispondere, ed è **il CLI a sapere quale
@@ -881,15 +936,31 @@ export class Registry {
   /**
    * L'helper: una chat che non lascia niente, e ce n'e' **una sola** (§17).
    *
-   * L'unicita' non e' una limitazione ma il modo in cui «muore col ricaricamento della
-   * pagina» diventa un fatto invece di una speranza. Un browser che si ricarica non
-   * puo' avvisare in modo affidabile (`beforeunload` non e' una promessa), e la sua
-   * memoria dell'id se n'e' andata comunque: la prima cosa che fa riaprendo il pannello
-   * e' chiederne uno nuovo, e quella richiesta porta via il vecchio. Nessun ciclo di
-   * vita da indovinare, nessun orfano che resta acceso a consumare un processo.
+   * L'helper e' del **daemon**, non del browser: una volta aperto, sopravvive al
+   * ricaricamento della pagina. Chi riapre il pannello dopo un reload si riaggancia
+   * alla stessa sessione invece di pagare un nuovo handshake (l'«Avvio…») e di
+   * lasciare un processo di troppo. E' il motivo per cui il reload non lo chiude:
+   * il browser che se ne va non puo' avvisare in modo affidabile, ma non deve —
+   * la sessione non e' sua. Muore solo col daemon, o col cestino del pannello
+   * (`closeHelper`), ed e' quello il gesto che vuol dire «ho finito».
+   *
+   * Resta **una sola**: se una c'e' gia' viva, la richiesta di apertura la riusa.
+   * Non e' una limitazione ma il modo in cui «chat sempre pronta» diventa un fatto:
+   * nessun ciclo di vita da indovinare, nessun orfano che si accumula a ogni reload.
    */
   async openHelper(spec: Omit<OpenSpec, 'ephemeral'>): Promise<string> {
-    await this.closeHelper()
+    const vivo = this.helperId && this.live.has(this.helperId)
+      ? this.live.get(this.helperId)
+      : null
+    if (vivo) {
+      // Riusala se non si chiede un agent diverso: la scelta del **modello** sullo
+      // stesso agent non passa di qui (e' `session.setOption`), quindi il confronto
+      // sull'agent basta a decidere se la conversazione puo' continuare.
+      const richiesto = spec.agent
+      const attuale = vivo.snapshot?.agent
+      if (!richiesto || richiesto === attuale) return this.helperId as string
+      await this.closeHelper()
+    }
     const id = await this.open({ ...spec, ephemeral: true })
     this.helperId = id
     return id

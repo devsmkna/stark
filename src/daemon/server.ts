@@ -515,9 +515,14 @@ async function route(
     // le stesse quattro difese di ogni altra rotta, perché è di quelle rotte che è
     // comodo aggiungere «al volo» fuori dalla guardia, ed è così che se ne apre uno.
     if (method === 'POST' && path === '/api/reveal') {
-      const body = await readJson<{ path?: string }>(req)
+      const body = await readJson<{ path?: string; sessionId?: string }>(req)
       if (!body?.path) return send(res, 400, { error: 'path obbligatorio' })
-      const esito = await reveal(body.path)
+      // Un percorso relativo si legge rispetto alla **chat**, non al daemon, la cui
+      // cartella è `/`. Chi manda un percorso assoluto (il blocco di un file, la riga
+      // di un tool) non passa nessun `sessionId` e non cambia niente per lui:
+      // `resolve` con una base ignora la base quando il percorso è già assoluto.
+      const base = body.sessionId ? registry.snapshot(body.sessionId)?.cwd : undefined
+      const esito = await reveal(body.path, base)
       return send(res, esito.ok ? 200 : 404, esito)
     }
     // Apre un link con l'app dedicata invece che nel browser (F1). Il perimetro non
@@ -693,6 +698,18 @@ async function route(
       return send(res, 200, { agents: await catalogoCompleto() })
     }
 
+    if (method === 'GET' && path === '/api/helper') {
+      // Riagganciarsi all'helper **già vivo**, senza ricrearlo: dopo un reload il
+      // pannello non deve ripagare l'handshake (l'«Avvio…») né avviare un secondo
+      // processo. `registry.helper` dice se esiste; `404` = non c'è, e chi chiama
+      // fa il POST che lo crea.
+      const id = registry.helper
+      if (!id) return send(res, 404, { error: 'nessun helper vivo' })
+      const snap = registry.snapshot(id)
+      if (!snap) return send(res, 404, { error: 'nessun helper vivo' })
+      return send(res, 200, { id, snapshot: snap })
+    }
+
     if (method === 'POST' && path === '/api/helper') {
       const body = await readJson<{ agent?: string; model?: string }>(req)
       try {
@@ -800,6 +817,16 @@ async function route(
       if (method === 'DELETE' && sub === '') {
         const esito = await registry.remove(id)
         return send(res, esito.ok ? 200 : 404, esito)
+      }
+      // Quali percorsi citati in chat esistono davvero. Una domanda sola per messaggio,
+      // non una per percorso: il costo di questa rotta è una `existsSync` per candidato,
+      // e farne una richiesta HTTP ciascuna sarebbe il modo di renderlo caro senza
+      // renderlo più utile. È una POST e non una GET perché l'elenco sta nel corpo — una
+      // query string con quaranta percorsi dentro non ci starebbe.
+      if (method === 'POST' && sub === '/paths') {
+        const body = await readJson<{ paths?: unknown }>(req)
+        const paths = Array.isArray(body?.paths) ? body.paths as string[] : []
+        return send(res, 200, { exist: registry.pathsThatExist(id, paths) })
       }
       if (method === 'POST' && sub === '/command') {
         // 32 MB: un prompt può portarsi dietro qualche schermata, e in base64 ognuna

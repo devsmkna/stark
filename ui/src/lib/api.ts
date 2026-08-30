@@ -19,6 +19,11 @@ export type SessionRow = {
   id: string
   title: string
   state: string
+  /** Chi la guida — `'claude-code'`, `'opencode'`, … Serve a `wake()`: senza, il
+   *  risveglio riapre sempre col backend di default (Claude Code), qualunque fosse
+   *  l'agent vero. Assente su un journal scritto prima che questo campo esistesse:
+   *  quelle righe restano Claude Code, che era comunque l'unico agent a quel tempo. */
+  agent?: string
   cwd?: string
   model?: string
   /** Con quale agent è nata (assente su Claude Code, il default). Serve al risveglio:
@@ -389,9 +394,21 @@ export class Api {
     return (await this.json<{ agents: AgentModels[] }>('/api/models')).agents
   }
 
-  /** Apre l'helper. Ne esiste **uno solo**: questa chiamata chiude quello di prima,
-   *  ed e' anche il modo in cui «muore col ricaricamento della pagina» diventa un
-   *  fatto invece di una speranza appesa a `beforeunload`. */
+  /** L'helper già vivo del daemon, se c'è. Dopo un reload il pannello si riaggancia
+   *  a lui invece di ricrearlo: `openHelper` chiudeva e riapriva, e ogni reload
+   *  ripagava l'handshake (l'«Avvio…») e avviava un processo nuovo. */
+  async helperAttuale(): Promise<{ id: string; snapshot: SessionSnapshot } | null> {
+    try {
+      const r = await this.json<{ id: string; snapshot: SessionSnapshot }>('/api/helper')
+      return r
+    } catch {
+      return null
+    }
+  }
+
+  /** Apre l'helper, o riusa quello già vivo del daemon. Ne esiste **uno solo**: la
+   *  sessione è del daemon, non del browser — sopravvive al reload e muore solo col
+   *  cestino del pannello (`closeHelper`) o col daemon. */
   openHelper(pick: { agent?: string; model?: string } = {}): Promise<{ id: string }> {
     return this.json('/api/helper', {
       method: 'POST',
@@ -458,14 +475,35 @@ export class Api {
 
   /** F3: apre il gestore di file della macchina su `path`. Un rifiuto (file sparito
    *  dal disco, gestore che non parte) è una frase da mostrare, non un'eccezione. */
-  async reveal(path: string): Promise<Ack> {
+  async reveal(path: string, sessionId?: string): Promise<Ack> {
     const res = await fetch('/api/reveal', {
       method: 'POST',
       headers: { ...this.auth, 'content-type': 'application/json' },
-      body: JSON.stringify({ path }),
+      // `sessionId` serve solo a dire **rispetto a cosa** leggere un percorso relativo.
+      // Chi ne manda uno assoluto può ometterlo, e il daemon non lo usa comunque.
+      body: JSON.stringify({ path, ...(sessionId ? { sessionId } : {}) }),
     })
     try { return await res.json() as Ack }
     catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
+  /**
+   * Quali fra questi percorsi esistono davvero, nella cartella di questa chat.
+   *
+   * Una domanda sola per messaggio, con tutti i candidati dentro: la rosa la fa la UI
+   * con una regola grossolana, a decidere è il disco. Un errore non è un guasto — si
+   * risponde «nessuno», e i percorsi restano testo, che è com'erano prima.
+   */
+  async pathsExist(id: string, paths: string[]): Promise<string[]> {
+    try {
+      const res = await fetch(`/api/sessions/${id}/paths`, {
+        method: 'POST',
+        headers: { ...this.auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ paths }),
+      })
+      const j = await res.json() as { exist?: unknown }
+      return Array.isArray(j.exist) ? j.exist as string[] : []
+    } catch { return [] }
   }
 
   /** F1: apre `url` con l'app dedicata (`scheme`). Il rifiuto più comune è «l'app

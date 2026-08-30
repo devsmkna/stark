@@ -29,9 +29,30 @@ export type RevealResult = { ok: true } | { ok: false; error: string }
  * Rivela `path` nel gestore di file della macchina. Non lancia mai un errore: un
  * gestore di file che non parte non deve far cadere il daemon, è un fastidio
  * dell'utente, non un guasto di STARK.
+ *
+ * `base` è la cartella rispetto a cui si legge un percorso **relativo**, e va passata
+ * ogni volta che il percorso arriva da una conversazione: è il suo `cwd`.
+ *
+ * Senza, `resolve()` lo leggeva rispetto alla cartella del **processo daemon**, che è
+ * `/` — quindi un `docs/ui-anteprima.html` citato in chat diventava
+ * `/docs/ui-anteprima.html` e rispondeva «file not found on this machine» su un file
+ * che esiste (segnalato dall'utente il 28 agosto 2026). Il difetto vero non era il
+ * percorso sbagliato ma le **due basi**: chi controllava che il file esistesse lo
+ * risolveva rispetto alla chat, chi lo apriva rispetto al daemon — e per costruzione
+ * la prima diceva sempre di sì e la seconda sempre di no. Una regola che vale per una
+ * stringa deve stare in un posto solo.
+ *
+ * La risoluzione è esportata a parte (`risolviPercorso`) perché è **l'unica metà
+ * provabile**: aprire il gestore di file apre una finestra, e una prova automatica non
+ * ha il permesso di farsi notare da chi non l'ha lanciata. Quello che si era rotto però
+ * non era l'apertura — era la base, ed è quella che `npm run check` verifica.
  */
-export async function reveal(path: string): Promise<RevealResult> {
-  const p = resolve(path)
+export function risolviPercorso(path: string, base?: string): string {
+  return base ? resolve(base, path) : resolve(path)
+}
+
+export async function reveal(path: string, base?: string): Promise<RevealResult> {
+  const p = risolviPercorso(path, base)
   if (!existsSync(p)) return { ok: false, error: 'file not found on this machine' }
 
   try {

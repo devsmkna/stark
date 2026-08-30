@@ -1,14 +1,15 @@
 <script lang="ts">
   import Sprite from './components/Sprite.svelte'
   import Sidebar from './components/Sidebar.svelte'
-  import Helper from './components/Helper.svelte'
-  import Conversation from './components/Conversation.svelte'
-  import Effects from './components/Effects.svelte'
-  import NewChat from './components/NewChat.svelte'
-  import Phone from './components/Phone.svelte'
-  import Settings from './components/Settings.svelte'
-  import Todo from './components/Todo.svelte'
-  import Board from './components/Board.svelte'
+import Helper from './components/Helper.svelte'
+import AgentPanel from './components/AgentPanel.svelte'
+import Board from './components/Board.svelte'
+import Conversation from './components/Conversation.svelte'
+import Effects from './components/Effects.svelte'
+import NewChat from './components/NewChat.svelte'
+import Phone from './components/Phone.svelte'
+import Settings from './components/Settings.svelte'
+import Todo from './components/Todo.svelte'
   import Icon from './components/Icon.svelte'
   import Workspace from './components/Workspace.svelte'
   import Palette from './components/Palette.svelte'
@@ -107,12 +108,13 @@
   // effetti, o «sta aprendo», o l'errore di collegamento) la sostituisce quando c'è.
   // Larga, invece, sono sempre affiancate: sono questi due booleani a fare tutta la
   // differenza, il resto del template sotto non cambia.
-  // Su schermo stretto l'helper e' una schermata, non una colonna: un sesto di
-  // telefono non e' una chat, e' una colonna di sillabe. Prende il posto di tutto,
-  // come le impostazioni. Su schermo largo si affianca e non toglie niente a nessuno.
-  const soloHelper = $derived(store.narrow && store.helperOn)
-  const showList = $derived(!soloHelper && (!store.narrow || (store.selected === null && !store.fatal)))
-  const showRight = $derived(!soloHelper && (!store.narrow || store.selected !== null || !!store.fatal))
+  // Pannello agente unificato (TODOs + Chat) — su stretto prende tutto.
+  const rightOpen = $derived(store.todoOpen || store.helperOn)
+  const soloPanel = $derived(store.narrow && rightOpen)
+  // retrocompat: vecchio soloHelper usato solo per decidere layout stretto
+  const soloHelper = $derived(soloPanel)
+  const showList = $derived(!soloPanel && (!store.narrow || (store.selected === null && !store.fatal)))
+  const showRight = $derived(!soloPanel && (!store.narrow || store.selected !== null || !!store.fatal))
 </script>
 
 <Sprite />
@@ -250,21 +252,11 @@
       </div>
     {/if}
 
-    <!-- Sotto la soglia stretta la colonna non c'è: 258px su 390 sarebbero due terzi
-         dello schermo per una cosa che si guarda di sfuggita, e §8 di ui-schermate.md
-         dice che lì si mostra una schermata alla volta. La preferenza resta salvata,
-         quindi tornando su uno schermo largo la colonna si ritrova aperta. -->
-    {#if store.todoOpen && !store.narrow}
-      <Todo {store} />
-    {/if}
-
-    <!-- L'helper: terzo figlio di `.shell`, **fuori** dall'albero dei pannelli. Non e'
-         una chat del lavoro — non si dispone, non si salva, non si ritrova — quindi
-         metterlo dentro `layout` avrebbe voluto dire insegnare all'albero un'eccezione.
-         Sotto la soglia stretta `soloHelper` ha gia' spento gli altri due, e questo
-         resta solo in scena. -->
-    {#if store.helperOn}
-      <Helper {store} />
+    <!-- Pannello agente unificato: rispetta il design screenshot (card scura, pill TODOs/Chat). -->
+    {#if soloPanel}
+      <AgentPanel {store} />
+    {:else if rightOpen && !store.narrow}
+      <AgentPanel {store} />
     {/if}
   {/if}
 

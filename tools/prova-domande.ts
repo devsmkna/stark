@@ -75,12 +75,18 @@ const DUE = await apri([
     ],
   },
   {
-    question: 'Quali suite rilancio dopo l\'aggiornamento?',
+    // Markdown vero, e non per bellezza: la domanda cita **tre percorsi**, di cui uno
+    // che non esiste. Serve a vedere insieme le due cose che possono rompersi qui —
+    // che il Markdown sia reso (e non stampato coi backtick), e che i bottoni del
+    // percorso compaiano **solo** su quelli veri, anche dentro il box delle domande.
+    question: 'Quali suite rilancio dopo l\'aggiornamento? `npm run check` sta in '
+      + '`package.json`, la sonda in `tools/prova-domande.ts`, e quella vecchia stava in '
+      + '`tools/prova-suite.ts` — che **non esiste più**.',
     header: 'Verifiche',
     multiSelect: true,
     options: [
-      { label: 'npm run check', description: '136 verifiche, costo zero di quota.' },
-      { label: 'npm run daemon', description: '25 verifiche su un daemon vero in /tmp.' },
+      { label: '`npm run check`', description: '**136 verifiche**, costo zero di quota — vedi `docs/ui-implementazione.md`.' },
+      { label: '`npm run daemon`', description: '25 verifiche su un daemon vero in `/tmp`.' },
       { label: 'npm run opencode', description: 'Richiede il server OpenCode acceso.' },
     ],
   },

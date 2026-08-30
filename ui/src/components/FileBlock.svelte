@@ -33,13 +33,13 @@
         {:else if edits.length > 1}<span style="color:var(--muted)">{edits.length} changes</span>{/if}
         <span class="pl">+{totals.added}</span>
         <span class="mn">−{totals.removed}</span>
-        <span style="color:var(--muted)">{open ? '▾' : '▸'}</span>
+        <span class="chev" class:open={open} style="color:var(--muted);display:inline-flex"><Icon name="i-fwd" style="width:9px;height:9px" /></span>
       </span>
     </button>
     <!-- F3: una seconda via, non una sostituzione — il clic sul blocco resta quello
          che apre il confronto, questo arriva al file dove sta davvero. -->
     <button class="reveal" title="Reveal in file manager" aria-label="Reveal in file manager"
-      onclick={() => void store.reveal(path)}>
+      onclick={() => void store.reveal(path, store.selected ?? undefined)}>
       <Icon name="i-reveal" />
     </button>
   </div>
@@ -57,6 +57,8 @@
 <style>
   .fh { width: 100%; border: 0; text-align: left; font: inherit; color: inherit; }
   .fh:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .chev { display: inline-flex; transition: transform .15s; }
+  .chev.open { transform: rotate(90deg); }
   .editsep {
     padding: 3px 10px; font-size: 9.5px; color: var(--muted);
     background: var(--surface-2); border-top: 1px solid var(--line);

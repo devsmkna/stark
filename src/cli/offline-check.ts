@@ -1291,6 +1291,37 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
       && !existsSync(orfano),
     JSON.stringify({ rAssente, orfano: existsSync(orfano) }))
 
+  // Bug segnalato dall'utente il 29 agosto 2026: «reopen di una chat OpenCode risponde
+  // sempre 500». Riprodotto e non dedotto: il registro apriva **Claude Code** — il
+  // backend di default — con `--resume ses_...`, un id che non e' un UUID e che il CLI
+  // rifiuta. Non era «mandiamo un wake sbagliato a OpenCode»: era che non gli arrivava
+  // affatto, perche' la riga dell'elenco (`SessionRow`) non portava mai `agent`, e
+  // senza saperlo `wake()` non poteva passarlo indietro.
+  //
+  // Si riusa **lo stesso `reg`** di qui sopra, e non se ne apre uno nuovo con una
+  // `STARK_HOME` sua: `SESSIONS` in `registry.ts` e' una costante di modulo, fissata
+  // al primo import di questo processo — un secondo `import('../daemon/registry.ts')`
+  // con l'ambiente cambiato ottiene lo stesso modulo gia' in cache, puntato ancora
+  // alla prima cartella. La prova nasceva rossa per questo, non per il bug: scriveva
+  // il journal in una casa che nessuno guardava piu'.
+  const idAgent = '44444444-4444-4444-8444-444444444444'
+  const rigaAgent = [
+    { v: 1, seq: 1, ts: Date.now(), sessionId: idAgent, payload: { k: 'session.state', state: 'starting' } },
+    { v: 1, seq: 2, ts: Date.now(), sessionId: idAgent, payload: {
+      k: 'session.created', agent: 'opencode', cwd: '/tmp/prova-agent-riga',
+      model: 'opencode/big-pickle',
+      capabilities: { interrupt: true, switchModel: true, switchMode: true, autoMode: false,
+        permissionAlways: true, questions: true, revert: false, toolProgress: false,
+        fileBrowser: false, pty: false },
+      tools: [], commands: [] } },
+    { v: 1, seq: 3, ts: Date.now(), sessionId: idAgent, payload: { k: 'session.state', state: 'idle' } },
+  ]
+  writeFileSync(resolve(starkHome, 'sessioni', `${idAgent}.jsonl`),
+    rigaAgent.map(r => JSON.stringify(r)).join('\n') + '\n')
+  const rigaVista = reg.list().find(r => r.id === idAgent)
+  check('l\'elenco porta `agent` per una riga letta dal journal (non solo viva)',
+    rigaVista?.agent === 'opencode', JSON.stringify(rigaVista))
+
   if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
   if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
   rmSync(casa, { recursive: true, force: true })
@@ -1625,6 +1656,40 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   let esploso = false
   try { m.append({ k: 'session.state', state: 'idle' }) } catch { esploso = true }
   check('§17: scrivere su un deposito chiuso e\' un errore, non un silenzio', esploso)
+}
+
+// ─── F3: rispetto a quale cartella si legge un percorso citato ──────────────
+//
+// Il bug segnalato dall'utente il 28 agosto 2026: un `docs/ui-anteprima.html` citato in
+// chat rispondeva «file not found on this machine» su un file che c'e'. Non era il
+// percorso: erano le **due basi**. Chi controllava che il file esistesse lo risolveva
+// rispetto al `cwd` della chat, chi lo apriva rispetto al processo daemon — la cui
+// cartella e' `/`. Per costruzione la prima diceva sempre di si' e la seconda sempre di
+// no, quindi ogni percorso relativo prendeva i bottoni e nessuno funzionava.
+//
+// Si prova **solo la risoluzione**: aprire il gestore di file apre una finestra, e una
+// prova automatica non ha il permesso di farsi notare. Quello che si era rotto e'
+// questo, non l'apertura.
+{
+  const { risolviPercorso } = await import('../daemon/reveal.ts')
+  const CHAT = '/mnt/m/devs-development/stark/stark'
+  check('F3: un percorso relativo si legge rispetto alla chat',
+    risolviPercorso('docs/ui-anteprima.html', CHAT) === `${CHAT}/docs/ui-anteprima.html`,
+    risolviPercorso('docs/ui-anteprima.html', CHAT))
+  // Questa asseriva `!== CHAT/...`, ed era verde solo dove il processo gira **fuori**
+  // dal repo: lanciata da dentro, `process.cwd()` e' proprio `CHAT` e la prova cadeva.
+  // E' la stessa malattia della prova VAPID corretta il 27 agosto — una prova che
+  // dipende da dove la esegui. Il fatto vero non e' «finisce altrove», e' «finisce
+  // sulla cartella del processo», che e' l'esatto motivo per cui serviva la base:
+  // quella del daemon e' `/`, e non ha niente a che vedere con la chat.
+  check('F3: senza base finisce sulla cartella del **processo**, qualunque sia',
+    risolviPercorso('docs/ui-anteprima.html') === resolve(process.cwd(), 'docs/ui-anteprima.html'),
+    risolviPercorso('docs/ui-anteprima.html'))
+  check('F3: un percorso assoluto ignora la base',
+    risolviPercorso('/tmp/x.txt', CHAT) === '/tmp/x.txt')
+  check('F3: i `..` si normalizzano, e restano relativi alla chat',
+    risolviPercorso('../stark/docs/x.md', CHAT) === `${CHAT}/docs/x.md`,
+    risolviPercorso('../stark/docs/x.md', CHAT))
 }
 
 // ─── §18: quanto e' stato usato STARK ───────────────────────────────────────
