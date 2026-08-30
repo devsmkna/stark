@@ -21,7 +21,7 @@ import type {
 } from '../../core/events.ts'
 import { IMMAGINI, parteDi } from '../../core/allegati.ts'
 import { clientLegacyPer, clientPer, lascia } from './host.ts'
-import { modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
+import { messaggioErrore, modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
 
 type Client = Awaited<ReturnType<typeof clientPer>>
 type Legacy = Awaited<ReturnType<typeof clientLegacyPer>>
@@ -148,8 +148,6 @@ export class OpenCodeAdapter implements AgentSession {
   /** L'ultimo prompt mandato, per poterlo rimandare se lo step fallisce di striscio. */
   private ultimoPrompt: { parts: unknown[] } | null = null
   private tentativi = 0
-  /** L'ultimo errore del turno: dice se un turno finito male è da riprovare (rate limit). */
-  private ultimoErrore = ''
   /** Lo Stop dell'utente: da li' in poi non si ritenta piu' niente. */
   private fermato = false
   /** Il guardiano del turno muto. Vedi `ATTESA_PRIMO_SEGNO`. */
@@ -333,41 +331,42 @@ export class OpenCodeAdapter implements AgentSession {
     if (e.type === 'permission.asked') { await this.unPermesso(d); return }
     if (e.type === 'question.asked') { await this.unaDomanda(d); return }
     if (e.type === 'session.next.step.failed' && await this.forseRitenta(d)) return
+    if (e.type === 'session.error' && await this.forseRitentaErrore(d)) return
 
     for (const p of this.tr.translate(e)) {
       this.emit(p)
-      if (p.k === 'session.error') this.ultimoErrore = p.message
-      if (p.k === 'turn.ended') {
-        this.sveglia()
-        // Workaround «turn interrupted»: è il rate limit del provider, che in STARK
-        // chiude il turno come `error` (motivoDa non produce mai `interrupted` nel
-        // flusso normale). Il turno si riprende da solo, fino a tre volte.
-        if (p.reason === 'error' || p.reason === 'interrupted') void this.riprovaInterrotto()
-      }
+      if (p.k === 'turn.ended') this.sveglia()
     }
   }
 
   /**
-   * Riprende un turno interrotto, fino a tre volte, con attese 5s/15s/30s.
+   * Un `session.error` passeggero (rate limit) puo' passare da solo? Se si, si ritenta
+   * **senza** tradurre l'evento — cioe' senza chiudere il turno.
    *
-   * Non si riprende se l'utente ha premuto Stop (`fermato`), se non c'è un prompt da
-   * riprendere, o se si è già al tetto dei tentativi. Il messaggio di ripresa va al
-   * runner come un prompt nuovo: la cronologia ha già il lavoro, e il testo dice solo
-   * di continuare da dove si era.
+   * Il bug che questo risolve: prima si traduceva sempre, il che chiudeva il turno
+   * (`chiudiTurno('error', ...)`) e **solo dopo** `unEvento` decideva di riprovare. Fra
+   * la chiusura e il nuovo tentativo il turno canonico risultava finito — `activity()`
+   * su uno snapshot senza turno aperto torna `null`, e con lei sparisce lo Stop dal
+   * Dock: durante l'attesa 5s/15s/30s il lavoro andava avanti (verificabile: `interrupt()`
+   * abortiva davvero il runner) ma **non c'era modo di premerlo**. Segnalato dall'utente
+   * il 30 agosto 2026: «lo stop diventa non premibile... come se scompare».
+   *
+   * `session.next.step.failed` (→ `forseRitenta`) non aveva questo bug: intercetta
+   * anche lui prima di tradurre, e questo lo allinea allo stesso schema.
    */
-  private async riprovaInterrotto(): Promise<void> {
-    if (!this.ultimoPrompt || this.fermato) return
-    if (this.tentativi >= RITENTATIVI) return
-    // Non si si riprende su un errore vero (modello non supportato, chiave sbagliata):
-    // solo un intoppo passeggero — il rate limit — merita di riprovare.
-    if (!passeggero(this.ultimoErrore)) return
+  private async forseRitentaErrore(d: Record<string, unknown>): Promise<boolean> {
+    const motivo = messaggioErrore(d)
+    if (!this.ultimoPrompt || this.fermato) return false
+    if (this.tentativi >= RITENTATIVI) return false
+    if (!passeggero(motivo)) return false
     this.tentativi++
-    this.emit({ k: 'session.retried', attempt: this.tentativi, reason: 'interrupted' })
+    this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })
     await new Promise(r => setTimeout(r, ATTESE_RIPRESA[this.tentativi - 1]))
-    if (this.fermato) return
+    if (this.fermato) return false
     this.montaGuardia()
     await this.mandaAlRunner({ parts: [{ type: 'text' as const, text: RIPRESA }] })
-      .catch(() => { /* il prossimo errore chiuderà il turno */ })
+      .catch(() => { /* il prossimo errore chiudera' il turno */ })
+    return true
   }
 
   /**

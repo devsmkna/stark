@@ -69,6 +69,18 @@ const ogg = (v: unknown): Record<string, unknown> =>
   (v ?? {}) as Record<string, unknown>
 
 /**
+ * Il messaggio vero di un `session.error`. Sta in `error.data.message`, non in
+ * `error.message` — quel campo non esiste mai, verificato su un rate limit reale
+ * (Baseten, 429). Esportata perché l'adapter deve poterla leggere **prima** di
+ * tradurre l'evento, per decidere se vale la pena ritentare senza chiudere il turno
+ * (vedi `forseRitentaErrore` in `adapter.ts`).
+ */
+export function messaggioErrore(d: Record<string, unknown>): string {
+  const err = ogg(d['error'])
+  return str(ogg(err['data'])['message']) || str(err['message']) || str(d['message']) || 'errore'
+}
+
+/**
  * I token di uno step nel nostro vocabolario.
  *
  * OpenCode conta anche i token di ragionamento a parte; STARK non ha quel campo, e
@@ -170,11 +182,7 @@ export class OpenCodeTranslator {
       }
 
       case 'session.error': {
-        // Il messaggio vero sta in `error.data.message`, non in `error.message` — quel
-        // campo non esiste mai, verificato su un rate limit reale (Baseten, 429): senza
-        // questo la UI mostrava «Turn error» e basta, e il motivo restava solo nel raw log.
-        const err = ogg(d['error'])
-        const msg = str(ogg(err['data'])['message']) || str(err['message']) || str(d['message']) || 'errore'
+        const msg = messaggioErrore(d)
         return [{ k: 'session.error', message: msg, fatal: false }, ...this.chiudiTurno('error', msg)]
       }
 
