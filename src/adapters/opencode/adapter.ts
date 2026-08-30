@@ -317,9 +317,7 @@ export class OpenCodeAdapter implements AgentSession {
       void this.rispondiPermesso(b.requestId, 'reject')
     } else {
       this.emit({ k: 'question.rejected', requestId: b.requestId })
-      void this.client?.v2.session.question.reject(
-        { sessionID: this.sessionId, requestID: b.requestId },
-      ).catch(() => { /* gia' ferma, o il server e' andato */ })
+      void this.rispondiDomanda(b.requestId, null)
     }
   }
 
@@ -546,7 +544,7 @@ export class OpenCodeAdapter implements AgentSession {
 
     if (!risposta) {
       this.emit({ k: 'question.rejected', requestId })
-      await this.client?.v2.session.question.reject({ sessionID: this.sessionId, requestID: requestId })
+      await this.rispondiDomanda(requestId, null)
       return
     }
     this.emit({
@@ -560,9 +558,51 @@ export class OpenCodeAdapter implements AgentSession {
       const v = risposta.answers[q.header]
       return Array.isArray(v) ? v : v ? [v] : []
     })
-    await this.client?.v2.session.question.reply({
-      sessionID: this.sessionId, requestID: requestId,
-      questionV2Reply: { answers: inOrdine } as never,
+    await this.rispondiDomanda(requestId, inOrdine)
+  }
+
+  /**
+   * La risposta (o il rifiuto) a una domanda del tool `question`, sul registro dove
+   * sta davvero.
+   *
+   * Misurato il 30 agosto 2026 contro il server vivo: il tool che gira nel runner
+   * legacy registra la domanda nel registro **globale** — `GET /question?directory=…`
+   * la contiene, `GET /api/session/{id}/question` è vuoto — e la rotta
+   * session-scoped dell'SDK, `v2.session.question.reply`, risponde
+   * **404 QuestionNotFoundError**. La radice è la divergenza che ADR-009 prevedeva:
+   * `createOpencodeServer` avvia `opencode` dal PATH (qui 1.18.25), mentre l'SDK che
+   * genera le rotte è 1.17.20. Nota che il difetto **non** era una rotta mancante:
+   * l'SDK 1.17.20 dichiara **entrambe** le superfici — `client.question.*` è il
+   * registro globale, `client.v2.session.question.*` quello per sessione — il codice
+   * semplicemente chiamava quello sbagliato. Prima di dare la colpa all'SDK, guardare
+   * i suoi `.d.ts`: ci stava il metodo tutto il tempo.
+   *
+   * E il difetto peggiore era che il 404 **spariva**: con `ThrowOnError` al default
+   * l'SDK non lancia, il risultato con `.error` veniva buttato via senza essere
+   * letto — STARK diceva `question.replied` e `busy`, il tool restava `running` per
+   * sempre, e chi guarda legge «si è fermato». Quindi: primo colpo la rotta globale
+   * (la verità misurata sul server che gira qui); se un giorno il registro torna
+   * session-scoped, quella la trova come seconda via; se falliscono entrambe, la
+   * notizia arriva in cima alla chat invece di morire in una variabile.
+   */
+  private async rispondiDomanda(requestId: string, inOrdine: string[][] | null): Promise<void> {
+    const base = { requestID: requestId, directory: this.spec.cwd }
+    const globale = inOrdine
+      ? await this.client?.question.reply({ ...base, answers: inOrdine }).catch(() => null)
+      : await this.client?.question.reject(base).catch(() => null)
+    if (globale && !globale.error) return
+
+    const sessione = { sessionID: this.sessionId, requestID: requestId }
+    const scoped = inOrdine
+      ? await this.client?.v2.session.question
+        .reply({ ...sessione, questionV2Reply: { answers: inOrdine } as never }).catch(() => null)
+      : await this.client?.v2.session.question.reject(sessione).catch(() => null)
+    if (scoped && !scoped.error) return
+
+    const dettaglio = String(globale?.error ?? scoped?.error ?? 'nessuna risposta dal server').slice(0, 160)
+    this.emit({
+      k: 'notice', level: 'error',
+      text: `la risposta non è arrivata all'agent: ${dettaglio}`,
     })
   }
 
