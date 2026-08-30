@@ -14,6 +14,7 @@
   } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
   import { quandoRiparte, quotaFerma } from '$core/quota.ts'
+  import { longpress, longPressAppenaFatto } from '../lib/longpress.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
@@ -201,9 +202,16 @@
 
   let draft = $state('')
 
+  function apriMenu(row: SessionRow, x: number, y: number): void {
+    store.menu = { id: row.id, x, y }
+  }
+
   function openMenu(e: MouseEvent, row: SessionRow): void {
     e.preventDefault()
-    store.menu = { id: row.id, x: e.clientX, y: e.clientY }
+    // Su Android la stessa pressione lunga fa pure il `contextmenu` nativo: se il
+    // menu l'ha appena aperto il dito, questo evento è un doppione della stessa cosa.
+    if (longPressAppenaFatto()) return
+    apriMenu(row, e.clientX, e.clientY)
   }
 
   async function commit(row: SessionRow): Promise<void> {
@@ -344,6 +352,7 @@
         <div class="gstate">Titles</div>
         {#each perTitolo as row (row.id)}
           <button class="sit" class:on={row.id === store.selected}
+            use:longpress={(x, y) => apriMenu(row, x, y)}
             onclick={() => void store.select(row.id)}
             oncontextmenu={e => openMenu(e, row)}>
             {#if row.model && getLobeIconUrl(row.model)}
@@ -424,6 +433,7 @@
               class="sit"
               class:on={row.id === store.selected}
               class:zz={group(row.state) === 'Sleeping'}
+              use:longpress={(x, y) => apriMenu(row, x, y)}
               onclick={() => void store.select(row.id)}
               draggable="true"
               ondragstart={e => {
@@ -647,7 +657,11 @@
   /* Posizionamento del menu rispetto alla testata. */
   :global(.side) { position: relative; }
 
-  .sit { width: calc(100% - 10px); border-radius: 10px; }
+  .sit { width: calc(100% - 10px); border-radius: 10px;
+    /* La pressione lunga apre il menu: la selezione del testo e il callout di iOS
+       non devono contendergli il gesto — un dito fermo su una riga vale «menu», non
+       «seleziona». */
+    -webkit-touch-callout: none; user-select: none; }
   .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible, .more:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;

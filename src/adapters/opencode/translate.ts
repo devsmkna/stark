@@ -47,6 +47,7 @@
 // sonda leggeva solo `properties` e i permessi, che arrivavano, non si vedevano.
 
 import { EMPTY_USAGE, type Payload, type Usage } from '../../core/events.ts'
+import { effettoTool } from './effects.ts'
 
 // NOTA sui totali del turno: `turn.ended` vuole `usage` e `cost` del giro intero, ma
 // OpenCode li da' **per step** (`step-finish.tokens`, `.cost`). Sommarli qui vorrebbe
@@ -340,11 +341,17 @@ export class OpenCodeTranslator {
         }]
       }
 
-      case 'completed':
+      case 'completed': {
+        // §9: l'effetto si dichiara quando il tool e' finito — prima non c'e'
+        // niente di vero da dire: il comando poteva ancora fallire, il file
+        // ancora non e' scritto. Qui `state` porta input, output e metadata
+        // insieme, ed e' la stessa forma che legge l'import.
+        const eff = effettoTool(str(p['tool']), stato)
         return [{
           k: 'tool.ended', callId, ok: true,
           output: stato['output'] ?? ogg(stato['metadata']) ?? {},
-        }]
+        }, ...(eff ? [eff] : [])]
+      }
 
       case 'error':
         return [{

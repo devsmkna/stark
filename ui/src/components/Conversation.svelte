@@ -17,6 +17,7 @@
   import { renderMarkdown } from '../lib/markdown.ts'
   import { osservaPercorsi, pezziConCitazioni } from '../lib/percorsi.ts'
   import { decoraColoriTesto } from '../lib/colori.ts'
+  import { zoomRoot } from '../lib/zoom.ts'
   import {
     conta, groupParts, isLive, keyOf, type Grp, type OpPart,
   } from '../lib/gruppi.ts'
@@ -228,6 +229,23 @@
   $effect(() => {
     if (snap.sessionId !== lastSession) { lastSession = snap.sessionId; stick = true }
   })
+
+  // ─── l'altezza dell'intestazione del turno ────────────────────────────────
+  // La pill del gruppo operations aperto si appiccica ESATTAMENTE sotto
+  // l'intestazione del turno, che è già sticky a `top:0`. Quanto vale «sotto»
+  // non si dichiara a mano: l'header è ~33px, ma un numero scritto qui sarebbe
+  // caduto alla prima modifica del suo padding — e lo zoom del testo cambia i
+  // pixel veri, non quelli che le lunghezze CSS valgono dentro il root. Si
+  // misura quindi il rettangolo vero (getBoundingClientRect) e lo si riporta
+  // in unità locali dividendo per lo zoom: la stessa conversione di `zoom.ts`,
+  // che registra la regola per il menu del tasto destro.
+  let thH = $state(34)
+  const misuraTh = (el: HTMLElement): { destroy(): void } => {
+    const leggi = (): void => { thH = el.getBoundingClientRect().height / zoomRoot() }
+    const ro = new ResizeObserver(leggi)
+    ro.observe(el)
+    return { destroy: () => ro.disconnect() }
+  }
 
   /**
    * I percorsi citati diventano copiabili e apribili — **dopo** che il testo è
@@ -730,7 +748,8 @@
     {/if}
   {/snippet}
 
-  <div class="scroller conv" bind:this={scrollerEl} onscroll={onScroll}>
+  <div class="scroller conv" bind:this={scrollerEl} onscroll={onScroll}
+    style="--th-h:{thH}px">
     {#each chapters as ch (ch.key)}
     {#if ch.clearedAt !== undefined}
       <!-- La riga che tiene chiuso tutto ciò che c'era prima del `/clear`. Ha le due
@@ -779,7 +798,7 @@
         <!-- Il contenitore è un `div` e non più il bottone stesso: dentro ce ne stanno
              due, e un bottone dentro un bottone non è HTML valido. È la stessa forma di
              `.oprow`, dove la riga del tool e la lente per il file sono fratelli. -->
-        <div class="th">
+        <div class="th" use:misuraTh>
           <button class="thmain" onclick={() => toggle(turn, i)} title={promptOf(turn)}>
             <span class="q">{@html decoraColoriTesto(promptOf(turn))}</span>
           </button>
@@ -964,7 +983,7 @@
                 {@const c = conta(g.parts)}
                 {@const nOps = c.ops}
                 {@const nNote = c.note}
-                <button class="row clickable ops" onclick={() => toggleBlock(gkey)}>
+                <button class="row clickable ops" class:pin={gopen} onclick={() => toggleBlock(gkey)}>
                   <span class="ops-meta">
                     {#if g.key === doneTail && opLive}
                       {@render liveTag(opLive)}
@@ -1190,6 +1209,21 @@
   .row.ops .ops-meta .m.live { color: var(--ink-2); font-weight: 500; }
   .row.ops .end { color: var(--muted); font-size: 11px; flex: none; display: inline-flex; align-items: center; }
   .row.clickable.ops { background: none; align-self: flex-start; }
+  /* Il gruppo aperto resta richiudibile da dove si è: la pill si appiccica sotto
+     l'intestazione del turno — già sticky lei a `top:0` — e da lì si richiude
+     senza risalire a mano tutto il blocco. L'offset è l'altezza dell'header
+     misurata dall'azione `misuraTh` (`--th-h`, in unità locali del root zoomato):
+     a mano sarebbe stato un numero che cade alla prima modifica dei suoi 33px.
+     Vale solo da aperto: da chiuso la pill è una riga sola al suo posto, e non
+     c'è nulla da richiudere. Il fondo opaco copre il contenuto che le scorre
+     dietro — ed è lo stesso colore che le sta dietro anche da ferma, quindi
+     a riposo non si vede. Due gruppi aperti nello stesso turno si sovrapporrebbero
+     alla stessa quota: l'ultimo disegnato copre il primo, ed è il compromesso
+     accettato — il caso comune è un gruppo aperto per turno. */
+  .row.ops.pin {
+    position: sticky; top: var(--th-h, 34px); z-index: 1;
+    background: var(--surface);
+  }
   .opgroup {
     display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 8px;
     padding-left: 8px; border-left: 2px solid var(--line-2);

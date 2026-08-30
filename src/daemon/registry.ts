@@ -9,9 +9,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
+import { backendFor, DEFAULT_AGENT, agentIds, etichettaDi } from '../adapters/index.ts'
 import type {
-  AgentSession, ConversationInfo, PermissionAnswer, PlanAnswer, QuestionAnswer,
+  AgentBackend, AgentSession, ConversationInfo, PermissionAnswer, PlanAnswer, QuestionAnswer,
 } from '../core/adapter.ts'
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, MemoryJournal, RawLog, type EventSink } from '../core/journal.ts'
@@ -122,6 +122,10 @@ export type SessionRow = {
 
 /** Una conversazione della CLI come la vede la UI, con ciò che il registro sa in più. */
 export type ImportableRow = ConversationInfo & {
+  /** Quale agent ha quella conversazione: con due backend, la riga lo dice. */
+  agent: string
+  /** Come si chiama a schermo: la UI non conosce i nomi degli agent (§1). */
+  agentLabel: string
   /** È già dentro STARK: importarla di nuovo non aggiungerebbe niente. */
   already: boolean
   /** Scritta da poco: **forse** è aperta in un terminale proprio adesso. */
@@ -681,16 +685,29 @@ export class Registry {
    * seconda è l'avviso sulla presa in carico.
    */
   async importable(): Promise<ImportableRow[]> {
-    const b = backendFor()
-    // Un agent senza un terminale proprio non ha conversazioni da importare, e non è
-    // la stessa cosa che averne zero: la domanda non si pone (§12).
-    const found = (await b.listConversations?.(this.defaults.profile)) ?? []
+    // Gli agent che sanno elencare conversazioni nate fuori da STARK ormai sono
+    // due, e l'elenco è uno: chi importa cerca «quella di ieri», non «quelle di
+    // un agent prima e quelle dell'altro poi». Prima del secondo adapter qui
+    // c'era un `backendFor()` solo, e non si vedeva che era una scelta.
     const now = Date.now()
-    return found.map(t => ({
-      ...t,
-      already: existsSync(resolve(SESSIONS, `${t.sessionId}.jsonl`)),
-      recent: b.isRecent?.(t, now) ?? false,
-    }))
+    const out: ImportableRow[] = []
+    for (const id of agentIds()) {
+      const b = backendFor(id)
+      // Un agent senza un terminale proprio non ha conversazioni da importare, e non è
+      // la stessa cosa che averne zero: la domanda non si pone (§12).
+      if (!b.listConversations) continue
+      const found = (await b.listConversations(this.defaults.profile)) ?? []
+      for (const t of found) {
+        out.push({
+          ...t,
+          agent: b.id,
+          agentLabel: etichettaDi(b.id),
+          already: existsSync(resolve(SESSIONS, `${t.sessionId}.jsonl`)),
+          recent: b.isRecent?.(t, now) ?? false,
+        })
+      }
+    }
+    return out.sort((a, b) => b.lastModified - a.lastModified)
   }
 
   /**
@@ -702,9 +719,21 @@ export class Registry {
    */
   async importSession(sessionId: string):
     Promise<{ ok: true; id: string; profile?: string } | { ok: false; error: string }> {
-    const b = backendFor()
-    if (!b.locateConversation || !b.importConversation) {
-      return { ok: false, error: 'this agent has no conversations to import' }
+    // Quale agent possiede questa conversazione non lo dice l'id: lo si chiede a
+    // chi sa cercarlo. Il primo che la trova vince — gli id sono mondi separati
+    // (uuid di Claude Code, `ses_…` di OpenCode), quindi non c'è gara vera.
+    let chi: {
+      b: AgentBackend
+      importa: NonNullable<AgentBackend['importConversation']>
+      ref: string
+      profile?: string
+    } | undefined
+    for (const id of agentIds()) {
+      const b = backendFor(id)
+      const importa = b.importConversation
+      if (!b.locateConversation || !importa) continue
+      const qui = b.locateConversation(sessionId, this.defaults.profile)
+      if (qui) { chi = { b, importa, ref: qui.ref, ...(qui.profile ? { profile: qui.profile } : {}) }; break }
     }
 
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
@@ -714,13 +743,7 @@ export class Registry {
       return { ok: false, error: 'already imported' }
     }
 
-    // Si cerca per **id**, non dentro l'elenco delle importabili — quello sono le più
-    // recenti, un limite pensato per una schermata da sfogliare, e un id scritto a
-    // mano può essere vecchio quanto si vuole. Dove guardare, e in quali profili, lo
-    // sa l'agent: il `ref` che torna è **opaco** (per Claude Code è il percorso del
-    // trascritto) e da qui non si guarda dentro.
-    const trovata = b.locateConversation(sessionId, this.defaults.profile)
-    if (!trovata) {
+    if (!chi) {
       // Nessun residuo: il journal appena creato e mai scritto se ne va, se no
       // resterebbe una chat senza `cwd` in mezzo a quelle vere — stessa disciplina
       // di `open()`, e stessa ragione.
@@ -730,7 +753,7 @@ export class Registry {
     }
 
     try {
-      const { events } = b.importConversation(trovata.ref)
+      const { events } = chi.importa(chi.ref)
       // `session.resumeRef` per primo: senza, il journal saprebbe dire cosa è successo
       // ma non come tornarci, e la conversazione importata resterebbe da guardare e
       // basta. L'ora è quella del primo fatto, non di adesso: una conversazione di due
@@ -741,7 +764,7 @@ export class Registry {
       journal.close()
     }
     this.bump()
-    return { ok: true, id: sessionId, ...(trovata.profile ? { profile: trovata.profile } : {}) }
+    return { ok: true, id: sessionId, ...(chi.profile ? { profile: chi.profile } : {}) }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -1002,6 +1025,14 @@ export class Registry {
     // il caso normale, non l'eccezione.
     if (cmd.c === 'session.rename') return this.rename(id, cmd.title)
 
+    // Addormentare una chat **senza processo dietro** — importata dal terminale, o
+    // rimasta ferma dopo un riavvio del daemon — è lo stesso sonno con una cosa in
+    // meno: non c'è un processo da interrompere né da fermare. Il fatto che resta da
+    // scrivere è uno solo, ed è lo stesso che gli adapter scrivono dormendo
+    // (`session.slept`): lo stato diventa `sleeping`, la riga esce dal gruppo
+    // Waiting, e il risveglio è lo stesso `resume` di sempre.
+    if (cmd.c === 'session.sleep' && !this.live.has(id)) return this.dormiFerma(id)
+
     const l = this.live.get(id)
     if (!l) return { ok: false, error: 'session not active' }
     switch (cmd.c) {
@@ -1101,6 +1132,24 @@ export class Registry {
 
   pendingQuestions(id: string): { requestId: string; questions: AgentQuestion[] }[] {
     return this.live.get(id)?.snapshot.pendingQuestions ?? []
+  }
+
+  /**
+   * Il sonno di una chat che **non ha un processo**: tutto il fatto è una riga nel
+   * journal. Gli adapter, dormendo, scrivono esattamente questo evento — la sola
+   * differenza è che loro possono anche fermare un processo, e qui non c'è.
+   */
+  private dormiFerma(id: string): { ok: true } | { ok: false; error: string } {
+    const path = resolve(SESSIONS, `${id}.jsonl`)
+    if (!existsSync(path)) return { ok: false, error: 'unknown session' }
+    // Già dormiente: un secondo `session.slept` non direbbe nulla di nuovo, e il
+    // journal non ha bisogno di due righe per lo stesso fatto.
+    if (this.leggi(id, path).state === 'sleeping') return { ok: true }
+    const j = new Journal(path, id)
+    j.append({ k: 'session.slept' })
+    j.close()
+    this.bump()
+    return { ok: true }
   }
 
   private retire(id: string): void {

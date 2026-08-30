@@ -760,7 +760,15 @@ async function route(
 
     // Gli allegati: `<ref>` è uno sha256, e il controllo vero lo rifà il registro —
     // qui la forma serve solo a non far entrare niente che somigli a un percorso.
-    const b = /^\/api\/sessions\/([0-9a-f-]{8,})\/blob\/([0-9a-f]{64})$/.exec(path)
+    // L'id di sessione non e' un uuid: e' qualunque cosa l'agent generi. La classe
+    // `[0-9a-f-]` sotto era scritta per gli uuid di Claude Code, e con il secondo
+    // adapter e' diventata un muro invisibile: gli id di OpenCode portano `_` e
+    // maiuscole (`ses_fad3a59e…USIn…`), non ci entravano, e **tutta** la superficie
+    // per-sessione — snapshot, stream, comandi — rispondeva 404 a quell'agent.
+    // Misurato il 30 agosto con una conversazione importata che non si apriva.
+    // Il contenuto dell'id non e' un permesso: chi spara un id finto riceve comunque
+    // un 404 da `registry.snapshot`, qui si decide solo che forma ha la rotta.
+    const b = /^\/api\/sessions\/([0-9a-zA-Z_-]{8,})\/blob\/([0-9a-f]{64})$/.exec(path)
     if (b && method === 'GET') {
       const found = registry.attachment(b[1]!, b[2]!)
       if (!found) return send(res, 404, { error: 'unknown attachment' })
@@ -774,7 +782,7 @@ async function route(
       return
     }
 
-    const m = /^\/api\/sessions\/([0-9a-f-]{8,})(\/[a-z]+)?$/.exec(path)
+    const m = /^\/api\/sessions\/([0-9a-zA-Z_-]{8,})(\/[a-z]+)?$/.exec(path)
     if (m) {
       const id = m[1]!
       const sub = m[2] ?? ''

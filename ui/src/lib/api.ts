@@ -104,6 +104,10 @@ export type ImportableRow = {
   lastModified: number
   sizeBytes?: number
   path?: string
+  /** Quale agent ha quella conversazione: con due backend, la riga lo dice. */
+  agent: string
+  /** Come si chiama a schermo: la UI non conosce i nomi degli agent. */
+  agentLabel: string
   already: boolean
   recent: boolean
 }

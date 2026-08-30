@@ -20,6 +20,7 @@ import type {
   Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
 } from '../../core/events.ts'
 import { IMMAGINI, parteDi } from '../../core/allegati.ts'
+import { EMPTY_USAGE } from '../../core/events.ts'
 import { clientLegacyPer, clientPer, lascia } from './host.ts'
 import { messaggioErrore, modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
 
@@ -366,8 +367,15 @@ export class OpenCodeAdapter implements AgentSession {
     if (e.type === 'session.error' && await this.forseRitentaErrore(d)) return
 
     for (const p of this.tr.translate(e)) {
+      // L'`idle` che `chiudiTurno` mette in coda al turno e' una sosta bugiarda se
+      // dietro c'e' ancora della fila: durerebbe un istante ma e' lo stato su cui
+      // suona la notifica «ha finito» — la stessa ragione per cui la prova della
+      // fila lo verifica (§7). Si guarda anche il turno aperto, non solo la coda,
+      // perche' `next()` l'ha gia' svuotata quando l'`idle` arriva al giro.
+      if (p.k === 'session.state' && p.state === 'idle'
+        && (this.coda.length > 0 || this.tr.turnoAperto() !== null)) continue
       this.emit(p)
-      if (p.k === 'turn.ended') this.sveglia()
+      if (p.k === 'turn.ended') { this.next(); this.sveglia() }
     }
   }
 
@@ -578,9 +586,6 @@ export class OpenCodeAdapter implements AgentSession {
         ...(i.name ? { name: i.name } : {}),
       })),
     ]
-    this.tr.apriTurno(turnId)
-    this.emit({ k: 'turn.started', turnId, prompt: parti })
-    this.emit({ k: 'session.state', state: 'busy' })
 
     // Si tiene da parte per poterlo **rimandare**: la rotta v2 non ritenta da se' su un
     // errore passeggero del provider, e senza questo STARK mollerebbe dove il terminale
@@ -596,24 +601,92 @@ export class OpenCodeAdapter implements AgentSession {
         })),
       ],
     }
+    // C'e' gia' qualcosa in volo? Allora questo prompt **apre un turno suo e aspetta**:
+    // non si piega dentro quello in corso e non parte adesso. E' la stessa fila FIFO
+    // che l'adapter di Claude Code si e' costruita il 26 agosto, e per la stessa
+    // ragione, misurata qui il 30 agosto (tools/prova-opencode-coda.ts): il server
+    // OpenCode accoda davvero — il primo turno non viene interrotto — ma sul filo non
+    // c'e' niente che dica **quale** turno stia finendo, e il traduttore nostro tiene
+    // un turno alla volta. Consegnando subito, la risposta del secondo prompt finiva
+    // dentro il primo, e l'`session.idle` chiudeva il turno sbagliato lasciando
+    // l'altro aperto per sempre. Tenendo la fila qui, al server arriva un prompt alla
+    // volta e a sessione ferma: il caso normale, quello che gia' funziona.
+    //
+    // «Apre un turno suo» perche' e' cio' che l'utente ha fatto: due richieste
+    // separate sono due richieste, e la UI lo sa gia' disegnare — un turno aperto
+    // che non e' il primo aperto si mostra come «queued, waiting its turn».
+    // Si annuncia **qui e una volta sola**, in entrambe le strade: `consegna()`
+    // non lo ripete, perche' quando la chiama `next()` il turno e' gia' stato
+    // annunciato entrando in fila — raddoppiarlo fonderebbe due turni nel journal.
+    this.emit({ k: 'turn.started', turnId, prompt: parti })
+    if (this.inVolo()) {
+      this.coda.push({ turnId, invio })
+      return turnId
+    }
+
+    this.consegna(turnId, invio)
+    return turnId
+  }
+
+  // ─── la fila ──────────────────────────────────────────────────────────────
+
+  /** I prompt che hanno gia' un turno aperto e aspettano il loro giro. In ordine.
+   *  Le parti non servono piu': il `turn.started` l'hanno avuto entrando. */
+  private coda: Array<{ turnId: string; invio: { parts: unknown[] } }> = []
+
+  /** C'e' un turno in corso, o altri gia' in fila? */
+  private inVolo(): boolean {
+    return this.tr.turnoAperto() !== null || this.coda.length > 0
+  }
+
+  /** Il turno e' davvero suo: si apre nel traduttore e si spedisce. L'annuncio
+   *  (`turn.started`) sta a chi lo chiama, perche' il turno in fila l'ha gia' avuto. */
+  private consegna(turnId: string, invio: { parts: unknown[] }): void {
+    this.tr.apriTurno(turnId)
+    this.emit({ k: 'session.state', state: 'busy' })
+
     this.ultimoPrompt = invio
     this.tentativi = 0
     this.fermato = false
     this.montaGuardia()
 
-    // La fila FIFO **e' del protocollo**, non da costruire. Su Claude Code STARK ha
-    // dovuto scriversela sopra (consegna uno alla volta, a sessione ferma) perche' il
-    // CLI fondeva in un turno solo i prompt consegnati insieme. Qui si manda e basta:
-    // misurato sulla rotta legacy, due prompt a 14ms di distanza hanno prodotto quattro
-    // messaggi — utente, agent, utente, agent — nell'ordine giusto e non fusi.
-    // E' il posto in cui il secondo adapter fa **meno** lavoro del primo, non di piu'.
     void this.mandaAlRunner(invio).catch((err: unknown) => {
       this.emit({ k: 'session.error', message: String(err), fatal: false })
       this.abbandonaBloccantePendente()
       for (const p of this.tr.chiudiTurno('error')) this.emit(p)
       this.sveglia()
     })
-    return turnId
+  }
+
+  /**
+   * Il turno in corso e' finito: parte il primo della fila.
+   *
+   * Il `turn.started` l'ha gia' avuto quando e' entrato in fila, quindi qui si
+   * apre e si spedisce e basta — raddoppiarlo fonderebbe due turni nel journal.
+   */
+  private next(): void {
+    const p = this.coda.shift()
+    if (!p) return
+    this.consegna(p.turnId, p.invio)
+  }
+
+  /**
+   * Svuota la fila dichiarando finiti i turni che non gireranno.
+   *
+   * Serve perche' un turno aperto che non ricevera' mai eventi e' la cosa peggiore
+   * che si possa lasciare in un journal: alla rilettura la conversazione
+   * mostrerebbe per sempre un «queued, waiting its turn» che non aspetta piu'
+   * niente (§4). Meglio dire che e' stato interrotto, che e' la verita'.
+   */
+  private svuota(): void {
+    const persi = this.coda
+    this.coda = []
+    for (const p of persi) {
+      this.emit({
+        k: 'turn.ended', turnId: p.turnId, reason: 'aborted',
+        usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+      })
+    }
   }
 
   /**
@@ -635,10 +708,14 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
-    // Chi preme il quadrato rosso non vuole che STARK riprovi mezzo secondo dopo.
+    // Chi preme il quadrato rosso non vuole che STARK riprova mezzo secondo dopo.
     this.fermato = true
     this.ultimoPrompt = null
     this.smontaGuardia()
+    // E non vuole nemmeno che la fila parta un istante dopo: tre prompt in coda
+    // vorrebbero quattro Stop. Uno ferma tutto — stessa ragione dell'adapter di
+    // Claude Code.
+    this.svuota()
     // «Idle interruption is a no-op», dice la rotta: fermare una sessione ferma non e'
     // un errore. Quindi non serve guardare prima se sta lavorando.
     //
@@ -716,10 +793,12 @@ export class OpenCodeAdapter implements AgentSession {
     } catch { return [] }
   }
 
-  /** Aspetta che il turno aperto si chiuda. Senza turno, torna subito. */
+  /** Aspetta che non ci sia piu' niente in volo: il turno aperto **e** la fila.
+   *  Serve alle prove, non alla UI. */
   async settled(): Promise<void> {
-    if (!this.tr.turnoAperto()) return
-    await new Promise<void>(res => this.attese.push(res))
+    while (this.tr.turnoAperto() || this.coda.length > 0) {
+      await new Promise<void>(res => this.attese.push(res))
+    }
   }
 
   private sveglia(): void {
@@ -743,6 +822,7 @@ export class OpenCodeAdapter implements AgentSession {
 
   private async spegni(): Promise<void> {
     this.smontaGuardia()
+    this.svuota()
     for (const p of this.tr.chiudiTurno('interrupted')) this.emit(p)
     this.sveglia()
     this.ac.abort()
@@ -764,9 +844,11 @@ const dato = (r: unknown): unknown => {
 
 /**
  * Cosa questa sessione sa fare. Sono **misure**, non speranze: ogni `false` qui sotto
- * corrisponde a una cosa provata dal vivo e non trovata (P21/P22).
+ * corrisponde a una cosa provata dal vivo e non trovata (P21/P22). Serve anche
+ * all'import (`import.ts`), perche' la conversazione importata dichiara le stesse
+ * capacita' di una viva: sono un fatto dell'agent, non della sessione.
  */
-function capacita(): Capabilities {
+export function capacita(): Capabilities {
   return {
     interrupt: true,
     switchModel: true,

@@ -64,6 +64,15 @@ export type NewTab = 'new' | 'import'
 /** Il menu del tasto destro su una riga dell'elenco. */
 export type ContextMenu = { id: string; x: number; y: number } | null
 
+/**
+ * La foglia del layout che mostra il selettore «quale chat in questo pannello».
+ *
+ * Non è una chat: è un invito a sceglierne una, e per questo non ha un `Pane` nella
+ * mappa e non può prendere il fuoco. Vale solo finché è aperta — al ricaricamento
+ * l'albero si riconcilia sulle chat vere e la foglia sparisce da sola.
+ */
+export const SPLIT_PICK = '__split_pick__'
+
 /** Una preferenza di questo dispositivo, con la modalità privata che non esplode. */
 function leggiPreferenza(chiave: string): boolean {
   try { return localStorage.getItem(chiave) === '1' } catch { return false }
@@ -95,6 +104,16 @@ export class Store {
 
   rows = $state<SessionRow[]>([])
   selected = $state<string | null>(null)
+
+  /**
+   * Quante aperture sono in corso in questo momento. Non è un booleano per un motivo:
+   * `select` → `splitPane` → `select` possono annidarsi, e un booleano spento dal primo
+   * che finisce spegnerebbe lo splash mentre il secondo lavora ancora. Un contatore si
+   * incrementa prima di sotto-mandare e si decrementa in `finally`: lo zero dice davvero
+   * «niente più aperture». La UI lo usa per mostrare lo splash dopo un breve scarto
+   * (`Splash.svelte` + `App.svelte`), così un'apertura istantanea non fa alcun lampo.
+   */
+  aprendo = $state(0)
 
   /**
    * Le chat aperte in un pannello, per id. Quando `layout` non è `null`, ogni sua
@@ -220,6 +239,13 @@ export class Store {
    * trascinate sulla casella di scrittura, che è un gesto diverso con un altro esito.
    */
   draggingChat = $state<string | null>(null)
+
+  /**
+   * La chat che sta **accanto** al selettore del pannello destro: quella su cui era
+   * il cursore quando si è aperto. Il selettore non la propone — è già visibile a
+   * sinistra — e sceglierla non vuole dire nulla.
+   */
+  splitPickTarget = $state<string | null>(null)
 
   tab = $state<NewTab>('new')
   importable = $state<ImportableRow[] | null>(null)
@@ -516,18 +542,27 @@ export class Store {
     // seconda copia — due sottoscrizioni SSE sulla stessa sessione non servono a
     // nessuno, e il §«una chat = un pannello» della spec nasce da lì.
     if (this.panes.has(id)) { this.focusPane(id); return }
-
-    const uscente = this.selected
-    const pane = new Pane(id)
-    const esito = await pane.open(this.api)
-    if (!esito.ok) { this.refused = esito.error; return }
-    this.#addPane(pane)
-    this.layout = this.layout && uscente && leafIds(this.layout).includes(uscente)
-      ? replaceLeaf(this.layout, uscente, id)
-      : { type: 'leaf', paneId: id }
-    if (uscente && uscente !== id && !leafIds(this.layout).includes(uscente)) this.#dropPane(uscente)
-    this.selected = id
-    this.#saveLayout()
+    // Le due uscite di sopra sono istantanee e non contano come «apertura»; quello
+    // che segue è l'attesa vera — il fetch dello snapshot — e va coperto dallo splash.
+    this.aprendo++
+    try {
+      const uscente = this.selected
+      const pane = new Pane(id)
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.refused = esito.error; return }
+      this.#addPane(pane)
+      this.layout = this.layout && uscente && leafIds(this.layout).includes(uscente)
+        ? replaceLeaf(this.layout, uscente, id)
+        : { type: 'leaf', paneId: id }
+      // Se al posto del pannello accanto al selettore è subentrata un'altra chat, il
+      // selettore la segue: il bersaglio è «chi sta a sinistra», non un id fisso.
+      if (this.splitPickTarget === uscente) this.splitPickTarget = id
+      if (uscente && uscente !== id && !leafIds(this.layout).includes(uscente)) this.#dropPane(uscente)
+      this.selected = id
+      this.#saveLayout()
+    } finally {
+      this.aprendo--
+    }
   }
 
   // ─── pannelli ─────────────────────────────────────────────────────────────
@@ -540,30 +575,98 @@ export class Store {
     await this.splitPane(this.selected ?? leafIds(this.layout)[0]!, 'row', chatId)
   }
 
+  // ─── il selettore del pannello destro ─────────────────────────────────────
+  //
+  // «Add to split view» sulla chat già aperta: non c'è una seconda chat da mettere
+  // a destra, quindi il pannello nuovo si apre **prima** e dice cosa ci può stare —
+  // un elenco di chat fra cui scegliere. È lo stesso ordine di idee del drop: prima
+  // la divisione, poi il contenuto.
+
+  /**
+   * Divide la foglia di `targetChatId` e a destra mette il selettore. Un selettore
+   * già aperto si **sposta** qui invece di restare dov'era: un clic che non fa
+   * niente è peggio di uno che ricolla il selettore accanto alla chat giusta.
+   */
+  apriSceltaSplit(targetChatId: string): void {
+    if (!this.layout || !leafIds(this.layout).includes(targetChatId)) return
+    const senza = leafIds(this.layout).includes(SPLIT_PICK)
+      ? closeLeaf(this.layout, SPLIT_PICK)
+      : this.layout
+    if (!senza) return
+    this.layout = splitLeaf(senza, targetChatId, 'row', SPLIT_PICK)
+    this.splitPickTarget = targetChatId
+    this.#saveLayout()
+  }
+
+  /**
+   * La chat scelta prende il posto del selettore: la posizione del pannello è già
+   * quella giusta, cambia solo chi ci sta dentro. Una chat già aperta altrove si
+   * **sposta** qui — lo stesso che fa il trascinamento — e il pannello di prima si
+   * chiude; una chat non aperta viene aperta al posto del selettore.
+   */
+  async scegliSplit(chatId: string): Promise<void> {
+    if (!this.layout || !leafIds(this.layout).includes(SPLIT_PICK)) return
+    this.aprendo++
+    try {
+      // La chat di sinistra è già visibile accanto al selettore: sceglierla non
+      // posizionerebbe niente. Si chiude solo il selettore.
+      if (chatId === this.splitPickTarget) { this.chiudiSplitPick(); return }
+      const senza = leafIds(this.layout).includes(chatId)
+        ? closeLeaf(this.layout, chatId)
+        : this.layout
+      if (!senza) { this.chiudiSplitPick(); return }
+      if (!this.panes.has(chatId)) {
+        const pane = new Pane(chatId)
+        const esito = await pane.open(this.api)
+        if (!esito.ok) { this.refused = esito.error; return }
+        this.#addPane(pane)
+      }
+      this.layout = replaceLeaf(senza, SPLIT_PICK, chatId)
+      this.splitPickTarget = null
+      this.focusPane(chatId)
+    } finally {
+      this.aprendo--
+    }
+  }
+
+  /** Il selettore si chiude senza scelta: la foglia sparisce e i pannelli restanti
+   *  si ridistribuiscono, come quando si chiude una chat qualunque. */
+  chiudiSplitPick(): void {
+    this.splitPickTarget = null
+    if (!this.layout || !leafIds(this.layout).includes(SPLIT_PICK)) return
+    this.layout = closeLeaf(this.layout, SPLIT_PICK)
+    this.#saveLayout()
+  }
+
   /**
    * Trascinare una chat dalla barra laterale sul bordo di un pannello: `newChatId`
    * diventa una foglia nuova accanto a `targetChatId`, nella direzione `dir`.
    */
   async splitPane(targetChatId: string, dir: 'row' | 'col', newChatId: string): Promise<void> {
     if (newChatId === targetChatId) return
-    if (!this.layout || !leafIds(this.layout).includes(targetChatId)) { await this.select(newChatId); return }
-    if (this.panes.has(newChatId)) {
-      // Già aperta altrove: si sposta la foglia invece di duplicarla. Toglierla e
-      // rimetterla accanto al bersaglio è più semplice che spostare un nodo
-      // nell'albero, e il `Pane` resta la stessa istanza — il flusso non si riapre.
-      const senza = closeLeaf(this.layout, newChatId)
-      this.layout = senza && leafIds(senza).includes(targetChatId)
-        ? splitLeaf(senza, targetChatId, dir, newChatId)
-        : this.layout
+    this.aprendo++
+    try {
+      if (!this.layout || !leafIds(this.layout).includes(targetChatId)) { await this.select(newChatId); return }
+      if (this.panes.has(newChatId)) {
+        // Già aperta altrove: si sposta la foglia invece di duplicarla. Toglierla e
+        // rimetterla accanto al bersaglio è più semplice che spostare un nodo
+        // nell'albero, e il `Pane` resta la stessa istanza — il flusso non si riapre.
+        const senza = closeLeaf(this.layout, newChatId)
+        this.layout = senza && leafIds(senza).includes(targetChatId)
+          ? splitLeaf(senza, targetChatId, dir, newChatId)
+          : this.layout
+        this.focusPane(newChatId)
+        return
+      }
+      const pane = new Pane(newChatId)
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.refused = esito.error; return }
+      this.#addPane(pane)
+      this.layout = splitLeaf(this.layout, targetChatId, dir, newChatId)
       this.focusPane(newChatId)
-      return
+    } finally {
+      this.aprendo--
     }
-    const pane = new Pane(newChatId)
-    const esito = await pane.open(this.api)
-    if (!esito.ok) { this.refused = esito.error; return }
-    this.#addPane(pane)
-    this.layout = splitLeaf(this.layout, targetChatId, dir, newChatId)
-    this.focusPane(newChatId)
   }
 
   /** Il drop al **centro** di un pannello: la chat cambia, il riquadro resta dov'è. */
@@ -586,6 +689,7 @@ export class Store {
     this.#addPane(pane)
     this.layout = replaceLeaf(this.layout, targetChatId, newChatId)
     this.#dropPane(targetChatId)
+    if (this.splitPickTarget === targetChatId) this.splitPickTarget = newChatId
     this.focusPane(newChatId)
   }
 
@@ -595,6 +699,12 @@ export class Store {
     if (!this.panes.has(chatId)) return
     this.layout = this.layout ? closeLeaf(this.layout, chatId) : null
     this.#dropPane(chatId)
+    // Un selettore rimasto senza una chat accanto non ha senso: non c'è nulla da
+    // dividere, e mostrarlo da solo sarebbe un pannello che non porta da nessuna parte.
+    if (this.layout && leafIds(this.layout).length === 1 && leafIds(this.layout)[0] === SPLIT_PICK) {
+      this.#chiudiTutto()
+      return
+    }
     if (this.selected !== chatId) { this.#saveLayout(); return }
     const next = this.layout ? leafIds(this.layout)[0] ?? null : null
     this.selected = next
@@ -604,6 +714,9 @@ export class Store {
 
   /** Sposta il fuoco (e l'indirizzo) su un pannello già aperto. */
   focusPane(chatId: string): void {
+    // Il selettore non è una chat: non prende il fuoco, e l'indirizzo non deve
+    // mai puntare a lui — un ricaricamento su quell'indirizzo sarebbe un vicolo cieco.
+    if (chatId === SPLIT_PICK) return
     if (!this.panes.has(chatId)) return
     if (this.selected !== chatId) this.selected = chatId
     go(chatId, this.panes.get(chatId)?.view ?? 'chat')
@@ -638,6 +751,7 @@ export class Store {
     this.panes = new Map()
     this.layout = null
     this.selected = null
+    this.splitPickTarget = null
     this.#saveLayout()
   }
 

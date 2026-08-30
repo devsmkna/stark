@@ -5,9 +5,10 @@
   // una mini-conversazione completa e indipendente, non una vista in sola lettura. Uno
   // split è una riga o una colonna flex, con un divisore trascinabile fra i fratelli.
   import type { LayoutNode } from '../lib/layout.ts'
-  import type { Store } from '../lib/store.svelte.ts'
+  import { SPLIT_PICK, type Store } from '../lib/store.svelte.ts'
   import Conversation from './Conversation.svelte'
   import Effects from './Effects.svelte'
+  import SplitPick from './SplitPick.svelte'
   import Workspace from './Workspace.svelte'
   import { leafIds } from '../lib/layout.ts'
 
@@ -92,35 +93,41 @@
 
 {#if node?.type === 'leaf'}
   {@const id = node.paneId}
-  {@const pane = store.panes.get(id)}
-  <div class="pane" class:on={!soli && store.selected === id}
-    role="presentation"
-    onpointerdowncapture={() => store.focusPane(id)}>
-    {#if pane?.snap}
-      {#if pane.view === 'effects'}
-        <Effects {store} snap={pane.snap} {id} setView={v => { pane.view = v }}
-          onClose={soli ? undefined : () => store.closePane(id)} />
+  {#if id === SPLIT_PICK}
+    <!-- Il selettore non è un pannello: non prende il fuoco, non ha zone di rilascio
+         e non ha nulla da chiudere che non sia lui stesso. -->
+    <SplitPick {store} />
+  {:else}
+    {@const pane = store.panes.get(id)}
+    <div class="pane" class:on={!soli && store.selected === id}
+      role="presentation"
+      onpointerdowncapture={() => store.focusPane(id)}>
+      {#if pane?.snap}
+        {#if pane.view === 'effects'}
+          <Effects {store} snap={pane.snap} {id} setView={v => { pane.view = v }}
+            onClose={soli ? undefined : () => store.closePane(id)} />
+        {:else}
+          <Conversation {store} snap={pane.snap} link={pane.link} {id}
+            setView={v => { pane.view = v }} onClose={soli ? undefined : () => store.closePane(id)} />
+        {/if}
       {:else}
-        <Conversation {store} snap={pane.snap} link={pane.link} {id}
-          setView={v => { pane.view = v }} onClose={soli ? undefined : () => store.closePane(id)} />
+        <div class="mid">Opening…</div>
       {/if}
-    {:else}
-      <div class="mid">Opening…</div>
-    {/if}
 
-    <!-- La zona di rilascio esiste **solo** durante un trascinamento di chat, e per
-         questo copre tutto il pannello: sotto ci sono già altri bersagli (la casella
-         accetta immagini), e due significati sullo stesso pixel si contendono il drop.
-         Fuori dal trascinamento non c'è niente qui sopra. -->
-    {#if store.draggingChat && store.draggingChat !== id}
-      <div class="drop" role="presentation"
-        ondragover={e => { e.preventDefault(); zona = zonaDi(e) }}
-        ondragleave={() => { zona = null }}
-        ondrop={e => lascia(e, id)}>
-        {#if zona}<div class="hint {zona}"></div>{/if}
-      </div>
-    {/if}
-  </div>
+      <!-- La zona di rilascio esiste **solo** durante un trascinamento di chat, e per
+           questo copre tutto il pannello: sotto ci sono già altri bersagli (la casella
+           accetta immagini), e due significati sullo stesso pixel si contendono il drop.
+           Fuori dal trascinamento non c'è niente qui sopra. -->
+      {#if store.draggingChat && store.draggingChat !== id}
+        <div class="drop" role="presentation"
+          ondragover={e => { e.preventDefault(); zona = zonaDi(e) }}
+          ondragleave={() => { zona = null }}
+          ondrop={e => lascia(e, id)}>
+          {#if zona}<div class="hint {zona}"></div>{/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 {:else if node?.type === 'split'}
   <div class="split d-{node.dir}" bind:this={box}>
     {#each node.children as child, i (i)}

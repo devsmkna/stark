@@ -436,7 +436,9 @@
                    che fa dire «ah, è quella». -->
               {#if r.firstPrompt}<div class="fp">“{r.firstPrompt}”</div>{/if}
               <div class="mt">
-                {when(r.lastModified)}{#if r.sizeBytes}{' · '}{size(r.sizeBytes)}{/if}
+                <!-- Quale agent: con due backend, «quale chat» dice anche «di chi».
+                     L'etichetta arriva dal daemon (§1): la UI non conosce i nomi. -->
+                {r.agentLabel}{' · '}{when(r.lastModified)}{#if r.sizeBytes}{' · '}{size(r.sizeBytes)}{/if}
                 {#if r.already}{' · '}<b>already in STARK</b>{/if}
                 {#if !r.path && !r.already}{' · '}<b>transcript file not found</b>{/if}
               </div>

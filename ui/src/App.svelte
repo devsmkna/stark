@@ -2,6 +2,7 @@
   import Sprite from './components/Sprite.svelte'
   import Sidebar from './components/Sidebar.svelte'
 import Helper from './components/Helper.svelte'
+import Splash from './components/Splash.svelte'
 import AgentPanel from './components/AgentPanel.svelte'
 import Board from './components/Board.svelte'
 import Conversation from './components/Conversation.svelte'
@@ -14,6 +15,7 @@ import Todo from './components/Todo.svelte'
   import Workspace from './components/Workspace.svelte'
   import Palette from './components/Palette.svelte'
   import { Store } from './lib/store.svelte.ts'
+  import type { SessionRow } from './lib/api.ts'
   import { AZIONI, combos } from './lib/actions.ts'
   import { matches, parse } from './lib/shortcuts.ts'
   import { zoomRoot } from './lib/zoom.ts'
@@ -74,6 +76,19 @@ import Todo from './components/Todo.svelte'
     apply()
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
+  })
+
+  // Lo splash di apertura non deve fare lampi su un'apertura istantanea: quando
+  // `aprendo` sale, si aspetta 150 ms prima di mostrarsi — se nel frattempo l'apertura
+  // è finita non compare proprio. È un contatore, non un booleano, perché `select`,
+  // `splitPane` e `scegliSplit` si annidano: solo lo zero vuol dire «davvero finito».
+  let mostroApertura = $state(false)
+  $effect(() => {
+    if (store.aprendo > 0) {
+      const handle = setTimeout(() => { mostroApertura = true }, 150)
+      return () => { clearTimeout(handle); mostroApertura = false }
+    }
+    mostroApertura = false
   })
 
   const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
@@ -229,7 +244,9 @@ import Todo from './components/Todo.svelte'
       <Conversation {store} snap={store.snap} link={store.link}
         id={store.selected ?? ''} setView={v => store.show(v)} />
     {:else if store.selected}
-      <div class="mid">Opening…</div>
+      <Splash message="Opening…" />
+    {:else if !store.loaded}
+      <Splash message="Starting…" />
     {:else if store.loaded && store.rows.length === 0}
       <div class="mid">
         <div>
@@ -260,56 +277,93 @@ import Todo from './components/Todo.svelte'
     {/if}
   {/if}
 
-  <!-- Le azioni stanno dove sta l'oggetto: col tasto destro sulla riga. Non esiste
+  <!-- Le azioni stanno dove sta l'oggetto: col tasto destro sulla riga — o, dove il
+       tasto destro non c'è, con la pressione lunga (`lib/longpress.ts`). Non esiste
        una schermata «modifica chat» perché, con cartella e agent bloccati per
        costruzione, sarebbe un contenitore con dentro un campo solo. -->
+  {#snippet vociMenu(row: SessionRow)}
+    <!-- Sta in cima e ha una riga sua perché è l'unica voce che NON agisce su questa
+         chat: agisce sul suo progetto. Aprire la seconda conversazione su una cartella
+         su cui stai già lavorando non deve passare da «New chat» e da un percorso da
+         ritrovare — la cartella la sa già la riga su cui hai premuto. -->
+    <button class="mi" disabled={!row.cwd}
+      title={row.cwd ?? 'This chat has no folder: there is nothing to open another one in'}
+      onclick={() => {
+        const cwd = row.cwd
+        store.menu = null
+        store.refused = null
+        if (!cwd) return
+        // Il profilo Claude del progetto lo rilegge `newChat` da sé, come fa `wake()`:
+        // senza, la seconda chat partirebbe con la `CLAUDE_CONFIG_DIR` di default e
+        // sembrerebbe rotta senza motivo apparente.
+        // Modello e agent li porta dietro la riga: «qui» vuol dire nello stesso
+        // progetto **e** con lo stesso modello — e il model id appartiene all'agent
+        // che l'ha dichiarato, quindi si portano insieme.
+        void store.newChat(cwd, {
+          ...(row.model ? { model: row.model } : {}),
+          ...(row.agent ? { agent: row.agent } : {}),
+        }).then(() => {
+          // Se non si è aperta — la cartella è stata cancellata nel frattempo — il
+          // motivo va letto da qualche parte. `store.refused` si vede nel blocco di
+          // scrittura, che però esiste solo se una conversazione è aperta: senza
+          // questo, con l'elenco a fuoco e nessuna chat aperta, il clic non farebbe
+          // niente e non lo direbbe. La modale lo mostra, ed è anche il posto in cui
+          // si corregge il percorso.
+          if (store.refused) store.dialog = { kind: 'new' }
+        })
+      }}>
+      <Icon name="i-plus" /> New chat here
+    </button>
+    <button class="mi" disabled={store.narrow}
+      title={store.narrow ? 'This screen is too narrow for split view' : undefined}
+      onclick={() => {
+        const id = row.id
+        store.menu = null
+        // Chat già aperta: la divisione si apre accanto a lei, con a destra il
+        // selettore di che ci va — la chat resta a sinistra. Chat chiusa: è lei
+        // ad andare a destra, accanto a quella a fuoco.
+        if (store.panes.has(id)) store.apriSceltaSplit(id)
+        else void store.openPane(id)
+      }}>
+      <Icon name="i-panel" /> Add to split view
+    </button>
+    <hr />
+    <button class="mi" onclick={() => { store.renaming = row.id; store.menu = null }}>
+      <Icon name="i-pencil" /> Rename
+    </button>
+    <button class="mi" disabled={row.state === 'sleeping'}
+      title={row.state === 'sleeping' ? 'Already sleeping'
+        : row.live ? 'Frees memory, not quota'
+        : 'Nothing is running: it just moves under Sleeping'}
+      onclick={() => { const id = row.id; store.menu = null; void store.sleep(id) }}>
+      <Icon name="i-moon" /> Put to sleep
+    </button>
+    <hr />
+    <button class="mi dgr"
+      onclick={() => { store.dialog = { kind: 'delete', row }; store.menu = null }}>
+      <Icon name="i-trash" /> Delete
+    </button>
+  {/snippet}
+
   {#if store.menu && menuRow}
-    <!-- La prima posizione è già quella giusta rispetto al cursore: l'effetto qui
-         sopra la ritocca solo se il menu sfonda un bordo, così non c'è un fotogramma
-         in cui compare nell'angolo sbagliato. -->
-    <div class="ctx-menu" bind:this={menuEl}
-      style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
-      <!-- Sta in cima e ha una riga sua perché è l'unica voce che NON agisce su questa
-           chat: agisce sul suo progetto. Aprire la seconda conversazione su una cartella
-           su cui stai già lavorando non deve passare da «New chat» e da un percorso da
-           ritrovare — la cartella la sa già la riga su cui hai premuto. -->
-      <button class="mi" disabled={!menuRow.cwd}
-        title={menuRow.cwd ?? 'This chat has no folder: there is nothing to open another one in'}
-        onclick={() => {
-          const cwd = menuRow.cwd
-          store.menu = null
-          store.refused = null
-          if (!cwd) return
-          // Il profilo Claude del progetto lo rilegge `newChat` da sé, come fa `wake()`:
-          // senza, la seconda chat partirebbe con la `CLAUDE_CONFIG_DIR` di default e
-          // sembrerebbe rotta senza motivo apparente.
-          void store.newChat(cwd).then(() => {
-            // Se non si è aperta — la cartella è stata cancellata nel frattempo — il
-            // motivo va letto da qualche parte. `store.refused` si vede nel blocco di
-            // scrittura, che però esiste solo se una conversazione è aperta: senza
-            // questo, con l'elenco a fuoco e nessuna chat aperta, il clic non farebbe
-            // niente e non lo direbbe. La modale lo mostra, ed è anche il posto in cui
-            // si corregge il percorso.
-            if (store.refused) store.dialog = { kind: 'new' }
-          })
-        }}>
-        <Icon name="i-plus" /> New chat here
-      </button>
-      <hr />
-      <button class="mi" onclick={() => { store.renaming = menuRow.id; store.menu = null }}>
-        <Icon name="i-pencil" /> Rename
-      </button>
-      <button class="mi" disabled={!menuRow.live}
-        title={menuRow.live ? 'Frees memory, not quota' : 'Already stopped'}
-        onclick={() => { const id = menuRow.id; store.menu = null; void store.sleep(id) }}>
-        <Icon name="i-moon" /> Put to sleep
-      </button>
-      <hr />
-      <button class="mi dgr"
-        onclick={() => { store.dialog = { kind: 'delete', row: menuRow }; store.menu = null }}>
-        <Icon name="i-trash" /> Delete
-      </button>
-    </div>
+    {#if store.narrow}
+      <!-- Da tocco il menu non sta sotto il dito: sta in fondo allo schermo, dove il
+           pollice arriva. Porta il titolo della chat perché la riga può essere fuori
+           vista — un menu in fondo deve saper dire a chi si riferisce. -->
+      <div class="sheet" role="menu">
+        <div class="grab" role="presentation"></div>
+        <div class="shead">{menuRow.title}</div>
+        {@render vociMenu(menuRow)}
+      </div>
+    {:else}
+      <!-- La prima posizione è già quella giusta rispetto al cursore: l'effetto qui
+           sopra la ritocca solo se il menu sfonda un bordo, così non c'è un fotogramma
+           in cui compare nell'angolo sbagliato. -->
+      <div class="ctx-menu" bind:this={menuEl}
+        style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
+        {@render vociMenu(menuRow)}
+      </div>
+    {/if}
     <div class="catch" role="presentation" onclick={() => { store.menu = null }}
       oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
   {/if}
@@ -351,6 +405,13 @@ import Todo from './components/Todo.svelte'
   {#if store.boardOpen}
     <Board {store} />
   {/if}
+
+  <!-- L'apertura di una chat che dura (da telefono, su rete lenta) copre tutto con lo
+       splash: finché `aprendo` non torna a zero il riquadro non deve mostrare nulla di
+       in mezzo — la lista dietro non è ancora quella giusta. -->
+  {#if mostroApertura}
+    <Splash />
+  {/if}
 </div>
 
 <!-- L'audio parte sospeso finché l'utente non tocca la pagina: è una regola del
@@ -383,6 +444,30 @@ import Todo from './components/Todo.svelte'
   .ctx-menu .mi:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* Sotto il menu, e sopra tutto il resto: il primo clic altrove lo chiude e basta. */
   .catch { position: fixed; inset: 0; z-index: 5; }
+
+  /* Da tocco il menu è un foglio in fondo allo schermo, non un popup sotto il dito:
+     il pollice coprirebbe le voci, e un tocco che manca il bersaglio stretto è il
+     gesto più facile sbagliare. Z-index sopra il `.catch`, come il menu largo. */
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: var(--surface);
+    border: 1px solid var(--line-2); border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    padding: 4px 6px max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 -12px 40px rgba(16,20,32,.25);
+    animation: salire .16s ease-out;
+  }
+  @keyframes salire { from { transform: translateY(40%); opacity: .5 } }
+  /* La maniglia: dice «questo è un foglio» prima ancora di leggere niente. */
+  .grab { width: 36px; height: 4px; border-radius: 999px; background: var(--line-2); margin: 4px auto 6px; }
+  .shead {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding: 2px 8px 7px; border-bottom: 1px solid var(--line); margin-bottom: 3px;
+  }
+  /* Voci alte: sotto un dito, mirare una riga da 20px è il gesto che manca. */
+  .sheet .mi { padding: 12px 10px; font-size: 13.5px; border-radius: 10px; }
+  .sheet hr { margin: 3px 6px; }
 
   .btn { cursor: pointer; }
 </style>

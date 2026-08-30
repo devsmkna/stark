@@ -34,9 +34,77 @@
     <meta name="apple-mobile-web-app-title" content="STARK" />
     <meta name="theme-color" content="#0E1118" />
     <title>STARK</title>
+    <!-- Splash pre-JS: è la prima cosa che si vede da mobile con una connessione
+         lenta, quando il bundle sta ancora arrivando. Il mount svuota #app
+         (main.ts) e la UI mostra lo stesso disegno col `Splash.svelte` vero, quindi
+         non si cambia mai forma: da "STARK che respira" a "STARK che respira". -->
+    <style>
+      #carica{position:fixed;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;background:#FFFFFF;color:#171A22}
+      @media (prefers-color-scheme:dark){#carica{background:#0E1118;color:#E8EAF0}}
+      #carica .mark{height:clamp(34px,8vw,50px);animation:respiro 2s ease-in-out infinite}
+      #carica .mark svg{display:block;height:100%;width:auto}
+      @keyframes respiro{
+        0%,100%{opacity:.62;filter:drop-shadow(0 0 10px rgba(122,146,255,.45)) drop-shadow(0 0 30px rgba(154,111,239,.25))}
+        50%{opacity:1;filter:drop-shadow(0 0 18px rgba(122,146,255,.65)) drop-shadow(0 0 48px rgba(154,111,239,.4))}
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div id="carica" role="status" aria-label="Loading STARK">
+        <span class="mark" aria-hidden="true">
+          <!-- Copia fedele di ui/src/components/Logo.svelte, col `currentColor` che qui
+               eredita il `color` del contenitore (le parole cambiano col tema). Se
+               `tools/gen-logo.py` cambia il logo, va aggiornata anche questa. -->
+          <svg viewBox="0 0 1650 238" role="img" aria-label="STARK">
+            <title>STARK</title>
+            <defs>
+              <linearGradient id="starkA" x1="0" y1="0" x2="1" y2="0.35">
+                <stop offset="0" stop-color="#6482F3"/>
+                <stop offset="1" stop-color="#9A6FEF"/>
+              </linearGradient>
+            </defs>
+            <g transform="translate(0,238) scale(0.1,-0.1)">
+              <path fill="currentColor" d="M550 2344 c-266 -56 -450 -214 -515 -439 -10 -33 -22 -69 -27 -80
+-17 -37 -4 -303 19 -375 81 -263 291 -425 596 -459 151 -17 376 -15 383 4 8
+20 77 20 94 0 11 -13 57 -15 324 -14 321 2 360 -2 436 -41 155 -80 170 -325
+26 -429 -86 -61 -74 -61 -1013 -61 -670 0 -853 -3 -860 -12 -13 -21 -10 -398
+3 -409 28 -23 1881 -6 1966 18 614 174 653 1127 53 1322 -150 49 -181 51 -752
+51 -585 0 -634 4 -711 55 -122 80 -124 308 -3 391 95 65 85 64 922 64 l758 0
+3 48 c2 26 2 122 0 215 l-3 167 -817 -1 c-658 0 -830 -3 -882 -15z M3263 2348 c-9 -14 -9 -406 0 -414 3 -3 247 -6 543 -7 297 -1 545 -6
+552 -10 9 -6 12 -206 12 -941 0 -780 2 -935 14 -945 9 -8 82 -11 242 -9 l229
+3 5 942 c3 518 9 945 13 950 5 4 255 9 557 11 l549 3 3 92 c2 51 2 147 0 215
+l-3 122 -1354 0 c-1072 0 -1356 -3 -1362 -12z M10265 2348 c-3 -7 -4 -533 -3 -1168 l3 -1155 238 -3 c190 -2 239 0
+243 11 2 7 6 432 7 944 1 512 6 935 10 940 18 17 1357 14 1410 -3 198 -66 277
+-252 202 -479 -56 -173 -109 -189 -652 -193 -238 -2 -433 -7 -433 -12 0 -4 39
+-52 88 -106 48 -54 114 -130 147 -170 33 -40 114 -134 180 -209 66 -76 152
+-174 190 -220 99 -117 306 -358 377 -437 l59 -68 295 0 c230 0 294 3 294 13 0
+11 -128 161 -327 383 -204 228 -343 392 -343 405 0 5 10 11 23 13 418 80 603
+313 601 761 -1 409 -159 643 -494 736 l-85 24 -1013 3 c-816 2 -1013 0 -1017
+-10z M14047 2353 c-18 -17 -8 -2212 10 -2222 17 -9 17 -10 0 -29 -11 -12
+-17 -31 -15 -49 l3 -28 240 0 240 0 3 1154 c1 844 -1 1157 -9 1167 -12 15
+-458 21 -472 7z M15773 2281 c-43 -43 -82 -84 -88 -90 -5 -7 -227 -227 -492 -491
+-266 -263 -483 -485 -483 -493 0 -27 303 -327 325 -322 27 7 55 -11 36 -24
+-21 -14 -20 -14 398 -440 l394 -401 318 0 c176 0 319 2 319 5 0 3 -237 242
+-526 533 -290 290 -554 556 -587 591 l-61 64 161 156 c89 86 342 334 563 551
+221 217 411 401 421 408 42 29 15 32 -300 32 l-319 0 -79 -79z"/>
+              <path fill="url(#starkA)" d="M7615 2326 c-41 -20 -105 -80 -105 -100 0 -3 -34 -67 -76 -143 -42
+-76 -94 -172 -116 -213 -23 -41 -101 -185 -176 -320 -74 -135 -160 -291 -191
+-348 -31 -56 -87 -158 -124 -225 -38 -67 -100 -183 -139 -257 -39 -74 -81
+-151 -94 -171 -12 -19 -41 -73 -64 -120 -23 -46 -60 -113 -80 -150 -66 -113
+-131 -242 -124 -248 8 -9 347 -14 429 -6 l70 6 37 62 c20 34 66 116 101 182
+35 66 79 147 97 180 18 33 59 107 90 165 32 58 121 219 199 359 77 140 141
+255 141 257 0 2 31 59 69 126 37 68 85 155 106 193 153 283 161 293 193 228
+10 -21 48 -90 84 -153 100 -175 365 -664 532 -981 185 -350 279 -522 322 -591
+l23 -36 233 5 c283 6 264 1 236 60 -27 56 -178 340 -248 463 -26 47 -67 123
+-92 170 -55 106 -354 655 -418 770 -26 47 -65 119 -85 160 -21 41 -54 104 -75
+140 -21 36 -64 117 -97 180 -200 383 -196 380 -468 380 -127 0 -145 -2 -190
+-24z"/>
+            </g>
+          </svg>
+        </span>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

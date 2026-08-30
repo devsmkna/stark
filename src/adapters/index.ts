@@ -22,7 +22,13 @@ import { allineaMemoria } from './claude-code/memoria.ts'
 import { diagnostics, warmDiagnostics } from './claude-code/profiles.ts'
 import { modeChoices } from './claude-code/sdk-options.ts'
 import { catalogoModelli } from './claude-code/modelli.ts'
-import { catalogoModelli as catalogoOpenCode, modiNoti, OpenCodeAdapter } from './opencode/adapter.ts'
+import {
+  catalogoModelli as catalogoOpenCode, modiNoti, OpenCodeAdapter,
+} from './opencode/adapter.ts'
+import {
+  elencoConversazioni, importaConversazione, isRecent as recenteOpenCode,
+  trovaConversazione,
+} from './opencode/import.ts'
 
 export const claudeCode: AgentBackend = {
   id: 'claude-code',
@@ -45,11 +51,14 @@ export const claudeCode: AgentBackend = {
  * Il secondo adapter (ADR-012/ADR-013). «Quanto basta» a far girare una conversazione
  * con permessi e Stop, non un secondo prodotto.
  *
- * I tre metodi opzionali del contratto restano **non implementati**, e opzionale qui
- * vuol dire davvero «quel fatto non c'e'»: OpenCode non ha conversazioni nate in un
- * terminale a parte da importare (la sua TUI e il suo server leggono lo stesso
- * database, quindi non c'e' niente da portare dentro), e non ha un `CLAUDE.md` globale
- * su cui scrivere una regola per le descrizioni dei comandi.
+ * Le conversazioni nate nella TUI si importano dal **database** di OpenCode, non
+ * dall'SDK: le rotte v2 della storia leggono un archivio che la TUI non popola
+ * (misurato: 0 righe su sessioni da 151 messaggi), le tabelle `message`/`part`
+ * hanno tutto. Vedi `opencode/import.ts` — che e' il gemello di quello che legge
+ * i trascritti JSONL di Claude Code, cambiando solo la cassaforte.
+ *
+ * Restano fuori le descrizioni dei comandi: non c'e' un `CLAUDE.md` globale di
+ * OpenCode su cui scriverle.
  */
 export const openCode: AgentBackend = {
   id: 'opencode',
@@ -62,6 +71,10 @@ export const openCode: AgentBackend = {
   // Solo se il CLI c'e': chiederli a un agent non installato farebbe partire un
   // processo che non esiste, e l'elenco tornerebbe vuoto dopo averci provato.
   catalogue: async () => (await presente()) ? catalogoOpenCode() : [],
+  listConversations: async (_profile, limit) => elencoConversazioni(limit),
+  isRecent: recenteOpenCode,
+  importConversation: importaConversazione,
+  locateConversation: (sessionId) => trovaConversazione(sessionId),
 }
 
 let ocPresente: boolean | null = null
@@ -289,4 +302,9 @@ const SENZA_SOLA_LETTURA = 'Read-only isn\'t enforced on this agent yet: it coul
 const ETICHETTE: Record<string, string> = {
   'claude-code': 'Claude Code',
   opencode: 'OpenCode',
+}
+
+/** L'etichetta di un agent per chi non lo conosce per id — la UI, per esempio. */
+export function etichettaDi(agent: string): string {
+  return ETICHETTE[agent] ?? agent
 }
