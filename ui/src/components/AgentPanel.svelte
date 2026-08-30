@@ -70,7 +70,7 @@
     attaccato = el.scrollHeight - el.scrollTop - el.clientHeight < 24
   }
   $effect(() => { void quanto; void turns.length; if (!attaccato) return; const el = scroller; if (el) requestAnimationFrame(() => { if (attaccato) el.scrollTop = el.scrollHeight }) })
-  function grow(): void { const el = box; if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 140)}px` }
+  function grow(): void { const el = box; if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 160)}px` }
   async function regrow(): Promise<void> { await Promise.resolve(); grow() }
   async function manda(): Promise<void> {
     const t = testo.trim(); if (!t || lavora || store.helperBusy) return
@@ -99,7 +99,13 @@
     const ora = store.helperPick?.agent ?? snap?.agent
     return !!ora && !!snap && turns.length > 0 && agent !== ora
   }
-  function chiudiMenu(e: MouseEvent): void {
+  /** Chiude su `pointerdown` e non su `click` perche' il clic su una voce di primo
+   *  livello cambia il contenuto del popup **durante** la stessa distribuzione
+   *  dell'evento: il nodo premuto si stacca da `.ap-pop`, e il `click`, quando
+   *  arriva al document, lo vedrebbe fuori e chiuderebbe il menu che l'utente sta
+   *  usando. Al `pointerdown` l'albero è ancora intatto — ed è il gesto con cui
+   *  chiude la status bar (misurato: tools/prova-pannello-agente.mjs). */
+  function chiudiMenu(e: PointerEvent): void {
     if (!(e.target as HTMLElement).closest('.ap-pop, .ap-tune')) menu = false
   }
   function esc(e: KeyboardEvent): void {
@@ -107,9 +113,9 @@
   }
 </script>
 
-<svelte:document onclick={chiudiMenu} onkeydown={esc} />
+<svelte:document onpointerdown={chiudiMenu} onkeydown={esc} />
 
-<aside class="agentpan" style="width:{(store.helperW || 300)}px" aria-label="Pannello agente">
+<aside class="agentpan" style="width:{(store.helperW || 300)}px" aria-label="Agent panel">
   <button class="hgrip" aria-label="Resize"
     onpointerdown={(e) => {
       const start = e.clientX, w0 = store.helperW
@@ -121,7 +127,7 @@
     }}></button>
 
   <div class="ap-head">
-    <span class="ap-title">PANNELLO AGENTE</span>
+    <span class="ap-title">AGENT PANEL</span>
     <button class="ap-x" aria-label="Close" onclick={close}><Icon name="i-x" /></button>
   </div>
 
@@ -136,18 +142,18 @@
   {#if tab === 'todos'}
     <div class="ap-body scroller">
       {#if !store.snap}
-        <div class="ap-empty">Apri una chat per vedere i TODO.</div>
+        <div class="ap-empty">Open a chat to see the TODOs.</div>
       {:else if todos.length === 0}
         <div class="ap-empty">
           {#if store.snap.capabilities?.todos === false}
-            Questo agent non tiene una checklist mentre lavora.
+            This agent does not keep a checklist while it works.
           {:else}
-            Nessun task. L'agent terrà traccia del lavoro qui quando avrà qualcosa da fare.
+            No tasks. The agent will keep track of work here when it has something to do.
           {/if}
         </div>
       {:else}
         {#if inCorso.length > 0}
-          <div class="ap-sec-head">IN CORSO</div>
+          <div class="ap-sec-head">IN PROGRESS</div>
           {#each inCorso as t (t.content)}
             <div class="ap-row">
               <span class="ap-box"
@@ -160,9 +166,9 @@
           {/each}
           <hr class="ap-sep" />
         {/if}
-        <div class="ap-sec-head">COMPLETATI</div>
+        <div class="ap-sec-head">COMPLETED</div>
         {#if completati.length === 0}
-          <div class="ap-empty">Nessun completato.</div>
+          <div class="ap-empty">None completed.</div>
         {:else}
           {#each completati as t (t.content)}
             <div class="ap-row done">
@@ -180,11 +186,11 @@
       <!-- info sola lettura — con margin (richiesta) -->
       <div class="ap-notice">
         <Icon name="i-shield" />
-        <span>Sola lettura — può consultare il progetto ma non modificarlo. Chat temporanea, non entra nella cronologia principale.</span>
+        <span>Read-only — it can consult the project but not modify it. Temporary chat; it does not enter the main history.</span>
       </div>
 
       {#if store.helperRefused}<div class="hwarn">{store.helperRefused}</div>{/if}
-      {#if !snap && store.helperBusy}<div class="ap-empty">Avvio…</div>{/if}
+      {#if !snap && store.helperBusy}<div class="ap-empty">Starting…</div>{/if}
       {#each turns as t (t.turnId)}
         {@const chiesto = promptText(t.prompt)}
         {#if chiesto}<div class="hq">{chiesto}</div>{/if}
@@ -209,7 +215,7 @@
         </div>
       {/if}
       <div class="ap-input-row">
-        <textarea class="ap-input" bind:this={box} bind:value={testo} placeholder="Fai una domanda veloce..." rows="1" oninput={grow} onkeydown={tasto} disabled={store.helperBusy}></textarea>
+        <textarea class="ap-input" bind:this={box} bind:value={testo} placeholder="Ask a quick question..." rows="1" oninput={grow} onkeydown={tasto} disabled={store.helperBusy}></textarea>
         <button class="ap-send" aria-label="Send" onclick={() => void manda()} disabled={!testo.trim() || lavora || store.helperBusy}><Icon name="i-send" /></button>
       </div>
       <div class="ap-status">
@@ -217,7 +223,7 @@
              modello, nome, chevron. Solo i colori sono quelli del pannello. -->
         <button class="ap-tune" onclick={() => void apriMenu()} aria-label="Model: {modelloOra}">
           {#if iconaModello}
-            <img src={iconaModello} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy"
+            <img src={iconaModello} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy"
               onerror={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display='none' }} />
           {:else}
             <span class="mdot"></span>
@@ -232,115 +238,129 @@
 
 <style>
   .agentpan{
-    flex:none; display:flex; flex-direction:column; background:#080C18; border-left:1px solid #1C2333;
+    flex:none; display:flex; flex-direction:column; background:var(--panel-bg); border-left:1px solid var(--panel-line);
     position:relative; overflow:hidden; border-radius: 14px 0 0 14px; /* staccata come nello screenshot */
+    /* Il pannello ha le sue tinte: i `--panel-*` di app.css, che in scuro valgono il
+       design scuro fisso e in chiaro la tavolozza di base. Riscrivere i nomi del
+       vocabolario su questa radice fa sì che le classi qui sotto (e la tendina dei
+       modelli, che sta dentro) le prendano senza dover sapere da dove vengono. */
+    --side:var(--panel-bg); --surface:var(--panel-surface); --surface-2:var(--panel-surface-2); --surface-3:var(--panel-surface-3);
+    --ink:var(--panel-ink); --ink-2:var(--panel-ink-2); --muted:var(--panel-muted);
+    --line:var(--panel-line); --line-2:var(--panel-line-2);
+    --accent:var(--panel-accent); --accent-soft:var(--panel-accent-soft);
   }
   .hgrip{position:absolute; left:-3px; top:0; bottom:0; width:7px; cursor:col-resize; background:none; border:0; padding:0; z-index:2}
-  .hgrip:hover{background:rgba(122,92,250,.12)}
+  .hgrip:hover{background:color-mix(in srgb,var(--panel-accent) 12%,transparent)}
   .ap-head{display:flex; align-items:center; justify-content:space-between; padding:12px 12px 8px; flex:none}
-  .ap-title{font-size:10px; letter-spacing:.12em; font-weight:700; color:#6B7488}
-  .ap-x{width:22px; height:22px; display:grid; place-items:center; background:none; border:0; color:#6B7488; cursor:pointer; border-radius:6px}
-  .ap-x:hover{color:#E6E8F0; background:#1A1F2E}
+  .ap-title{font-size:10px; letter-spacing:.12em; font-weight:700; color:var(--muted)}
+  .ap-x{width:22px; height:22px; display:grid; place-items:center; background:none; border:0; color:var(--muted); cursor:pointer; border-radius:6px}
+  .ap-x:hover{color:var(--ink); background:var(--surface-2)}
   .ap-x :global(svg.ic){width:13px; height:13px}
 
   /* pill tabs — stesso stile di Sidebar .pick (Group by), dimensioni invariate */
   .ap-tabs{
     margin: 0 12px 10px; padding:2px; display:flex; gap:2px; flex:none;
-    background:#1C2333; border:0; border-radius:999px;
+    background:var(--surface-3); border:0; border-radius:999px;
   }
   .ap-tab{
-    flex:1; padding:6px 0; border:0; border-radius:999px; background:none; color:#6B7488;
+    flex:1; padding:6px 0; border:0; border-radius:999px; background:none; color:var(--muted);
     font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
   }
-  .ap-tab:hover:not(.on){ color:#E6E8F0; }
-  .ap-tab.on{background:#131A2A; color:#E6E8F0; box-shadow:0 1px 1.5px rgba(0, 0, 0, .10)}
-  .ap-tab:focus-visible{ outline:2px solid #7A5CFA; outline-offset:1px; }
+  .ap-tab:hover:not(.on){ color:var(--ink); }
+  .ap-tab.on{background:var(--surface); color:var(--ink); box-shadow:0 1px 1.5px rgba(0, 0, 0, .10)}
+  .ap-tab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
   .ap-body{flex:1; overflow:auto; padding:8px 12px 12px; display:flex; flex-direction:column; gap:8px}
-  .ap-sec-head{font-size:10px; letter-spacing:.10em; font-weight:600; color:#6B7488; margin:6px 0 4px}
-  .ap-sep{border:0; border-top:1px solid #1C2333; margin:10px 0}
-  .ap-empty{color:#6B7488; font-size:11px; padding:12px 4px; line-height:1.5}
+  .ap-sec-head{font-size:10px; letter-spacing:.10em; font-weight:600; color:var(--muted); margin:6px 0 4px}
+  .ap-sep{border:0; border-top:1px solid var(--line); margin:10px 0}
+  .ap-empty{color:var(--muted); font-size:11px; padding:12px 4px; line-height:1.5}
   .ap-row{display:flex; gap:8px; align-items:flex-start; padding:4px 0}
-  .ap-box{width:16px; height:16px; border-radius:4px; border:1px solid #2A3347; display:grid; place-items:center; flex:none; color:#6B7488; background:#0E1424}
-  .ap-box.on{background:#0F2A1D; border-color:#1B4D2E; color:#1DBA54}
+  .ap-box{width:16px; height:16px; border-radius:4px; border:1px solid var(--line-2); display:grid; place-items:center; flex:none; color:var(--muted); background:var(--surface)}
+  .ap-box.on{background:var(--panel-done-bg); border-color:var(--panel-done); color:var(--panel-done)}
   .ap-box :global(svg.ic){width:10px; height:10px}
   .ap-box.on :global(svg.ic){width:10px; height:10px}
   .ap-row-main{flex:1; min-width:0}
-  .ap-row-title{font-size:11.5px; color:#E6E8F0; line-height:1.35}
-  .ap-row-title.strike{color:#8A91A2; text-decoration:line-through}
-  .ap-row-sub{font-size:9.5px; color:#6B7488; margin-top:1px}
-  .ap-row.done .ap-row-title{color:#8A91A2}
+  .ap-row-title{font-size:11.5px; color:var(--ink); line-height:1.35}
+  .ap-row-title.strike{color:var(--muted); text-decoration:line-through}
+  .ap-row-sub{font-size:9.5px; color:var(--muted); margin-top:1px}
+  .ap-row.done .ap-row-title{color:var(--muted)}
 
   .ap-notice{
     display:flex; gap:8px; align-items:flex-start; padding:10px 11px; border-radius:10px;
-    background:#131A2A; border:1px solid #1E2535; color:#C2C8D6; font-size:11px; line-height:1.4;
+    background:var(--surface); border:1px solid var(--panel-field); color:var(--ink-2); font-size:11px; line-height:1.4;
     margin: 10px 12px 14px;
   }
-  .ap-notice :global(svg.ic){width:14px; height:14px; flex:none; color:#7A5CFA; margin-top:1px}
-  .ap-dock{border-top:1px solid #1C2333; padding:8px; flex:none; position:relative; background:#080C18}
-  .ap-input-row{display:flex; gap:8px; align-items:flex-end}
+  .ap-notice :global(svg.ic){width:14px; height:14px; flex:none; color:var(--accent); margin-top:1px}
+  /* Il fondo del pannello ricalca il dock dello spazio centrale (`Dock.svelte` +
+     `.status` in app.css), misura per misura: le due colonne stanno affiancate a
+     tutta altezza, e righe di altezza diversa si leggerebbero come due design.
+     Padding sulle righe, non sul contenitore — come là. */
+  .ap-dock{border-top:1px solid var(--line); padding:0; flex:none; position:relative; background:var(--panel-bg)}
+  .ap-input-row{display:flex; gap:8px; align-items:center; padding:12px 16px}
   .ap-input{
-    flex:1; min-height:36px; max-height:120px; resize:none; padding:8px 12px; border-radius:18px;
-    background:#131A2A; border:1px solid #1E2535; color:#E6E8F0; font:inherit; font-size:11.5px; outline:none;
+    flex:1; resize:none; padding:9px 14px; border-radius:20px;
+    background:var(--surface); border:1px solid var(--panel-field); color:var(--ink); font:inherit;
+    font-size:12.5px; line-height:1.45; outline:none; max-height:160px;
   }
-  .ap-input::placeholder{color:#6B7488}
-  .ap-input:focus{border-color:#7A5CFA; box-shadow:0 0 0 3px rgba(122,92,250,.18)}
+  .ap-input::placeholder{color:var(--muted)}
+  .ap-input:focus{border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--panel-accent) 18%,transparent)}
   .ap-send{
-    width:34px; height:34px; border-radius:50%; flex:none; border:0; background:#7A5CFA; color:#fff; display:grid; place-items:center; cursor:pointer;
+    width:30px; height:30px; border-radius:50%; flex:none; border:0; background:var(--accent); color:var(--on-accent); display:grid; place-items:center; cursor:pointer;
   }
   .ap-send:disabled{opacity:.45; cursor:default}
-  .ap-send :global(svg.ic){width:14px; height:14px}
+  .ap-send :global(svg.ic){width:15px; height:15px}
 
-  /* La status bar sotto la casella: per ora solo il modello. Stessa forma del chip
-     della barra di stato della conversazione grande (`.tune`): icona del provider,
-     nome, chevron — solo i colori sono quelli del pannello. */
-  .ap-status{display:flex; align-items:center; gap:8px; padding:8px 2px 0}
+  /* La status bar sotto la casella: stesso passo di `.status` (padding e altezza
+     del chip compresi) e il chip del modello appoggiato a destra, come la parte
+     destra della barra della conversazione grande (`.status .r .tune`). */
+  .ap-status{display:flex; align-items:center; justify-content:flex-end; gap:9px; padding:5px 12px 7px}
   .ap-tune{
-    display:inline-flex; align-items:center; gap:5px; border:1px solid #1E2535; border-radius:8px;
-    padding:3px 8px; background:#131A2A; color:#E6E8F0; font:inherit; font-size:10px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:4px; border:0; background:none; padding:0;
+    min-height:calc(1.45em + 4px); color:var(--ink); font:inherit; font-size:10px; cursor:pointer;
     max-width:100%;
   }
   .ap-tune .mname{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
-  .ap-tune :global(svg.ic){width:10px; height:10px; color:#6B7488; flex:none}
-  .ap-tune .mdot{width:8px; height:8px; border-radius:50%; background:#6B7488; flex:none}
-  .ap-tune:hover{border-color:#7A5CFA}
-  .ap-tune:focus-visible{outline:2px solid #7A5CFA; outline-offset:1px}
+  .ap-tune :global(svg.ic){width:10px; height:10px; color:var(--muted); flex:none}
+  .ap-tune .mdot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none}
+  .ap-tune:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 
   /* La tendina dei modelli: sta **dentro** il pannello, larga quanto lui — un pannello
      trascinabile e il mobile hanno larghezze diverse, e una larghezza fissa più grande
      del pannello sporgeva a sinistra sopra la conversazione (segnalato il 30 agosto).
      Gli id lunghi si troncano con l'ellissi che `.mpick .lb` già fa. Le voci sono le
-     stesse del menu della status bar (`.mi` ecc.), solo coi colori del pannello. */
+     stesse del menu della status bar (`.mi` ecc.), solo coi colori del pannello: i
+     `--panel-*`, che in scuro valgono il design scuro fisso e in chiaro la tavolozza
+     di base. */
   .ap-pop{
-    position:absolute; left:8px; right:8px; bottom:calc(100% + 4px); width:auto;
-    background:#0E1424; border:1px solid #1E2535; border-radius:10px;
+    position:absolute; left:16px; right:16px; bottom:calc(100% + 4px); width:auto;
+    background:var(--panel-pop); border:1px solid var(--panel-field); border-radius:10px;
     box-shadow:0 8px 28px rgba(0,0,0,.45); padding:4px; z-index:6; max-height:62vh; overflow:auto;
   }
   /* Le voci della tendina: stesse righe del menu di ogni altro posto, ma coi colori
-     del pannello — qui non ci sono le variabili del tema, il pannello è scuro fisso. */
+     del pannello (i `--panel-*` di app.css, vedi sopra). */
   .ap-pop :global(.mi){
     display:flex; align-items:center; gap:7px; padding:4px 8px; border-radius:6px;
-    font-size:11px; color:#C2C8D6; width:100%; background:none; border:0; font-family:inherit; text-align:left; cursor:pointer;
+    font-size:11px; color:var(--ink-2); width:100%; background:none; border:0; font-family:inherit; text-align:left; cursor:pointer;
   }
-  .ap-pop :global(button.mi:hover){background:#1A1F2E}
-  .ap-pop :global(.mi.on){background:rgba(122,92,250,.16); color:#E6E8F0; font-weight:600}
-  .ap-pop :global(.mi.dis){color:#6B7488}
-  .ap-pop :global(.mi .tag){margin-left:auto; font-size:9.5px; color:#6B7488; flex:none}
-  .ap-pop :global(.mi .sub){display:block; color:#6B7488; font-size:9.5px}
+  .ap-pop :global(button.mi:hover){background:var(--surface-2)}
+  .ap-pop :global(.mi.on){background:color-mix(in srgb,var(--panel-accent) 16%,transparent); color:var(--ink); font-weight:600}
+  .ap-pop :global(.mi.dis){color:var(--muted)}
+  .ap-pop :global(.mi .tag){margin-left:auto; font-size:9.5px; color:var(--muted); flex:none}
+  .ap-pop :global(.mi .sub){display:block; color:var(--muted); font-size:9.5px}
   .ap-pop :global(.mpick .lb),.ap-pop :global(.mpick .sub){display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .ap-pop :global(.mpick .tx){flex:1; min-width:0}
   .ap-pop :global(.msearch){
     position:sticky; bottom:0; display:flex; align-items:center; gap:7px; padding:6px 8px; margin-top:2px;
-    border-top:1px solid #1C2333; background:#131A2A; color:#6B7488;
+    border-top:1px solid var(--line); background:var(--surface); color:var(--muted);
   }
-  .ap-pop :global(.msearch input){flex:1; min-width:0; border:0; background:none; color:#E6E8F0; font-family:inherit; font-size:10.5px; outline:none; padding:0}
-  .ap-pop :global(.msearch input::placeholder){color:#6B7488}
+  .ap-pop :global(.msearch input){flex:1; min-width:0; border:0; background:none; color:var(--ink); font-family:inherit; font-size:10.5px; outline:none; padding:0}
+  .ap-pop :global(.msearch input::placeholder){color:var(--muted)}
 
   /* helper inner reuse */
   .hconv{padding:0; gap:8px}
-  .hq{background:#1A1F2E; border:1px solid #242B3D; color:#E6E8F0}
-  .ha{color:#C2C8D6}
-  .hthought{border-left-color:#1E2535; color:#8A91A2}
-  .spin{width:9px; height:9px; border-radius:50%; border:2px solid #7A5CFA; border-right-color:transparent; animation:sp .9s linear infinite}
+  .hq{background:var(--surface-2); border:1px solid var(--line-2); color:var(--ink)}
+  .ha{color:var(--ink-2)}
+  .hthought{border-left-color:var(--panel-field); color:var(--muted)}
+  .spin{width:9px; height:9px; border-radius:50%; border:2px solid var(--panel-accent); border-right-color:transparent; animation:sp .9s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
 
   @media (max-width: 860px){

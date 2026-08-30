@@ -237,7 +237,7 @@ async function route(
         + 'Ask for a code on your computer, then open this page again.</p></div>')
       return
     }
-    send(res, 403, { error: 'vietato' })
+    send(res, 403, { error: 'forbidden' })
     return
   }
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -282,25 +282,25 @@ async function route(
       if (!push?.disponibile) {
         // Spento **con la spiegazione**, non nascosto: la UI ne fa una riga che dice
         // cosa manca, invece di un interruttore che non fa niente.
-        return send(res, 200, { disponibile: false, motivo: 'web-push non è installato', iscritti: 0 })
+        return send(res, 200, { disponibile: false, motivo: 'web-push is not installed', iscritti: 0 })
       }
       if (method === 'GET') {
         return send(res, 200, { disponibile: true, key: push.chiavePubblica, iscritti: push.quanti })
       }
     }
     if (method === 'POST' && path === '/api/push/subscribe') {
-      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      if (!push?.disponibile) return send(res, 503, { error: 'notifications unavailable' })
       const b = await readJson<Subscription>(req)
       if (!b?.endpoint || !b.keys?.p256dh || !b.keys?.auth) {
-        return send(res, 400, { error: 'iscrizione incompleta' })
+        return send(res, 400, { error: 'incomplete subscription' })
       }
       push.iscrivi(b)
       return send(res, 200, { ok: true, iscritti: push.quanti })
     }
     if (method === 'POST' && path === '/api/push/unsubscribe') {
-      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      if (!push?.disponibile) return send(res, 503, { error: 'notifications unavailable' })
       const b = await readJson<{ endpoint?: string }>(req)
-      if (!b?.endpoint) return send(res, 400, { error: 'endpoint obbligatorio' })
+      if (!b?.endpoint) return send(res, 400, { error: 'endpoint required' })
       push.disiscrivi(b.endpoint)
       return send(res, 200, { ok: true, iscritti: push.quanti })
     }
@@ -309,10 +309,10 @@ async function route(
     // schermata Home, e senza un modo di provarlo si scopre che non funziona la prima
     // volta che serviva.
     if (method === 'POST' && path === '/api/push/test') {
-      if (!push?.disponibile) return send(res, 503, { error: 'notifiche non disponibili' })
+      if (!push?.disponibile) return send(res, 503, { error: 'notifications unavailable' })
       await push.manda({
-        kind: 'done', title: 'STARK · prova',
-        body: 'Se leggi questo, le notifiche sul telefono funzionano.', sessionId: '',
+        kind: 'done', title: 'STARK · test',
+        body: 'If you can read this, notifications on your phone are working.', sessionId: '',
       })
       return send(res, 200, { ok: true, iscritti: push.quanti })
     }
@@ -370,7 +370,7 @@ async function route(
     }
     if (method === 'POST' && path === '/api/importable') {
       const body = await readJson<{ sessionId?: string }>(req)
-      if (!body?.sessionId) return send(res, 400, { error: 'sessionId obbligatorio' })
+      if (!body?.sessionId) return send(res, 400, { error: 'sessionId required' })
       const esito = await registry.importSession(body.sessionId)
       return send(res, esito.ok ? 201 : 409, esito)
     }
@@ -385,7 +385,7 @@ async function route(
     }
     if (method === 'PUT' && path === '/api/settings') {
       const body = await readJson<Settings>(req)
-      if (!body) return send(res, 400, { error: 'impostazioni malformate' })
+      if (!body) return send(res, 400, { error: 'malformed settings' })
       // Si risponde con ciò che è stato **davvero** scritto, non con ciò che è
       // arrivato: il registro butta via quello che non riconosce, e la UI deve
       // mostrare lo stato vero invece di quello che sperava di aver impostato.
@@ -435,7 +435,7 @@ async function route(
       return
     }
     if (method === 'POST' && path === '/api/phone/claim') {
-      if (!telefono) return send(res, 503, { ok: false, error: 'non disponibile' })
+      if (!telefono) return send(res, 503, { ok: false, error: 'unavailable' })
       const body = await readJson<{ code?: string }>(req)
       const esito = telefono.riscatta(body?.code ?? '', String(req.headers['user-agent'] ?? ''))
       if (!esito.ok) return send(res, 200, esito)   // 200: è una risposta, non un guasto
@@ -452,7 +452,7 @@ async function route(
 
     // Da qui in giù serve il token: sono le rotte che si usano **dal computer**.
     if (method === 'GET' && path === '/api/phone') {
-      if (!telefono) return send(res, 503, { error: 'non disponibile' })
+      if (!telefono) return send(res, 503, { error: 'unavailable' })
       // `questo` e `conTokenMacchina` descrivono **chi sta chiedendo**, non lo stato
       // della macchina: sono l'unico modo perché il pannello, aperto da un telefono,
       // sappia quale riga dell'elenco è quella da cui lo stai guardando.
@@ -473,7 +473,7 @@ async function route(
       })
     }
     if (method === 'POST' && path === '/api/phone/code') {
-      if (!telefono) return send(res, 503, { error: 'non disponibile' })
+      if (!telefono) return send(res, 503, { error: 'unavailable' })
       return send(res, 200, telefono.apri())
     }
     if (method === 'DELETE' && path === '/api/phone/code') {
@@ -482,7 +482,7 @@ async function route(
     }
     if (method === 'DELETE' && path === '/api/phone/device') {
       const id = url.searchParams.get('id')
-      if (!id) return send(res, 400, { ok: false, error: 'id obbligatorio' })
+      if (!id) return send(res, 400, { ok: false, error: 'id required' })
       return send(res, 200, { ok: telefono?.revoca(id) ?? false })
     }
     // I due passi che STARK può fare al posto tuo. Gli altri tre no, e non è una
@@ -497,7 +497,7 @@ async function route(
 
     if (method === 'GET' && path === '/api/git') {
       const cwd = url.searchParams.get('cwd')
-      if (!cwd) return send(res, 400, { error: 'cwd obbligatorio' })
+      if (!cwd) return send(res, 400, { error: 'cwd required' })
       return send(res, 200, await ramoDi(cwd))
     }
     if (method === 'GET' && path === '/api/browse') {
@@ -516,7 +516,7 @@ async function route(
     // comodo aggiungere «al volo» fuori dalla guardia, ed è così che se ne apre uno.
     if (method === 'POST' && path === '/api/reveal') {
       const body = await readJson<{ path?: string; sessionId?: string }>(req)
-      if (!body?.path) return send(res, 400, { error: 'path obbligatorio' })
+      if (!body?.path) return send(res, 400, { error: 'path required' })
       // Un percorso relativo si legge rispetto alla **chat**, non al daemon, la cui
       // cartella è `/`. Chi manda un percorso assoluto (il blocco di un file, la riga
       // di un tool) non passa nessun `sessionId` e non cambia niente per lui:
@@ -532,11 +532,11 @@ async function route(
     // quanto serva, e comodo da bucare proprio perché sembra innocuo.
     if (method === 'POST' && path === '/api/open-app') {
       const body = await readJson<{ url?: string; scheme?: string }>(req)
-      if (!body?.url || !body.scheme) return send(res, 400, { error: 'url e scheme obbligatori' })
+      if (!body?.url || !body.scheme) return send(res, 400, { error: 'url and scheme required' })
       let host: string
-      try { host = new URL(body.url).hostname } catch { return send(res, 400, { error: 'url non valido' }) }
+      try { host = new URL(body.url).hostname } catch { return send(res, 400, { error: 'invalid url' }) }
       if (serviceFor(host)?.scheme !== body.scheme) {
-        return send(res, 400, { error: 'dominio non riconosciuto per questo schema' })
+        return send(res, 400, { error: 'domain not recognized for this scheme' })
       }
       const esito = await openApp(body.url, body.scheme)
       return send(res, esito.ok ? 200 : 404, esito)
@@ -613,12 +613,12 @@ async function route(
     if (method === 'POST' && path === '/api/update') {
       const stato = aggiornamentoNoto()
       if (!stato?.disponibile || !stato.tag) {
-        return send(res, 409, { error: 'non c\'è nessuna release più nuova da installare' })
+        return send(res, 409, { error: 'no newer release to install' })
       }
       if (await alberoSporco(RADICE)) {
         return send(res, 409, {
-          error: 'ci sono modifiche locali a file tracciati in ' + RADICE
-            + ': STARK non le sovrascrive. Risolvile a mano, poi riprova.',
+          error: 'there are uncommitted changes to tracked files in ' + RADICE
+            + ': STARK will not overwrite them. Resolve them yourself, then try again.',
         })
       }
       const esito = avviaRicambio(STARK_HOME, { aggiorna: true, log: logPath(STARK_HOME) })
@@ -678,10 +678,10 @@ async function route(
     if (method === 'POST' && path === '/api/handoff') {
       const body = await readJson<{ id?: string; agent?: string; model?: string; via?: string }>(req)
       if (!body?.id || !body.agent || !body.model) {
-        return send(res, 400, { error: 'id, agent e model obbligatori' })
+        return send(res, 400, { error: 'id, agent and model required' })
       }
       if (body.via && body.via !== 'agent' && body.via !== 'journal') {
-        return send(res, 400, { error: `via sconosciuta: ${body.via}` })
+        return send(res, 400, { error: `unknown via: ${body.via}` })
       }
       const esito = await eseguiHandoff(registry, {
         id: body.id, agent: body.agent, model: body.model,
@@ -704,9 +704,9 @@ async function route(
       // processo. `registry.helper` dice se esiste; `404` = non c'è, e chi chiama
       // fa il POST che lo crea.
       const id = registry.helper
-      if (!id) return send(res, 404, { error: 'nessun helper vivo' })
+      if (!id) return send(res, 404, { error: 'no helper alive' })
       const snap = registry.snapshot(id)
-      if (!snap) return send(res, 404, { error: 'nessun helper vivo' })
+      if (!snap) return send(res, 404, { error: 'no helper alive' })
       return send(res, 200, { id, snapshot: snap })
     }
 
@@ -740,7 +740,7 @@ async function route(
 
     if (method === 'POST' && path === '/api/sessions') {
       const body = await readJson<OpenSpec>(req)
-      if (!body?.cwd) return send(res, 400, { error: 'cwd obbligatorio' })
+      if (!body?.cwd) return send(res, 400, { error: 'cwd required' })
       // Che la cartella esista si controlla **qui**, prima di aprire qualunque cosa.
       // Senza, si arrivava a far partire il processo figlio e a fallire là in fondo: e
       // fallire là in fondo aveva due prezzi. Il primo è il messaggio, che veniva
@@ -752,7 +752,7 @@ async function route(
       // aveva aperto. Un input non valido deve fermarsi al confine, non lasciare
       // residui dentro.
       if (!isDir(body.cwd)) {
-        return send(res, 400, { error: `la cartella non esiste: ${body.cwd}` })
+        return send(res, 400, { error: `the folder does not exist: ${body.cwd}` })
       }
       const id = await registry.open(body)
       return send(res, 201, { id, snapshot: registry.snapshot(id) })
@@ -763,7 +763,7 @@ async function route(
     const b = /^\/api\/sessions\/([0-9a-f-]{8,})\/blob\/([0-9a-f]{64})$/.exec(path)
     if (b && method === 'GET') {
       const found = registry.attachment(b[1]!, b[2]!)
-      if (!found) return send(res, 404, { error: 'allegato sconosciuto' })
+      if (!found) return send(res, 404, { error: 'unknown attachment' })
       // Immutabile per costruzione: il nome **è** l'impronta del contenuto, quindi la
       // cache del browser non può servire una cosa per un'altra.
       res.writeHead(200, {
@@ -781,7 +781,7 @@ async function route(
 
       if (method === 'GET' && sub === '') {
         const s = registry.snapshot(id)
-        return s ? send(res, 200, { snapshot: s }) : send(res, 404, { error: 'sconosciuta' })
+        return s ? send(res, 200, { snapshot: s }) : send(res, 404, { error: 'unknown' })
       }
       // Le citazioni con `@`: i file del progetto che somigliano a quello che si sta
       // scrivendo. GET e non `/command`, perché qui serve una **risposta** — il canale
@@ -806,12 +806,12 @@ async function route(
       // in qualunque cartella di questa macchina» (stessa ragione di `/files`).
       if (method === 'GET' && sub === '/todo') {
         const cwd = registry.snapshot(id)?.cwd
-        if (!cwd) return send(res, 404, { error: 'questa conversazione non ha una cartella' })
+        if (!cwd) return send(res, 404, { error: 'this conversation has no folder' })
         return send(res, 200, { cwd, ...leggiTodo(cwd) })
       }
       if (method === 'GET' && sub === '/todostream') {
         const cwd = registry.snapshot(id)?.cwd
-        if (!cwd) return send(res, 404, { error: 'questa conversazione non ha una cartella' })
+        if (!cwd) return send(res, 404, { error: 'this conversation has no folder' })
         return todoStream(req, res, cwd)
       }
       if (method === 'DELETE' && sub === '') {
@@ -833,7 +833,7 @@ async function route(
         // pesa un terzo in più dei suoi byte. Il tetto resta perché un corpo senza
         // limite è il modo più semplice di finire la memoria di un daemon.
         const cmd = await readJson<Command>(req, 32 * 1024 * 1024)
-        if (!cmd?.c) return send(res, 400, { error: 'comando malformato' })
+        if (!cmd?.c) return send(res, 400, { error: 'malformed command' })
         const esito = await registry.command(id, cmd)
         return send(res, esito.ok ? 200 : 409, esito)
       }
@@ -924,7 +924,7 @@ async function route(
     const mia = guard.credenziale(req) ?? token
     if (!path.startsWith('/api/') && serveUi(req, res, mia, mia !== token)) return
 
-    send(res, 404, { error: 'non trovato' })
+    send(res, 404, { error: 'not found' })
   } catch (e) {
     send(res, 500, { error: String((e as Error).message ?? e) })
   }

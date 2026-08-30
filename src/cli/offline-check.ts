@@ -1287,7 +1287,7 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   const rAssente = await reg.importSession(ID_ASSENTE)
   const orfano = resolve(starkHome, 'sessioni', `${ID_ASSENTE}.jsonl`)
   check('§resume: un id assente in ogni profilo torna errore chiaro, nessun journal orfano',
-    rAssente.ok === false && /non trovato/.test((rAssente as { error: string }).error)
+    rAssente.ok === false && /transcript not found on this machine/.test((rAssente as { error: string }).error)
       && !existsSync(orfano),
     JSON.stringify({ rAssente, orfano: existsSync(orfano) }))
 

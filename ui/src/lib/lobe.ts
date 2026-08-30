@@ -19,6 +19,10 @@ const KNOWN = new Set([
 ])
 
 function mapByKeywords(m: string): string | null {
+  // bigpickle/big-pickle e' il modello di default di OpenCode Zen su questa macchina:
+  // nato dalla famiglia "big" (che in FAMILY_SYNONYMS gia' mappa su opencode), va
+  // con l'icona di opencode, non senza icona.
+  if (m === 'bigpickle' || m.includes('big-pickle')) return 'opencode'
   if (m.includes('claude')) return 'claude'
   if (m.includes('anthropic')) return 'anthropic'
   if (m.includes('openai') || m.includes('chatgpt') || m.includes('gpt') || /\bo1\b|\bo3\b/.test(m)) return 'openai'

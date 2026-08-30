@@ -29,7 +29,7 @@
     dati = null
     tutti = null
     errore = ''
-    const perso = (s: string): void => { if (s === 'lost') errore = 'connessione persa' }
+    const perso = (s: string): void => { if (s === 'lost') errore = 'connection lost' }
     if (tutto) return store.api.todosStream(t => { tutti = t.projects; errore = '' }, perso)
     if (!id) return
     return store.api.todoStream(id, t => { dati = t; errore = '' }, perso)

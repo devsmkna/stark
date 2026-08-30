@@ -363,7 +363,7 @@
   .mk {
     flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%;
     border: 1.5px solid var(--line-2); display: flex; align-items: center;
-    justify-content: center; color: #fff;
+    justify-content: center; color: var(--on-done);
   }
   .passo.ok .mk { background: var(--done); border-color: var(--done); }
   .mk :global(svg.ic) { width: 10px; height: 10px; stroke-width: 3; }

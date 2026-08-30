@@ -68,10 +68,10 @@ export function leggiTodo(cwd: string | undefined): TodoFile {
   } catch (e) {
     // Un file scritto a metà si legge così per una frazione di secondo. Non è un guasto:
     // è il motivo per cui lo script scrive su un temporaneo e poi rinomina.
-    return { lists: [], scartate: 0, assente: false, motivo: `todo.json non è JSON valido: ${(e as Error).message}` }
+    return { lists: [], scartate: 0, assente: false, motivo: `todo.json is not valid JSON: ${(e as Error).message}` }
   }
   if (typeof grezzo !== 'object' || grezzo === null || Array.isArray(grezzo)) {
-    return { lists: [], scartate: 0, assente: false, motivo: 'todo.json non è una mappa id → lista' }
+    return { lists: [], scartate: 0, assente: false, motivo: 'todo.json is not a map id → list' }
   }
 
   const lists: TodoList[] = []

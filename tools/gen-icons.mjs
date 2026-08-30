@@ -21,6 +21,9 @@ const ICONS = {
   'i-copy': 'copy',
   'i-reveal': 'folder-open',
   'i-open': 'external-link',
+  'i-dollar': 'dollar-sign',
+  'i-span': 'unfold-horizontal',
+  'i-panel': 'panel-left',
 }
 
 /**
@@ -38,6 +41,19 @@ const CUSTOM = {
   'i-dot': {
     nota: "Quello in corso. `i-bolt` c'era ma vuol dire un'altra cosa (la modalità auto).",
     inner: '<circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" fill="currentColor" />',
+  },
+  'i-phone': {
+    nota: `Il telefono (notifiche, Phone.svelte). \`smartphone\` di Lucide esiste ma è
+       un'altra forma: questo è il rettangolo stretto con la barra sotto.`,
+    inner: '<rect x="6" y="2" width="12" height="20" rx="3" /><path d="M11 18h2" />',
+  },
+  'i-file': {
+    nota: "L'allegato che non è un'immagine: al posto dell'anteprima che non c'è (FileBlock).",
+    inner: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" />',
+  },
+  'i-more': {
+    nota: "I tre punti dell'overflow «…» della barra laterale: variante piena di `ellipsis`, che in Lucide è vuota.",
+    inner: '<circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none" />',
   },
 }
 

@@ -199,7 +199,7 @@ export class OpenCodeTranslator {
         return [{
           k: 'session.retried',
           attempt: num(d['attempt']),
-          reason: str(ogg(d['error'])['message']) || 'il modello non ha risposto',
+          reason: str(ogg(d['error'])['message']) || 'the model did not respond',
         }]
 
       case 'todo.updated': {

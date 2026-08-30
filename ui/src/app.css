@@ -11,6 +11,24 @@
   --line:#E7E9F0; --line-2:#DCDFE9;
   --side:#F5F6FA;
   --accent:#3B5BF5; --accent-soft:#E9EDFE;
+  --on-accent:#FFFFFF;
+  /* Il testo o le icone che stanno **sopra** un fondo `--accent`: in scuro l'accento
+     è chiaro (lavanda), quindi il testo torna scuro — lo diceva già ogni `.reco`,
+     `.btn.pri` e `.opt.pri` con due regole a parte, ed è qui che vive adesso. */
+  --on-done:#FFFFFF;
+  /* Il `<code>` e i chip monospace (`.rsub`, `.blockbody`): nel tema scuro resta il
+     "terminale" richiesto il 29 agosto (testo lilla su fondo notte); in chiaro è un
+     chip normale come la sintassi dei `.codeblock` — niente riquadro notte su carta. */
+  --code:#171A22; --code-bg:#EEF0F6;
+  /* Il pannello agente e la sidebar sinistra: gli stessi ruoli dei token qui sopra,
+     ma tarati per il pannello staccato. In chiaro riusano la tavolozza di base (così
+     la staccata non stona col resto); in scuro valgono le due tinte del design, che
+     legge "stesso sfondo del pannello agente". È l'unico posto dove cambiano. */
+  --panel-bg:#F5F6FA; --panel-surface:#FFFFFF; --panel-surface-2:#EEF0F6; --panel-surface-3:#E7E9F0;
+  --panel-line:#E7E9F0; --panel-line-2:#DCDFE9; --panel-field:#DCDFE9;
+  --panel-pop:#FFFFFF; --panel-ink:#171A22; --panel-ink-2:#454B5C; --panel-muted:#767D90;
+  --panel-accent:#3B5BF5; --panel-accent-soft:#E9EDFE;
+  --panel-done:#186A3B; --panel-done-bg:#E6F4EC;
   --wait:#B45309; --wait-bg:#FDF3D7;
   --work:#1D5FBF; --work-bg:#E6F0FD;
   --stop:#D0342C; --stop-bg:#FDECEA;
@@ -31,6 +49,11 @@
      che c'è già, quindi sono gli stessi hue tarati per entrambi i temi. */
   --syn-key:#8B5CF6; --syn-str:#186A3B; --syn-num:#B45309;
   --syn-com:#767D90; --syn-fn:#3B5BF5; --syn-var:#0891B2;
+  /* Le icone dei modelli (Lobe, immagini remote) sono monocromatiche per scelta:
+     `brightness(0)` le fa scure, `invert(1)` le capovolge in bianco. Un'unica
+     variabile perché la polarità segue il tema, non il pannello: in chiaro scure
+     sul fondo chiaro, in scuro chiare sul fondo scuro. */
+  --icon-f:brightness(0);
   --sans:"Inter",system-ui,-apple-system,Segoe UI,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
@@ -39,6 +62,14 @@
   --ink:#E8EAF0; --ink-2:#B2B8C7; --muted:#8A91A2;
   --line:#262C39; --line-2:#333B4B; --side:#12161E;
   --accent:#7A92FF; --accent-soft:#1C2440;
+  --on-accent:#0E1118;
+  --on-done:#12301F;
+  --code:#c7bfff; --code-bg:#0a0c14;
+  --panel-bg:#080C18; --panel-surface:#131A2A; --panel-surface-2:#1A1F2E; --panel-surface-3:#1C2333;
+  --panel-line:#1C2333; --panel-line-2:#242B3D; --panel-field:#1E2535;
+  --panel-pop:#0E1424; --panel-ink:#E6E8F0; --panel-ink-2:#C2C8D6; --panel-muted:#6B7488;
+  --panel-accent:#7A5CFA; --panel-accent-soft:#1E1A3A;
+  --panel-done:#1DBA54; --panel-done-bg:#0F2A1D;
   --wait:#F0B849; --wait-bg:#3A2E10;
   --work:#8AB6F5; --work-bg:#12263F;
   --stop:#F0736A; --stop-bg:#3A1A17;
@@ -49,12 +80,21 @@
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
   --syn-key:#A78BFA; --syn-str:#7BC79B; --syn-num:#FBBF24;
   --syn-com:#8A91A2; --syn-fn:#7A92FF; --syn-var:#22D3EE;
+  --icon-f:brightness(0) invert(1);
 }}
 :root[data-theme="dark"]{
   --ground:#0E1118; --surface:#161A23; --surface-2:#1C212C; --surface-3:#232936;
   --ink:#E8EAF0; --ink-2:#B2B8C7; --muted:#8A91A2;
   --line:#262C39; --line-2:#333B4B; --side:#12161E;
   --accent:#7A92FF; --accent-soft:#1C2440;
+  --on-accent:#0E1118;
+  --on-done:#12301F;
+  --code:#c7bfff; --code-bg:#0a0c14;
+  --panel-bg:#080C18; --panel-surface:#131A2A; --panel-surface-2:#1A1F2E; --panel-surface-3:#1C2333;
+  --panel-line:#1C2333; --panel-line-2:#242B3D; --panel-field:#1E2535;
+  --panel-pop:#0E1424; --panel-ink:#E6E8F0; --panel-ink-2:#C2C8D6; --panel-muted:#6B7488;
+  --panel-accent:#7A5CFA; --panel-accent-soft:#1E1A3A;
+  --panel-done:#1DBA54; --panel-done-bg:#0F2A1D;
   --wait:#F0B849; --wait-bg:#3A2E10;
   --work:#8AB6F5; --work-bg:#12263F;
   --stop:#F0736A; --stop-bg:#3A1A17;
@@ -65,6 +105,7 @@
   --p1:#7A92FF; --p2:#FBBF24; --p3:#34D399; --p4:#A78BFA; --p5:#F472B6; --p6:#22D3EE; --p7:#A3E635;
   --syn-key:#A78BFA; --syn-str:#7BC79B; --syn-num:#FBBF24;
   --syn-com:#8A91A2; --syn-fn:#7A92FF; --syn-var:#22D3EE;
+  --icon-f:brightness(0) invert(1);
 }
 
 /* ── guscio dell'app ───────────────────────────────────────────────────────
@@ -121,11 +162,13 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
    conversazione, per dirne uno). Chi ha già un colore o un fondo propri (.opt.pri,
    .chip, .row, …) vince comunque: sono selettori più specifici di uno per tag. */
 button{font-family:inherit;cursor:pointer;color:inherit;background:none}
-/* Colori fissi, richiesti dall'utente (29 agosto 2026): non `var(--surface-2)`/`--ink`.
-   Vale per il tag `<code>` in generale — quindi anche per il testo inline dentro una
-   riga, non per i blocchi (`.codeblock pre`, che ha la sua regola e resta separata:
-   prima versione di questa richiesta l'aveva presa lei per sbaglio, corretto). */
-code{font-family:var(--mono);font-size:.9em;color:#c7bfff;background:#0a0c14;padding:1px 5px;border-radius:5px}
+/* Il tag `<code>` segue il tema via `--code`/`--code-bg`: in chiaro è un chip normale
+   su fondo carta (il "terminale" del 29 agosto era proprio il problema lì); in scuro
+   resta il lilla su notte di quell'impostazione. Vale per il tag in generale — quindi
+   anche per il testo inline dentro una riga, non per i blocchi (`.codeblock pre`, che
+   ha la sua regola e resta separata: prima versione di questa richiesta l'aveva presa
+   lei per sbaglio, corretto). */
+code{font-family:var(--mono);font-size:.9em;color:var(--code);background:var(--code-bg);padding:1px 5px;border-radius:5px}
 .dotk{width:7px;height:7px;border-radius:50%;flex:none}
 /* un colore per progetto, assegnato in ordine — vedi docs/ui-schermate.md */
 .p0{background:var(--p1)}.p1{background:var(--p2)}.p2{background:var(--p3)}
@@ -300,9 +343,9 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    L'ordine conta: `.turn.active>.th` e `.turn.open>.th` hanno la **stessa** specificità
    (tre classi), e il turno in corso è quasi sempre anche aperto — quindi la riga del
    blu deve venire dopo, o non si vedrebbe mai. */
-.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#161a23;position:sticky;top:0;z-index:2;border-radius:10px 10px 0 0;border-bottom:0}
-.turn.open>.th{background:#161a23}
-.turn.active>.th{background:#161a23}
+.turn>.th{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface-2);position:sticky;top:0;z-index:2;border-radius:10px 10px 0 0;border-bottom:0}
+.turn.open>.th{background:var(--surface)}
+.turn.active>.th{background:var(--surface)}
 .th .cx{color:var(--muted);font-size:10px;flex:none}
 /* L'ora è un riferimento, non un titolo: grigia e di peso normale, come il conteggio
    dei blocchi in fondo alla stessa riga. In blu e in grassetto competeva col prompt
@@ -319,7 +362,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .tb{padding:6px 12px 12px;display:flex;flex-direction:column;gap:8px}
 .tb .prose{color:var(--ink)}
 .tb .prose b{color:var(--ink)}
-.tb .prose :global(code){background:#1E2535;color:#c7bfff;border-radius:4px;padding:1px 4px}
+.tb .prose :global(code){background:var(--code-bg);color:var(--code);border-radius:4px;padding:1px 4px}
 /* Il code INLINE qui sopra non deve toccare un blocco di codice (`<pre><code>`).
    Era arrivato a farlo per un dettaglio di specificità — due classi (`.tb .prose`)
    battono le tre del blocco (`.codeblock pre code`, un solo `.codeblock`) — e il
@@ -406,9 +449,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .aq .n{grid-row:span 2;font-size:9.5px;color:var(--muted);text-align:right;padding-top:1px}
 .aq .q{font-size:10.5px;color:var(--muted);line-height:1.4}
 .aq .a{font-size:10.5px;color:var(--ink);font-weight:500;line-height:1.4}
-.opt.pri{background:var(--accent);color:#fff;border-color:transparent}
-:root[data-theme="dark"] .opt.pri{color:#0E1118}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .opt.pri{color:#0E1118}}
+.opt.pri{background:var(--accent);color:var(--on-accent);border-color:transparent}
 .input{margin:8px 12px;border:1px solid var(--line-2);border-radius:9px;padding:8px 11px;color:var(--muted);font-size:11px}
 .status{display:flex;align-items:center;gap:9px;padding:5px 12px 7px;font-size:10px;color:var(--muted);position:relative;flex-wrap:nowrap;white-space:nowrap}
 .status .l,.status .r{display:flex;align-items:center;gap:9px;min-width:0;flex-wrap:nowrap}
@@ -517,8 +558,8 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .dn{color:var(--muted);text-align:right;background:var(--surface-2);font-variant-numeric:tabular-nums}
 .dold{background:var(--del-bg)}
 .dnew{background:var(--add-bg)}
-.mark{background:rgba(180,35,24,.24);border-radius:2px}
-.markn{background:rgba(24,106,59,.24);border-radius:2px}
+.mark{background:color-mix(in srgb,var(--del) 26%,transparent);border-radius:2px}
+.markn{background:color-mix(in srgb,var(--add) 26%,transparent);border-radius:2px}
 .gap{grid-column:1/-1;color:var(--muted);text-align:center;background:var(--surface-2);font-size:10px}
 .tl{display:flex;gap:9px;align-items:flex-start;padding:5px 0}
 .tl .when{font-variant-numeric:tabular-nums;color:var(--muted);font-size:10px;width:38px;flex:none;text-align:right;padding-top:5px}
@@ -579,9 +620,7 @@ button.mi.on:hover{background:var(--accent-soft)}
 .warn b{font-weight:600}
 .btnrow{display:flex;gap:7px;align-items:center;margin-top:auto;padding-top:6px}
 .btn{border:1px solid var(--line-2);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;color:var(--ink);background:var(--surface);font-family:inherit}
-.btn.pri{background:var(--accent);color:#fff;border-color:transparent}
-:root[data-theme="dark"] .btn.pri{color:#0E1118}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.pri{color:#0E1118}}
+.btn.pri{background:var(--accent);color:var(--on-accent);border-color:transparent}
 .btn.dgr{color:var(--stop);border-color:var(--line-2)}
 .snav{width:132px;flex:none;border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:1px;background:var(--surface)}
 .sn{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;font-size:11px;color:var(--ink-2)}
@@ -743,7 +782,7 @@ button.mi.on:hover{background:var(--accent-soft)}
 .nrow .nn{font-size:11px;color:var(--ink);font-weight:500}
 .nrow .nd{font-size:9.5px;color:var(--muted)}
 .nrow .rt{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
-.sw{width:15px;height:15px;border-radius:5px;flex:none;border:1px solid rgba(0,0,0,.08)}
+.sw{width:15px;height:15px;border-radius:5px;flex:none;border:1px solid var(--line-2)}
 .swrow{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid var(--line);font-size:11px}
 .swrow:last-child{border-bottom:0}
 .swrow .pn2{color:var(--ink);font-weight:500;text-transform:uppercase;letter-spacing:.05em;font-size:10px}
@@ -882,7 +921,7 @@ button.mi.on:hover{background:var(--accent-soft)}
    voci — sono due strade fra cui scegliere, quindi stanno affiancate e non impilate. */
 .hrow { display: flex; gap: 6px; padding: 6px 8px 8px; }
 .hrow .mi { flex: 1; justify-content: center; border: 1px solid var(--line); border-radius: 6px; }
-.hrow .mi.on { background: var(--accent); color: var(--on-accent, #fff); border-color: transparent; }
+.hrow .mi.on { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .menu .pnote { white-space: normal; line-height: 1.45; }
 
 /* La casella di ricerca in fondo alla tendina dei modelli.
@@ -999,7 +1038,7 @@ button.mi.on:hover{background:var(--accent-soft)}
 .pthb .ic use.ok{display:none}
 .pthb.done .ic use.ok{display:inline}
 .pthb.done .ic use:not(.ok){display:none}
-.pthb.done .ic{color:#7BC79B}
+.pthb.done .ic{color:var(--done)}
 /* Il nome del linguaggio nella barra del blocco: a destra, in tono minore. Dice di che
    cosa si tratta senza competere col bottone, che è la cosa che si preme. */
 .cblang{margin-left:auto;font-size:9.5px;color:var(--muted);font-family:var(--mono);

@@ -342,6 +342,28 @@
    *  dello store: nessun altro componente ha bisogno di saperlo, e metterlo là vorrebbe
    *  dire un altro stato globale da tenere in ordine. */
   let promptAperto = $state<string | null>(null)
+
+  /** Copia il prompt intero. Stesso pattern dei bottone di copia dei blocchi codice:
+   *  il `span` dentro il bottone passa da "Copy" a "Copied" e torna dopo un secondo e
+   *  mezzo — la conferma avviene dove il dito ha premuto, non in un toast che nessuno
+   *  cercava. */
+  async function copiaPrompt(e: MouseEvent): Promise<void> {
+    const btn = (e.currentTarget as HTMLElement).closest('button')
+    try {
+      await navigator.clipboard.writeText(promptAperto ?? '')
+    } catch {
+      store.refused = 'the browser did not allow copying'
+      return
+    }
+    if (!btn) return
+    btn.classList.add('done')
+    const label = btn.querySelector('span')
+    if (label) label.textContent = 'Copied'
+    setTimeout(() => {
+      btn.classList.remove('done')
+      if (label) label.textContent = 'Copy'
+    }, 1500)
+  }
   /** Gli allegati il cui file non si trova più. Non è stato dell'app, è stato del disco. */
   let persi = $state(new SvelteSet<string>())
 
@@ -1036,9 +1058,14 @@
   <div class="dlg" style="width:520px">
     <div class="dlgh">
       <div class="dt">Your prompt</div>
-      <button class="x" aria-label="Close" onclick={() => { promptAperto = null }}>
-        <Icon name="i-x" />
-      </button>
+      <div class="dlgacts">
+        <button class="copyp" aria-label="Copy prompt" onclick={copiaPrompt}>
+          <Icon name="i-copy" /><span>Copy</span>
+        </button>
+        <button class="x" aria-label="Close" onclick={() => { promptAperto = null }}>
+          <Icon name="i-x" />
+        </button>
+      </div>
     </div>
     <div class="dlgb">
       <!-- Le citazioni con `@` diventano premibili **qui** e non nella riga del turno,
@@ -1060,6 +1087,18 @@
 <svelte:document onkeydown={e => { if (e.key === 'Escape' && promptAperto !== null) promptAperto = null }} />
 
 <style>
+  /* I comandi in testa al popup «Your prompt»: copia e chiudi, raggruppati a destra.
+     `.copyp` segue il vocabolario dei bottoni di copia dei blocchi codice — stessa
+     icona, stesso gioco Copied/done — solo più piccolo, perché vive in un'intestazione. */
+  .dlgacts{margin-left:auto;display:flex;align-items:center;gap:2px}
+  .copyp{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:10px;
+    color:var(--muted);background:none;border:0;border-radius:5px;padding:3px 6px;
+    cursor:pointer;flex:none}
+  .copyp svg.ic{width:11px;height:11px}
+  .copyp:hover{background:var(--surface-2);color:var(--ink)}
+  .copyp:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .copyp.done{color:var(--done)}
+
   /* Il turno attivo (l'agent ci sta davvero lavorando) e quello in coda (dietro un
      altro ancora in corso) si distinguono col colore già usato per gli stessi stati
      altrove in STARK: blu = working, ambra = tocca aspettare. */
@@ -1098,7 +1137,7 @@
     display: inline-block; max-width: 100%; vertical-align: top;
     margin: 2px 0 0 21px;
     font-family: var(--mono); font-size: 9px;
-    color: #c7bfff; background: #0a0c14;
+    color: var(--code); background: var(--code-bg);
     padding: 1px 5px; border-radius: 5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -1108,13 +1147,14 @@
   .row.clickable.bad { color: var(--stop); }
   .row.clickable.block { color: var(--wait); }
   /* Il testo monospace dentro le righe operations si legge come un tag `code`:
-     JetBrains Mono, fondo scuro `#0a0c14` e lilla `#c7bfff`, con lo stesso piccolo
-     padding e angolo. Vale SOLO per il codice — soggetto, percorso, comando — e
-     non per la motivazione (F2), che è una frase e resta sul fondo della riga. */
+     JetBrains Mono e i due token `--code`/`--code-bg` (lilla su notte in scuro,
+     chip su carta in chiaro), con lo stesso piccolo padding e angolo. Vale SOLO
+     per il codice — soggetto, percorso, comando — e non per la motivazione (F2),
+     che è una frase e resta sul fondo della riga. */
   .row.clickable.think .v:not(.plain),
   .row.clickable.tool .rtop .v:not(.plain) {
     font-family: var(--mono); font-size: 10px;
-    color: #c7bfff; background: #0a0c14;
+    color: var(--code); background: var(--code-bg);
     padding: 1px 5px; border-radius: 5px;
   }
   .row .v.plain { font-family: var(--sans); color: var(--ink-2); }
@@ -1173,16 +1213,16 @@
   .chev.open { transform: rotate(90deg); }
   .blockbody {
     white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
-    font-size: 10.5px; color: #c7bfff; background: #0a0c14;
+    font-size: 10.5px; color: var(--code); background: var(--code-bg);
     border: 1px solid var(--line-2); border-radius: 7px; padding: 7px 9px;
     margin: 2px 0 6px; max-height: 360px; overflow: auto;
   }
   .bblabel {
     font-family: var(--sans); font-size: 9px; font-weight: 700; letter-spacing: .06em;
-    text-transform: uppercase; color: #9aa3b8; margin: 6px 0 2px;
+    text-transform: uppercase; color: var(--muted); margin: 6px 0 2px;
   }
   .bblabel:first-child { margin-top: 0; }
-  .bblabel.err { color: #f0736a; }
+  .bblabel.err { color: var(--stop); }
 
   /* La risposta che finisce con un punto di domanda: è quella che si perde più
      facilmente in un muro di testo, e per questo prende lo stesso ambra di ogni
@@ -1242,7 +1282,7 @@
     display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
     overflow: hidden; text-align: left; white-space: normal;
   }
-  .tsum.bad { border-left-color: var(--bad, #d66); }
+  .tsum.bad { border-left-color: var(--stop); }
 
   /* Il piano riaperto dal flusso. Rientrato come il corpo di un blocco aperto, e
      senza tetto d'altezza: qui non c'è niente sotto da spingere fuori — a differenza

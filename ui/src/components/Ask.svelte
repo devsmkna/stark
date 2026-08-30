@@ -628,11 +628,9 @@
   .reco {
     order: 2; margin-left: auto; flex: none;
     padding: 1.5px 7px; border-radius: 20px;
-    background: var(--accent); color: #fff;
+    background: var(--accent); color: var(--on-accent);
     font-size: 8.5px; font-weight: 700; letter-spacing: .03em; line-height: 1.55;
   }
-  :root[data-theme="dark"] .reco { color: #0E1118; }
-  @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) .reco { color: #0E1118; } }
 
   .qwrite { align-items: center; }
   .qwrite :global(svg.ic) { width: 12px; height: 12px; flex: none; color: var(--muted); }

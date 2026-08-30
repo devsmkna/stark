@@ -66,6 +66,77 @@
   const scelto = (m: { id: string }): boolean => m.id === idScelto
 
   /**
+   * L'agent e il modello in uso, per la scheda in testa alla tendina.
+   *
+   * La ricerca e' la stessa di `idScelto` ma restituisce le due cose invece dell'id
+   * solo, perche' la scheda deve dire anche *chi* offre il modello. Prima si guarda
+   * nell'agent di questa chat: due agent possono esporre lo stesso modello con lo
+   * stesso id, e quello della chat corrente ha la ragione sul gemello.
+   */
+  const livello0 = $derived.by(() => {
+    if (!catalogo) return null
+    const nel = (a: AgentModels) => a.models.find(x => x.id === corrente || x.resolved === corrente)
+    const mio = catalogo.find(a => a.id === agenteCorrente)
+    const ordine = mio ? [mio, ...catalogo.filter(a => a !== mio)] : catalogo
+    for (const a of ordine) {
+      const m = nel(a)
+      if (m) return { agent: a, model: m }
+    }
+    return null
+  })
+
+  /** Un numero di token leggibile: 200000 → "200k", 1000000 → "1M". Stessa scala
+   *  della barra di stato, cosi' la scheda e il pannellino si leggono allo stesso modo. */
+  const fmtTok = (n: number | undefined): string => {
+    if (!n) return '—'
+    if (n >= 1_000_000) {
+      const m = n / 1_000_000
+      return `${Number.isInteger(m) ? m : m.toFixed(1)}M`
+    }
+    if (n >= 1000) return `${Math.round(n / 1000)}k`
+    return String(n)
+  }
+
+  /** Un costo per milione di token: 15 → "15", 1.2 → "1.20", un prezzo minuscolo
+   *  non si arrotonda a zero e si lascia coi decimali che servono. Il segno `$` lo
+   *  disegna la stat della scheda, non il valore: l'icona e il numero stanno l'una
+   *  accanto all'altro, e il simbolo ripetuto sarebbe rumore. */
+  const fmtCosto = (n: number): string =>
+    `${n < 0.01 ? n.toFixed(4).replace(/0+$/, '') : Number.isInteger(n) ? String(n) : n.toFixed(2)}`
+
+  /** Il costo del modello in essere come bandiera: vero quando i due canali sono a
+   *  zero (la firma free riconosciuta dappertutto nel picker), falso quando costa o
+   *  quando il modello non lo dichiara. La stat distingue i tre casi: `class:free`,
+   *  il valore, o un trattino. */
+  const costoFree = $derived.by(() => {
+    const c = livello0?.model?.cost
+    return !!c && c.input === 0 && c.output === 0
+  })
+
+  /** Il provider da dire: il nome vero ("OpenCode Zen") se c'e', altrimenti quello
+   *  dedotto dall'id del modello ("baseten"), altrimenti niente. Manca sul modello
+   *  che non lo dichiara (Claude Code ha un solo venditore, e non lo ripete). */
+  const providerMostrato = $derived.by(() => {
+    const m = livello0?.model
+    if (!m) return ''
+    if (m.providerName) return m.providerName
+    const prov = getProviderForModel((m as any).resolved ?? m.id)
+    return prov ? familyLabel(prov) : ''
+  })
+
+  /** La risposta alla domanda «questo modello legge allegati?», e nient'altro: yes/no,
+   *  non **quali** tipi. La scheda e' una riga di fatti essenziali, e l'elenco dei tipi
+   *  sta dove si allega davvero — la graffetta spenta dice la sua ragione. La lettura
+   *  dei tre casi resta quella di `core/allegati.ts`: un **elenco** vuoto e' un no
+   *  dichiarato, un elenco assente e' il ripiego di sempre, un elenco pieno e' un si. */
+  const allegati = $derived.by(() => {
+    const m = livello0?.model
+    if (!m) return null
+    if (m.accepts !== undefined && m.accepts.length === 0) return 'no'
+    return 'yes'
+  })
+
+  /**
    * La ricerca attraversa **tutti** gli agent, anche quando si sta dentro a uno.
    *
    * Sembrava più coerente filtrare solo il gruppo aperto, e non lo è: chi scrive
@@ -217,6 +288,34 @@
 
   const famigliaSelezionata = $derived(famiglie.find(f => f.id === famiglia) ?? null)
 
+  /** La riga «indietro» in testa alla tendina, che porta al livello sopra: l'elenco
+   *  degli agent, quello dei provider o quello delle famiglie, a seconda di dove si è.
+   *  Resta nulla al primo livello e durante la ricerca — lì si esce svuotando la
+   *  casella. Sta nel contenitore sticky `.mhd` insieme alla scheda del modello, così
+   *  non sparisce con lo scorrimento dell'elenco. */
+  const back = $derived.by(() => {
+    if (dentro === null || !gruppo || risultati) return null
+    if (gruppo.id === 'opencode' && provider && famigliaSelezionata) {
+      return {
+        onClick: () => { famiglia = null },
+        lb: famigliaSelezionata.label,
+        sub: `${famigliaSelezionata.models.length} models`,
+      }
+    }
+    if (gruppo.id === 'opencode' && provider) {
+      return {
+        onClick: () => { provider = null },
+        lb: providerSelezionato?.label ?? provider,
+        sub: `${providerSelezionato?.models.length ?? 0} models`,
+      }
+    }
+    return {
+      onClick: () => { dentro = null },
+      lb: gruppo.label,
+      sub: `${gruppo.models.length} models`,
+    }
+  })
+
   /** L'id sotto il nome, ma solo quando aggiunge qualcosa: per `Fable` l'etichetta e
    *  l'id coincidono, e ripeterlo sarebbe rumore su ogni riga. */
   const sotto = (m: { id: string; label?: string }): string =>
@@ -224,6 +323,45 @@
 </script>
 
 <div class="mpick">
+{#if livello0 || back}
+  <div class="mhd">
+    {#if livello0}
+      {@const ic0 = getLobeIconUrl((livello0.model as any).resolved ?? livello0.model.id)}
+      <div class="card">
+        <div class="avatar">
+          {#if ic0}<img class="micon" src={ic0} alt="" width="15" height="15" loading="lazy"
+            onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+          {:else}<Icon name="i-brain" />{/if}
+        </div>
+        <div class="info">
+          <div class="title">{livello0.model.label ?? livello0.model.id}</div>
+          <div class="provider">{livello0.agent.label}{#if providerMostrato}<span class="sep">·</span>{providerMostrato}{/if}</div>
+          <div class="stats">
+            <span class="stat" class:free={costoFree}><span class="dollar">$</span>
+              {#if costoFree}
+                <b>free</b>
+              {:else if livello0.model.cost}
+                <span class="per-m">/M</span><b>{fmtCosto(livello0.model.cost.input)} / {fmtCosto(livello0.model.cost.output)}</b>
+              {:else}
+                <b>—</b>
+              {/if}
+            </span>
+            <span class="stat" title="context window"><Icon name="i-span" class="stat-ic" /><b>{fmtTok(livello0.model.contextWindow)}</b></span>
+            {#if allegati}
+              <span class="stat" title="attachments"><Icon name="i-clip" class="stat-ic" /><b>{allegati}</b></span>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
+    {#if back}
+      <button class="mi back" onclick={() => back.onClick()}>
+        <Icon name="i-back" />
+        <span class="tx"><span class="lb">{back.lb}</span><span class="sub">{back.sub}</span></span>
+      </button>
+    {/if}
+  </div>
+{/if}
 {#if catalogo === null}
   <div class="mi dis"><Icon name="i-loader" /><span>Loading models…</span></div>
 {:else if risultati}
@@ -235,7 +373,7 @@
     <button class="mi" class:on={scelto(r.m)}
       title={r.m.note ?? r.m.id}
       onclick={() => onScegli(r.a.id, r.m.id)}>
-      {#if rIcon}<img src={rIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
+      {#if rIcon}<img src={rIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
       <span class="tx"><span class="lb">{r.m.label ?? r.m.id}</span>
         <span class="sub">{r.a.id === 'opencode' ? (r.m.providerName ?? r.a.label) : r.a.label}</span></span>
       {#if r.free}<span class="free-pill">FREE</span>{/if}
@@ -252,42 +390,33 @@
   {/if}
 {:else if gruppo}
   {#if gruppo.id === 'opencode' && !provider}
-    <button class="mi" onclick={() => { dentro = null }}>
-      <Icon name="i-back" /><span class="tx"><span class="lb">{gruppo.label}</span><span class="sub">{gruppo.models.length} models</span></span>
-    </button>
     {#if gruppo.note}
       <div class="mi dis"><Icon name="i-warn" style="color:var(--wait)" /><span>{gruppo.note}</span></div>
     {/if}
     {#each providers as p (p.id)}
       <button class="mi" onclick={() => { provider = p.id }}>
-        {#if p.icon}<img src={p.icon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
+        {#if p.icon}<img src={p.icon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
         <span class="tx"><span class="lb">{p.label}</span><span class="sub">{p.models.length} models</span></span>
         {#if hasFree(p.models)}<span class="free-pill">FREE</span>{/if}
         <Icon name="i-fwd" style="margin-left:auto" />
       </button>
     {/each}
   {:else if gruppo.id === 'opencode' && provider && !famigliaSelezionata}
-    <button class="mi" onclick={() => { provider = null }}>
-      <Icon name="i-back" /><span class="tx"><span class="lb">{providerSelezionato?.label ?? provider}</span><span class="sub">{providerSelezionato?.models.length ?? 0} models</span></span>
-    </button>
     {#each famiglie as f (f.id)}
       <button class="mi" onclick={() => { famiglia = f.id }}>
-        {#if f.icon}<img src={f.icon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
+        {#if f.icon}<img src={f.icon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
         <span class="tx"><span class="lb">{f.label}</span><span class="sub">{f.models.length} models</span></span>
         {#if hasFree(f.models)}<span class="free-pill">FREE</span>{/if}
         <Icon name="i-fwd" style="margin-left:auto" />
       </button>
     {/each}
   {:else if gruppo.id === 'opencode' && provider && famigliaSelezionata}
-    <button class="mi" onclick={() => { famiglia = null }}>
-      <Icon name="i-back" /><span class="tx"><span class="lb">{famigliaSelezionata.label}</span><span class="sub">{famigliaSelezionata.models.length} models</span></span>
-    </button>
     {#each famigliaSelezionata.models as m (m.id)}
       {@const gIcon = getLobeIconUrl((m as any).resolved ?? m.id)}
       <button class="mi" class:on={scelto(m)}
         title={m.note ?? m.id}
         onclick={() => onScegli(gruppo.id, m.id)}>
-        {#if gIcon}<img src={gIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
+        {#if gIcon}<img src={gIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
         <span class="tx"><span class="lb">{m.label ?? m.id}</span>
           <span class="sub">{sotto(m)}</span></span>
         {#if isFreeModelFor(gruppo, m)}<span class="free-pill">FREE</span>{/if}
@@ -297,9 +426,6 @@
       </button>
     {/each}
   {:else}
-    <button class="mi" onclick={() => { dentro = null }}>
-      <Icon name="i-back" /><span class="tx"><span class="lb">{gruppo.label}</span><span class="sub">{gruppo.models.length} models</span></span>
-    </button>
     {#if gruppo.note}
       <div class="mi dis"><Icon name="i-warn" style="color:var(--wait)" /><span>{gruppo.note}</span></div>
     {/if}
@@ -308,7 +434,7 @@
       <button class="mi" class:on={scelto(m)}
         title={m.note ?? m.id}
         onclick={() => onScegli(gruppo.id, m.id)}>
-        {#if gIcon}<img src={gIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
+        {#if gIcon}<img src={gIcon} alt="" width="12" height="12" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{/if}
         <span class="tx"><span class="lb">{m.label ?? m.id}</span>
           <span class="sub">{sotto(m)}</span></span>
         {#if isFreeModelFor(gruppo, m)}<span class="free-pill">FREE</span>{/if}
@@ -325,7 +451,7 @@
       title={a.reason ?? a.note ?? ''}
       onclick={() => { dentro = a.id }}>
       {#if aIcon}
-        <img src={aIcon} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+        <img src={aIcon} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
       {:else if !a.available}<Icon name="i-block" />{/if}
       <span class="tx"><span class="lb">{a.label}</span><span class="sub"
         >{a.available ? `${a.models.length} models` : (a.reason ?? 'not available')}</span></span>
@@ -346,9 +472,44 @@
 </div>
 
 <style>
+  /* Il contenitore sticky in testa: la scheda del modello e la riga «indietro» insieme,
+     così da non servire una misura fissa da tenere sincronizzata — l'elenco dei 151
+     modelli scorre sotto di loro, e una riga che se ne va col primo giro di scroll
+     sarebbe utile solo nei due secondi in cui apri. Il bordo sotto le separa dall'elenco. */
+  .mhd{position:sticky;top:0;z-index:1;background:var(--surface);
+    margin:-4px -4px 2px;padding:4px;border-bottom:1px solid var(--line)}
+  .mhd .mi.back{padding:5px 8px}
+  /* La scheda del modello in uso: un riquadro col bordo e il raggio suoi, sospeso
+     nella fascia dello header (il padding di `mhd` gli dà il respiro). L'icona sta
+     in un quadrato, così ha un fondo e un bordo coerenti con ciò che la circonda,
+     e le statistiche portano un'icona al posto dell'etichetta: l'icona dice *cosa*,
+     il `title` dice le parole per intero. */
+  .card{display:flex;align-items:flex-start;gap:10px;padding:12px;cursor:pointer}
+  .avatar{width:30px;height:30px;border-radius:8px;border:1px solid var(--line-2);
+    display:flex;align-items:center;justify-content:center;flex:none}
+  .card img.micon{flex:none;filter:var(--icon-f)}
+  .avatar svg.ic{flex:none;width:15px;height:15px}
+  .info{flex:1;min-width:0}
+  .title{font-size:10px;font-weight:700;color:var(--ink);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .provider{font-size:10px;color:var(--muted);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .provider .sep{color:var(--line-2);margin:0 5px}
+  .stats{display:flex;gap:12px;margin-top:9px;flex-wrap:wrap}
+  .stat{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
+  /* La classe è dedicata alle sole due stat con un'icona (contesto e allegati):
+     il glifo del dollaro non è un'icona, e dimensionarle per colore pivot su
+     `svg.ic` le legherebbe alla scala di base che vale per tutte le altre. */
+  .stat .stat-ic{width:11px;height:11px;color:var(--muted);flex-shrink:0}
+  .stat .dollar{font-family:var(--mono);font-weight:700;color:var(--muted);
+    width:8px;text-align:center;flex-shrink:0}
+  .stat .per-m{font-size:9px;color:var(--muted);flex-shrink:0}
+  .stat b{color:var(--ink);font-weight:600;margin-left:1px}
+  .stat.free b{color:var(--accent)}
+
   .free-pill {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-size: 8px;
     font-weight: 700;
     letter-spacing: .05em;
@@ -358,5 +519,12 @@
     flex: none;
     margin-left: auto;
   }
+
+  /* La casella attaccata al bordo del contenitore: i tre popup che ospitano il picker
+     (`hpop`, `menu`, `ap-pop`) hanno tutti padding:4px, quindi il margine negativo lo
+     azzera a destra, a sinistra e in basso — resta solo il bordo della tendina a fare
+     da cornice, senza fascia di colore fra la casella e il container. Gli angoli bassi
+     seguono il raggio del contenitore che la ospita. */
+  .msearch{margin:2px -4px -4px;border-radius:0 0 8px 8px}
 </style>
 </div>

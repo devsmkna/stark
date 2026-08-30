@@ -616,10 +616,10 @@
   .row-input .send {
     width: 30px; height: 30px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent); color: #fff; border: none;
+    background: var(--accent); color: var(--on-accent); border: none;
     cursor: pointer; flex-shrink: 0;
   }
-  .row-input .send:hover { background: #8b7cf5; }
+  .row-input .send:hover { filter: brightness(.93); }
   .row-input .send[disabled] { opacity: .35; cursor: default; }
   .row-input .send :global(svg) { width: 15px; height: 15px; }
   .row-input .attach:disabled { opacity: .45; cursor: default; }

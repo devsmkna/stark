@@ -220,7 +220,7 @@ export async function collega(): Promise<{ ok: boolean; url?: string; error?: st
   // è meglio che tradurre un `ENOENT` in un messaggio che incolpa la cosa sbagliata.
   const attiva = await viaAttiva()
   const via = attiva?.via ?? vieTailscale()[0]
-  if (!via) return { ok: false, error: 'tailscale non è installato su questa macchina' }
+  if (!via) return { ok: false, error: 'tailscale is not installed on this machine' }
   return new Promise(resolve => {
     const child = execFile(via.cmd, [...via.pre, 'up', '--json'], { timeout: 120_000, windowsHide: true }, () => { /* vedi sotto */ })
     let buf = ''
@@ -240,8 +240,8 @@ export async function collega(): Promise<{ ok: boolean; url?: string; error?: st
     })
     child.on('close', code => rispondi(code === 0
       ? { ok: true }
-      : { ok: false, error: 'tailscale up non è riuscito — provalo da un terminale per vedere cosa dice' }))
-    child.on('error', () => rispondi({ ok: false, error: 'tailscale non è installato su questa macchina' }))
+      : { ok: false, error: 'tailscale up failed — try it from a terminal to see what it says' }))
+    child.on('error', () => rispondi({ ok: false, error: 'tailscale is not installed on this machine' }))
   })
 }
 
@@ -249,10 +249,10 @@ export async function collega(): Promise<{ ok: boolean; url?: string; error?: st
 export async function pubblica(porta: number): Promise<{ ok: boolean; error?: string }> {
   try {
     const attiva = await viaAttiva()
-    if (!attiva) return { ok: false, error: 'tailscale non risponde su questa macchina' }
+    if (!attiva) return { ok: false, error: 'tailscale is not responding on this machine' }
     await run(attiva.via.cmd, [...attiva.via.pre, 'serve', '--bg', String(porta)], { timeout: 15_000 })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: (e as Error).message.split('\n')[0] ?? 'non riuscito' }
+    return { ok: false, error: (e as Error).message.split('\n')[0] ?? 'failed' }
   }
 }

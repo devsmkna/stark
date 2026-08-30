@@ -56,20 +56,20 @@ export async function eseguiHandoff(
   registry: Registry, r: RichiestaHandoff,
 ): Promise<EsitoHandoff> {
   const snap = registry.snapshot(r.id)
-  if (!snap) return { ok: false, error: 'conversazione sconosciuta' }
+  if (!snap) return { ok: false, error: 'unknown conversation' }
   const cwd = snap.cwd
-  if (!cwd) return { ok: false, error: 'questa conversazione non ha una cartella' }
+  if (!cwd) return { ok: false, error: 'this conversation has no folder' }
   if (snap.agent === r.agent) {
     // Non è un errore dell'utente, è un errore di chi chiama: dentro lo stesso agent il
     // modello si cambia con `session.setModel`, che non costa niente e non apre niente.
-    return { ok: false, error: 'stesso agent: usa il cambio di modello, non il passaggio' }
+    return { ok: false, error: 'same agent: change the model, not the handoff' }
   }
 
   const viva = registry.isLive(r.id)
   const via = r.via ?? (viva ? 'agent' : undefined)
   if (!via) return { ok: false, serveScelta: true, state: snap.state }
   if (via === 'agent' && !viva) {
-    return { ok: false, error: 'la conversazione non è viva: risvegliala prima, o usa il briefing dal journal' }
+    return { ok: false, error: 'this conversation is not alive: wake it first, or use a journal briefing' }
   }
 
   const file = percorsoHandoff(new Date())
@@ -77,13 +77,13 @@ export async function eseguiHandoff(
   if (via === 'journal') {
     // Lo scrive STARK. `resolve` contro la cwd della chat, e non si accetta un percorso
     // assoluto da fuori: il nome lo decide `percorsoHandoff`, non chi chiama la rotta.
-    if (isAbsolute(file)) return { ok: false, error: 'percorso inatteso' }
+    if (isAbsolute(file)) return { ok: false, error: 'unexpected path' }
     const pieno = resolve(cwd, file)
     try {
       mkdirSync(dirname(pieno), { recursive: true })
       writeFileSync(pieno, briefingDalJournal(snap, new Date()), 'utf8')
     } catch (e) {
-      return { ok: false, error: `non riesco a scrivere ${file}: ${(e as Error).message}` }
+      return { ok: false, error: `i cannot write ${file}: ${(e as Error).message}` }
     }
   } else {
     const esito = await scriviColModello(registry, r.id, file)
@@ -97,7 +97,7 @@ export async function eseguiHandoff(
   try {
     nuova = await registry.open({ cwd, agent: r.agent, model: r.model })
   } catch (e) {
-    return { ok: false, error: `il passaggio è scritto in ${file}, ma la chat nuova non si è aperta: ${(e as Error).message}` }
+    return { ok: false, error: `the handoff is written in ${file}, but the new conversation did not open: ${(e as Error).message}` }
   }
 
   // Le due metà del legame, una per journal. Si scrivono **prima** del primo prompt: se

@@ -446,7 +446,7 @@
             ? 'This chat was recorded before STARK carried the model list'
             : o.label}>
           {#if iconUrl}
-            <img src={iconUrl} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:brightness(0) invert(1)" loading="lazy"
+            <img src={iconUrl} alt="" width="14" height="14" style="flex:none;border-radius:3px;filter:var(--icon-f)" loading="lazy"
               onerror={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display='none' }} />
           {:else}
             <span class="mdot"></span>

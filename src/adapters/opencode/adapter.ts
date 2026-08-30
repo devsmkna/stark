@@ -851,9 +851,10 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           autoMode: false,
           contextWindow: typeof limit['context'] === 'number' ? limit['context'] : 0,
           accepts: allegabiliDi(m),
-          // Il nome del provider (es. "OpenCode Zen") e il costo per-token: su OpenCode
-          // lo stesso modello può stare su più provider con prezzi diversi, e senza
-          // questi due campi chi sceglie non sa da chi sta pagando.
+          // Il nome del provider (es. "OpenCode Zen") e il costo per milione di
+          // token: su OpenCode lo stesso modello può stare su più provider con
+          // prezzi diversi, e senza questi due campi chi sceglie non sa da chi sta
+          // pagando. La scala è quella di models.dev, che è lì che nasce il dato.
           ...(typeof p.name === 'string' ? { providerName: String(p.name) } : {}),
           ...(typeof m['family'] === 'string' ? { family: String(m['family']) } : {}),
           ...(typeof cost['input'] === 'number' && typeof cost['output'] === 'number'

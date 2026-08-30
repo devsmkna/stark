@@ -704,14 +704,14 @@ export class Registry {
     Promise<{ ok: true; id: string; profile?: string } | { ok: false; error: string }> {
     const b = backendFor()
     if (!b.locateConversation || !b.importConversation) {
-      return { ok: false, error: 'questo agent non ha conversazioni da importare' }
+      return { ok: false, error: 'this agent has no conversations to import' }
     }
 
     const dest = resolve(SESSIONS, `${sessionId}.jsonl`)
     const journal = new Journal(dest, sessionId)
     if (journal.lastSeq > 0) {
       journal.close()
-      return { ok: false, error: 'già importata' }
+      return { ok: false, error: 'already imported' }
     }
 
     // Si cerca per **id**, non dentro l'elenco delle importabili — quello sono le più
@@ -726,7 +726,7 @@ export class Registry {
       // di `open()`, e stessa ragione.
       journal.close()
       rmSync(dest, { force: true })
-      return { ok: false, error: 'trascritto non trovato su questa macchina' }
+      return { ok: false, error: 'transcript not found on this machine' }
     }
 
     try {
@@ -894,7 +894,7 @@ export class Registry {
    */
   rename(id: string, title: string): { ok: true } | { ok: false; error: string } {
     const clean = title.trim().replace(/\s+/g, ' ').slice(0, 120)
-    if (!clean) return { ok: false, error: 'titolo vuoto' }
+    if (!clean) return { ok: false, error: 'empty title' }
     return this.annota(id, { k: 'session.renamed', title: clean })
   }
 
@@ -919,7 +919,7 @@ export class Registry {
       for (const w of l.watchers) w(e)
     } else {
       const path = resolve(SESSIONS, `${id}.jsonl`)
-      if (!existsSync(path)) return { ok: false, error: 'sconosciuta' }
+      if (!existsSync(path)) return { ok: false, error: 'unknown' }
       const j = new Journal(path, id)
       j.append(p)
       j.close()
@@ -988,7 +988,7 @@ export class Registry {
       try { await l.adapter.close() } catch { /* il processo è già andato */ }
       this.retire(id)
     }
-    if (!existsSync(path)) return { ok: false, error: 'sconosciuta' }
+    if (!existsSync(path)) return { ok: false, error: 'unknown' }
     rmSync(path, { force: true })
     rmSync(resolve(SESSIONS, `${id}.raw.jsonl`), { force: true })
     // Gli allegati sono parte della conversazione: restare senza di lei non ha senso.
@@ -1003,7 +1003,7 @@ export class Registry {
     if (cmd.c === 'session.rename') return this.rename(id, cmd.title)
 
     const l = this.live.get(id)
-    if (!l) return { ok: false, error: 'sessione non attiva' }
+    if (!l) return { ok: false, error: 'session not active' }
     switch (cmd.c) {
       case 'session.prompt':
         // I byte finiscono su disco **prima** di partire: il journal scriverà il
@@ -1050,7 +1050,7 @@ export class Registry {
         return { ok: true }
       case 'permission.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'permission') return { ok: false, error: 'richiesta sconosciuta' }
+        if (p?.kind !== 'permission') return { ok: false, error: 'unknown request' }
         l.pending.delete(cmd.requestId)
         if (cmd.decision === 'reject') {
           p.resolve({ allow: false, reason: 'Negato dall\'utente' })
@@ -1071,14 +1071,14 @@ export class Registry {
       }
       case 'question.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'question') return { ok: false, error: 'domanda sconosciuta' }
+        if (p?.kind !== 'question') return { ok: false, error: 'unknown question' }
         l.pending.delete(cmd.requestId)
         p.resolve({ answers: cmd.answers, ...(cmd.response !== undefined ? { response: cmd.response } : {}) })
         return { ok: true }
       }
       case 'plan.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'plan') return { ok: false, error: 'piano sconosciuto' }
+        if (p?.kind !== 'plan') return { ok: false, error: 'unknown plan' }
         l.pending.delete(cmd.requestId)
         p.resolve(cmd.decision === 'approved'
           ? { approved: true, ...(cmd.mode ? { mode: cmd.mode } : {}) }
@@ -1087,7 +1087,7 @@ export class Registry {
       }
       case 'question.reject': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'question') return { ok: false, error: 'domanda sconosciuta' }
+        if (p?.kind !== 'question') return { ok: false, error: 'unknown question' }
         l.pending.delete(cmd.requestId)
         // `null` non è "nessuna risposta": è l'utente che ha chiuso la card, ed è una
         // risposta vera. L'agent la riceve come rifiuto e può cambiare strada.
@@ -1095,7 +1095,7 @@ export class Registry {
         return { ok: true }
       }
       default:
-        return { ok: false, error: `comando non gestito: ${cmd.c}` }
+        return { ok: false, error: `unknown command: ${cmd.c}` }
     }
   }
 

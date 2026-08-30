@@ -99,15 +99,15 @@ export class Telefono {
    */
   riscatta(codice: string, agente: string): { ok: true; token: string } | { ok: false; error: string } {
     const p = this.#dati.pairing
-    if (!p) return { ok: false, error: 'nessun codice attivo' }
-    if (Date.now() > p.scade) { this.annulla(); return { ok: false, error: 'codice scaduto' } }
+    if (!p) return { ok: false, error: 'no active code' }
+    if (Date.now() > p.scade) { this.annulla(); return { ok: false, error: 'expired code' } }
     if (!pari(impronta(codice.trim().toUpperCase()), p.hash)) {
       this.#cambia(d => {
         if (!d.pairing) return
         d.pairing.tentativi++
         if (d.pairing.tentativi >= TENTATIVI) delete d.pairing
       })
-      return { ok: false, error: 'codice errato' }
+      return { ok: false, error: 'wrong code' }
     }
     const token = randomBytes(32).toString('hex')
     const dev: Dispositivo = {

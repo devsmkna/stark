@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { name, style = '' }: { name: string; style?: string } = $props()
+  let { name, class: c = '', style = '' }: { name: string; class?: string; style?: string } = $props()
 </script>
 
-<svg class="ic" {style} aria-hidden="true"><use href="#{name}" /></svg>
+<svg class="ic {c}" {style} aria-hidden="true"><use href="#{name}" /></svg>

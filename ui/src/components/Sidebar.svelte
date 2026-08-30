@@ -107,6 +107,10 @@
    */
   const recentiAll = $derived([...store.rows].sort((a, b) => b.since - a.since))
   // Filtro "Solo non lette" dal menu … — se attivo mostra solo ciò che ti aspetta.
+  // Dichiarato qui, prima del `$derived` che lo legge: uno stato dichiarato sotto la
+  // riga che lo usa è un errore a runtime ("used before declaration"), non solo una
+  // seccatura del typecheck.
+  let soloNonLette = $state(false)
   const recenti = $derived(soloNonLette ? recentiAll.filter(r => needsYou(r.state)) : recentiAll)
 
   /** Le righe di una lista, raccolte per progetto e i progetti in ordine alfabetico. */
@@ -216,7 +220,6 @@
   // Overflow "…" : raggruppa Notifiche / Todo / Helper / Telefono, come da screenshot 2.
   // Resta in testata solo [+] e […] — "Segui sistema" quindi niente forzatura dark.
   let moreOpen = $state(false)
-  let soloNonLette = $state(false)
 
   function closeMore(): void { moreOpen = false }
 
@@ -250,18 +253,18 @@
         <button class="mp-item" role="menuitem"
           onclick={() => { void store.calls.toggle(); closeMore() }}>
           <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
-          <span class="mp-label">Notifiche</span>
+          <span class="mp-label">Notifications</span>
           {#if store.calls.on}<span class="mp-check"><Icon name="i-check" /></span>{/if}
         </button>
         <button class="mp-item" role="menuitem"
           onclick={() => { soloNonLette = false; closeMore() }}>
           <span class="mp-ico">{#if !soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
-          <span class="mp-label">Mostra completate</span>
+          <span class="mp-label">Show completed</span>
         </button>
         <button class="mp-item" role="menuitem"
           onclick={() => { soloNonLette = true; closeMore() }}>
           <span class="mp-ico">{#if soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
-          <span class="mp-label">Solo non lette</span>
+          <span class="mp-label">Unread only</span>
         </button>
         <hr class="mp-sep" />
         <!-- La board arriva da main e sta qui, non in testata: il design ha svuotato
@@ -277,7 +280,7 @@
         <button class="mp-item" role="menuitem"
           onclick={() => { store.refused = null; store.dialog = { kind: 'phone' }; closeMore() }}>
           <Icon name="i-phone" />
-          <span class="mp-label">Dispositivi collegati</span>
+          <span class="mp-label">Connected devices</span>
         </button>
         <hr class="mp-sep" />
         <button class="mp-item" role="menuitem"
@@ -473,13 +476,16 @@
      solo ciò che serve a togliere l'aspetto di pulsante senza perderne il mestiere. */
   /* La casella di ricerca — pill tonda come nello screenshot 1: lente a sinistra,
      placeholder "Search chats", X a destra. Resta `type="search"` per tastiera. */
-  /* 1) Sidebar sinistra stesso sfondo del pannello agente (#080C18) */
+  /* 1) Sidebar sinistra stesso sfondo del pannello agente: in scuro le due tinte scure
+        del design (`--panel-*`), in chiaro la tavolozza di base. Riscrivere i nomi del
+        vocabolario su `.side` fa sì che tutte le classi qui dentro li prendano senza
+        sapere da dove vengono. */
   :global(.side){
-    background:#080C18; border-right:1px solid #1C2333;
-    --side:#080C18; --surface:#131A2A; --surface-2:#1A1F2E; --surface-3:#1C2333;
-    --ink:#E6E8F0; --ink-2:#C2C8D6; --muted:#6B7488;
-    --line:#1C2333; --line-2:#242B3D;
-    --accent:#7A5CFA; --accent-soft:#1E1A3A;
+    background:var(--panel-bg); border-right:1px solid var(--panel-line);
+    --side:var(--panel-bg); --surface:var(--panel-surface); --surface-2:var(--panel-surface-2); --surface-3:var(--panel-surface-3);
+    --ink:var(--panel-ink); --ink-2:var(--panel-ink-2); --muted:var(--panel-muted);
+    --line:var(--panel-line); --line-2:var(--panel-line-2);
+    --accent:var(--panel-accent); --accent-soft:var(--panel-accent-soft);
   }
   /* Header senza linea — nello screenshot non c'è separatore. */
   :global(.side .sidetop) { border-bottom: none; padding: 10px 10px 8px 12px; }
@@ -602,12 +608,10 @@
   .plus, .more { width: auto; display: flex; cursor: pointer; align-items: center; justify-content: center; }
   /* Plus più piccola nello screenshot: quadrato viola compatto, icona più piccola. */
   .plus {
-    width: 22px; height: 22px; border-radius: 7px; background: var(--accent); color: #fff;
+    width: 22px; height: 22px; border-radius: 7px; background: var(--accent); color: var(--on-accent);
     border: 1px solid transparent; box-shadow: 0 1px 2px rgba(16,20,32,.10);
   }
   .plus :global(svg.ic) { width: 11px; height: 11px; }
-  :root[data-theme="dark"] .plus, :root:not([data-theme="light"]) .plus { color: #fff; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .plus { color: #fff; } }
   .plus:hover { filter: brightness(1.06); }
   .more {
     width: 22px; height: 22px; border-radius: 7px; color: var(--muted);
@@ -658,5 +662,5 @@
      occupa lo stesso spazio dell'immagine, così le righe senza modello — o con un
      modello che non ha icona — restano allineate con le altre. */
   .micon { flex: none; width: 14px; height: 14px; display: inline-flex; border-radius: 3px; }
-  img.micon { filter: brightness(0) invert(1); opacity: .8; }
+  img.micon { filter: var(--icon-f); opacity: .8; }
 </style>

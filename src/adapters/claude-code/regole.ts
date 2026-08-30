@@ -70,7 +70,7 @@ export function consentiSempre(cwd: string, soggetto: string): EsitoRegola {
       if (grezzo.length > 0) {
         const letto: unknown = JSON.parse(grezzo)
         if (typeof letto !== 'object' || letto === null || Array.isArray(letto)) {
-          return { path, giaPresente: false, scritto: false, error: 'non è un oggetto JSON' }
+          return { path, giaPresente: false, scritto: false, error: 'not a JSON object' }
         }
         radice = letto as Record<string, unknown>
       }
