@@ -26,9 +26,6 @@ export type SessionRow = {
   agent?: string
   cwd?: string
   model?: string
-  /** Con quale agent è nata (assente su Claude Code, il default). Serve al risveglio:
-   *  vedi `wake()` in `store.svelte.ts`. */
-  agent?: string
   turns: number
   lastSeq: number
   lastTs: number

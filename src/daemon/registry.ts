@@ -94,13 +94,6 @@ export type SessionRow = {
    */
   since: number
   /**
-   * Con quale agent è nata. Assente sull'agent di default (Claude Code, storicamente
-   * l'unico): serve solo a chi ne ha più di uno installato, per risvegliarla con lo
-   * stesso backend con cui è nata invece di quello di default (`wake()` in
-   * `store.svelte.ts` la rimanda qui).
-   */
-  agent?: string
-  /**
    * Cosa sta facendo **adesso**. C'è solo se dietro c'è un processo: su una sessione
    * senza, l'ultimo turno del journal è rimasto aperto a metà e ripeterlo direbbe che
    * sta girando qualcosa che non gira — la bugia peggiore, perché è quella su cui si

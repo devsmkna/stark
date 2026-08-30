@@ -342,8 +342,7 @@ export class OpenCodeAdapter implements AgentSession {
       this.emit({ k: 'notice', level: 'error', text: motivo })
       this.emit({ k: 'session.error', message: motivo, fatal: false })
       this.abbandonaBloccantePendente()
-      for (const p of this.tr.chiudiTurno('error')) this.emit(p)
-      this.emit({ k: 'session.state', state: 'idle' })
+      this.scrivi(this.tr.chiudiTurno('error'))
       this.sveglia()
     }, ATTESA_PRIMO_SEGNO)
     // Un guardiano non deve tenere in vita il processo: se STARK non ha altro da fare,
@@ -366,17 +365,8 @@ export class OpenCodeAdapter implements AgentSession {
     if (e.type === 'session.next.step.failed' && await this.forseRitenta(d)) return
     if (e.type === 'session.error' && await this.forseRitentaErrore(d)) return
 
-    for (const p of this.tr.translate(e)) {
-      // L'`idle` che `chiudiTurno` mette in coda al turno e' una sosta bugiarda se
-      // dietro c'e' ancora della fila: durerebbe un istante ma e' lo stato su cui
-      // suona la notifica «ha finito» — la stessa ragione per cui la prova della
-      // fila lo verifica (§7). Si guarda anche il turno aperto, non solo la coda,
-      // perche' `next()` l'ha gia' svuotata quando l'`idle` arriva al giro.
-      if (p.k === 'session.state' && p.state === 'idle'
-        && (this.coda.length > 0 || this.tr.turnoAperto() !== null)) continue
-      this.emit(p)
-      if (p.k === 'turn.ended') { this.next(); this.sveglia() }
-    }
+    this.scrivi(this.tr.translate(e))
+    this.sveglia()
   }
 
   /**
@@ -639,6 +629,24 @@ export class OpenCodeAdapter implements AgentSession {
     return this.tr.turnoAperto() !== null || this.coda.length > 0
   }
 
+  /**
+   * Gli eventi di chiusura di un turno passano **tutti** da qui, ovunque nascano:
+   * stream, guardiano, invio fallito, interrupt. Perche' due regole valgono in tutti
+   * i casi e un solo posto a farle valere e' il modo per non dimenticarne uno:
+   * l'`idle` bugiardo si filtra se dietro c'e' ancora della fila, e un `turn.ended`
+   * consegna il prossimo prompt. Il guardiano e l'errore di invio chiudono turni
+   * anche loro — lasciare la fila in sospeso dopo sarebbe il «queued, waiting its
+   * turn» per sempre che il §4 vieta.
+   */
+  private scrivi(parti: Payload[]): void {
+    for (const p of parti) {
+      if (p.k === 'session.state' && p.state === 'idle'
+        && (this.coda.length > 0 || this.tr.turnoAperto() !== null)) continue
+      this.emit(p)
+      if (p.k === 'turn.ended') this.next()
+    }
+  }
+
   /** Il turno e' davvero suo: si apre nel traduttore e si spedisce. L'annuncio
    *  (`turn.started`) sta a chi lo chiama, perche' il turno in fila l'ha gia' avuto. */
   private consegna(turnId: string, invio: { parts: unknown[] }): void {
@@ -653,7 +661,7 @@ export class OpenCodeAdapter implements AgentSession {
     void this.mandaAlRunner(invio).catch((err: unknown) => {
       this.emit({ k: 'session.error', message: String(err), fatal: false })
       this.abbandonaBloccantePendente()
-      for (const p of this.tr.chiudiTurno('error')) this.emit(p)
+      this.scrivi(this.tr.chiudiTurno('error'))
       this.sveglia()
     })
   }
@@ -726,7 +734,7 @@ export class OpenCodeAdapter implements AgentSession {
       path: { id: this.sessionId }, query: { directory: this.spec.cwd },
     } as never).catch(() => { /* gia' ferma, o il server e' andato */ })
     this.abbandonaBloccantePendente()
-    for (const p of this.tr.chiudiTurno('aborted')) this.emit(p)
+    this.scrivi(this.tr.chiudiTurno('aborted'))
     this.sveglia()
   }
 
@@ -823,7 +831,7 @@ export class OpenCodeAdapter implements AgentSession {
   private async spegni(): Promise<void> {
     this.smontaGuardia()
     this.svuota()
-    for (const p of this.tr.chiudiTurno('interrupted')) this.emit(p)
+    this.scrivi(this.tr.chiudiTurno('interrupted'))
     this.sveglia()
     this.ac.abort()
     await this.flusso?.catch(() => {})
