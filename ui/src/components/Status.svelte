@@ -15,7 +15,7 @@
   import type { QuotaWindow, SessionOption } from '$core/events.ts'
   import { optionsFrom } from '$core/adapter.ts'
   import { MODE_BLURB, MODE_ICON, project, since, stamp, tilde, until } from '../lib/view.ts'
-  import type { GitInfo } from '../lib/api.ts'
+  import type { AgentModels, GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   // `live` per pannello, non `live`: vedi Dock.svelte.
@@ -24,6 +24,7 @@
   // Era un elenco chiuso di tre. Ora e' l'`id` del selettore aperto, e la UI non sa
   // quali esistano: li dichiara l'agent (ADR-014).
   let open = $state<string | null>(null)
+  let hovered = $state<string | null>(null)
   let bar = $state<HTMLElement | null>(null)
 
   /**
@@ -278,6 +279,43 @@
     if (!open) { conferma = null; store.handoff = null }
   }
 
+  // ─── hover sul model picker: mostra solo il blocco del modello in corso ─────────
+  // Il blocco (COST/context/INPT) deve essere visibile anche in hover, senza aprire
+  // la lista. `hovered` tiene l'id dell'opzione su cui è il puntatore.
+  const fmtTokHover = (n: number | undefined): string => {
+    if (!n) return '—'
+    if (n >= 1_000_000) { const m = n / 1_000_000; return `${Number.isInteger(m) ? m : m.toFixed(1)}M` }
+    if (n >= 1000) return `${Math.round(n / 1000)}k`
+    return String(n)
+  }
+  const fmtCostoHover = (n: number): string =>
+    `${n < 0.01 ? n.toFixed(4).replace(/0+$/, '') : Number.isInteger(n) ? String(n) : n.toFixed(2)}`
+  const hoverInfo = $derived.by(() => {
+    if (!hovered || open) return null
+    const opt = destra.find(o => o.id === hovered)
+    if (!opt) return null
+    const corrente = opt.value
+    const catalogo = store.catalogo
+    if (!catalogo) return null
+    const nel = (a: AgentModels) => a.models.find(m => m.id === corrente || (m as any).resolved === corrente)
+    const agente = catalogo.find(a => a.id === snap.agent)
+    const ordine = agente ? [agente, ...catalogo.filter(a => a !== agente)] : catalogo
+    for (const a of ordine) {
+      const m = nel(a)
+      if (m) {
+        const accepts = (m as any).accepts as string[] | undefined
+        const tipi = accepts ?? ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+        const has = (pref: string) => tipi.some(t => t.startsWith(pref))
+        const inputTypes = accepts !== undefined && accepts.length === 0
+          ? { text: true, image: false, video: false, audio: false, docs: false }
+          : { text: true, image: has('image/'), video: has('video/'), audio: has('audio/'), docs: tipi.includes('application/pdf') }
+        const costFree = !!(m as any).cost && (m as any).cost.input === 0 && (m as any).cost.output === 0
+        return { agent: a, model: m, inputTypes, costFree }
+      }
+    }
+    return null
+  })
+
   // ─── passare a un altro agent ─────────────────────────────────────────────
   //
   // Dentro lo stesso agent cambiare modello e' un parametro. Fra due agent non lo e':
@@ -438,7 +476,7 @@
     {#each destra as o (o.id)}
       {@const iconUrl = getLobeIconUrl(o.value)}
       {@const scelta = o.choices.find(c => c.value === o.value)}
-      <span class="pop">
+      <span class="pop" onmouseenter={() => { hovered = o.id; if (!store.catalogo) void store.caricaCatalogo() }} onmouseleave={() => hovered = null}>
         <button class="tune" disabled={!modificabile(o) || o.choices.length === 0}
           onclick={() => choose(o.id)}
           aria-label="{o.label}: {o.value}"
@@ -454,6 +492,37 @@
           <span class="mname">{nome(o.value, scelta?.label) || '—'}</span>
           {#if o.choices.length > 0}<Icon name="i-down" />{/if}
         </button>
+        {#if hovered === o.id && open !== o.id && hoverInfo}
+          {@const ic0 = getLobeIconUrl((hoverInfo.model as any).resolved ?? hoverInfo.model.id)}
+          <div class="hover-card" role="tooltip">
+            <div class="card">
+              <div class="avatar">
+                {#if ic0}<img class="micon" src={ic0} alt="" width="15" height="15" loading="lazy" onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />{:else}<Icon name="i-brain" />{/if}
+              </div>
+              <div class="info">
+                <div class="title-row">
+                  <div class="title">{hoverInfo.model.label ?? hoverInfo.model.id}</div>
+                  <span class="input-types" title={`accepts: ${[hoverInfo.inputTypes.text ? 'text' : null, hoverInfo.inputTypes.image ? 'image' : null, hoverInfo.inputTypes.video ? 'video' : null, hoverInfo.inputTypes.audio ? 'audio' : null, hoverInfo.inputTypes.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
+                    {#if hoverInfo.inputTypes.text}<Icon name="i-type" class="on" />{/if}
+                    {#if hoverInfo.inputTypes.image}<Icon name="i-image" class="on" />{/if}
+                    {#if hoverInfo.inputTypes.video}<Icon name="i-video" class="on" />{/if}
+                    {#if hoverInfo.inputTypes.audio}<Icon name="i-audio" class="on" />{/if}
+                    {#if hoverInfo.inputTypes.docs}<Icon name="i-doc" class="on" />{/if}
+                  </span>
+                </div>
+                <div class="provider">{hoverInfo.agent.label}</div>
+                <div class="stats">
+                  <span class="stat" class:free={hoverInfo.costFree}><span class="dollar">$</span>
+                    {#if hoverInfo.costFree}<b>free</b>
+                    {:else if (hoverInfo.model as any).cost}<span class="per-m">/M</span><b>{fmtCostoHover((hoverInfo.model as any).cost.input)} / {fmtCostoHover((hoverInfo.model as any).cost.output)}</b>
+                    {:else}<b>—</b>{/if}
+                  </span>
+                  <span class="stat"><span class="k">context</span><b>{fmtTokHover((hoverInfo.model as any).contextWindow)}</b></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
         {#if open === o.id}
           <!-- Larghezza dichiarata, come la tendina MCP: senza, `.menu` si adatta al
                contenuto e le righe vengono di larghezze diverse una dall'altra — con
@@ -705,4 +774,35 @@
   /* Il reset e gli stati di `.mi` stavano qui, e qui valevano solo per le righe scritte
      in questo file: `ModelPicker` disegna le stesse `.mi` e non le vedeva. Sono in
      app.css, accanto alla definizione della classe. */
+
+  /* Hover sul model picker: mostra solo il blocco del modello in corso */
+  .hover-card{
+    position:absolute; bottom:calc(100% + 7px); right:0; width:280px;
+    background:var(--surface); border:1px solid var(--line-2); border-radius:10px;
+    box-shadow:0 8px 28px rgba(0,0,0,.18); padding:4px; z-index:7;
+    pointer-events:none;
+  }
+  .hover-card .card{display:flex;align-items:flex-start;gap:10px;padding:12px}
+  .hover-card .avatar{width:30px;height:30px;border-radius:8px;border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:none}
+  .hover-card .avatar svg.ic{width:15px;height:15px}
+  .hover-card .micon{filter:var(--icon-f)}
+  .hover-card .info{flex:1;min-width:0}
+  .hover-card .title{font-size:10px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hover-card .title-row{display:flex;align-items:center;gap:8px}
+  .hover-card .title-row .title{flex:1;min-width:0}
+  .hover-card .title-row .input-types{margin-left:auto;flex:none;display:inline-flex;gap:3px}
+  .hover-card .provider{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hover-card .provider .sep{color:var(--line-2);margin:0 5px}
+  .hover-card .stats{display:flex;gap:12px;margin-top:9px;flex-wrap:wrap}
+  .hover-card .stat{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
+  .hover-card .stat .k{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);opacity:.75;flex-shrink:0}
+  .hover-card .stat .dollar{font-family:var(--mono);font-weight:700;color:var(--muted);width:8px;text-align:center;flex-shrink:0}
+  .hover-card .stat .per-m{font-size:9px;color:var(--muted)}
+  .hover-card .stat b{color:var(--ink);font-weight:600;margin-left:1px}
+  .hover-card .stat.free b{color:var(--accent)}
+  .hover-card .input-types svg.ic{width:11px;height:11px}
+  .hover-card .input-types svg.ic.on{color:var(--ink)}
+  @media (max-width:860px){
+    .hover-card{display:none}
+  }
 </style>

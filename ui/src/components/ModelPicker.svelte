@@ -347,10 +347,21 @@
           {:else}<Icon name="i-brain" />{/if}
         </div>
         <div class="info">
-          <div class="title">{livello0.model.label ?? livello0.model.id}</div>
+          <div class="title-row">
+            <div class="title">{livello0.model.label ?? livello0.model.id}</div>
+            {#if inputTypes}
+              <span class="input-types" title={`accepts: ${[inputTypes.text ? 'text' : null, inputTypes.image ? 'image' : null, inputTypes.video ? 'video' : null, inputTypes.audio ? 'audio' : null, inputTypes.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
+                {#if inputTypes.text}<Icon name="i-type" class="on" />{/if}
+                {#if inputTypes.image}<Icon name="i-image" class="on" />{/if}
+                {#if inputTypes.video}<Icon name="i-video" class="on" />{/if}
+                {#if inputTypes.audio}<Icon name="i-audio" class="on" />{/if}
+                {#if inputTypes.docs}<Icon name="i-doc" class="on" />{/if}
+              </span>
+            {/if}
+          </div>
           <div class="provider">{livello0.agent.label}{#if providerMostrato}<span class="sep">·</span>{providerMostrato}{/if}</div>
           <div class="stats">
-            <span class="stat" class:free={costoFree}><span class="k">COST</span>
+            <span class="stat" class:free={costoFree}><span class="dollar">$</span>
               {#if costoFree}
                 <b>free</b>
               {:else if livello0.model.cost}
@@ -359,19 +370,7 @@
                 <b>—</b>
               {/if}
             </span>
-            <span class="stat" title="context window"><span class="k">CNTX</span><b>{fmtTok(livello0.model.contextWindow)}</b></span>
-            {#if inputTypes}
-              <span class="stat" title={`accepts: ${[inputTypes.text ? 'text' : null, inputTypes.image ? 'image' : null, inputTypes.video ? 'video' : null, inputTypes.audio ? 'audio' : null, inputTypes.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
-                <span class="k">INPT</span>
-                <span class="input-types">
-                  {#if inputTypes.text}<Icon name="i-type" class="on" />{/if}
-                  {#if inputTypes.image}<Icon name="i-image" class="on" />{/if}
-                  {#if inputTypes.video}<Icon name="i-video" class="on" />{/if}
-                  {#if inputTypes.audio}<Icon name="i-audio" class="on" />{/if}
-                  {#if inputTypes.docs}<Icon name="i-doc" class="on" />{/if}
-                </span>
-              </span>
-            {/if}
+            <span class="stat" title="context window"><span class="k">context</span><b>{fmtTok(livello0.model.contextWindow)}</b></span>
           </div>
         </div>
       </div>
@@ -514,12 +513,16 @@
   .info{flex:1;min-width:0}
   .title{font-size:10px;font-weight:700;color:var(--ink);white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
+  .title-row{display:flex;align-items:center;gap:8px}
+  .title-row .title{flex:1;min-width:0}
+  .title-row .input-types{margin-left:auto;flex:none}
   .provider{font-size:10px;color:var(--muted);white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
   .provider .sep{color:var(--line-2);margin:0 5px}
   .stats{display:flex;gap:12px;margin-top:9px;flex-wrap:wrap}
   .stat{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
   .stat .k{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);opacity:.75;font-stretch:condensed;flex-shrink:0}
+  .stat .dollar{font-family:var(--mono);font-weight:700;color:var(--muted);width:8px;text-align:center;flex-shrink:0}
   .stat .per-m{font-size:9px;color:var(--muted);flex-shrink:0}
   .stat b{color:var(--ink);font-weight:600;margin-left:1px}
   .stat.free b{color:var(--accent)}
