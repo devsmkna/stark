@@ -927,6 +927,34 @@ export class Registry {
    * chiamanti sono diventati due, e due copie di questo ballo sarebbero due modi di
    * sbagliarlo.
    */
+  /**
+   * L'utente ha risposto a una richiesta che nessuno può più esaudire.
+   *
+   * Succede quando il pezzo che l'aveva chiesta è sparito prima di ricevere risposta —
+   * un riavvio del daemon a metà attesa, un turno chiuso d'ufficio dal guardiano — e
+   * con lui la promessa che *qualcosa* avrebbe risolto quella `Promise` in sospeso.
+   * `l.pending` non la conosce più (l'oggetto che la teneva non esiste), ma lo
+   * snapshot sì: resta lì finché non arriva un evento che la chiude, per lo stesso §18
+   * che tiene il resto della UI onesto. Prima questo caso restituiva solo un errore
+   * («unknown request») e la card restava a schermo per sempre, senza nessun modo di
+   * togliersela di torno — un permesso a cui non si può più rispondere né rifiutare.
+   *
+   * Qui si scrive il fatto: non risolve nulla dall'altra parte (non c'è più un'altra
+   * parte ad ascoltare), ma libera la UI da una richiesta morta. `rifiuto` perché è il
+   * verso sicuro — non si può concedere un permesso che nessuno controllerà mai.
+   */
+  private scartaOrfano(l: Live, requestId: string, rifiuto: Payload): boolean {
+    const orfano = l.snapshot.pendingPermissions.some(x => x.requestId === requestId)
+      || l.snapshot.pendingQuestions.some(x => x.requestId === requestId)
+      || l.snapshot.pendingPlans.some(x => x.requestId === requestId)
+    if (!orfano) return false
+    const e = l.journal.append(rifiuto)
+    applyTo(l.snapshot, e)
+    for (const w of l.watchers) w(e)
+    this.bump()
+    return true
+  }
+
   annota(id: string, p: Payload): { ok: true } | { ok: false; error: string } {
     const l = this.live.get(id)
     if (l) {
@@ -1074,7 +1102,11 @@ export class Registry {
         return { ok: true }
       case 'permission.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'permission') return { ok: false, error: 'unknown request' }
+        if (p?.kind !== 'permission') {
+          const chiusa = this.scartaOrfano(l, cmd.requestId,
+            { k: 'permission.replied', requestId: cmd.requestId, decision: 'reject' })
+          return chiusa ? { ok: true } : { ok: false, error: 'unknown request' }
+        }
         l.pending.delete(cmd.requestId)
         if (cmd.decision === 'reject') {
           p.resolve({ allow: false, reason: 'Negato dall\'utente' })
@@ -1095,14 +1127,22 @@ export class Registry {
       }
       case 'question.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'question') return { ok: false, error: 'unknown question' }
+        if (p?.kind !== 'question') {
+          const chiusa = this.scartaOrfano(l, cmd.requestId,
+            { k: 'question.rejected', requestId: cmd.requestId })
+          return chiusa ? { ok: true } : { ok: false, error: 'unknown question' }
+        }
         l.pending.delete(cmd.requestId)
         p.resolve({ answers: cmd.answers, ...(cmd.response !== undefined ? { response: cmd.response } : {}) })
         return { ok: true }
       }
       case 'plan.reply': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'plan') return { ok: false, error: 'unknown plan' }
+        if (p?.kind !== 'plan') {
+          const chiusa = this.scartaOrfano(l, cmd.requestId,
+            { k: 'plan.replied', requestId: cmd.requestId, decision: 'rejected' })
+          return chiusa ? { ok: true } : { ok: false, error: 'unknown plan' }
+        }
         l.pending.delete(cmd.requestId)
         p.resolve(cmd.decision === 'approved'
           ? { approved: true, ...(cmd.mode ? { mode: cmd.mode } : {}) }
@@ -1111,7 +1151,11 @@ export class Registry {
       }
       case 'question.reject': {
         const p = l.pending.get(cmd.requestId)
-        if (p?.kind !== 'question') return { ok: false, error: 'unknown question' }
+        if (p?.kind !== 'question') {
+          const chiusa = this.scartaOrfano(l, cmd.requestId,
+            { k: 'question.rejected', requestId: cmd.requestId })
+          return chiusa ? { ok: true } : { ok: false, error: 'unknown question' }
+        }
         l.pending.delete(cmd.requestId)
         // `null` non è "nessuna risposta": è l'utente che ha chiuso la card, ed è una
         // risposta vera. L'agent la riceve come rifiuto e può cambiare strada.
