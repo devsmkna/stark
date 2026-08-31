@@ -336,7 +336,15 @@ export class Api {
       ...init,
       headers: { ...this.auth, ...(init?.headers ?? {}) },
     })
-    if (!res.ok) throw new Error(`${res.status} su ${path}`)
+    if (!res.ok) {
+      let msg = `${res.status} su ${path}`
+      try {
+        const j = await res.clone().json() as Record<string, unknown>
+        if (typeof j.error === 'string' && j.error.trim()) msg = j.error
+        else if (typeof j.message === 'string' && j.message.trim()) msg = j.message
+      } catch { /* corpo non JSON: resta il fallback */ }
+      throw new Error(msg)
+    }
     return await res.json() as T
   }
 

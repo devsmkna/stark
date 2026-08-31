@@ -218,7 +218,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .sidetop .bell.off:hover{opacity:1}
 .gstate{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:11px 10px 4px}
 .gproj{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 12px;color:var(--ink-2);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-.sit{display:flex;gap:7px;padding:5px 10px 5px 22px;border-radius:7px;align-items:center;margin:0 5px;border-left:3px solid transparent}
+.sit{display:flex;gap:7px;padding:5px 10px 5px 4px;border-radius:7px;align-items:center;margin:0 5px;border-left:3px solid transparent}
 /* La riga della chat aperta adesso: non solo un fondo tenue (si perdeva contro
    `--side`, che gli somiglia troppo) ma anche un bordo pieno, come lo stesso
    trattamento usato per il turno attivo dentro la conversazione. */
@@ -454,7 +454,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .status{display:flex;align-items:center;gap:9px;padding:5px 12px 7px;font-size:10px;color:var(--muted);position:relative;flex-wrap:nowrap;white-space:nowrap}
 .status .l,.status .r{display:flex;align-items:center;gap:9px;min-width:0;flex-wrap:nowrap}
 .status .r{margin-left:auto}
-.status .r .tune{border:0;background:none;padding-left:0;padding-right:0}
+.status .tune{border:0;background:none;padding-left:0;padding-right:0}
 .status .sep{color:var(--line-2)}
 /* Il percorso non ha un limite proprio: su una cartella con un nome lungo cresceva
    finché non finiva contro il bordo di `.shell` (che taglia, non scorre) — sparendo a

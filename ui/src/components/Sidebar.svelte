@@ -10,7 +10,7 @@
   import Logo from './Logo.svelte'
   import type { Match, SessionMatches, SessionRow } from '../lib/api.ts'
   import {
-    ORDER, activityIcon, activityText, colours, group, hhmm, label, needsYou, project, stamp,
+    ORDER, colours, group, hhmm, label, needsYou, project, stamp,
   } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
   import { quandoRiparte, quotaFerma } from '$core/quota.ts'
@@ -456,15 +456,6 @@
                   {hhmm(row.lastTs)}
                   <span class="sst {label(row.state)}">{label(row.state)}</span>
                 </div>
-                <!-- Cosa sta facendo adesso. Solo sulle righe vive: chi ha finito, chi
-                     dorme e chi è stato fermato non sta facendo niente, e una riga in
-                     più su ognuna costerebbe l'altezza dell'elenco per dire nulla. -->
-                {#if row.doing}
-                  <div class="act">
-                    <Icon name={activityIcon(row.doing)} />
-                    <span>{activityText(row.doing)}</span>
-                  </div>
-                {/if}
               </div>
               {#if needsYou(row.state)}<span class="unread"></span>{/if}
             </button>

@@ -124,16 +124,29 @@
     return prov ? familyLabel(prov) : ''
   })
 
-  /** La risposta alla domanda «questo modello legge allegati?», e nient'altro: yes/no,
-   *  non **quali** tipi. La scheda e' una riga di fatti essenziali, e l'elenco dei tipi
-   *  sta dove si allega davvero — la graffetta spenta dice la sua ragione. La lettura
-   *  dei tre casi resta quella di `core/allegati.ts`: un **elenco** vuoto e' un no
-   *  dichiarato, un elenco assente e' il ripiego di sempre, un elenco pieno e' un si. */
-  const allegati = $derived.by(() => {
-    const m = livello0?.model
+  /** Quali tipologie di input il modello accetta — text / image / video / audio / documents.
+   *  Sostituisce il vecchio yes/no: `boxes` fa da titolo della riga, le cinque icone
+   *  dicono quali. `accepts` è l'elenco MIME del modello (vuoto = niente, assente = ripiego
+   *  immagini come in `core/allegati.ts`). */
+  const inputTypes = $derived.by(() => {
+    const m = livello0?.model as { accepts?: string[] } | undefined
     if (!m) return null
-    if (m.accepts !== undefined && m.accepts.length === 0) return 'no'
-    return 'yes'
+    // `text` è l'input standard del prompt: se puoi scrivere al modello vuol dire che lo
+    // accetta, quindi quasi tutti i modelli sono almeno `text`. Non dipende da `accepts`
+    // che invece elenca i file allegabili (image/pdf/video/audio).
+    if (m.accepts !== undefined && m.accepts.length === 0) {
+      return { text: true, image: false, video: false, audio: false, docs: false, none: false }
+    }
+    const tipi = m.accepts ?? ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+    const has = (pref: string): boolean => tipi.some(t => t.startsWith(pref))
+    return {
+      text: true,
+      image: has('image/'),
+      video: has('video/'),
+      audio: has('audio/'),
+      docs: tipi.includes('application/pdf'),
+      none: false,
+    }
   })
 
   /**
@@ -337,7 +350,7 @@
           <div class="title">{livello0.model.label ?? livello0.model.id}</div>
           <div class="provider">{livello0.agent.label}{#if providerMostrato}<span class="sep">·</span>{providerMostrato}{/if}</div>
           <div class="stats">
-            <span class="stat" class:free={costoFree}><span class="dollar">$</span>
+            <span class="stat" class:free={costoFree}><span class="k">COST</span>
               {#if costoFree}
                 <b>free</b>
               {:else if livello0.model.cost}
@@ -346,9 +359,18 @@
                 <b>—</b>
               {/if}
             </span>
-            <span class="stat" title="context window"><Icon name="i-span" class="stat-ic" /><b>{fmtTok(livello0.model.contextWindow)}</b></span>
-            {#if allegati}
-              <span class="stat" title="attachments"><Icon name="i-clip" class="stat-ic" /><b>{allegati}</b></span>
+            <span class="stat" title="context window"><span class="k">CNTX</span><b>{fmtTok(livello0.model.contextWindow)}</b></span>
+            {#if inputTypes}
+              <span class="stat" title={`accepts: ${[inputTypes.text ? 'text' : null, inputTypes.image ? 'image' : null, inputTypes.video ? 'video' : null, inputTypes.audio ? 'audio' : null, inputTypes.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
+                <span class="k">INPT</span>
+                <span class="input-types">
+                  {#if inputTypes.text}<Icon name="i-type" class="on" />{/if}
+                  {#if inputTypes.image}<Icon name="i-image" class="on" />{/if}
+                  {#if inputTypes.video}<Icon name="i-video" class="on" />{/if}
+                  {#if inputTypes.audio}<Icon name="i-audio" class="on" />{/if}
+                  {#if inputTypes.docs}<Icon name="i-doc" class="on" />{/if}
+                </span>
+              </span>
             {/if}
           </div>
         </div>
@@ -497,15 +519,13 @@
   .provider .sep{color:var(--line-2);margin:0 5px}
   .stats{display:flex;gap:12px;margin-top:9px;flex-wrap:wrap}
   .stat{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
-  /* La classe è dedicata alle sole due stat con un'icona (contesto e allegati):
-     il glifo del dollaro non è un'icona, e dimensionarle per colore pivot su
-     `svg.ic` le legherebbe alla scala di base che vale per tutte le altre. */
-  .stat .stat-ic{width:11px;height:11px;color:var(--muted);flex-shrink:0}
-  .stat .dollar{font-family:var(--mono);font-weight:700;color:var(--muted);
-    width:8px;text-align:center;flex-shrink:0}
+  .stat .k{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);opacity:.75;font-stretch:condensed;flex-shrink:0}
   .stat .per-m{font-size:9px;color:var(--muted);flex-shrink:0}
   .stat b{color:var(--ink);font-weight:600;margin-left:1px}
   .stat.free b{color:var(--accent)}
+  .input-types{display:inline-flex;align-items:center;gap:3px;margin-left:1px}
+  :global(.input-types svg.ic){width:11px;height:11px}
+  :global(.input-types svg.ic.on){color:var(--ink);opacity:1}
 
   .free-pill {
     background: var(--accent);

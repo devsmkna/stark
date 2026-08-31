@@ -24,6 +24,11 @@ const ICONS = {
   'i-dollar': 'dollar-sign',
   'i-span': 'unfold-horizontal',
   'i-panel': 'panel-left',
+  'i-boxes': 'boxes',
+  'i-type': 'type',
+  'i-image': 'image',
+  'i-video': 'video',
+  'i-audio': 'volume-2',
 }
 
 /**

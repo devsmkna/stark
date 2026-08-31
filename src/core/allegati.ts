@@ -48,6 +48,7 @@ export const ESTENSIONE: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
   'application/pdf': 'pdf',
   'text/plain': 'txt', 'text/markdown': 'md', 'text/csv': 'csv',
+  'video/mp4': 'mp4', 'audio/mpeg': 'mp3',
 }
 
 /** Il contrario, per rispondere con l'intestazione giusta quando li si rilegge. */
@@ -60,6 +61,7 @@ const ETICHETTA: Record<string, string> = {
   'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/gif': 'GIF', 'image/webp': 'WebP',
   'application/pdf': 'PDF',
   'text/plain': 'TXT', 'text/markdown': 'Markdown', 'text/csv': 'CSV',
+  'video/mp4': 'MP4', 'audio/mpeg': 'MP3',
 }
 
 /**
