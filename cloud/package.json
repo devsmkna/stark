@@ -1,0 +1,10 @@
+{
+  "name": "stark-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Il server cloud di STARK: autenticazione e (presto) sincronizzazione della board",
+  "engines": {
+    "node": ">=22.18"
+  }
+}

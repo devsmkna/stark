@@ -16,6 +16,23 @@ by the **`kanban-md`** CLI, which handles the tricky parts for you: atomic claim
 agents on the same task), `next_id`, and file writes. You never edit the task files by hand
 unless the CLI is unavailable.
 
+## REGOLA — aggiorna lo stato SUBITO, non dopo
+
+Se stai lavorando a un task **e c'è una board**, aggiorni lo stato della board **nel momento
+stesso in cui prendi in carico il task**, non alla fine. Non è una cosa da fare "quando hai
+tempo": è il primo passo del lavoro.
+
+- **Quando inizi** un task → `claim` + `move in-progress` **subito**, prima di fare altro.
+- **Quando cambi stato** (bloccato, in review, fatto) → aggiorna la board **immediatamente**,
+  appena succede, mai in un batch a fine lavoro.
+- Un task che prendi in carico e non segni in corso è una board che **mente** su cosa sta
+  succedendo — e chi la guarda (l'utente, un collega, un altro agent) si fida di quello che
+  legge.
+
+Questa regola vale **sempre** quando c'è una board: anche per un task piccolo, anche se pensi
+di finirlo in un attimo. La board è la superficie di coordinamento, e una superficie che non
+si aggiorna non coordina niente.
+
 ## Is there a board?
 
 Before anything else, check whether the project has one:
