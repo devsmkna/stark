@@ -174,9 +174,24 @@
 
   function start(): void {
     if (ready) {
+      // Il modello preferito (chiesto dall'utente, 1º settembre 2026): le chat nuove
+      // partono con lui, **tranne** quelle del menu contestuale, che portano il
+      // modello della chat da cui si è premuto — quella regola la fa App.svelte,
+      // non qui. La coppia è vincolata all'agent: se qui si è scelto un agent
+      // diverso da quello della preferenza, il modello preferito non esiste in
+      // quella casa e non si impone — parte il default dell'agent scelto. E se
+      // l'agent della preferenza non è più installato, la preferenza non si applica:
+      // un modello di una casa assente sarebbe una chat che non parte.
+      const pref = store.settings?.preferredModel
+      const disponibili = new Set((agents ?? []).map(a => a.id))
+      const agente = pref && disponibili.has(pref.agent) && (agentPick === null || agentPick === pref.agent)
+        ? pref.agent
+        : effectiveAgent
+      const modello = pref && agente === pref.agent ? pref.model : undefined
       void store.newChat(cwd.trim(), {
         ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
-        ...(showAgents && effectiveAgent ? { agent: effectiveAgent } : {}),
+        ...(agente ? { agent: agente } : {}),
+        ...(modello ? { model: modello } : {}),
         ...(showContinue && continua ? { continue: true } : {}),
       })
     }

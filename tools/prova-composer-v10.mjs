@@ -255,7 +255,10 @@ const usage = await p.evaluate(() => {
     righe: righe.length,
     ctx: !!ctx,
     barre: ctx ? !!ctx.querySelector('.u-bar span') : false,
-    costi: ctx ? ctx.querySelectorAll('.u-cost').length === 1 : false,
+    // La cella costo esiste solo se c'è spesa (chiesto dall'utente, 1º settembre 2026):
+    // senza span la barra si allunga fino in fondo invece di lasciare un buco. Su un
+    // modello gratuito la spesa è 0, quindi qui si accetta sia la cella sia il vuoto.
+    costi: ctx ? ctx.querySelectorAll('.u-cost').length <= 1 : false,
     pct: ctx?.querySelector('.u-pct')?.textContent ?? '',
   }
 })

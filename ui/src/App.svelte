@@ -289,7 +289,15 @@ import Todo from './components/Todo.svelte'
     <button class="mi" disabled={!row.cwd}
       title={row.cwd ?? 'This chat has no folder: there is nothing to open another one in'}
       onclick={() => {
+        // Modello e agent si catturano PRIMA di chiudere il menu, e non è zelo: il
+        // menu si smonta nello stesso istante in cui `store.menu` va a null, e i
+        // parametri dello snippet diventano undefined — leggere `row.model` dopo
+        // faceva esplodere l'handler («Cannot read properties of undefined»), e il
+        // clic non apriva niente. Gli altri handler già catturavano prima (id, cwd);
+        // questo è l'unico che leggeva campi DOPO.
         const cwd = row.cwd
+        const model = row.model
+        const agent = row.agent
         store.menu = null
         store.refused = null
         if (!cwd) return
@@ -300,8 +308,8 @@ import Todo from './components/Todo.svelte'
         // progetto **e** con lo stesso modello — e il model id appartiene all'agent
         // che l'ha dichiarato, quindi si portano insieme.
         void store.newChat(cwd, {
-          ...(row.model ? { model: row.model } : {}),
-          ...(row.agent ? { agent: row.agent } : {}),
+          ...(model ? { model } : {}),
+          ...(agent ? { agent } : {}),
         }).then(() => {
           // Se non si è aperta — la cartella è stata cancellata nel frattempo — il
           // motivo va letto da qualche parte. `store.refused` si vede nel blocco di

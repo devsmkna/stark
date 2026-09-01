@@ -87,6 +87,20 @@ export type Settings = {
    * cancellerebbe la scorciatoia di una versione più nuova di sé.
    */
   shortcuts?: Record<string, string>
+  /**
+   * Il modello con cui partono le **chat nuove** (chiesto dall'utente, 1º settembre
+   * 2026), nella coppia che lo identifica: l'agent che lo dichiara e l'id.
+   *
+   * Sta qui e non nel browser per la stessa ragione di `defaultMode`: cambia cosa
+   * fa l'agent alla nascita di una conversazione, che è un fatto della macchina.
+   * Non tocca il «New chat here» del menu contestuale — quello porta il modello
+   * della chat da cui si è premuto, per scelta — e non tocca le chat riprese.
+   *
+   * La coppia è **vincolata all'agent**: un id modello esiste solo dentro il
+   * catalogo di chi lo dichiara, quindi chi sceglie un altro agent nel dialogo
+   * parte col default di quello, non col preferito.
+   */
+  preferredModel?: { agent: string; model: string }
 }
 
 export const DEFAULTS: Settings = {
@@ -148,6 +162,23 @@ const FILE = 'settings.json'
  * default, che sono quelli buoni per il 90% dei casi. Perdere una preferenza è un
  * fastidio; non poter aprire l'app perché una virgola è fuori posto è un guasto.
  */
+/**
+ * La coppia preferita, sanata: entra solo se **entrambi** i campi sono stringhe
+ * non vuote. Una metà (agent senza modello, o il contrario) non è una preferenza —
+ * è un mezzo dato che alla nascita della chat diverrebbe un modello sbagliato o
+ * mancante, e buttare la metà buona con quella cattiva è ciò che non si perderebbe
+ * in silenzio.
+ */
+export function sanePreferred(v: unknown): { agent: string; model: string } | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const agent = (v as Record<string, unknown>)['agent']
+  const model = (v as Record<string, unknown>)['model']
+  if (typeof agent !== 'string' || !agent.trim() || typeof model !== 'string' || !model.trim()) {
+    return undefined
+  }
+  return { agent, model }
+}
+
 export function readSettings(home: string): Settings {
   const path = resolve(home, FILE)
   if (!existsSync(path)) return { ...DEFAULTS, projects: {} }
@@ -162,6 +193,7 @@ export function readSettings(home: string): Settings {
       defaultMode: saneMode(raw.defaultMode),
       ...(sanePerAgent(raw['defaultModes'])),
       ...(saneShortcuts(raw['shortcuts'])),
+      ...(sanePreferred(raw['preferredModel']) ? { preferredModel: sanePreferred(raw['preferredModel']) } : {}),
     }
   } catch {
     return { ...DEFAULTS, projects: {} }
@@ -177,6 +209,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     defaultMode: saneMode(s.defaultMode),
     ...(sanePerAgent(s.defaultModes)),
     ...(saneShortcuts(s.shortcuts)),
+    ...(sanePreferred(s.preferredModel) ? { preferredModel: sanePreferred(s.preferredModel) } : {}),
   }
   writeFileSync(resolve(home, FILE), `${JSON.stringify(pulito, null, 2)}\n`)
   return pulito

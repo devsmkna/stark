@@ -1404,6 +1404,33 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('l\'elenco porta `agent` per una riga letta dal journal (non solo viva)',
     rigaVista?.agent === 'opencode', JSON.stringify(rigaVista))
 
+  // §preferred: il modello preferito delle chat nuove, in read/write. La coppia
+  // incompleta non entra — una metà (agent senza modello) diverrebbe alla nascita
+  // un modello sbagliato o mancante. E il giro dev'essere rotondo: ciò che si
+  // scrive si rilegge uguale.
+  const casaPref = mkdtempSync(resolve(tmpdir(), 'stark-pref-'))
+  const { readSettings: leggiPref, writeSettings: scriviPref } =
+    await import('../daemon/settings.ts')
+  const conCoppia = scriviPref(casaPref, {
+    permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto',
+    preferredModel: { agent: 'opencode', model: 'opencode/gpt-5-nano' },
+  } as Parameters<typeof scriviPref>[1])
+  const riletta = leggiPref(casaPref)
+  check('§preferred: la coppia preferita si scrive e si rilegge intera',
+    conCoppia.preferredModel?.agent === 'opencode'
+      && conCoppia.preferredModel?.model === 'opencode/gpt-5-nano'
+      && riletta.preferredModel?.agent === 'opencode'
+      && riletta.preferredModel?.model === 'opencode/gpt-5-nano',
+    JSON.stringify({ scritta: conCoppia.preferredModel, riletta: riletta.preferredModel }))
+  const incompleta = scriviPref(casaPref, {
+    permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto',
+    preferredModel: { agent: 'opencode', model: '' } as never,
+  } as Parameters<typeof scriviPref>[1])
+  rmSync(casaPref, { recursive: true, force: true })
+  check('§preferred: la coppia incompleta non entra',
+    incompleta.preferredModel === undefined,
+    JSON.stringify(incompleta.preferredModel))
+
   check('§options: dal risveglio tornano solo le opzioni che il registro conosce',
   await (async () => {
     // Import dinamico e non statico: `SESSIONS` in registry.ts è una costante di

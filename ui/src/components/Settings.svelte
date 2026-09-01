@@ -111,6 +111,43 @@
 
   // ─── l'agent ──────────────────────────────────────────────────────────────
 
+  /** Il modello preferito delle chat nuove. La scelta passa per il **catalogo vero**
+   *  (store.catalogo — ciò che gli agent di questa macchina dichiarano): un elenco
+   *  scritto qui sarebbe un secondo posto che mente sui modelli che esistono. Il
+   *  catalogo si carica alla prima visita della sezione, non all'avvio: chi non
+   *  guarda mai questa pagina non lo paga.
+   *
+   *  Non tocca il «New chat here» del menu contestuale (porta il modello della chat
+   *  da cui si è premuto, per scelta) né le chat riprese. */
+  async function salvaPreferita(v: string | null): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    if (!v) {
+      await store.saveSettings({ ...s, preferredModel: undefined })
+      return
+    }
+    const [agent = '', model = ''] = v.split('\u0000')
+    await store.saveSettings({ ...s, preferredModel: { agent, model } })
+  }
+
+  // Il catalogo: gli agent con i loro modelli, come lo dichiara la macchina.
+  let catalogo = $state<NonNullable<typeof store.catalogo> | null>(null)
+  $effect(() => {
+    if (sez === 'agent' && catalogo === null && store.catalogo === null) {
+      void store.caricaCatalogo()
+    }
+  })
+  $effect(() => { if (store.catalogo && catalogo === null) catalogo = store.catalogo })
+
+  /** La coppia selezionata, come chiave per il `<select>`: agent e id uniti da un
+   *  separatore che nessun id contiene. */
+  const chiavePreferita = (a: string, m: string): string => `${a}\u0000${m}`
+  const preferitaChiave = $derived(store.settings?.preferredModel
+    ? chiavePreferita(store.settings.preferredModel.agent, store.settings.preferredModel.model)
+    : '')
+
+  const ETICHETTA_AGENT: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode' }
+
   async function setDesc(v: boolean): Promise<void> {
     const s = store.settings
     if (!s) return
@@ -438,6 +475,42 @@
             <span><b>This applies to new chats.</b> A chat already open keeps the rules it started
             with — its checks are installed when the agent starts, not while it works.</span>
           </div>
+        </div>
+
+        <!-- Il modello preferito delle chat nuove. Sta DOPO le modalità perché
+             risponde alla domanda gemella: con che MODE partono, con che MODELLO
+             partono. L'elenco è il catalogo vero raggruppato per agent — optgroup,
+             non una lista appiattita: 151 modelli di un agent solo in fila con
+             l'intestazione che dice di chi è, era la lezione del picker. -->
+        <div class="fgroup">
+          <div class="flabel">New chats start with model…</div>
+          <div class="prow">
+            <div>
+              <div class="pn">Preferred model</div>
+              <div class="pd">new chats open with it — except «New chat here», which
+              carries the model of the chat you pressed</div>
+            </div>
+            <!-- Value, non bind: la fonte è lo store (le impostazioni che il daemon
+                 ha scritto davvero), non uno stato locale che diverrebbe la verità
+                 al posto suo. -->
+            <select class="inp sel" value={preferitaChiave}
+              onchange={(e) => void salvaPreferita((e.currentTarget as HTMLSelectElement).value || null)}>
+              <option value="">Default — the agent's own first choice</option>
+              {#each catalogo ?? [] as a (a.id)}
+                <optgroup label={ETICHETTA_AGENT[a.id] ?? a.label ?? a.id}>
+                  {#each a.models as m (m.id)}
+                    <option value={chiavePreferita(a.id, m.id)}
+                      selected={preferitaChiave === chiavePreferita(a.id, m.id)}>
+                      {m.label ?? m.id}
+                    </option>
+                  {/each}
+                </optgroup>
+              {/each}
+            </select>
+          </div>
+          <div class="hint">The preference is bound to its agent: if a chat picks a
+          different agent, the preferred model doesn't exist there and the agent's
+          own default applies.</div>
         </div>
 
         <!-- La modalità di partenza. Era l'unica differenza strutturale fra STARK e il
@@ -1252,6 +1325,16 @@
      `.mi` è solo forma e colore, e ogni componente che la usa toglie da sé l'aspetto
      di pulsante del browser (`Status.svelte` fa lo stesso). Senza, queste righe
      avrebbero il bordo grigio e il fondo di sistema. */
+  /* La tendina del modello preferito: piena larghezza della colonna e sotto al
+     titolo — a destra, come i segmenti, non ci sta: gli id dei modelli sono lunghi
+     (opencode/nemotron-3.5-lightning-free) e su un pannello stretto spingerebbero
+     fuori la riga. Il vestito segue le caselle del resto della sezione. */
+  select.sel {
+    width: 100%; margin-top: 8px; font: inherit; font-size: 11px; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 6px 9px; cursor: pointer;
+  }
+  select.sel:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
   .modes { width: auto; box-shadow: none; }
   .modes .mi {
     width: 100%; border: 0; background: none; color: var(--ink); font: inherit;
