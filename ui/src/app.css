@@ -309,6 +309,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .turn.active{border-radius:0}
 .turn.active>.th{border-radius:0}
 .turn.active::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--user);border-radius:0;pointer-events:none;z-index:3}
+/* La coda usa la STESSA barretta del turno in corso, e cambia solo il colore
+   (ambra, `--wait`) — chiesto dall'utente, 1º settembre 2026: prima era un bordo
+   3px sull'intestazione sola, cioè un secondo stile per lo stesso significato.
+   Lo `z-index:3` vale per la stessa ragione: l'intestazione sticky lo coprirebbe. */
+.turn.queued::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--wait);border-radius:0;pointer-events:none;z-index:3}
 /* `z-index:3` e non niente: l'intestazione del turno è sticky, con fondo opaco e
    `z-index:2` — senza, la barretta che segna il turno in corso resterebbe coperta
    proprio accanto al prompt, dove invece deve vedersi. È UNA sola barretta per

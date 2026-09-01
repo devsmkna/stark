@@ -793,6 +793,14 @@
       {@const groups = groupParts(turn.parts)}
       {@const opLive = livePart(groups)}
       {@const doneTail = lastDoneKey(groups)}
+      {#if i === snap.turns.length - 1 && snap.turns.length > 1}
+        <!-- Un filo sottile prima dell'ULTIMO turno: gli ultimi due messaggi si
+             confondevano, e la domanda che torna è «quale dei due è quello nuovo».
+             Un filo e non un bordo grosso: è un riferimento, non un titolo. Scompare
+             da solo su una chat con un turno solo — un separatore sopra il primo
+             messaggio segna un confine che non c'è. -->
+        <div class="turnsep" aria-hidden="true"></div>
+      {/if}
       <div class="turn" data-turn={turn.turnId}
         class:open class:active={status === 'active'} class:queued={status === 'queued'}>
         <!-- Il contenitore è un `div` e non più il bottone stesso: dentro ce ne stanno
@@ -800,6 +808,7 @@
              `.oprow`, dove la riga del tool e la lente per il file sono fratelli. -->
         <div class="th" use:misuraTh>
           <button class="thmain" onclick={() => toggle(turn, i)} title={promptOf(turn)}>
+            {#if status === 'queued'}<span class="qtag">queue</span>{/if}
             <span class="q">{@html decoraColoriTesto(promptOf(turn))}</span>
           </button>
           <button class="thmore" title="Show the full prompt"
@@ -1120,15 +1129,19 @@
 
   /* Il turno attivo (l'agent ci sta davvero lavorando) e quello in coda (dietro un
      altro ancora in corso) si distinguono col colore già usato per gli stessi stati
-     altrove in STARK: blu = working, ambra = tocca aspettare. */
-  .turn.active { border-color: var(--work); }
-  /* Sul turno attivo il bordo dell'intestazione non c'è più: il segno è la barretta
-     `::before` di `app.css` (2px, `--user`), una sola da cima a fondo — qui il bordo
-     3px `var(--work)` ne faceva un secondo, di colore e misura diversi, proprio
-     accanto al prompt. Il `padding-left:8px` compensava il bordo e se ne va con lui. */
-  .turn.queued { border-color: var(--wait); }
-  .turn.queued > .th { border-left: 3px solid var(--wait); padding-left: 8px; }
+     altrove in STARK: blu = working, ambra = tocca aspettare. Il segno è la barretta
+     `::before` in app.css (2px, una sola da cima a fondo, `--user` o `--wait`): le
+     due `border-color` qui sotto erano morte — `.turn` ha `border:0` — e sembravano
+     dire una cosa che non disegnavano. */
   .turn.queued .n { color: var(--wait); }
+  /* L'etichetta «queue» in testa alla riga: giallo, maiuscoletto strette, la stessa
+     voce che la barra laterale usa per gli stati (`gstate`). Sta nel bottone del
+     prompt, non accanto: far parte del prompt la rende premibile con lui, e la
+     `flex:none` impedisce all'ellissi del prompt di mangiarsela. */
+  .qtag {
+    flex: none; color: var(--wait); font-size: 9.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
 
   /* Un blocco (reasoning, tool) si apre come il turno: stesso segno, stesso posto.
      È un <button>, quindi il colore e il fondo che `.row` dà a un <div> vanno
@@ -1336,6 +1349,12 @@
 
   .turn.found { outline: 2px solid var(--accent); outline-offset: -1px; }
   .turn { transition: outline-color .4s; }
+
+  /* Il filo fra penultimo e ultimo turno: una riga spenta, più corta del capitolo —
+     un riferimento da leggere in un colpo d'occhio, non una regola che attraversa
+     tutto. Spazio uguale sopra e sotto: sta a metà fra i due messaggi, non attaccata
+     a nessuno dei due. */
+  .turnsep { height: 1px; background: var(--line); margin: 6px 8px; flex: none; }
 
   /* `.conv` è una colonna flex con `gap: 8px`: il capitolo la interrompe, quindi se la
      rifà uguale dentro di sé — senza, i turni si incollerebbero fra loro. */
