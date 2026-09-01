@@ -2025,3 +2025,24 @@ tornato sotto la **sua** unità → pagina ricaricata da sé → banda sparita, 
 ~4s; il codice della release nuova arrivato davvero (riga-sentinella cercata nel file); e
 i due rifiuti col motivo giusto — albero sporco, e «non c'è nessuna release più nuova».
 `npm run check` passa a **293**.
+
+**Il dock parla alla SUA chat** (1º settembre 2026, chiusura del difetto latente del
+28 agosto). Durante l'indagine di «premo invio, non succede nulla» era emerso che ogni
+comando del blocco in basso — prompt, Stop, risposte a permessi/domande/piani, opzioni —
+partiva con `store.selected`, cioè verso la chat a fuoco e non verso la chat del
+pannello che lo disegnava; era stato lasciato lì perché «con più pannelli il clic sposta
+il fuoco prima, quindi nella pratica non si vede». La premessa era vera ma incompleta:
+il clic sposta il fuoco perché `focusPane` gira al **pointerdown** del pannello, cioè
+prima del click — quindi la via del mouse era protetta per *effetto laterale*, e la via
+della tastiera (Tab fino alla casella dell'altro pannello, poi Invio) no. Misurato A/B
+nel browser vero (`tools/prova-dock-pannello.mjs`): con due sessioni in split view, chat
+a fuoco a sinistra e prompt mandato dalla casella di destra con focus programmático
+(= la strada di chi arriva da tastiera, nessun pointerdown), il turno nasceva nel
+**journal della chat sbagliata**. La cura non è un secondo effetto laterale ma gli id
+espliciti: i metodi dello store che non li avevano li hanno presi, `Ask` riceve l'id
+dal dock e lo passa a ogni risposta, e le guardie di quota/contesto/file guardano la
+riga di quella chat. Due ricadute trovate nello stesso giro: «Reopen» risvegliava la
+chat a fuoco invece di quella del pannello (quota spesa per un lavoro mai chiesto), e
+il passaggio a un altro agent avrebbe sostituito il pannello sbagliato (`replacePane`
+con `da` preso da `selected`). 8/8 con modello gratuito; sul codice di prima la stessa
+sonda dà i tre fallimenti che documentano il difetto.
