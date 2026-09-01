@@ -244,10 +244,22 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       const resolved = typeof m?.['resolvedModel'] === 'string' ? m['resolvedModel'] : undefined
       const label = typeof m?.['displayName'] === 'string' ? m['displayName'] : undefined
       const auto = modelSupportsAutoMode(resolved ?? id)
+      // I due fatti misurati (1º settembre 2026, handshake 2.1.241): l'handshake
+      // porta supportsAdaptiveThinking e supportedEffortLevels PER MODELLO — vero
+      // su Opus/Sonnet/Fable, assente su Haiku. Il vecchio commento qui sotto diceva
+      // «supportsEffort, supportsAutoMode, supportsFastMode e nient'altro, verificato
+      // sui cinque modelli»: era vero a data 26 agosto e non lo è più — il CLI
+      // aggiorna, e la misura va rifatta a ogni patch, non dedotta dai tipi.
+      const adaptive = m['supportsAdaptiveThinking'] === true
+      const livelli = Array.isArray(m['supportedEffortLevels'])
+        ? (m['supportedEffortLevels'] as unknown[]).map(String)
+        : undefined
       out.push({
         id, autoMode: auto,
         contextWindow: contextWindowFor(resolved ?? id),
         accepts: ALLEGABILI,
+        ...(adaptive ? { reasoning: true } : {}),
+        ...(livelli?.length ? { effortLevels: livelli } : {}),
         // L'avviso lo scrive **questo** agent, e solo qui ha senso: su Claude Code
         // alcuni modelli reggono auto mode e altri no, quindi l'assenza distingue. Su
         // un agent senza classificatore non distinguerebbe niente — vedi `optionsFrom`.

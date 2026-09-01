@@ -621,6 +621,12 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       s.quotaWindows = p.windows; s.quotaWindowsAt = e.ts; break
     case 'context.usage':
       s.contextUsage = p.usage; s.contextUsageAt = e.ts; break
+    case 'session.options':
+      // Rimpiazzo completo, non fusione: le voci dipendono l'una dall'altra (i livelli
+      // di effort dipendono dal modello), e un elenco che si fonde con il precedente
+      // lascerebbe in piedi scelte che non esistono più.
+      s.options = p.options
+      break
     case 'session.retried': {
       // Senza un turno aperto non c'e' un posto nel flusso: un ritentativo avviene per
       // definizione dentro un turno. Se ne arrivasse uno fuori, si perderebbe qui — e

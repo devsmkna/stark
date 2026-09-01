@@ -25,6 +25,7 @@ import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
 import { passeggero } from '../adapters/opencode/adapter.ts'
 import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
+import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
@@ -541,6 +542,53 @@ check('§7: due prompt ravvicinati restano due turni, nell\'ordine in cui li hai
   && promptText(FILA.turns[0]?.prompt ?? []) === 'uno'
   && promptText(FILA.turns[1]?.prompt ?? []) === 'due',
   JSON.stringify(FILA.turns.map(t => promptText(t.prompt))))
+// §options: le due scelte nuove (reasoning, effort) dichiarate dall'adapter Claude
+// Code, verificate contro la cattura dell'handshake MISURATA il 1º settembre 2026
+// (SDK 0.3.241 ↔ CLI 2.1.241 — spike/tmp-handshake-effort.ts, handshake solo,
+// zero quota): supportsAdaptiveThinking e supportedEffortLevels per modello,
+// assenti su Haiku. Il vecchio commento di sdk-options diceva «nient'altro,
+// verificato sui cinque modelli»: era vero a data 26 agosto e non più — il CLI
+// aggiorna e la misura va rifatta a ogni patch.
+const MODERNI = [
+  { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)',
+    supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    supportsAdaptiveThinking: true, supportsAutoMode: true },
+  { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku' },
+] as unknown[]
+check('§options: modello con effort dichiara reasoning ed effort coi livelli giusti',
+  (() => {
+    const modelli = modelChoices(MODERNI, 'default')
+    const opzioni = opzioniClaude(modelli, 'default', 'on', 'high')
+    const r = opzioni.find(o => o.id === 'reasoning')
+    const e = opzioni.find(o => o.id === 'effort')
+    return !!r && r.value === 'on' && r.choices.length === 2
+      && !!e && e.value === 'high' && e.choices.map(c => c.value).join(',') === 'low,medium,high,xhigh,max'
+      && modelli[0]?.reasoning === true && modelli[0]?.effortLevels?.length === 5
+  })())
+check('§options: modello senza capability non dichiara effort, il reasoning resta',
+  (() => {
+    const modelli = modelChoices(MODERNI, 'haiku')
+    const opzioni = opzioniClaude(modelli, 'haiku', 'on', 'high')
+    const haiku = modelli.find(m => m.id === 'haiku')
+    return opzioni.find(o => o.id === 'effort') === undefined
+      && opzioni.find(o => o.id === 'reasoning') !== undefined
+      && haiku?.reasoning === undefined && haiku?.effortLevels === undefined
+  })())
+check('§options: session.options rimpiazza, non fonde',
+  (() => {
+    const s = reduce([], 'sess-opz')
+    applyTo(s, { v: MODEL_VERSION, seq: 1, ts: 1, sessionId: 'sess-opz',
+      payload: { k: 'session.created', agent: 'claude-code', cwd: '/t', model: 'm',
+        capabilities: capabilitiesFor('m'), tools: [], commands: [],
+        options: [{ id: 'effort', label: 'Effort', value: 'high',
+          choices: [{ value: 'high', available: true, label: 'high' }] }] } })
+    applyTo(s, { v: MODEL_VERSION, seq: 2, ts: 2, sessionId: 'sess-opz',
+      payload: { k: 'session.options', options: [{ id: 'effort', label: 'Effort', value: 'low',
+        choices: [{ value: 'low', available: true, label: 'low' }] }] } })
+    return s.options.length === 1 && s.options[0]?.value === 'low'
+      && s.options[0]?.choices.length === 1
+  })())
+
 check('§7: chiudere il turno in corso non chiude quello che aspetta il suo giro',
   FILA.turns[0]?.ended === true && FILA.turns[1]?.ended === false,
   `t1 ${String(FILA.turns[0]?.ended)} · t2 ${String(FILA.turns[1]?.ended)}`)
@@ -1356,7 +1404,22 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('l\'elenco porta `agent` per una riga letta dal journal (non solo viva)',
     rigaVista?.agent === 'opencode', JSON.stringify(rigaVista))
 
-  if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
+  check('§options: dal risveglio tornano solo le opzioni che il registro conosce',
+  await (async () => {
+    // Import dinamico e non statico: `SESSIONS` in registry.ts è una costante di
+    // modulo fissata al primo import, e un import statico verrebbe issato PRIMA
+    // che questo check fissi la sua casa — la stessa trappola documentata nel
+    // blocco §resume. La funzione è pura, ma l'import non lo è.
+    const { opzioniDaSnapshot } = await import('../daemon/registry.ts')
+    const tornate = opzioniDaSnapshot([
+      { id: 'reasoning', value: 'off' }, { id: 'effort', value: 'low' },
+      { id: 'model', value: 'x' }, { id: 'ignota', value: 'y' },
+    ])
+    return tornate['reasoning'] === 'off' && tornate['effort'] === 'low'
+      && tornate['model'] === undefined && tornate['ignota'] === undefined
+  })())
+
+if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
   if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
   rmSync(casa, { recursive: true, force: true })
 }

@@ -25,7 +25,7 @@
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
   } from '$core/allegati.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
-  import { MODE_BLURB, MODE_ICON, project, since, stamp, until } from '../lib/view.ts'
+  import { MODE_BLURB, MODE_ICON, project, stamp, until } from '../lib/view.ts'
   import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -436,7 +436,7 @@
   // contenitore** (la riga «indietro» è la stessa del picker), perché un menu che si
   // sposta di posto a ogni clic sembra tre menu diversi.
 
-  type Nav = 'root' | 'mode' | 'mcp' | 'model'
+  type Nav = 'root' | 'mode' | 'mcp' | 'model' | 'reasoning' | 'effort'
   let menu = $state<Nav>('root')
   let aperto = $state(false)
   let leadEl = $state<HTMLElement | null>(null)
@@ -472,9 +472,10 @@
     chiudiMenu()
   }
 
-  // ⌘O / Ctrl+O apre la scelta del file **mentre il menu è aperto**: è l'unica zona in
-  // cui il suggerimento della voce ha senso, e intercettarlo fuori intercetterebbe
-  // anche l'«apri file» del browser, che non è nostro.
+  // ⌘O / Ctrl+O apre la scelta del file **mentre il menu è aperto**: intercettarlo
+  // fuori intercetterebbe anche l'«apri file» del browser, che non è nostro.
+  // L'etichetta sulla voce «Choose file» non c'è più (chiesta via dall'utente,
+  // 1º settembre 2026) — la scorciatoia invece resta, e continua a valere qui.
   function tastoGlobale(e: KeyboardEvent): void {
     if (!aperto) return
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
@@ -538,6 +539,12 @@
   )
   const modeOpt = $derived(opts.find(o => o.kind === 'mode'))
   const modelOpt = $derived(opts.find(o => o.kind === 'model'))
+  // Le due scelte nuove (chieste dall'utente, 1º settembre 2026): si cercano per
+  // `id`, non per `kind` — sono opzioni 'other' e il vocabolario lo dichiara
+  // l'agent (ADR-014). Dove non ci sono (OpenCode, journal vecchi) le voci non
+  // compaiono: stessa regola delle finestre di quota.
+  const reasoningOpt = $derived(opts.find(o => o.id === 'reasoning'))
+  const effortOpt = $derived(opts.find(o => o.id === 'effort'))
 
   /** Come si chiama il modello, in forma breve: il pezzo dopo l'ultimo slash, che è ciò
    *  che lo distingue — «GLM-5.3-Flash» e non «opencode/glm-5.3-flash». Resta il
@@ -628,21 +635,20 @@
     return () => clearInterval(t)
   })
 
-  /** Da quanto è vecchia la misura. Se ha più di due minuti si dice, perché nel
-   *  frattempo la quota la consumano anche gli altri e nessuno ce lo viene a dire. */
-  const stale = $derived(
-    snap.quotaWindowsAt && clock - snap.quotaWindowsAt > 120_000 ? snap.quotaWindowsAt : null,
-  )
-
-  // Si rilegge quando l'utente apre il menu (o ci passa sopra): è l'unico momento in
-  // cui quei numeri devono essere freschi. Non più di una volta ogni quindici secondi.
-  let ultimaLettura = 0
+  // Si rilegge quando l'utente apre il menu (o ci passa sopra). Il **contesto** si
+  // chiede a ogni apertura, senza cadenza: è una domanda sul canale di controllo
+  // (2-3 ms misurati) ed è il numero che chi apre il menu viene a guardare — la
+  // vecchia cadenza di quindici secondi lo lasciava al turno scorso, uno «shot»
+  // dell'ultimo messaggio invece che la situazione attuale (segnalato dall'utente,
+  // 1º settembre 2026). La quota resta a cadenza: le finestre non si muovono di
+  // secondo in secondo e quella lettura costa di più.
+  let ultimaQuota = 0
   function peek(): void {
-    const t = Date.now()
-    if (t - ultimaLettura < 15_000) return
-    ultimaLettura = t
-    void store.refreshQuota()
     void store.refreshContext()
+    const t = Date.now()
+    if (t - ultimaQuota < 15_000) return
+    ultimaQuota = t
+    void store.refreshQuota()
   }
 
   /** Un numero di token leggibile per il piè del pannello d'uso: come `fmtTok`, ma
@@ -802,7 +808,7 @@
               <ModelPicker catalogo={store.catalogo} corrente={modelOpt?.value ?? snap.model ?? ''}
                 agenteCorrente={snap.agent}
                 nota={a => (a === snap.agent ? null : 'handoff')}
-                onScegli={scegliModello} onClose={chiudiMenu} />
+                onScegli={scegliModello} onIndietro={() => { menu = 'root' }} />
             {/if}
           </div>
         {:else if menu === 'mcp'}
@@ -866,9 +872,48 @@
               </button>
             {/each}
           </div>
+        {:else if menu === 'reasoning'}
+          <div class="leadbox popup" bind:this={menuEl}>
+            <button class="pk-nav" onclick={() => { menu = 'root' }}>
+              <span class="back"><Icon name="i-back" /></span>
+              <span class="nv-title">Reasoning</span>
+            </button>
+            <div class="pk-rule"></div>
+            {#each reasoningOpt?.choices ?? [] as c (c.value)}
+              <button class="pop-item" class:dis={!c.available} disabled={!c.available}
+                onclick={() => { void store.setOption('reasoning', c.value); chiudiMenu() }}>
+                <span class="ico"><Icon name="i-brain"
+                  style={c.value === reasoningOpt!.value ? 'color:var(--accent)' : ''} /></span>
+                <span class="lbl">{c.label ?? c.value}<span class="sub"
+                  >{c.reason ?? c.note ?? ''}</span></span>
+                {#if !c.available}<span class="tagx">unavailable</span>
+                {:else if c.value === reasoningOpt!.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
+        {:else if menu === 'effort'}
+          <div class="leadbox popup" bind:this={menuEl}>
+            <button class="pk-nav" onclick={() => { menu = 'root' }}>
+              <span class="back"><Icon name="i-back" /></span>
+              <span class="nv-title">Effort</span>
+            </button>
+            <div class="pk-rule"></div>
+            {#each effortOpt?.choices ?? [] as c (c.value)}
+              <button class="pop-item" class:dis={!c.available} disabled={!c.available}
+                onclick={() => { void store.setOption('effort', c.value); chiudiMenu() }}>
+                <span class="ico"><Icon name="i-bolt"
+                  style={c.value === effortOpt!.value ? 'color:var(--accent)' : ''} /></span>
+                <span class="lbl">{c.label ?? c.value}<span class="sub"
+                  >{c.reason ?? c.note ?? ''}</span></span>
+                {#if !c.available}<span class="tagx">unavailable</span>
+                {:else if c.value === effortOpt!.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
         {:else}
           <!-- Il menu radice: dove si sta (cartella e ramo), cosa si può dare al
-               modello (file, modalità, strumenti, modello) e quanto ne resta. -->
+               modello (file, modalità, strumenti, modello, quanto ragiona) e quanto
+               ne resta. -->
           <div class="leadbox popup" bind:this={menuEl}>
             <div class="pop-head">
               <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
@@ -889,7 +934,6 @@
               onclick={() => fileInput?.click()}>
               <span class="ico"><Icon name="i-file" /></span>
               Choose file
-              <span class="kbd">⌘O</span>
             </button>
 
             <div class="divider"></div>
@@ -921,6 +965,22 @@
                 <span class="cur">{nomeLeggibile} <span class="chev"><Icon name="i-fwd" /></span></span>
               </button>
             {/if}
+            {#if reasoningOpt}
+              <button class="pop-item" disabled={!live}
+                onclick={() => { menu = 'reasoning' }}>
+                <span class="ico"><Icon name="i-brain" /></span>
+                Reasoning
+                <span class="cur">{reasoningOpt.value} <span class="chev"><Icon name="i-fwd" /></span></span>
+              </button>
+            {/if}
+            {#if effortOpt}
+              <button class="pop-item" disabled={!live}
+                onclick={() => { menu = 'effort' }}>
+                <span class="ico"><Icon name="i-bolt" /></span>
+                Effort
+                <span class="cur">{effortOpt.value} <span class="chev"><Icon name="i-fwd" /></span></span>
+              </button>
+            {/if}
 
             {#if contextWindow || haFinestre}
               <div class="divider"></div>
@@ -930,26 +990,28 @@
                   <div class="u-row" title={`${fmt(totalNow)} / ${fmt(contextWindow)} tokens`}>
                     <span class="u-lbl">Context</span>
                     <span class="u-bar"><span style="width:{Math.min(100, pct ?? 0)}%;background:{meterColour(pct ?? 0)}"></span></span>
-                    <span class="u-pct" class:warn={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
+                    <span class="u-pct" class:near={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
                     <!-- Il costo della chat: l'unico della colonna che esiste davvero
-                         (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero». -->
-                    <span class="u-cost">{snap.spentUsd > 0 ? fmtUsd(snap.spentUsd) : ''}</span>
+                         (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero».
+                         Dove il costo non c'è lo span non si mette proprio: la barra
+                         (`flex:1`) si allunga fino in fondo a riempire lo spazio,
+                         invece di lasciare un buco bianco (chiesto dall'utente,
+                         1º settembre 2026). -->
+                    {#if snap.spentUsd > 0}<span class="u-cost">{fmtUsd(snap.spentUsd)}</span>{/if}
                   </div>
                 {/if}
                 {#if sessionWin?.used !== undefined}
                   <div class="u-row" title="Session · 5 hours">
                     <span class="u-lbl">Session</span>
                     <span class="u-bar"><span style="width:{Math.min(100, sessionWin.used)}%;background:{meterColour(sessionWin.used)}"></span></span>
-                    <span class="u-pct" class:warn={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
-                    <span class="u-cost"></span>
+                    <span class="u-pct" class:near={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
                   </div>
                 {/if}
                 {#if weeklyWin?.used !== undefined}
                   <div class="u-row" title="Weekly">
                     <span class="u-lbl">Week</span>
                     <span class="u-bar"><span style="width:{Math.min(100, weeklyWin.used)}%;background:{meterColour(weeklyWin.used)}"></span></span>
-                    <span class="u-pct" class:warn={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
-                    <span class="u-cost"></span>
+                    <span class="u-pct" class:near={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
                   </div>
                 {/if}
                 {#each weeklyScoped as w (w.scope)}
@@ -957,8 +1019,7 @@
                     <div class="u-row" title="Weekly · {w.scope}">
                       <span class="u-lbl">{w.scope}</span>
                       <span class="u-bar"><span style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></span></span>
-                      <span class="u-pct" class:warn={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
-                      <span class="u-cost"></span>
+                      <span class="u-pct" class:near={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
                     </div>
                   {/if}
                 {/each}
@@ -971,10 +1032,6 @@
                     </span>
                     {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
                   </div>
-                {/if}
-                {#if stale}
-                  <div class="u-foot"><span class="faint">read {since(stale, clock)} ago{
-                    live ? '' : ' — this chat has no process behind it now'}</span></div>
                 {/if}
               </div>
             {/if}
@@ -1252,7 +1309,6 @@
   .pop-item .ico img { border-radius: 3px; filter: var(--icon-f); display: block; }
   .pop-item .lbl { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; min-height: 0; }
   .pop-item .lbl .sub { font-size: 9.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pop-item .kbd { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--muted); }
   .pop-item .cur {
     margin-left: auto; display: flex; align-items: center; gap: 6px;
     font-family: var(--mono); font-size: 10.5px; color: var(--muted);
@@ -1318,7 +1374,11 @@
   .u-bar span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
   .u-pct { width: 30px; flex: none; text-align: right; font-family: var(--mono);
     font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .u-pct.warn { color: var(--wait); }
+  /* `near`, non `warn`: il nome collide con la `.warn` globale di `app.css` (il
+     riquadro d'avviso, con fondo `--wait-bg`, padding e display:flex) — applicata
+     a questi span faceva una pillola gialla attorno alla percentuale, chiesta
+     via dall'utente il 1º settembre 2026. Qui il colore basta. */
+  .u-pct.near { color: var(--wait); }
   .u-pct.crit { color: var(--stop); }
   .u-cost { width: 48px; flex: none; text-align: right; font-family: var(--mono);
     font-size: 10.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -1326,7 +1386,6 @@
     display: flex; justify-content: space-between; margin-top: 8px; padding-top: 7px;
     border-top: 1px solid var(--line); font-family: var(--mono); font-size: 8.5px; color: var(--muted);
   }
-  .u-foot .faint { font-style: italic; }
 
   /* La conferma del passaggio a un altro agent: le stesse regole che avevano le
      tendine della barra (`.pg`/`.pnote` stanno in app.css per `.hpop` e `.menu`,
