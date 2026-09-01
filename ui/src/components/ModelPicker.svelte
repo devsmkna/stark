@@ -96,7 +96,7 @@
    *  nome «Default» e suffisso «recommended», che nel DS sta in mono spento accanto.
    *  Un'etichetta senza parentesi è solo nome. */
   const nomeESuffisso = (m: { id: string; label?: string }): { nome: string; suffix?: string } => {
-    const label = m.label ?? m.id
+    const label = m.id
     const mm = /^(.*?)\s*\((.+)\)\s*$/.exec(label)
     return mm ? { nome: mm[1]!, suffix: mm[2]! } : { nome: label }
   }
