@@ -29,6 +29,7 @@ const snap = {
   models: [], modes: [], options: [], todos: [], mcpServers: [], turns: [], files: [], shell: [],
   pendingPermissions: [], pendingQuestions: [], pendingPlans: [], blocked: [], notices: [],
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: { nominalUsd: 0 },
+  spentUsd: 0,
   quotaWindows: [], lastSeq: 0, lastTs: 0, stateSince: 0,
 } as SessionSnapshot
 

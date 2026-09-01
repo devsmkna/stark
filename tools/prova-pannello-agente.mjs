@@ -91,14 +91,16 @@ await p.evaluate(() => {
 
 /** Le voci del popup adesso: l'etichetta di ogni riga, per stampare il livello. */
 const voci = () => p.evaluate(() =>
-  [...document.querySelectorAll('.ap-pop button.mi, .ap-pop .mi.dis')]
-    .map(x => x.querySelector('.lb')?.textContent ?? x.textContent.trim().slice(0, 30)))
+  [...document.querySelectorAll('.ap-pop .pk-row, .ap-pop .pk-mrow')]
+    .map(x => x.querySelector('.pk-name-1')?.textContent
+      ?? x.querySelector('.mname')?.textContent
+      ?? x.textContent.trim().slice(0, 30)))
 
 /** Un clic al centro della riga che contiene `testo`: il mouse vero, non un
  *  dispatch sintetico, perche' il difetto sta nella catena vera degli eventi. */
 async function premi(testo) {
   const pt = await p.evaluate((t) => {
-    const x = [...document.querySelectorAll('.ap-pop button.mi')]
+    const x = [...document.querySelectorAll('.ap-pop .pk-row, .ap-pop .pk-mrow')]
       .find(b => b.textContent.toLowerCase().includes(t.toLowerCase()))
     if (!x) return null
     const r = x.getBoundingClientRect()
@@ -109,7 +111,7 @@ async function premi(testo) {
   await p.waitForTimeout(700)
   const stato = await p.evaluate(() => ({
     pop: !!document.querySelector('.ap-pop'),
-    nVoci: document.querySelectorAll('.ap-pop button.mi').length,
+    nVoci: document.querySelectorAll('.ap-pop .pk-row, .ap-pop .pk-mrow').length,
   }))
   console.log(`  premuto «${testo}» → popup: ${stato.pop ? 'aperto' : 'CHIUSO'}${stato.pop ? `, ${stato.nVoci} voci` : ''}`)
   return stato.pop
@@ -117,8 +119,11 @@ async function premi(testo) {
 
 console.log('\n— apro il menu dei modelli —')
 await p.click('.ap-tune')
-// `.mi` basta anche alla riga «Loading models…»: si aspetta un bottone vero
-await p.waitForFunction(() => document.querySelectorAll('.ap-pop button.mi').length > 0, null, { timeout: 25000 })
+// Le righe del picker (`pk-row`/`pk-mrow`): si aspetta un bottone vero, non il
+// «Loading models…» che non è cliccabile.
+await p.waitForFunction(() =>
+  document.querySelectorAll('.ap-pop .pk-row, .ap-pop .pk-mrow').length > 0,
+  null, { timeout: 25000 })
 console.log('primo livello:', JSON.stringify(await voci()))
 await p.screenshot({ path: '/tmp/ap-livello1.png' })
 
@@ -132,15 +137,16 @@ if (live1) {
   /** Il primo bottone utile del livello: abilitato e senza l'icona «indietro» —
    *  le righe-avviso dell'adapter (`mi.dis`) non si premono e non navigano. */
   const primoUtile = () => p.evaluate(() => {
-    const x = [...document.querySelectorAll('.ap-pop button.mi:not(.dis)')]
-      .filter(b => {
-        const use = b.querySelector('svg use')
-        return !(use && use.getAttribute('href') === '#i-back')
-      })[0]
+    // Le righe-avviso non esistono più come `.mi.dis`: qui le righe disabilitate sono
+    // solo gli agent spenti (`.pk-row.dis`), e il «back» non è più un bottone a sé
+    // ma la riga di navigazione — si salta prendendo solo pk-row/pk-mrow.
+    const x = [...document.querySelectorAll('.ap-pop .pk-row:not(.dis), .ap-pop .pk-mrow')][0]
     if (!x) return null
     const r = x.getBoundingClientRect()
     return { x: r.left + r.width / 2, y: r.top + r.height / 2,
-      testo: x.querySelector('.lb')?.textContent ?? x.textContent.trim().slice(0, 30) }
+      testo: x.querySelector('.pk-name-1')?.textContent
+        ?? x.querySelector('.mname')?.textContent
+        ?? x.textContent.trim().slice(0, 30) }
   })
 
   console.log('\n— clic sul primo provider —')

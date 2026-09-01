@@ -308,7 +308,13 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
 .turn{border:0;border-radius:10px;overflow:clip;background:none;flex:none;position:relative}
 .turn.active{border-radius:0}
 .turn.active>.th{border-radius:0}
-.turn.active::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--user);border-radius:0;pointer-events:none}
+.turn.active::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--user);border-radius:0;pointer-events:none;z-index:3}
+/* `z-index:3` e non niente: l'intestazione del turno è sticky, con fondo opaco e
+   `z-index:2` — senza, la barretta che segna il turno in corso resterebbe coperta
+   proprio accanto al prompt, dove invece deve vedersi. È UNA sola barretta per
+   tutto il turno, stesso colore dall'alto in basso: prima c'era anche un bordo
+   3px `var(--work)` sull'intestazione, due misure e due colori per la stessa
+   cosa (segnalato dall'utente, 1º settembre 2026) — è stato tolto. */
 /* Blu-azzurro apposta: è il blocco del PROMPT, la riga da cui riparte la
    discussione ogni volta che ne mandi uno nuovo — scorrendo una conversazione
    lunga deve saltare all'occhio senza doverlo leggere, per vedere subito fin

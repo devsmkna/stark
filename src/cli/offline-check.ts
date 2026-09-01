@@ -563,6 +563,40 @@ check('§7: dopo lo Stop non resta nessun turno aperto, nemmeno quelli mai parti
   FERMATA.turns.every(t => t.ended && t.reason === 'aborted'),
   FERMATA.turns.map(t => `${t.turnId}:${t.ended ? t.reason : 'aperto'}`).join(' '))
 
+// §spent: i dollari di sessione sono una SOMMA, non l'ultima lettura. Misurato sui
+// journal (31 agosto 2026): `total_cost_usd` dell'SDK, nonostante il nome, vale per
+// la singola chiamata — dentro un turno i valori oscillano col peso della richiesta e
+// non crescono mai. Quindi il riduttore somma ogni `usage.updated`. Il `turn.ended`
+// conta solo su OpenCode: è lì che l'import porta il costo del turno senza passare
+// per gli step; su Claude Code porterebbe l'ultimo result, già contato tra gli
+// usage.updated, e sommarlo sarebbe un doppio conteggio.
+const SPESO = reduce([
+  { v: MODEL_VERSION, seq: 1, ts: 1_000, sessionId: 'sess-speso',
+    payload: { k: 'session.created', agent: 'claude-code', cwd: '/tmp', model: 'claude-sonnet-5',
+               capabilities: capabilitiesFor('claude-sonnet-5'), tools: [], commands: [] } },
+  { v: MODEL_VERSION, seq: 2, ts: 1_100, sessionId: 'sess-speso',
+    payload: { k: 'usage.updated', usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0.01 } } },
+  { v: MODEL_VERSION, seq: 3, ts: 1_200, sessionId: 'sess-speso',
+    payload: { k: 'usage.updated', usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0.02 } } },
+  { v: MODEL_VERSION, seq: 4, ts: 2_000, sessionId: 'sess-speso',
+    payload: { k: 'turn.ended', turnId: 't1', reason: 'completed',
+               usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0.02 } } },
+], 'sess-speso')
+check('§spent: i dollari della sessione sommano ogni chiamata, non l\'ultima lettura',
+  Math.abs(SPESO.spentUsd - 0.03) < 1e-9, String(SPESO.spentUsd))
+check('§spent: il turn.ended di Claude Code non si conta due volte',
+  Math.abs(SPESO.spentUsd - 0.03) < 1e-9 && SPESO.cost.nominalUsd === 0.02)
+const SPESO_OC = reduce([
+  { v: MODEL_VERSION, seq: 1, ts: 1_000, sessionId: 'sess-speso-oc',
+    payload: { k: 'session.created', agent: 'opencode', cwd: '/tmp', model: 'oc/modello',
+               capabilities: capabilitiesFor('oc/modello'), tools: [], commands: [] } },
+  { v: MODEL_VERSION, seq: 2, ts: 2_000, sessionId: 'sess-speso-oc',
+    payload: { k: 'turn.ended', turnId: 't1', reason: 'completed',
+               usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0.05 } } },
+], 'sess-speso-oc')
+check('§spent: l\'import OpenCode porta il costo sul turn.ended, e qui si conta',
+  Math.abs(SPESO_OC.spentUsd - 0.05) < 1e-9, String(SPESO_OC.spentUsd))
+
 check('§6: la fotografia dei server MCP sostituisce la precedente, non ci si fonde',
   replayed.mcpServers.length === 1 && replayed.mcpServers[0]?.status === 'connected',
   replayed.mcpServers.map(s => `${s.name}:${s.status}`).join(','))

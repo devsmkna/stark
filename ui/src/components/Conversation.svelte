@@ -1122,7 +1122,10 @@
      altro ancora in corso) si distinguono col colore già usato per gli stessi stati
      altrove in STARK: blu = working, ambra = tocca aspettare. */
   .turn.active { border-color: var(--work); }
-  .turn.active > .th { border-left: 3px solid var(--work); padding-left: 8px; }
+  /* Sul turno attivo il bordo dell'intestazione non c'è più: il segno è la barretta
+     `::before` di `app.css` (2px, `--user`), una sola da cima a fondo — qui il bordo
+     3px `var(--work)` ne faceva un secondo, di colore e misura diversi, proprio
+     accanto al prompt. Il `padding-left:8px` compensava il bordo e se ne va con lui. */
   .turn.queued { border-color: var(--wait); }
   .turn.queued > .th { border-left: 3px solid var(--wait); padding-left: 8px; }
   .turn.queued .n { color: var(--wait); }

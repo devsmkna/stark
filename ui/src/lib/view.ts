@@ -221,8 +221,7 @@ export function permissionHeadline(action: string): { icon: string; text: string
  * un agent che non e' Claude Code, quello e' un difetto: vuol dire che l'adapter non ha
  * descritto le proprie.
  */
-export const MODE_BLURB: Record<string, string> = {
-  auto: 'A classifier checks every action. No cards.',
+export const MODE_BLURB: Record<string, string> = {  auto: 'A classifier checks every action. No cards.',
   default: 'Asks before everything',
   acceptEdits: 'File edits go through, the rest asks',
   plan: 'Plans first, touches nothing',
@@ -244,3 +243,23 @@ export function tilde(path: string | undefined): string {
   if (!path) return '—'
   return path.replace(/^\/root(?=\/|$)/, '~').replace(/^\/home\/[^/]+(?=\/|$)/, '~')
 }
+
+/** Un numero di token leggibile: 200000 → "200k", 1000000 → "1M". Stessa scala
+ *  ovunque la si mostri — scheda del modello, righe del picker, pannello d'uso —
+ *  così due numeri formati in due posti si leggono allo stesso modo. */
+export const fmtTok = (n: number | undefined): string => {
+  if (!n) return '—'
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`
+  }
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(n)
+}
+
+/** Un costo per milione di token: 15 → "15", 1.2 → "1.20", un prezzo minuscolo
+ *  non si arrotonda a zero e si lascia coi decimali che servono. Il segno `$` lo
+ *  disegna chi ospita, non il valore: l'icona e il numero stanno l'una accanto
+ *  all'altro, e il simbolo ripetuto sarebbe rumore. */
+export const fmtCosto = (n: number): string =>
+  `${n < 0.01 ? n.toFixed(4).replace(/0+$/, '') : Number.isInteger(n) ? String(n) : n.toFixed(2)}`
