@@ -181,8 +181,8 @@ scuro.
 | `POST /api/sessions/:id/command` | i comandi del §11 |
 
 **Comandi che il registro gestisce davvero**: `session.prompt`, `session.interrupt`,
-`session.setModel`, `session.setMode`, `session.setMcp`, `session.rename`, `session.sleep`,
-`session.close`, `permission.reply`, `question.reply`, `question.reject`.
+`session.dequeue`, `session.setModel`, `session.setMode`, `session.setMcp`, `session.rename`,
+`session.sleep`, `session.close`, `permission.reply`, `question.reply`, `question.reject`.
 
 `session.rename` è l'unico che il registro gestisce **prima** del controllo «è attiva?»: si
 rinomina soprattutto ciò che dorme.

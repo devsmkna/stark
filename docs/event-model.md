@@ -818,6 +818,7 @@ type Command =
   | { c: 'session.open',    agent: string, cwd: string, model?: string, mode?: PermissionMode }
   | { c: 'session.prompt',  text: string, attachments?: Attachment[] }
   | { c: 'session.interrupt' }
+  | { c: 'session.dequeue', turnId: string }
   | { c: 'session.refreshQuota' }
   | { c: 'session.refreshContext' }
   | { c: 'session.setModel', model: string }
@@ -833,6 +834,15 @@ type Command =
   | { c: 'plan.reply',      requestId: string, decision: 'approved'|'rejected',
                             mode?: PermissionMode, feedback?: string }
 ```
+
+`session.dequeue` è la controparte **puntuale** di `session.interrupt`: dove lo Stop
+svuota l'intera fila (ogni turno in coda riceve un `turn.ended` con
+`reason: 'aborted'`), dequeue ne toglie **una** — quella che l'utente non vuole più far
+partire. Il journal resta append-only: il turno non si cancella, si chiude. L'unico
+turno che sparisce senza lasciare traccia è quello mai annunciato (`turn.started` non
+uscito perché arrivato prima della nascita della sessione): non c'è niente da chiudere.
+La fila vive nell'adapter, quindi il metodo (`AgentSession.dequeue`) pure, e torna
+`false` se quel `turnId` non è più in fila — rifiuto detto, non successo finto.
 
 ```ts
 type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'

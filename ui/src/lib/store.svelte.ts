@@ -841,6 +841,16 @@ export class Store {
   }
 
   stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
+
+  /**
+   * Togli dalla fila un prompt che non è ancora partito. L'esito non si tocca a mano:
+   * il `turn.ended` che l'adapter scrive arriva dal flusso e `applyTo` chiude il turno
+   * — la fila smette di mostrarlo in coda da sola (§18).
+   */
+  dequeue(turnId: string): Promise<boolean> {
+    return this.send({ c: 'session.dequeue', turnId })
+  }
+
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
   /**
    * Cambia una scelta dichiarata dall'agent (ADR-014).

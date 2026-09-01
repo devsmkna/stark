@@ -640,6 +640,12 @@ alla volta.
   fermi; se il prossimo partisse mezzo secondo dopo, tre prompt in coda vorrebbero quattro Stop.
   I turni che non gireranno restano nella conversazione, chiusi come interrotti — spariti
   sarebbero peggio: hai scritto qualcosa, e dov'è finito deve vedersi.
+- **la fila si svuota anche una voce alla volta (1º settembre 2026).** Nell'intestazione di un
+  turno in coda c'è una ×: la toglie dalla fila **sola lei**, e il resto prosegue. È la
+  controparte puntuale dello Stop — che però toglie tutte. Il turno tolto resta nella
+  conversazione chiuso come interrotto, per la stessa ragione di qui sopra; il comando è
+  `session.dequeue` (modello di eventi §11) e il metodo vive nell'adapter, dove sta la fila.
+  Un turno già consegnato non ha la ×: non si richiama.
 - **fra un turno e il successivo la chat non si dichiara ferma.** Sembra un dettaglio: è lo
   stato su cui suona la notifica «ha finito», e suonerebbe a metà lavoro.
 

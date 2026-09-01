@@ -509,6 +509,34 @@ export class ClaudeCodeAdapter implements AgentSession {
   }
 
   /**
+   * Togli **una** voce dalla fila, su richiesta (`session.dequeue`): chi scrive da
+   * capo un prompt non vuole per forza aspettare che anche il vecchio parta.
+   *
+   * Lo stesso fatto di `svuota()`, per una voce sola: il suo `turn.started` è già nel
+   * journal, quindi sparire senza dire niente lascerebbe il «queued» per sempre che
+   * il §4 vieta — si dichiara finito senza che sia mai partito. L'unica eccezione è
+   * chi è arrivato **prima della nascita**: il suo annuncio non è ancora uscito
+   * (lo avrebbe fatto `announce()`), quindi non c'è niente da chiudere e può sparire
+   * senza lasciare traccia.
+   *
+   * `false` se il turno non era in fila — già consegnato, o mai esistito. Chi chiama
+   * lo dice all'utente invece di fingere.
+   */
+  dequeue(turnId: string): boolean {
+    const i = this.coda.findIndex(p => p.turnId === turnId)
+    if (i < 0) return false
+    const [p] = this.coda.splice(i, 1)
+    if (!p) return false
+    if (p.annunciato) {
+      this.emit({
+        k: 'turn.ended', turnId: p.turnId, reason: 'aborted',
+        usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+      })
+    }
+    return true
+  }
+
+  /**
    * Da media type a blocco dell'API. Tre forme, non una, e nessuna e' dedotta dalla
    * documentazione: sono state provate contro il CLI vero (`spike/allegato-pdf.ts`,
    * un turno corto per caso), perche' quello che l'API accetta e quello che il CLI

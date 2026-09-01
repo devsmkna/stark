@@ -713,6 +713,14 @@ export type Command =
   | { c: 'session.prompt'; text: string; attachments?: Attachment[] }
   | { c: 'session.interrupt' }
   /**
+   * Togli dalla fila un prompt che non è ancora partito: il `turnId` è quello che
+   * `session.prompt` aveva annunciato con il suo `turn.started`. Il journal è
+   * append-only, quindi «togliere» non cancella: chiude — l'adapter emette un
+   * `turn.ended` con `reason: 'aborted'`, lo stesso fatto che `session.interrupt`
+   * scrive per l'intera fila, qui per una voce sola.
+   */
+  | { c: 'session.dequeue'; turnId: string }
+  /**
    * Cambia una scelta dichiarata dall'agent (ADR-014). La UI manda l'`id` che ha
    * ricevuto e il valore scelto, senza sapere cosa significhino: e' la differenza fra
    * «disegna cio' che ti dicono» e «conosci le sei parole».

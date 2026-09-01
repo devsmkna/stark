@@ -1065,6 +1065,12 @@ export class Registry {
       case 'session.interrupt':
         await l.adapter.interrupt()
         return { ok: true }
+      case 'session.dequeue':
+        // Togliere una voce dalla fila è un fatto dell'adapter: solo lui sa se quel
+        // turno c'era ancora. `false` è un rifiuto detto — il turno era già partito,
+        // o non è mai stato quello — non un successo da fingere.
+        if (!l.adapter.dequeue(cmd.turnId)) return { ok: false, error: 'turn not in queue' }
+        return { ok: true }
       // ADR-014: il verbo generale. Il daemon non sa cosa siano gli `id` — li ha
       // dichiarati l'agent — e li passa senza guardarli. `setModel`/`setMode` restano
       // per le sonde e per il codice interno che sceglie *una modalita'* per nome.

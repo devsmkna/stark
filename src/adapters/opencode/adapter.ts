@@ -738,6 +738,27 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   /**
+   * Togli **una** voce dalla fila, su richiesta (`session.dequeue`).
+   *
+   * Lo stesso fatto di `svuota()`, per una voce sola — e qui senza eccezioni: il
+   * `turn.started` l'hanno avuto **tutti** entrando in fila, quindi la voce tolta
+   * lascia sempre dietro un turno aperto che si dichiara finito senza che sia mai
+   * partito. `false` se il turno non era in fila: già consegnato, o mai esistito —
+   * chi chiama lo dice all'utente invece di fingere.
+   */
+  dequeue(turnId: string): boolean {
+    const i = this.coda.findIndex(p => p.turnId === turnId)
+    if (i < 0) return false
+    const [p] = this.coda.splice(i, 1)
+    if (!p) return false
+    this.emit({
+      k: 'turn.ended', turnId: p.turnId, reason: 'aborted',
+      usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+    })
+    return true
+  }
+
+  /**
    * Il prompt al runner che esegue davvero.
    *
    * Un metodo solo perche' lo chiamano in due — l'invio e il ritentativo — e due copie
