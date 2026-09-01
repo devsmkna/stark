@@ -539,9 +539,14 @@
   const modeOpt = $derived(opts.find(o => o.kind === 'mode'))
   const modelOpt = $derived(opts.find(o => o.kind === 'model'))
 
-  /** Come si chiama il modello nel chip e nel placeholder: il pezzo dopo l'ultimo slash,
-   *  che è ciò che lo distingue — «GLM-5.3-Flash» e non «opencode/glm-5.3-flash». */
+  /** Come si chiama il modello, in forma breve: il pezzo dopo l'ultimo slash, che è ciò
+   *  che lo distingue — «GLM-5.3-Flash» e non «opencode/glm-5.3-flash». Resta il
+   *  ripiego quando l'elenco dei modelli non dichiara un'etichetta. */
   const nomeBreve = $derived(snap.model?.split('/').pop() ?? 'the agent')
+  /** Come si chiama invece dove si parla all'utente (riga «Model» del menu, placeholder
+   *  della casella): l'etichetta leggibile che l'agent dichiara («Opus (1M context)»),
+   *  non il codice risolto (`claude-opus-5[1m]`). */
+  const nomeLeggibile = $derived(modello?.label || nomeBreve)
   const modelloIcona = $derived(modelOpt ? getLobeIconUrl(modelOpt.value) : null)
 
   /** Cosa dice la riga di un server MCP. Gli stati sono quelli del protocollo e si
@@ -913,7 +918,7 @@
                   {:else}<span class="mdot"></span>{/if}
                 </span>
                 Model
-                <span class="cur">{nomeBreve} <span class="chev"><Icon name="i-fwd" /></span></span>
+                <span class="cur">{nomeLeggibile} <span class="chev"><Icon name="i-fwd" /></span></span>
               </button>
             {/if}
 
@@ -1040,7 +1045,7 @@
             onselect={segnaCaret}
             onblur={() => { files = [] }}
             rows="1"
-            placeholder={`Message ${nomeBreve}…`}
+            placeholder={`Message ${nomeLeggibile}…`}
           ></textarea>
           <!-- Mentre lavora: lo sweep corre sul bordo basso del campo. È il posto del
                vecchio riquadro «cosa sta facendo»: il racconto di ciò che fa sta nel
