@@ -1,0 +1,19 @@
+{"timestamp":"2026-08-29T23:21:40.15631+02:00","action":"create","task_id":1,"detail":"Turn interrupted succede spesso"}
+{"timestamp":"2026-08-29T23:21:40.173078+02:00","action":"create","task_id":2,"detail":"Workaround: retry dopo Turn interrupted (5s, 15s, 30s)"}
+{"timestamp":"2026-08-29T23:22:38.023164+02:00","action":"edit","task_id":2,"detail":"Workaround: retry dopo Turn interrupted (5s, 15s, 30s)"}
+{"timestamp":"2026-08-29T23:22:38.023362+02:00","action":"claim","task_id":2,"detail":"veenz"}
+{"timestamp":"2026-08-29T23:22:38.044874+02:00","action":"move","task_id":2,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-08-30T00:16:58.015597+02:00","action":"edit","task_id":1,"detail":"Turn interrupted succede spesso"}
+{"timestamp":"2026-08-30T00:16:58.030985+02:00","action":"move","task_id":1,"detail":"backlog -\u003e done"}
+{"timestamp":"2026-08-30T00:16:58.045598+02:00","action":"edit","task_id":2,"detail":"Workaround: retry dopo Turn interrupted (5s, 15s, 30s)"}
+{"timestamp":"2026-08-30T00:16:58.04574+02:00","action":"release","task_id":2,"detail":"veenz"}
+{"timestamp":"2026-08-30T00:16:58.061332+02:00","action":"move","task_id":2,"detail":"in-progress -\u003e done"}
+{"timestamp":"2026-08-30T15:21:17.885202+02:00","action":"create","task_id":3,"detail":"Cloud: autenticazione (step necessario per la board sincronizzata)"}
+{"timestamp":"2026-08-30T15:21:17.905415+02:00","action":"create","task_id":4,"detail":"Cloud: sincronizzazione della board"}
+{"timestamp":"2026-08-30T15:21:17.920655+02:00","action":"create","task_id":5,"detail":"Cloud: infrastruttura del backend"}
+{"timestamp":"2026-08-30T15:53:31.688459+02:00","action":"create","task_id":6,"detail":"Telemetria anonimizzata (usage, token, modelli usati)"}
+{"timestamp":"2026-08-30T16:17:41.000569+02:00","action":"create","task_id":7,"detail":"Tunneling: accesso remoto senza Tailscale (per autenticati)"}
+{"timestamp":"2026-08-30T18:37:45.999084+02:00","action":"edit","task_id":3,"detail":"Cloud: autenticazione (step necessario per la board sincronizzata)"}
+{"timestamp":"2026-08-30T18:37:45.999243+02:00","action":"claim","task_id":3,"detail":"veenz"}
+{"timestamp":"2026-08-30T18:37:46.019999+02:00","action":"move","task_id":3,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-01T10:08:54.059594+02:00","action":"create","task_id":8,"detail":"Aggiungere la possibilità di lanciare comandi e mostrare output in una finestra su stark direttamente"}

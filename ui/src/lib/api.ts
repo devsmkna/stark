@@ -173,6 +173,13 @@ export type TodoProject = Todos
 /** Tutti i progetti conosciuti che hanno qualcosa da mostrare. */
 export type AllTodos = { projects: TodoProject[] }
 
+/** Lo stato cloud: se il server è configurato, chi è loggato, e se risponde. */
+export type CloudStatus = {
+  url: string | null
+  email: string | null
+  server: 'ok' | 'giu' | 'non-configurato'
+}
+
 /** Un task della board, come lo espone `kanban-md list --json`. */
 export type BoardTask = {
   id: number
@@ -367,6 +374,23 @@ export class Api {
     return this.json(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`)
   }
   system(): Promise<SystemInfo> { return this.json('/api/system') }
+
+  /** Lo stato cloud: se il server è configurato e chi è loggato. */
+  cloudStatus(): Promise<CloudStatus> { return this.json('/api/cloud/status') }
+
+  /** Login verso il server cloud. `ok:false` con `motivo` se fallisce. */
+  cloudLogin(email: string, password: string): Promise<{ ok: boolean; email?: string; motivo?: string }> {
+    return this.json('/api/cloud/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+  }
+
+  /** Logout: revoca la sessione e toglie il token locale. */
+  cloudLogout(): Promise<{ ok: boolean }> {
+    return this.json('/api/cloud/logout', { method: 'POST' })
+  }
 
   /**
    * Tutti i modelli guidabili su questa macchina, per agent (§17).

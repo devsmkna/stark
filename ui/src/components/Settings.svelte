@@ -24,7 +24,7 @@
   let { store }: { store: Store } = $props()
 
   type Sezione = 'permissions' | 'agent' | 'shortcuts' | 'projects' | 'notifications' | 'phone'
-    | 'appearance' | 'usage' | 'storage' | 'system'
+    | 'appearance' | 'usage' | 'storage' | 'system' | 'cloud'
   let sez = $state<Sezione>('permissions')
   /** Solo su schermo stretto: sei **dentro** una sezione, o stai guardando il menu.
    *  Si riparte sempre dal menu — aprire le impostazioni su una sezione a caso sarebbe
@@ -42,6 +42,7 @@
     { id: 'usage', nome: 'Usage', icona: 'i-chart' },
     { id: 'storage', nome: 'Storage', icona: 'i-disk' },
     { id: 'system', nome: 'System', icona: 'i-monitor' },
+    { id: 'cloud', nome: 'Cloud', icona: 'i-globe' },
   ]
 
   // ─── scorciatoie ──────────────────────────────────────────────────────────
@@ -184,6 +185,11 @@
 
   let storage = $state<Storage | null>(null)
   let system = $state<SystemInfo | null>(null)
+  let cloud = $state<CloudStatus | null>(null)
+  let cloudEmail = $state('')
+  let cloudPassword = $state('')
+  let cloudErrore = $state('')
+  let cloudLavoro = $state(false)
   let errore = $state('')
   let erroreStorage = $state('')
 
@@ -281,7 +287,28 @@
     // Aprendo la sezione, non all'avvio: legge lo stato di Tailscale, che costa due
     // `execFile`. Stessa condotta della diagnostica qui sotto.
     if (sez === 'phone' && telStato === null) void store.api.phone().then(x => { telStato = x })
+    if (sez === 'cloud' && cloud === null) void store.api.cloudStatus().then(x => { cloud = x })
   })
+
+  async function faiLogin(): Promise<void> {
+    cloudLavoro = true
+    cloudErrore = ''
+    const esito = await store.api.cloudLogin(cloudEmail.trim(), cloudPassword)
+    cloudLavoro = false
+    if (esito.ok) {
+      cloudPassword = ''
+      cloud = { url: cloud?.url ?? null, email: esito.email ?? null, server: 'ok' }
+    } else {
+      cloudErrore = esito.motivo ?? 'login fallito'
+    }
+  }
+
+  async function faiLogout(): Promise<void> {
+    cloudLavoro = true
+    await store.api.cloudLogout()
+    cloudLavoro = false
+    cloud = { url: cloud?.url ?? null, email: null, server: cloud?.server ?? 'ok' }
+  }
 
   const mb = (n: number): string =>
     n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`

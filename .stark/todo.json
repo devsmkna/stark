@@ -1,0 +1,67 @@
+{
+  "1983bd73-27a7-4c56-a37b-6504c28af08f": {
+    "title": "Inventario file del progetto per estensione",
+    "created": 1787913074307,
+    "__status": "done",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "Elencare tutti i file della cartella (esclusi node_modules e .git)",
+        "state": "done"
+      },
+      {
+        "id": "t2",
+        "text": "Raggrupparli per estensione con conteggi",
+        "state": "done"
+      },
+      {
+        "id": "t3",
+        "text": "Mostrare l'elenco raggruppato all'utente",
+        "state": "done"
+      },
+      {
+        "id": "t4",
+        "text": "Ricevere dall'utente cosa farne e gli step successivi",
+        "state": "done",
+        "note": "utente: nessuna azione sui file, ha gia fatto lui"
+      }
+    ]
+  },
+  "f279dc0c-efd9-497e-8fa1-31fb551c94b5": {
+    "title": "Toggle All / This project nella colonna Todo",
+    "created": 1787914627036,
+    "__status": "done",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "Il daemon sa elencare le liste di tutti i progetti conosciuti",
+        "state": "done"
+      },
+      {
+        "id": "t2",
+        "text": "Rotta e flusso SSE aggregati, senza percorsi presi dal browser",
+        "state": "done"
+      },
+      {
+        "id": "t3",
+        "text": "Il client ha i metodi per leggere l'aggregato",
+        "state": "done"
+      },
+      {
+        "id": "t4",
+        "text": "Il toggle sta in cima alla colonna e la scelta sopravvive al ricaricamento",
+        "state": "done"
+      },
+      {
+        "id": "t5",
+        "text": "In All le liste sono raggruppate per progetto",
+        "state": "done"
+      },
+      {
+        "id": "t6",
+        "text": "Verificato guidando la UI vera, non solo per esito",
+        "state": "done"
+      }
+    ]
+  }
+}

@@ -1,0 +1,133 @@
+<h2>§2 — Dove vive la Mappa dentro STARK</h2>
+<p class="subtitle">Deve stare <em>a lato</em> della chat mentre parlate. STARK ha già tre posti dove una cosa così può andare, e non sono equivalenti.</p>
+
+<div class="section">
+  <div class="options">
+
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Un pannello come gli altri</h3>
+        <p>La Mappa si trascina nel workspace come si trascina una chat. Chat a sinistra, Mappa a destra, il divisore si sposta. Sfrutta i pannelli affiancati che esistono già.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Terza linguetta della conversazione</h3>
+        <p>Accanto a <code>Conversation</code> e <code>Effects</code>. La Mappa <em>prende il posto</em> della chat nello stesso pannello — quindi non si guardano insieme, si alternano.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Barra laterale stretta, come la Todo</h3>
+        <p>Sempre visibile a destra della chat, larghezza fissa. Zero gesti da imparare — ma un grafo dentro 260px è un elenco con le frecce.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+
+    <div class="mockup">
+      <div class="mockup-header">A — pannello affiancato</div>
+      <div class="mockup-body">
+        <div style="display:flex;gap:0;height:230px;font-size:11px">
+
+          <div style="flex:1;border:1px solid #666;border-radius:6px 0 0 6px;display:flex;flex-direction:column;overflow:hidden">
+            <div style="background:#2a2a35;padding:5px 8px;font-weight:600;border-bottom:1px solid #666">stark · adapter OpenCode</div>
+            <div style="flex:1;padding:8px;display:flex;flex-direction:column;gap:5px">
+              <div style="background:#3a4a7a;border-radius:5px;padding:5px 7px">Facciamo il canvas laterale…</div>
+              <div style="opacity:.75;padding:2px 7px">Propongo tre modi…</div>
+              <div style="border-left:2px solid #f0a020;padding:3px 7px;opacity:.8;font-size:10px">↻ hai spostato «Canvas» sotto «UI»</div>
+              <div style="opacity:.75;padding:2px 7px">Ok, allora il legame…</div>
+            </div>
+            <div style="border-top:1px solid #666;padding:5px 8px;opacity:.5">scrivi…</div>
+          </div>
+
+          <div style="width:5px;background:#7c8cff;opacity:.5"></div>
+
+          <div style="flex:1.15;border:1px solid #666;border-radius:0 6px 6px 0;display:flex;flex-direction:column;overflow:hidden">
+            <div style="background:#2a2a35;padding:5px 8px;font-weight:600;border-bottom:1px solid #666">Mappa</div>
+            <div style="flex:1;padding:10px;display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center">
+              <div style="display:flex;gap:7px">
+                <div style="border:1.5px solid #7c8cff;border-radius:6px;padding:5px 9px">UI <span style="background:#7c8cff;color:#fff;border-radius:8px;padding:0 5px;font-size:9px">3</span></div>
+                <div style="border:1.5px dashed #f0a020;border-radius:6px;padding:5px 9px;color:#f0a020">Canvas</div>
+              </div>
+              <div style="color:#888">↕</div>
+              <div style="display:flex;gap:7px">
+                <div style="border:1.5px solid #666;border-radius:6px;padding:5px 9px">Daemon <span style="background:#7c8cff;color:#fff;border-radius:8px;padding:0 5px;font-size:9px">1</span></div>
+                <div style="border:1.5px solid #666;border-radius:6px;padding:5px 9px">Journal</div>
+              </div>
+              <div style="color:#888">↕</div>
+              <div style="border:1.5px solid #666;border-radius:6px;padding:5px 9px">Adapter</div>
+            </div>
+          </div>
+
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">Si guardano <strong>insieme</strong>, e il grafo ha metà schermo vero. Il divisore lo sposti tu.</p>
+      </div>
+    </div>
+
+    <div class="mockup">
+      <div class="mockup-header">C — barra laterale stretta</div>
+      <div class="mockup-body">
+        <div style="display:flex;gap:0;height:230px;font-size:11px">
+
+          <div style="flex:1;border:1px solid #666;border-right:none;border-radius:6px 0 0 6px;display:flex;flex-direction:column;overflow:hidden">
+            <div style="background:#2a2a35;padding:5px 8px;font-weight:600;border-bottom:1px solid #666">stark · adapter OpenCode</div>
+            <div style="flex:1;padding:8px;display:flex;flex-direction:column;gap:5px">
+              <div style="background:#3a4a7a;border-radius:5px;padding:5px 7px">Facciamo il canvas laterale…</div>
+              <div style="opacity:.75;padding:2px 7px">Propongo tre modi di mettere architettura e lavoro sulla stessa tela, e il mio consiglio è…</div>
+            </div>
+            <div style="border-top:1px solid #666;padding:5px 8px;opacity:.5">scrivi…</div>
+          </div>
+
+          <div style="width:104px;border:1px solid #666;border-radius:0 6px 6px 0;display:flex;flex-direction:column;overflow:hidden">
+            <div style="background:#2a2a35;padding:5px 6px;font-weight:600;border-bottom:1px solid #666;font-size:10px">Mappa</div>
+            <div style="flex:1;padding:6px;display:flex;flex-direction:column;gap:4px">
+              <div style="border:1.5px solid #7c8cff;border-radius:5px;padding:4px 5px;font-size:10px">UI <span style="background:#7c8cff;color:#fff;border-radius:8px;padding:0 4px;font-size:9px">3</span></div>
+              <div style="padding-left:8px;color:#888;font-size:12px;line-height:.9">└</div>
+              <div style="border:1.5px dashed #f0a020;border-radius:5px;padding:4px 5px;font-size:10px;color:#f0a020">Canvas</div>
+              <div style="border:1.5px solid #666;border-radius:5px;padding:4px 5px;font-size:10px">Daemon <span style="background:#7c8cff;color:#fff;border-radius:8px;padding:0 4px;font-size:9px">1</span></div>
+              <div style="border:1.5px solid #666;border-radius:5px;padding:4px 5px;font-size:10px">Journal</div>
+              <div style="border:1.5px solid #666;border-radius:5px;padding:4px 5px;font-size:10px">Adapter</div>
+            </div>
+          </div>
+
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">Sempre lì, zero gesti. Ma i legami non ci stanno: torna a essere un elenco rientrato.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Perché consiglio A</h4>
+      <ul>
+        <li>I pannelli affiancati <strong>esistono già</strong> e sono provati — non c'è impianto nuovo da inventare</li>
+        <li>Il grafo ha larghezza vera, e quanta gliene dai lo decidi tu spostando il divisore</li>
+        <li>Chat e Mappa <strong>si guardano insieme</strong>, che è il punto di tutta la funzionalità</li>
+        <li>Chi non la vuole non se la trova: non ruba spazio finché non la trascini</li>
+        <li>Da telefono decade da sé — sotto gli 860px il layout è già ignorato</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cosa costa</h4>
+      <ul>
+        <li>Va scoperta: se non sai del trascinamento, la Mappa non esiste</li>
+        <li>Il workspace oggi affianca <strong>chat</strong>; deve imparare che un pannello può contenere altro</li>
+        <li>B la scarto perché alterna invece di affiancare — e serve guardarle insieme</li>
+        <li>C la scarto perché 260px non reggono un grafo: diventa la Todo con le frecce</li>
+      </ul>
+    </div>
+  </div>
+</div>

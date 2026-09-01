@@ -1,0 +1,131 @@
+<h2>§3 — Il nodo: cosa contiene, e cosa succede quando lo tocchi</h2>
+<p class="subtitle">Qui si decide se la Mappa è un disegno o uno strumento. Sopra, l'anatomia. Sotto, la domanda vera.</p>
+
+<div class="section">
+  <div class="label">Anatomia — tre stati, disegnati diversi</div>
+  <div class="mockup">
+    <div class="mockup-body">
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;padding:6px 0">
+
+        <div style="text-align:center">
+          <div style="border:1.5px solid #7c8cff;border-radius:8px;padding:9px 12px;min-width:150px;text-align:left;background:rgba(124,140,255,.06)">
+            <div style="font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+              <span>UI · Svelte</span>
+              <span style="background:#7c8cff;color:#fff;border-radius:9px;padding:0 6px;font-size:10px">3</span>
+            </div>
+            <div style="font-size:10px;color:#999;margin-top:3px">ui/src/ · 41 file</div>
+          </div>
+          <div style="font-size:10px;color:#888;margin-top:6px">esiste · c'è lavoro</div>
+        </div>
+
+        <div style="text-align:center">
+          <div style="border:1.5px solid #666;border-radius:8px;padding:9px 12px;min-width:150px;text-align:left">
+            <div style="font-weight:600;font-size:13px">Journal</div>
+            <div style="font-size:10px;color:#999;margin-top:3px">src/core/journal.ts</div>
+          </div>
+          <div style="font-size:10px;color:#888;margin-top:6px">esiste · a posto</div>
+        </div>
+
+        <div style="text-align:center">
+          <div style="border:1.5px dashed #f0a020;border-radius:8px;padding:9px 12px;min-width:150px;text-align:left;background:rgba(240,160,32,.05)">
+            <div style="font-weight:600;font-size:13px;color:#f0a020;display:flex;justify-content:space-between;align-items:center">
+              <span>Canvas</span>
+              <span style="border:1px solid #f0a020;border-radius:9px;padding:0 6px;font-size:9px">da fare</span>
+            </div>
+            <div style="font-size:10px;color:#c99;margin-top:3px">non esiste ancora</div>
+          </div>
+          <div style="font-size:10px;color:#888;margin-top:6px">intenzione</div>
+        </div>
+
+      </div>
+      <p style="font-size:11px;color:#888;margin:12px 4px 0">Bordo pieno = <code>codice</code>, l'ha trovato l'agent e punta a file veri. Bordo tratteggiato arancione = <code>intenzione</code>, l'abbiamo messo noi. <strong>Mai disegnati uguali.</strong></p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">La domanda: clic su un nodo, e poi?</div>
+
+  <div class="options">
+
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Si apre la scheda del nodo</h3>
+        <p>Descrizione, file che lo compongono, il lavoro appeso. Da lì apri un file, spunti una voce, modifichi il nome. La Mappa è un <strong>pannello di controllo</strong>: guardi e ritocchi.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Si apre una chat su quel pezzo</h3>
+        <p>Clic → nasce (o torna a fuoco) una conversazione <strong>agganciata a quel nodo</strong>, con i suoi file già citati. La Mappa diventa il modo di <strong>scegliere dove lavorare</strong>. Il nodo ricorda le sue chat.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>La chat accanto ci si mette a fuoco</h3>
+        <p>Nessuna chat nuova. La conversazione già aperta a fianco riceve il contesto del nodo, e i suoi messaggi che lo riguardano si evidenziano. La Mappa <strong>guida</strong> il discorso in corso.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+
+    <div class="mockup">
+      <div class="mockup-header">A — la scheda</div>
+      <div class="mockup-body">
+        <div style="border:1px solid #666;border-radius:6px;padding:10px;font-size:11px">
+          <div style="font-weight:600;font-size:13px;margin-bottom:2px">UI · Svelte</div>
+          <div style="color:#888;font-size:10px;margin-bottom:8px">codice · ui/src/ · 41 file</div>
+          <div style="color:#ccc;margin-bottom:9px">La UI in Svelte 5 servita dal daemon. Non tiene un modello proprio: applica <code>applyTo</code> sullo snapshot.</div>
+          <div class="label" style="margin-bottom:4px">Lavoro</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div>☐ Componente Canvas</div>
+            <div>☐ Trascinamento nel workspace</div>
+            <div style="opacity:.5;text-decoration:line-through">☑ Nota nel flusso</div>
+          </div>
+          <div style="margin-top:9px;display:flex;gap:5px">
+            <button class="mock-button" style="font-size:10px;padding:3px 9px">Apri cartella</button>
+            <button class="mock-button" style="font-size:10px;padding:3px 9px">Rinomina</button>
+          </div>
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">Tutto lì, niente si muove altrove. Ma la Mappa resta una cosa da <em>consultare</em>.</p>
+      </div>
+    </div>
+
+    <div class="mockup">
+      <div class="mockup-header">B — la chat sul nodo</div>
+      <div class="mockup-body">
+        <div style="display:flex;gap:0;height:190px;font-size:10px">
+          <div style="width:44%;border:1px solid #666;border-radius:6px 0 0 6px;padding:8px;display:flex;flex-direction:column;gap:7px;align-items:center;justify-content:center">
+            <div style="border:1.5px solid #7c8cff;border-radius:6px;padding:5px 9px;background:rgba(124,140,255,.15);box-shadow:0 0 0 2px rgba(124,140,255,.35)">UI <span style="background:#7c8cff;color:#fff;border-radius:8px;padding:0 4px;font-size:9px">3</span></div>
+            <div style="color:#888">↕</div>
+            <div style="border:1.5px solid #666;border-radius:6px;padding:5px 9px">Daemon</div>
+          </div>
+          <div style="width:5px;background:#7c8cff;opacity:.5"></div>
+          <div style="flex:1;border:1px solid #666;border-radius:0 6px 6px 0;display:flex;flex-direction:column;overflow:hidden">
+            <div style="background:#2a2a35;padding:4px 7px;font-weight:600;border-bottom:1px solid #666;font-size:10px">↳ UI · Svelte</div>
+            <div style="flex:1;padding:7px;display:flex;flex-direction:column;gap:5px">
+              <div style="background:#3a4a7a;border-radius:5px;padding:4px 6px">Lavoriamo sul Canvas</div>
+              <div style="opacity:.7;font-size:9px">contesto: <code>ui/src/lib/</code>, 3 voci aperte</div>
+            </div>
+            <div style="border-top:1px solid #666;padding:4px 7px;opacity:.5">scrivi…</div>
+          </div>
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">La Mappa smette di essere un disegno e diventa il <strong>menu del lavoro</strong>.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <p class="subtitle"><strong>Consiglio: B, con A dentro.</strong> Il clic apre la chat sul nodo — è lì che la Mappa smette di essere decorativa e diventa il posto da cui si comincia a lavorare, e sfrutta i pannelli affiancati che abbiamo appena scelto. La scheda di A non sparisce: sta nel nodo espanso, sulla tela. Quello che scarto è <strong>C</strong>: dirottare la chat già aperta significa che un clic curioso ti cambia il discorso sotto le mani.</p>
+</div>

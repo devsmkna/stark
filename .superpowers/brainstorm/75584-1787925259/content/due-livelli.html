@@ -1,0 +1,154 @@
+<h2>Architettura e lavoro sullo stesso canvas: come stanno insieme?</h2>
+<p class="subtitle">Hai detto A+B — i pezzi del sistema <em>e</em> cosa c'è da fare. Sono due informazioni diverse. Ecco tre modi di metterle sulla stessa tela.</p>
+
+<div class="section">
+  <div class="options">
+
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Il lavoro è appeso al pezzo che tocca</h3>
+        <p>Un grafo solo: i nodi sono i componenti del sistema. Le attività sono etichette attaccate al componente su cui vanno fatte. Guardi il sistema, e vedi dove c'è lavoro.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Due corsie, sopra e sotto</h3>
+        <p>In alto l'architettura, in basso il piano in sequenza. Una linea collega ogni attività ai componenti che tocca. Due letture affiancate, sempre entrambe visibili.</p>
+      </div>
+    </div>
+
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Due viste dello stesso grafo</h3>
+        <p>Un interruttore, come <code>Conversation</code> / <code>Effects</code> in STARK. Stessi nodi, due disposizioni: «com'è fatto» e «cosa si fa». Nessuna delle due è compressa.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="split">
+
+    <div class="mockup">
+      <div class="mockup-header">A — lavoro appeso all'architettura</div>
+      <div class="mockup-body">
+        <div style="display:flex;flex-direction:column;gap:14px;padding:8px">
+
+          <div style="display:flex;gap:12px;justify-content:center">
+            <div style="border:1.5px solid #7c8cff;border-radius:8px;padding:10px 14px;min-width:120px;text-align:center">
+              <div style="font-weight:600;font-size:13px">UI · Svelte</div>
+              <div style="margin-top:6px;display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                <span style="background:#7c8cff;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px">3 da fare</span>
+              </div>
+            </div>
+            <div style="border:1.5px solid #7c8cff;border-radius:8px;padding:10px 14px;min-width:120px;text-align:center">
+              <div style="font-weight:600;font-size:13px">Canvas</div>
+              <div style="margin-top:6px;display:flex;gap:4px;justify-content:center">
+                <span style="background:#f0a020;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px">nuovo</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align:center;color:#888;font-size:16px;line-height:1">↕</div>
+
+          <div style="display:flex;gap:12px;justify-content:center">
+            <div style="border:1.5px solid #666;border-radius:8px;padding:10px 14px;min-width:120px;text-align:center">
+              <div style="font-weight:600;font-size:13px">Daemon</div>
+              <div style="margin-top:6px"><span style="background:#7c8cff;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px">1 da fare</span></div>
+            </div>
+            <div style="border:1.5px solid #666;border-radius:8px;padding:10px 14px;min-width:120px;text-align:center">
+              <div style="font-weight:600;font-size:13px">Journal</div>
+              <div style="margin-top:6px"><span style="color:#4caf50;font-size:11px">✓ a posto</span></div>
+            </div>
+          </div>
+
+          <div style="text-align:center;color:#888;font-size:16px;line-height:1">↕</div>
+
+          <div style="display:flex;gap:12px;justify-content:center">
+            <div style="border:1.5px solid #666;border-radius:8px;padding:10px 14px;min-width:120px;text-align:center">
+              <div style="font-weight:600;font-size:13px">Adapter</div>
+            </div>
+          </div>
+
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">Una tela sola. Il lavoro non ha nodi propri — è una proprietà del componente.</p>
+      </div>
+    </div>
+
+    <div class="mockup">
+      <div class="mockup-header">B — due corsie</div>
+      <div class="mockup-body">
+        <div style="padding:8px">
+
+          <div class="label" style="margin-bottom:6px">Architettura</div>
+          <div style="display:flex;gap:8px;justify-content:space-between;padding-bottom:12px;border-bottom:1px dashed #666">
+            <div style="border:1.5px solid #7c8cff;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;flex:1;text-align:center">UI</div>
+            <div style="border:1.5px solid #666;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;flex:1;text-align:center">Daemon</div>
+            <div style="border:1.5px solid #666;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;flex:1;text-align:center">Adapter</div>
+          </div>
+
+          <div style="display:flex;justify-content:space-around;color:#7c8cff;font-size:14px;line-height:1;padding:4px 0">
+            <span>│</span><span>│</span>
+          </div>
+
+          <div class="label" style="margin-bottom:6px">Piano</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="border:1.5px solid #4caf50;border-radius:8px;padding:7px 10px;font-size:12px;display:flex;justify-content:space-between">
+              <span>1 · Rotta <code style="font-size:11px">/api/canvas</code></span><span style="color:#4caf50">✓</span>
+            </div>
+            <div style="border:1.5px solid #7c8cff;border-radius:8px;padding:7px 10px;font-size:12px;display:flex;justify-content:space-between">
+              <span>2 · Componente Canvas</span><span style="color:#7c8cff">in corso</span>
+            </div>
+            <div style="border:1.5px solid #666;border-radius:8px;padding:7px 10px;font-size:12px;opacity:.65">
+              3 · Scrittura del file
+            </div>
+          </div>
+
+        </div>
+        <p style="font-size:11px;color:#888;margin:10px 4px 0">Due zone fisse. Le linee dicono quale attività tocca quale pezzo.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">C — un interruttore, due disposizioni degli stessi nodi</div>
+    <div class="mockup-body">
+      <div style="display:flex;gap:6px;margin-bottom:14px">
+        <button class="mock-button" style="font-size:11px;padding:4px 12px">Com'è fatto</button>
+        <button class="mock-button" style="font-size:11px;padding:4px 12px;opacity:.45">Cosa si fa</button>
+      </div>
+      <div style="display:flex;gap:20px;align-items:center;justify-content:center;padding:6px 0">
+        <div style="text-align:center">
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <div style="border:1.5px solid #7c8cff;border-radius:6px;padding:6px 10px;font-size:11px">UI</div>
+            <div style="border:1.5px solid #666;border-radius:6px;padding:6px 10px;font-size:11px">Daemon</div>
+          </div>
+          <div style="border:1.5px solid #666;border-radius:6px;padding:6px 10px;font-size:11px">Adapter</div>
+          <div style="font-size:10px;color:#888;margin-top:8px">disposti per dipendenza</div>
+        </div>
+        <div style="color:#7c8cff;font-size:20px">⇄</div>
+        <div style="text-align:center">
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="border:1.5px solid #4caf50;border-radius:6px;padding:5px 10px;font-size:11px">1 · Daemon</div>
+            <div style="border:1.5px solid #7c8cff;border-radius:6px;padding:5px 10px;font-size:11px">2 · UI</div>
+            <div style="border:1.5px solid #666;border-radius:6px;padding:5px 10px;font-size:11px;opacity:.65">3 · Adapter</div>
+          </div>
+          <div style="font-size:10px;color:#888;margin-top:8px">disposti per ordine di lavoro</div>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#888;margin:10px 4px 0">Gli stessi nodi si ridispongono. Nessuna delle due vista è schiacciata a metà schermo.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="subtitle"><strong>Il mio consiglio: A.</strong> Perché il lavoro <em>è</em> una proprietà di un pezzo del sistema, non una cosa a parte — e perché con A hai <strong>una</strong> tela da imparare invece di due. B costa metà schermo per informazione che in A sta in un'etichetta; C è elegante ma raddoppia le disposizioni da mantenere, e sposta il costo su di te ogni volta che devi ricordare in quale vista eri.</p>
+</div>
