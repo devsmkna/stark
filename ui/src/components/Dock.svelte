@@ -24,8 +24,8 @@
   import {
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
   } from '$core/allegati.ts'
-  import { getLobeIconUrl } from '../lib/lobe.ts'
-  import { MODE_BLURB, MODE_ICON, project, stamp, until } from '../lib/view.ts'
+import { getLobeIconUrl, getProviderForModel, providerLabelFor, inputTypesOf } from '../lib/lobe.ts'
+import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '../lib/view.ts'
   import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -572,6 +572,34 @@
   const nomeLeggibile = $derived(modello?.label || nomeBreve)
   const modelloIcona = $derived(modelOpt ? getLobeIconUrl(modelOpt.value) : null)
 
+  /** Scheda del modello in uso per l'hover: stessa ricerca di ModelPicker `livello0`
+   *  — prima l'agent della chat, poi gli altri — ma qui solo per mostrare, non per
+   *  scegliere. Se il catalogo non è ancora arrivato, resta null e si ripiega sul
+   *  nome già risolto sopra. */
+  const currentCard = $derived.by(() => {
+    const cat = store.catalogo
+    const corrente = modelOpt?.value ?? snap.model ?? ''
+    if (!cat || !corrente) return null
+    const nel = (a: typeof cat[number]) => a.models.find(x => x.id === corrente || (x as any).resolved === corrente)
+    const mio = cat.find(a => a.id === snap.agent)
+    const ordine = mio ? [mio, ...cat.filter(a => a !== mio)] : cat
+    for (const a of ordine) {
+      const m = nel(a)
+      if (m) return { agent: a, model: m }
+    }
+    return null
+  })
+  const nomeESuffisso = (m: { id: string; label?: string }): { nome: string; suffix?: string } => {
+    const label = (m as any).label ?? m.id
+    const mm = /^(.*?)\s*\((.+)\)\s*$/.exec(label)
+    return mm ? { nome: mm[1]!, suffix: mm[2]! } : { nome: label }
+  }
+  const costoFree = $derived.by(() => {
+    const c = (currentCard?.model as any)?.cost
+    return !!c && c.input === 0 && c.output === 0
+  })
+  const capsCard = $derived(inputTypesOf(currentCard?.model as { accepts?: string[] } | undefined))
+
   /** Cosa dice la riga di un server MCP. Gli stati sono quelli del protocollo e si
    *  mostrano come sono: `needs-auth` non è un errore di STARK e non si nasconde — si
    *  dice cosa fare, che è una cosa che si fa dal terminale e non da qui. */
@@ -803,9 +831,126 @@
           </button>
         {/if}
       {/snippet}
-      {#snippet usagePanel()}
+      {#snippet modelBlock()}
+        {#if currentCard}
+          {@const head = nomeESuffisso(currentCard.model)}
+          {@const ic0 = getLobeIconUrl((currentCard.model as any).resolved ?? currentCard.model.id)}
+          <div class="preview-head">
+            <div class="pk-avatar">
+              {#if ic0}<img src={ic0} alt="" width="19" height="19" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<Icon name="i-brain" />{/if}
+            </div>
+            <div class="pk-id">
+              <div class="pk-name">{head.nome}{#if head.suffix} <span class="mult">({head.suffix})</span>{/if}</div>
+              <div class="pk-path">{currentCard.agent.label}{#if providerLabelFor(currentCard.model as any)} <span class="arw">›</span> {providerLabelFor(currentCard.model as any)}{/if}</div>
+            </div>
+            {#if capsCard}
+              <div class="pk-caps" title={`accepts: ${[capsCard.text ? 'text' : null, capsCard.image ? 'image' : null, capsCard.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
+                <Icon name="i-type" class={capsCard.text ? '' : 'off'} />
+                <Icon name="i-image" class={capsCard.image ? '' : 'off'} />
+                <Icon name="i-doc" class={capsCard.docs ? '' : 'off'} />
+              </div>
+            {/if}
+          </div>
+          <div class="pk-meta">
+            <span class="cash"><Icon name="i-dollar" /></span>
+            {#if costoFree}
+              <span class="price free">free</span>
+            {:else if (currentCard.model as any).cost}
+              <span class="unit">/M</span>
+              <span class="price">{fmtCosto((currentCard.model as any).cost.input)} / {fmtCosto((currentCard.model as any).cost.output)}</span>
+            {:else}
+              <span class="price">—</span>
+            {/if}
+            <span class="ctx-lbl">CONTEXT</span>
+            <span class="ctx-val">{fmtTok((currentCard.model as any).contextWindow)}</span>
+          </div>
+          <div class="pk-rule"></div>
+        {:else if modelOpt}
+          <div class="preview-head fallback">
+            <div class="pk-avatar">
+              {#if modelloIcona}<img src={modelloIcona} alt="" width="19" height="19" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<span class="mdot"></span>{/if}
+            </div>
+            <div class="pk-id"><div class="pk-name">{nomeLeggibile}</div></div>
+          </div>
+          <div class="pk-meta">
+            <span class="cash"><Icon name="i-dollar" /></span>
+            <span class="price">—</span>
+            {#if contextWindow}
+              <span class="ctx-lbl">CONTEXT</span>
+              <span class="ctx-val">{fmtTok(contextWindow)}</span>
+            {/if}
+          </div>
+          <div class="pk-rule"></div>
+        {/if}
+      {/snippet}
+      {#snippet modelTop()}
+        <button class="model-top" class:dis={!modificabile('model')} disabled={!modificabile('model')}
+          title={modificabile('model') ? 'Change model' : "This agent can't change its model from here"}
+          onclick={() => { if (modificabile('model')) menu = 'model' }}>
+          <div class="model-top-main">
+            {#if currentCard}
+              {@const head = nomeESuffisso(currentCard.model)}
+              {@const ic0 = getLobeIconUrl((currentCard.model as any).resolved ?? currentCard.model.id)}
+              <div class="preview-head" style="padding:0">
+                <div class="pk-avatar">
+                  {#if ic0}<img src={ic0} alt="" width="19" height="19" loading="lazy"
+                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+                  {:else}<Icon name="i-brain" />{/if}
+                </div>
+                <div class="pk-id">
+                  <div class="pk-name">{head.nome}{#if head.suffix} <span class="mult">({head.suffix})</span>{/if}</div>
+                  <div class="pk-path">{currentCard.agent.label}{#if providerLabelFor(currentCard.model as any)} <span class="arw">›</span> {providerLabelFor(currentCard.model as any)}{/if}</div>
+                </div>
+                {#if capsCard}
+                  <div class="pk-caps" style="padding-top:2px">
+                    <Icon name="i-type" class={capsCard.text ? '' : 'off'} />
+                    <Icon name="i-image" class={capsCard.image ? '' : 'off'} />
+                    <Icon name="i-doc" class={capsCard.docs ? '' : 'off'} />
+                  </div>
+                {/if}
+              </div>
+              <div class="pk-meta" style="padding:6px 0 0">
+                <span class="cash"><Icon name="i-dollar" /></span>
+                {#if costoFree}
+                  <span class="price free">free</span>
+                {:else if (currentCard.model as any).cost}
+                  <span class="unit">/M</span>
+                  <span class="price">{fmtCosto((currentCard.model as any).cost.input)} / {fmtCosto((currentCard.model as any).cost.output)}</span>
+                {:else}
+                  <span class="price">—</span>
+                {/if}
+                <span class="ctx-lbl">CONTEXT</span>
+                <span class="ctx-val">{fmtTok((currentCard.model as any).contextWindow)}</span>
+              </div>
+            {:else if modelOpt}
+              <div class="preview-head fallback" style="padding:0">
+                <div class="pk-avatar">
+                  {#if modelloIcona}<img src={modelloIcona} alt="" width="19" height="19" loading="lazy"
+                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+                  {:else}<span class="mdot"></span>{/if}
+                </div>
+                <div class="pk-id"><div class="pk-name">{nomeLeggibile}</div></div>
+              </div>
+              <div class="pk-meta" style="padding:6px 0 0">
+                <span class="cash"><Icon name="i-dollar" /></span>
+                <span class="price">—</span>
+                {#if contextWindow}
+                  <span class="ctx-lbl">CONTEXT</span>
+                  <span class="ctx-val">{fmtTok(contextWindow)}</span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <span class="chev"><Icon name="i-fwd" /></span>
+        </button>
+      {/snippet}
+      {#snippet usagePanel(hover = false)}
         {#if contextWindow || haFinestre}
-          <div class="divider"></div>
+          {#if !hover}<div class="divider"></div>{/if}
 
           <div class="usage">
             {#if contextWindow}
@@ -845,15 +990,42 @@
                 </div>
               {/if}
             {/each}
-            {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
+            {#if hover}
+              <!-- Hover: sotto l'utilizzo solo repo e branch, niente numeri flat -->
+              <div class="u-foot hover-foot">
+                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                {#if git?.branch}
+                  <span class="sep"></span>
+                  <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                    <Icon name="i-branch" />{git.branch}
+                  </span>
+                {/if}
+              </div>
+            {:else if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
               <div class="u-foot">
-                <span>
-                  {#if sessionWin?.resetsAt}resets {until(clock, sessionWin.resetsAt)}{/if}
-                  {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
-                  {#if weeklyWin?.resetsAt}{stamp(weeklyWin.resetsAt)}{/if}
+                <span class="g-foot">
+                  <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                  {#if git?.branch}
+                    <span class="sep"></span>
+                    <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                      <Icon name="i-branch" />{git.branch}
+                    </span>
+                  {/if}
                 </span>
                 {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
               </div>
+            {/if}
+          </div>
+        {/if}
+        {#if hover && !contextWindow && !haFinestre}
+          <!-- Hover senza barre: mostra comunque repo/branch in fondo -->
+          <div class="u-foot hover-foot" style="padding:4px 9px 8px">
+            <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+            {#if git?.branch}
+              <span class="sep"></span>
+              <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                <Icon name="i-branch" />{git.branch}
+              </span>
             {/if}
           </div>
         {/if}
@@ -1006,25 +1178,15 @@
             {/each}
           </div>
         {:else}
-          <!-- Il menu radice: dove si sta (cartella e ramo), cosa si può dare al
-               modello (file, modalità, strumenti, modello, quanto ragiona) e quanto
-               ne resta. -->
-          <div class="leadbox popup" bind:this={menuEl}>
-            <div class="pop-head">
-              <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
-              {#if git?.branch}
-                <span class="sep"></span>
-                <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
-                  <Icon name="i-branch" />{git.branch}
-                </span>
-              {/if}
-            </div>
+           <!-- Il menu radice: prima il modello corrente (blocco cliccabile → picker),
+                poi dove si sta (cartella e ramo), cosa si può dare al modello e quanto
+                ne resta. La riga «Model» vecchia sopra al Context è rimossa: questo
+                blocco è la nuova via. -->
+           <div class="leadbox popup" bind:this={menuEl}>
+             {@render modelTop()}
+             <div class="divider"></div>
 
-            <div class="divider"></div>
-
-            <!-- Spento, non nascosto: un modello che non legge allegati è un fatto da
-                 dire, e la voce che sparisce sembrerebbe un pezzo di STARK che manca. -->
-            <button class="pop-item" class:dis={!puoAllegare} disabled={!puoAllegare}
+             <button class="pop-item" class:dis={!puoAllegare} disabled={!puoAllegare}
               title={puoAllegare ? `Attach a file — ${nomiBrevi(tipi)}` : `${nomeModello} doesn't read attachments`}
               onclick={() => fileInput?.click()}>
               <span class="ico"><Icon name="i-file" /></span>
@@ -1047,7 +1209,6 @@
               MCP
               <span class="cur">{mcpLabel === 'none' ? '0' : mcpLabel} active <span class="chev"><Icon name="i-fwd" /></span></span>
             </button>
-            {@render modelRow()}
             {#if reasoningOpt}
               <button class="pop-item" disabled={!live}
                 onclick={() => { menu = 'reasoning' }}>
@@ -1073,11 +1234,13 @@
       <!-- L'anteprima al passaggio del mouse: solo prima di un clic — appena il
            menu vero si apre queste stesse righe sono già lì dentro, mostrarle due
            volte sarebbe un doppione — e solo con un mouse davvero (`hoverPreview`
-           non parte da tocco, vedi la sua definizione). -->
-      {#if hoverPreview && !aperto && !store.narrow && (modelOpt || contextWindow || haFinestre)}
+           non parte da tocco, vedi la sua definizione). Qui il modello si mostra
+           come **blocco** (scheda in testa al picker), non come riga cliccabile
+           «Model › Opus». -->
+      {#if hoverPreview && !aperto && !store.narrow && (currentCard || modelOpt || contextWindow || haFinestre)}
         <div class="leadbox popup preview">
-          {@render modelRow()}
-          {@render usagePanel()}
+          {@render modelBlock()}
+          {@render usagePanel(true)}
         </div>
       {/if}
 
@@ -1128,6 +1291,7 @@
           <button class="lead" title="Attachments and usage"
             onpointerenter={e => {
               peek()
+              void store.caricaCatalogo()
               // Solo il mouse: da tocco `pointerenter` precede il tap che apre il
               // menu vero comunque, e l'anteprima farebbe solo da lampo in mezzo.
               if (e.pointerType === 'mouse') hoverPreview = true
@@ -1410,6 +1574,57 @@
   .pk-empty { display: flex; align-items: center; gap: 7px; padding: 9px; color: var(--muted); font-size: 11.5px; }
   .pk-empty :global(svg.ic) { width: 13px; height: 13px; flex: none; }
   .pk-empty .sub-line { display: block; font-size: 10.5px; }
+
+  /* ── anteprima hover: blocco modello come in testa al picker (ModelPicker .pk-head/.pk-meta) ── */
+  .preview-head { display:flex; align-items:flex-start; gap:9px; padding:10px 11px 0; }
+  .preview-head.fallback { padding-bottom:8px; }
+  .preview-head .pk-avatar { width:32px; height:32px; flex:none; border-radius:9px; background:var(--surface-2);
+    border:1px solid var(--line-2); display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .preview-head .pk-avatar img { filter:var(--icon-f); }
+  .preview-head .pk-id { min-width:0; flex:1; }
+  .preview-head .pk-name { font-size:12.5px; font-weight:600; color:var(--ink); line-height:1.3;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .preview-head .pk-name .mult { font-weight:500; color:var(--muted); }
+  .preview-head .pk-path { display:flex; align-items:center; gap:5px; margin-top:2px;
+    font-family:var(--mono); font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; }
+  .preview-head .pk-path .arw { opacity:.6; flex:none; }
+  .preview-head .pk-caps { display:flex; gap:6px; color:var(--muted); flex:none; padding-top:2px; }
+  .preview-head .pk-caps :global(svg.ic) { width:13px; height:13px; }
+  .preview-head .pk-caps :global(svg.ic.off) { opacity:.32; }
+  .preview .pk-meta { display:flex; align-items:center; gap:7px; padding:8px 11px 9px; font-family:var(--sans); }
+  .preview .pk-meta :global(svg.ic) { width:10px; height:10px; }
+  .preview .pk-meta .cash { color:var(--muted); display:flex; }
+  .preview .pk-meta .unit { font-family:var(--sans); font-size:9px; color:var(--muted); }
+  .preview .pk-meta .price { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  .preview .pk-meta .price.free { color:var(--accent); }
+  .preview .pk-meta .ctx-lbl { margin-left:10px; font-size:8px; font-weight:600; letter-spacing:-0.02em; color:var(--muted); font-stretch:condensed; }
+  .preview .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  /* Hover: un solo separatore, da bordo a bordo (il popup ha padding 4px) */
+  .preview .pk-rule { margin:8px -4px 0; }
+  /* Footer hover con repo/branch, e footer espanso con repo/branch + flat a destra */
+  .u-foot.hover-foot { justify-content:flex-start; }
+  .u-foot .g-foot, .u-foot.hover-foot { display:flex; align-items:center; gap:7px; }
+  .u-foot .g { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:8.5px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .u-foot .g :global(svg.ic) { width:12px; height:12px; color:var(--muted); flex:none; }
+  .u-foot .sep { width:1px; height:11px; background:var(--line-2); flex:none; }
+  /* Seconda riga del blocco modello nell'espanso: stesso stile dell'hover ma senza .preview */
+  .model-top .pk-meta { display:flex; align-items:center; gap:7px; padding:6px 0 0; font-family:var(--sans); }
+  .model-top .pk-meta :global(svg.ic) { width:10px; height:10px; }
+  .model-top .pk-meta .cash { color:var(--muted); display:flex; }
+  .model-top .pk-meta .unit { font-family:var(--sans); font-size:9px; color:var(--muted); }
+  .model-top .pk-meta .price { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  .model-top .pk-meta .price.free { color:var(--accent); }
+  .model-top .pk-meta .ctx-lbl { margin-left:10px; font-size:8px; font-weight:600; letter-spacing:-0.02em; color:var(--muted); font-stretch:condensed; }
+  .model-top .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
+
+  /* Bottone modello in cima al menu espanso: lo stesso blocco dell'hover ma cliccabile */
+  .model-top { display:flex; align-items:center; gap:8px; width:100%; padding:8px 9px; border-radius:8px;
+    background:none; border:0; cursor:pointer; text-align:left; font:inherit; color:inherit; }
+  .model-top:hover:not(:disabled) { background:var(--surface-2); }
+  .model-top:disabled { opacity:.5; cursor:default; }
+  .model-top .model-top-main { flex:1; min-width:0; }
+  .model-top .chev { color:var(--muted); display:flex; flex:none; align-self:center; }
+  .model-top .chev :global(svg.ic) { width:12px; height:12px; }
 
   /* ── il pannello d'uso ────────────────────────────────────────────────────
      Tre righe invece di tre blocchi: etichetta, barra, percentuale, costo. La colonna

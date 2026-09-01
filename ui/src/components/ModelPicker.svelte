@@ -570,16 +570,15 @@
   .pk-caps :global(svg.ic){width:13px;height:13px}
   .pk-caps :global(svg.ic.off){opacity:.32}
 
-  /* La riga dei numeri del modello in uso: prezzo per milione e finestra. Mono e
-     tabulare, perché chi confronta due modelli confronta cifre. */
-  .pk-meta{display:flex;align-items:center;gap:7px;padding:8px 11px 9px}
-  .pk-meta :global(svg.ic){width:12px;height:12px}
-  .pk-meta .cash{color:var(--done);display:flex}
-  .pk-meta .unit{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
-  .pk-meta .price{font-family:var(--mono);font-size:11px;color:var(--ink);font-variant-numeric:tabular-nums}
+  /* Seconda riga: font classico, dollaro neutro, CONTEXT condensed */
+  .pk-meta{display:flex;align-items:center;gap:7px;padding:8px 11px 9px;font-family:var(--sans)}
+  .pk-meta :global(svg.ic){width:10px;height:10px}
+  .pk-meta .cash{color:var(--muted);display:flex}
+  .pk-meta .unit{font-family:var(--sans);font-size:9px;color:var(--muted)}
+  .pk-meta .price{font-family:var(--sans);font-size:10px;color:var(--ink)}
   .pk-meta .price.free{color:var(--accent)}
-  .pk-meta .ctx-lbl{margin-left:10px;font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--muted)}
-  .pk-meta .ctx-val{font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .pk-meta .ctx-lbl{margin-left:10px;font-size:8px;font-weight:600;letter-spacing:-0.02em;color:var(--muted);font-stretch:condensed}
+  .pk-meta .ctx-val{font-family:var(--sans);font-size:10px;color:var(--ink)}
   .pk-rule{height:1px;background:var(--line);flex:none}
 
   /* La riga di navigazione: indietro + titolo + conteggio, una riga sola. */
