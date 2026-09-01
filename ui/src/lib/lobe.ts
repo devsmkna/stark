@@ -184,3 +184,54 @@ export function getFamilyIconUrl(family: string): string | null {
   if (bestScore >= 0.5) return lobeUrl(best)
   return null
 }
+
+/** L'etichetta leggibile di una famiglia/provider ("OpenAI", "Hugging Face"), con la
+ *  mappa dei nomi che si scrivono in modo diverso dal loro id. Stavano nel picker dei
+ *  modelli e servivano anche alla scheda del modello: due copie dello stesso elenco
+ *  divergono alla prima correzione, quindi stanno qui, dove sta tutto il resto che
+ *  traduce un id di provider in una cosa che si mostra. */
+export function familyLabel(id: string): string {
+  const map: Record<string, string> = {
+    openai: 'OpenAI', anthropic: 'Anthropic', claude: 'Claude', gemini: 'Gemini', google: 'Google',
+    deepseek: 'DeepSeek', meta: 'Meta', mistral: 'Mistral', qwen: 'Qwen', cohere: 'Cohere',
+    perplexity: 'Perplexity', xai: 'xAI', groq: 'Groq', ollama: 'Ollama', deepmind: 'DeepMind',
+    openrouter: 'OpenRouter', zhipu: 'Zhipu', glm: 'GLM', minimax: 'MiniMax', moonshot: 'Moonshot',
+    kimi: 'Kimi', bytedance: 'ByteDance', tencentcloud: 'Tencent', baidu: 'Baidu', huawei: 'Huawei',
+    spark: 'Spark', nvidia: 'Nvidia', nemotron: 'Nemotron', gpt: 'GPT', llama: 'Llama',
+    grok: 'Grok', doubao: 'Doubao', huggingface: 'Hugging Face', stability: 'Stability',
+    other: 'Other'
+  }
+  return map[id] ?? id.charAt(0).toUpperCase() + id.slice(1)
+}
+
+/** Il provider da dire sotto il nome di un modello: il nome vero che l'agent dichiara
+ *  ("OpenCode Zen") se c'è, altrimenti quello dedotto dall'id ("baseten") con la sua
+ *  etichetta leggibile, altrimenti niente. Manca sul modello che non lo dichiara
+ *  (Claude Code ha un solo venditore, e non lo ripete). */
+export function providerLabelFor(model: { providerName?: string; id: string; resolved?: string }): string {
+  if (model.providerName) return model.providerName
+  const prov = getProviderForModel(model.resolved ?? model.id)
+  return prov ? familyLabel(prov) : ''
+}
+
+/** Quali tipologie di input il modello accetta — text / image / video / audio /
+ *  documents. `accepts` è l'elenco MIME del modello: vuoto = niente (solo testo),
+ *  assente = il ripiego immagini di `core/allegati.ts`. `text` è quasi sempre vero:
+ *  se puoi scrivere al modello, lo accetta. */
+export function inputTypesOf(model: { accepts?: string[] } | undefined): {
+  text: boolean; image: boolean; video: boolean; audio: boolean; docs: boolean
+} | null {
+  if (!model) return null
+  if (model.accepts !== undefined && model.accepts.length === 0) {
+    return { text: true, image: false, video: false, audio: false, docs: false }
+  }
+  const tipi = model.accepts ?? ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+  const has = (pref: string): boolean => tipi.some(t => t.startsWith(pref))
+  return {
+    text: true,
+    image: has('image/'),
+    video: has('video/'),
+    audio: has('audio/'),
+    docs: tipi.includes('application/pdf'),
+  }
+}

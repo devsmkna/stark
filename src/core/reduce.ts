@@ -235,6 +235,20 @@ export type SessionSnapshot = {
   notices: NoticeView[]
   usage: Usage
   cost: Cost
+  /**
+   * Quanto listino ha consumato la sessione **in tutta la sua vita**, in dollari
+   * nominali — la somma di ogni chiamata API passata di qui, non l'ultima lettura
+   * che sta in `cost`. Misurato sui journal (31 agosto 2026): `total_cost_usd`
+   * dell'SDK, nonostante il nome, **non è cumulativo di sessione** — dentro un
+   * turno i valori oscillano per peso della singola chiamata (0.0015, 0.0027,
+   * 0.0021…), quindi ogni `usage.updated` porta il costo di *quella* chiamata e
+   * il totale si costruisce sommandoli qui, nel riduttore: è l'unico che vede
+   * passare tutti gli eventi, e il replay li ri-somma identici al risveglio (§4).
+   * Resta zero dove il dato non c'è: i trascritti importati da Claude Code non
+   * portano costi (import.ts), e la UI nasconde la riga invece di disegnare uno
+   * zero che non vuole dire niente.
+   */
+  spentUsd: number
   quota?: QuotaView
   /**
    * Quanto hai consumato di ciascuna finestra del piano. Vuoto finché nessuno l'ha
@@ -276,7 +290,8 @@ function emptySnapshot(sessionId: string): SessionSnapshot {
     models: [], modes: [], options: [], todos: [], mcpServers: [],
     turns: [], files: [], shell: [], pendingPermissions: [], pendingQuestions: [], pendingPlans: [],
     blocked: [], notices: [], quotaWindows: [],
-    usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, lastSeq: 0, lastTs: 0,
+    usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, spentUsd: 0,
+    lastSeq: 0, lastTs: 0,
     stateSince: 0,
   }
 }
@@ -393,6 +408,17 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
         t.endedAt = e.ts
         if (p.detail) t.detail = p.detail
       }
+      // L'import OpenCode porta il costo del turno **solo qui**: gli import non
+      // passano per gli `usage.updated` degli step, quindi senza questa somma le
+      // chat importate resterebbero a zero dollari pur avendo il dato nel loro DB.
+      // Vale **solo** per OpenCode: il `turn.ended` di Claude Code live porta il
+      // costo dell'ultimo result del turno, già contato tra gli `usage.updated` —
+      // sommarlo lo conterebbe due volte. E il live OpenCode manda zero qui
+      // (translate.ts), quindi la somma non gli pesa. Se un giorno il live
+      // OpenCode iniziasse a mandare un costo vero su `turn.ended`, questa riga
+      // diventerebbe un doppio conteggio: la regola sta in piedi finché quello
+      // zero è vero — verificato sui journal, non dedotto dai tipi.
+      if (s.agent === 'opencode') s.spentUsd += p.cost.nominalUsd
       break
     }
     case 'step.started': { const t = turn(); if (t) t.steps++; break }
@@ -581,7 +607,11 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
       break
 
     case 'usage.updated':
-      s.usage = p.usage; s.cost = p.cost; break
+      s.usage = p.usage; s.cost = p.cost
+      // Ogni aggiornamento porta il costo della **singola** chiamata (Claude Code:
+      // un result dell'SDK; OpenCode: uno step) — vedi `spentUsd` qui sopra.
+      s.spentUsd += p.cost.nominalUsd
+      break
     case 'quota.updated':
       s.quota = {
         status: p.status, kind: p.kind, resetsAt: p.resetsAt, usingOverage: p.usingOverage,
