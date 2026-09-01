@@ -296,6 +296,15 @@
           <Icon name="i-gear" />
           <span class="mp-label">Settings</span>
         </button>
+        {#if store.aggiornamento?.installata}
+          <hr class="mp-sep" />
+          <!-- In sola lettura, di proposito: qui si mostra cosa gira, non si aggiorna
+               niente — l'azione ha già il suo posto nella banda in cima. -->
+          <div class="mp-item mp-static">
+            <span class="mp-label">Version</span>
+            <span class="mp-ver">{store.aggiornamento.installata}</span>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -644,6 +653,9 @@
   .mp-check { margin-left: auto; display: flex; color: var(--accent); }
   .mp-check svg.ic { width: 12px; height: 12px; color: var(--accent); }
   .mp-sep { margin: 4px 2px; border: 0; border-top: 1px solid var(--line); }
+  .mp-static { cursor: default; }
+  .mp-static:hover { background: none; }
+  .mp-ver { color: var(--muted); font-variant-numeric: tabular-nums; }
 
   /* Posizionamento del menu rispetto alla testata. */
   :global(.side) { position: relative; }

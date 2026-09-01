@@ -442,6 +442,14 @@
   let leadEl = $state<HTMLElement | null>(null)
   let menuEl = $state<HTMLElement | null>(null)
 
+  /** Il passaggio del mouse sul lead, prima ancora di un clic: mostra un'anteprima
+   *  di sola lettura — modello e quanto ne resta — con lo stesso `pop-item` e lo
+   *  stesso `.usage` del menu vero (§anteprimaConsumo qui sotto), non una copia.
+   *  Non conta da tocco: senza un mouse `pointerenter` o non parte o precede un tap
+   *  che aprirebbe comunque il menu vero un istante dopo — un lampo in più, non
+   *  un'informazione. */
+  let hoverPreview = $state(false)
+
   function chiudiMenu(): void {
     aperto = false
     menu = 'root'
@@ -764,6 +772,80 @@
 
   {#if live}
     <div class="composer-zone">
+      <!-- Le due righe che il menu vero e l'anteprima al passaggio del mouse
+           mostrano tali e quali: uno snippet ciascuna, non due copie della stessa
+           riga da tenere allineate a mano. -->
+      {#snippet modelRow()}
+        {#if modelOpt}
+          <button class="pop-item" class:dis={!modificabile('model')} disabled={!modificabile('model')}
+            title={modificabile('model') ? 'Model' : "This agent can't change its model from here"}
+            onclick={() => { aperto = true; menu = 'model' }}>
+            <span class="ico">
+              {#if modelloIcona}<img src={modelloIcona} alt="" width="15" height="15" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<span class="mdot"></span>{/if}
+            </span>
+            Model
+            <span class="cur">{nomeLeggibile} <span class="chev"><Icon name="i-fwd" /></span></span>
+          </button>
+        {/if}
+      {/snippet}
+      {#snippet usagePanel()}
+        {#if contextWindow || haFinestre}
+          <div class="divider"></div>
+
+          <div class="usage">
+            {#if contextWindow}
+              <div class="u-row" title={`${fmt(totalNow)} / ${fmt(contextWindow)} tokens`}>
+                <span class="u-lbl">Context</span>
+                <span class="u-bar"><span style="width:{Math.min(100, pct ?? 0)}%;background:{meterColour(pct ?? 0)}"></span></span>
+                <span class="u-pct" class:near={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
+                <!-- Il costo della chat: l'unico della colonna che esiste davvero
+                     (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero».
+                     Dove il costo non c'è lo span non si mette proprio: la barra
+                     (`flex:1`) si allunga fino in fondo a riempire lo spazio,
+                     invece di lasciare un buco bianco (chiesto dall'utente,
+                     1º settembre 2026). -->
+                {#if snap.spentUsd > 0}<span class="u-cost">{fmtUsd(snap.spentUsd)}</span>{/if}
+              </div>
+            {/if}
+            {#if sessionWin?.used !== undefined}
+              <div class="u-row" title="Session · 5 hours">
+                <span class="u-lbl">Session</span>
+                <span class="u-bar"><span style="width:{Math.min(100, sessionWin.used)}%;background:{meterColour(sessionWin.used)}"></span></span>
+                <span class="u-pct" class:near={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
+              </div>
+            {/if}
+            {#if weeklyWin?.used !== undefined}
+              <div class="u-row" title="Weekly">
+                <span class="u-lbl">Week</span>
+                <span class="u-bar"><span style="width:{Math.min(100, weeklyWin.used)}%;background:{meterColour(weeklyWin.used)}"></span></span>
+                <span class="u-pct" class:near={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
+              </div>
+            {/if}
+            {#each weeklyScoped as w (w.scope)}
+              {#if w.used !== undefined}
+                <div class="u-row" title="Weekly · {w.scope}">
+                  <span class="u-lbl">{w.scope}</span>
+                  <span class="u-bar"><span style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></span></span>
+                  <span class="u-pct" class:near={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
+                </div>
+              {/if}
+            {/each}
+            {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
+              <div class="u-foot">
+                <span>
+                  {#if sessionWin?.resetsAt}resets {until(clock, sessionWin.resetsAt)}{/if}
+                  {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
+                  {#if weeklyWin?.resetsAt}{stamp(weeklyWin.resetsAt)}{/if}
+                </span>
+                {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+
       {#if aperto}
         {#if menu === 'model'}
           <!-- Il selettore dei modelli: box `.picker` del DS (440px), con la conferma
@@ -952,19 +1034,7 @@
               MCP
               <span class="cur">{mcpLabel === 'none' ? '0' : mcpLabel} active <span class="chev"><Icon name="i-fwd" /></span></span>
             </button>
-            {#if modelOpt}
-              <button class="pop-item" class:dis={!modificabile('model')} disabled={!modificabile('model')}
-                title={modificabile('model') ? 'Model' : "This agent can't change its model from here"}
-                onclick={() => { menu = 'model' }}>
-                <span class="ico">
-                  {#if modelloIcona}<img src={modelloIcona} alt="" width="15" height="15" loading="lazy"
-                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
-                  {:else}<span class="mdot"></span>{/if}
-                </span>
-                Model
-                <span class="cur">{nomeLeggibile} <span class="chev"><Icon name="i-fwd" /></span></span>
-              </button>
-            {/if}
+            {@render modelRow()}
             {#if reasoningOpt}
               <button class="pop-item" disabled={!live}
                 onclick={() => { menu = 'reasoning' }}>
@@ -982,61 +1052,20 @@
               </button>
             {/if}
 
-            {#if contextWindow || haFinestre}
-              <div class="divider"></div>
-
-              <div class="usage">
-                {#if contextWindow}
-                  <div class="u-row" title={`${fmt(totalNow)} / ${fmt(contextWindow)} tokens`}>
-                    <span class="u-lbl">Context</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, pct ?? 0)}%;background:{meterColour(pct ?? 0)}"></span></span>
-                    <span class="u-pct" class:near={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
-                    <!-- Il costo della chat: l'unico della colonna che esiste davvero
-                         (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero».
-                         Dove il costo non c'è lo span non si mette proprio: la barra
-                         (`flex:1`) si allunga fino in fondo a riempire lo spazio,
-                         invece di lasciare un buco bianco (chiesto dall'utente,
-                         1º settembre 2026). -->
-                    {#if snap.spentUsd > 0}<span class="u-cost">{fmtUsd(snap.spentUsd)}</span>{/if}
-                  </div>
-                {/if}
-                {#if sessionWin?.used !== undefined}
-                  <div class="u-row" title="Session · 5 hours">
-                    <span class="u-lbl">Session</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, sessionWin.used)}%;background:{meterColour(sessionWin.used)}"></span></span>
-                    <span class="u-pct" class:near={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
-                  </div>
-                {/if}
-                {#if weeklyWin?.used !== undefined}
-                  <div class="u-row" title="Weekly">
-                    <span class="u-lbl">Week</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, weeklyWin.used)}%;background:{meterColour(weeklyWin.used)}"></span></span>
-                    <span class="u-pct" class:near={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
-                  </div>
-                {/if}
-                {#each weeklyScoped as w (w.scope)}
-                  {#if w.used !== undefined}
-                    <div class="u-row" title="Weekly · {w.scope}">
-                      <span class="u-lbl">{w.scope}</span>
-                      <span class="u-bar"><span style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></span></span>
-                      <span class="u-pct" class:near={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
-                    </div>
-                  {/if}
-                {/each}
-                {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
-                  <div class="u-foot">
-                    <span>
-                      {#if sessionWin?.resetsAt}resets {until(clock, sessionWin.resetsAt)}{/if}
-                      {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
-                      {#if weeklyWin?.resetsAt}{stamp(weeklyWin.resetsAt)}{/if}
-                    </span>
-                    {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
-                  </div>
-                {/if}
-              </div>
-            {/if}
+            {@render usagePanel()}
           </div>
         {/if}
+      {/if}
+
+      <!-- L'anteprima al passaggio del mouse: solo prima di un clic — appena il
+           menu vero si apre queste stesse righe sono già lì dentro, mostrarle due
+           volte sarebbe un doppione — e solo con un mouse davvero (`hoverPreview`
+           non parte da tocco, vedi la sua definizione). -->
+      {#if hoverPreview && !aperto && !store.narrow && (modelOpt || contextWindow || haFinestre)}
+        <div class="leadbox popup preview">
+          {@render modelRow()}
+          {@render usagePanel()}
+        </div>
       {/if}
 
       {#if allegati.length > 0}
@@ -1083,7 +1112,14 @@
              attorno al bottone che la apre. Ambra e rosso alle soglie di sempre. -->
         <div class="lead-wrap" class:open={aperto}
           style="--ctx:{pct ?? 0};--ring:{pct !== null ? meterColour(pct) : 'var(--accent)'}">
-          <button class="lead" title="Attachments and usage" onpointerenter={peek}
+          <button class="lead" title="Attachments and usage"
+            onpointerenter={e => {
+              peek()
+              // Solo il mouse: da tocco `pointerenter` precede il tap che apre il
+              // menu vero comunque, e l'anteprima farebbe solo da lampo in mezzo.
+              if (e.pointerType === 'mouse') hoverPreview = true
+            }}
+            onpointerleave={() => { hoverPreview = false }}
             onclick={chooseMenu} aria-label="Attachments and usage">
             <Icon name="i-plus" class={aperto ? 'rot' : ''} />
           </button>

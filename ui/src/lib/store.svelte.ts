@@ -15,7 +15,7 @@ import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
   type AgentModels, type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
-  type SessionRow, type Settings, type StatoAggiornamento,
+  type SessionRow, type Settings, type StatoAggiornamento, type SystemInfo,
 } from './api.ts'
 import { Pane } from './pane.svelte.ts'
 import {
@@ -277,10 +277,13 @@ export class Store {
 
   // ─── aggiornamenti ─────────────────────────────────────────────────────────
   //
-  // Il controllo l'ha già fatto il daemon accendendosi: qui si legge il risultato una
-  // volta sola, all'avvio della pagina. Ripeterlo a intervalli non servirebbe — la
-  // risposta non cambia finché il daemon non riparte, e a farlo ripartire è proprio
-  // l'aggiornamento.
+  // Il daemon ricontrolla da solo ogni tre ore (`daemon/aggiornamenti.ts`): qui non
+  // basta più leggerlo una volta sola all'avvio della pagina, perché una scheda tenuta
+  // aperta per ore non se ne accorgerebbe mai. Si rilegge quindi a intervalli — larghi,
+  // perché la risposta cambia raramente — e a ogni riconnessione del flusso
+  // dell'elenco: è il momento in cui un `stark update` lanciato da un altro terminale,
+  // che riavvia il daemon senza passare da questa scheda, diventa visibile senza dover
+  // ricaricare a mano.
   /** `null` finché non si è chiesto, o se il daemon non ha risposto. */
   aggiornamento = $state<StatoAggiornamento | null>(null)
   /** Il banner si può chiudere: chi non vuole aggiornare adesso non deve portarselo
@@ -367,14 +370,13 @@ export class Store {
     // Servono subito: da qui nascono i colori dei progetti e il silenzio per progetto,
     // che si vedono nella barra laterale prima ancora che si apra una chat.
     void this.loadSettings()
-    // Una lettura sola, e mai bloccante: se il daemon non risponde su questa rotta non
-    // succede niente: nessun banner, che è la risposta giusta quando non si sa.
-    void this.api.update().then(u => {
-      this.aggiornamento = u
-      try {
-        this.aggiornamentoChiuso = localStorage.getItem('stark.update.dismissed') === u.ultima
-      } catch { /* navigazione privata: il banner resta, ed è il male minore */ }
-    }).catch(() => { /* daemon vecchio senza questa rotta, o rete: nessun banner */ })
+    void this.loadProfiles()
+    void this.#checkUpdate()
+    // Larghissimo di proposito: il daemon stesso ricontrolla ogni tre ore, quindi
+    // chiederlo più spesso di così non farebbe comparire il banner prima — servirebbe
+    // solo a scoprire con qualche minuto di anticipo un giro che il daemon ha già fatto.
+    this.#updateTimer = setInterval(() => void this.#checkUpdate(), 30 * 60 * 1000)
+    let primaVoltaViva = true
     this.#stopList = this.api.sessionsStream(
       rows => {
         this.#ring(rows)
@@ -405,9 +407,32 @@ export class Store {
         // Un elenco che non arriva è l'unico guasto che vale la pena gridare: senza
         // di quello non c'è niente da guardare.
         if (s === 'lost') this.fatal = 'the daemon is not answering'
-        else if (s === 'live') this.fatal = null
+        else if (s === 'live') {
+          this.fatal = null
+          // La **prima** volta che il flusso è vivo non è una riconnessione: è
+          // l'apertura della pagina, che ha già chiesto l'aggiornamento qui sopra.
+          // Le volte dopo sì — ed è il momento in cui un `stark update` lanciato da un
+          // altro terminale, che il daemon lo riavvia senza passare da questa scheda,
+          // diventa visibile senza dover ricaricare a mano.
+          if (primaVoltaViva) primaVoltaViva = false
+          else void this.#checkUpdate()
+        }
       },
     )
+  }
+
+  #updateTimer: ReturnType<typeof setInterval> | null = null
+
+  /** Una lettura sola, e mai bloccante: se il daemon non risponde su questa rotta non
+   *  succede niente — nessun banner, che è la risposta giusta quando non si sa. */
+  async #checkUpdate(): Promise<void> {
+    try {
+      const u = await this.api.update()
+      this.aggiornamento = u
+      try {
+        this.aggiornamentoChiuso = localStorage.getItem('stark.update.dismissed') === u.ultima
+      } catch { /* navigazione privata: il banner resta, ed è il male minore */ }
+    } catch { /* daemon vecchio senza questa rotta, o rete: nessun banner */ }
   }
 
   /**
@@ -510,6 +535,22 @@ export class Store {
       ...s,
       projects: { ...s.projects, [cwd]: { ...s.projects[cwd], ...patch } },
     })
+  }
+
+  /** I profili Claude Code di questa macchina (le cartelle `~/.claude*`), per il
+   *  menu contestuale della barra laterale e per Settings — condividono la stessa
+   *  cache invece di chiedere `/api/system` ciascuno per conto proprio. `null` finché
+   *  non si è chiesto: un elenco vuoto e «non ancora chiesto» sono due fatti diversi,
+   *  e confonderli mostrerebbe per un istante «un solo profilo» dove ce n'è più di uno. */
+  profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
+
+  /** Si chiede una volta sola per caricamento di pagina: i profili non cambiano mentre
+   *  STARK è aperto (o se cambiano — un `~/.claude-*` creato a mano — non vale la pena
+   *  di un giro a intervalli per una cosa così rara). */
+  async loadProfiles(): Promise<void> {
+    if (this.profiles) return
+    try { this.profiles = (await this.api.system()).agent.profiles }
+    catch { this.profiles = [] }
   }
 
   /**
@@ -1328,5 +1369,6 @@ export class Store {
     for (const pane of this.panes.values()) pane.close()
     this.helper?.close()
     this.#stopList?.()
+    if (this.#updateTimer) clearInterval(this.#updateTimer)
   }
 }

@@ -34,10 +34,11 @@ solo che sia più alto.
 3. Il bottone fa esattamente `stark update`: si va sul tag, `npm install`, si ricompila
    la UI, si riscrive il lanciatore, e il daemon riparte.
 
-Il controllo lo fa **il daemon quando si accende**, non la pagina a intervalli. La
-conseguenza va saputa: un daemon lasciato acceso per una settimana non si accorge di una
-release uscita nel frattempo. Va bene perché aggiornare riavvia — quindi ogni
-aggiornamento rimette in moto il controllo — ma è il limite di questa scelta.
+Il controllo lo fa **il daemon**, all'accensione e poi ogni tre ore finché resta acceso
+(`daemon/aggiornamenti.ts`) — non la pagina: quella rilegge il risultato una volta
+all'apertura e di nuovo ogni volta che si riconnette dopo un'interruzione (persa la
+connessione e tornata viva), che è il momento in cui un riavvio fatto da un altro
+terminale diventa visibile senza dover ricaricare a mano.
 
 ## Le regole, e perché
 
