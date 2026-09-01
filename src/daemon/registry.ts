@@ -16,7 +16,7 @@ import type {
 import { activity, type Activity } from '../core/activity.ts'
 import { Journal, MemoryJournal, RawLog, type EventSink } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
-import { promptText } from '../core/events.ts'
+import { MODEL_VERSION, promptText } from '../core/events.ts'
 import { DA_ESTENSIONE, ESTENSIONE } from '../core/allegati.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { statsFrom, type Periodo, type Stats } from '../core/stats.ts'
@@ -134,11 +134,34 @@ type Live = {
   id: string
   adapter: AgentSession
   journal: EventSink
+  /** Il log nativo di diagnosi. Tiene un fd aperto: chi ritira la sessione lo chiude. */
+  raw: RawLog | null
   /** Non sta su disco: va tenuta fuori da elenco, ricerca e notifiche. */
   ephemeral: boolean
   snapshot: SessionSnapshot
   watchers: Set<(e: CanonicalEvent) => void>
   pending: Map<string, Pending>
+}
+
+/**
+ * I rifiuti d'ufficio per tutto ciò che un turno morto lascia in attesa.
+ *
+ * Un turno finito per Stop, errore o guardiano non risponderà mai più a niente: le card
+ * di permesso, domanda e piano rimaste in `pending*` sarebbero il «resta appesa per
+ * sempre» che il fix del 30 agosto aveva tolto — ma solo dentro l'adapter OpenCode.
+ * Questa è la stessa regola messa nel posto che vale per **qualunque** adapter, presente
+ * e futuro. Funzione pura, esportata per la prova offline: da uno snapshot agli eventi
+ * di rifiuto, senza toccare niente.
+ */
+export function rifiutiOrfani(s: SessionSnapshot): Payload[] {
+  return [
+    ...s.pendingPermissions.map(x =>
+      ({ k: 'permission.replied', requestId: x.requestId, decision: 'reject' } as const)),
+    ...s.pendingQuestions.map(x =>
+      ({ k: 'question.rejected', requestId: x.requestId } as const)),
+    ...s.pendingPlans.map(x =>
+      ({ k: 'plan.replied', requestId: x.requestId, decision: 'rejected' } as const)),
+  ]
 }
 
 /** Quanto pesa una conversazione: il journal, il file grezzo e i suoi allegati. */
@@ -352,7 +375,13 @@ export class Registry {
     const watchers = new Set<(e: CanonicalEvent) => void>()
     const startFrom = journal.lastSeq
 
-    const entry: Live = { id, adapter: null as never, journal, ephemeral: effimera, snapshot, watchers, pending }
+    const entry: Live = { id, adapter: null as never, journal, raw, ephemeral: effimera, snapshot, watchers, pending }
+
+    // La bandierina dell'errore fatale: si alza su `session.error fatal` e fa ritirare
+    // la sessione quando arriva il `closed` che lo segue. NON si ritira sul `closed`
+    // nudo: il sonno emette `closed` e POI `session.slept`, e ritirare lì chiuderebbe
+    // il journal sotto una riga ancora in volo.
+    let fatale = false
 
     // Risvegliare deve restituire la chat com'era, strumenti compresi: una sessione
     // che si riaddormenta senza i suoi server MCP si risveglia sembrando rotta, e
@@ -419,9 +448,16 @@ export class Registry {
       // in JSON ogni messaggio nativo per poi buttarlo via.
       ...(raw ? { onRaw: (m: unknown) => raw.write(JSON.stringify(m)) } : {}),
       onPayload: p => {
-        const e = journal.append(p)      // prima il disco
-        applyTo(snapshot, e)
-        for (const w of watchers) w(e)   // poi chi guarda
+        this.applica(entry, p)           // prima il disco, poi chi guarda
+        // Un turno morto (Stop, errore, guardiano) non deve lasciare card appese:
+        // ciò che aspettava una risposta si chiude d'ufficio, su QUALUNQUE adapter.
+        // Su OpenCode l'abbandono locale corre prima e questo trova già vuoto.
+        if (p.k === 'turn.ended' && p.reason !== 'completed') this.chiudiOrfani(entry)
+        if (p.k === 'session.error' && p.fatal) fatale = true
+        // Il loop dell'adapter è finito male: senza questo la sessione resterebbe
+        // nella mappa delle vive per sempre — `live:true` nell'elenco, e ogni prompt
+        // successivo in una coda che nessuno consuma più (la 61f480c1 del 1 settembre).
+        if (fatale && p.k === 'session.state' && p.state === 'closed') this.ritiraMorta(id)
         this.bump()                      // e infine chi guarda l'elenco
       },
       // Una richiesta resta appesa finché l'utente non risponde, e va bene così: la
@@ -457,6 +493,7 @@ export class Registry {
       // fa finire, poi si chiude.
       try { await adapter.close() } catch { /* stava già morendo */ }
       journal.close()
+      raw?.close()
 
       // Un'apertura fallita non deve lasciare una conversazione che non è mai
       // esistita. `session.created` è l'unico evento che porta il `cwd`: se non è mai
@@ -943,6 +980,62 @@ export class Registry {
    * parte ad ascoltare), ma libera la UI da una richiesta morta. `rifiuto` perché è il
    * verso sicuro — non si può concedere un permesso che nessuno controllerà mai.
    */
+  /**
+   * Append indistruttibile: la riga si prova a scrivere, e se il disco la rifiuta
+   * (ENOSPC, journal già chiuso) lo stato in memoria e chi guarda restano veri lo
+   * stesso — l'evento si fabbrica con un `seq` che continua, e il guasto va nel log
+   * del daemon. Raccontarlo nel journal sarebbe chiedere al disco pieno di dire che è
+   * pieno: è il circolo che ha ucciso la sessione 61f480c1 (1 settembre 2026), dove
+   * l'eccezione dell'append risaliva dentro `emit()` e il rimedio del catch era…
+   * emettere di nuovo.
+   */
+  private applica(l: Live, p: Payload): void {
+    let e: CanonicalEvent
+    try {
+      e = l.journal.append(p)
+    } catch (err) {
+      console.error(`journal non scrivibile (${l.id}): ${String((err as Error)?.message ?? err)}`)
+      e = { v: MODEL_VERSION, seq: l.snapshot.lastSeq + 1, ts: Date.now(), sessionId: l.id, payload: p }
+    }
+    applyTo(l.snapshot, e)
+    for (const w of l.watchers) w(e)
+  }
+
+  /**
+   * Chiude d'ufficio ciò che un turno morto lascia in attesa. Vedi `rifiutiOrfani`.
+   *
+   * Le `Promise` nella mappa non si risolvono — non c'è più nessuno dall'altra parte
+   * ad ascoltare la risposta, ed è la stessa scelta di `scartaOrfano` qui sotto. A
+   * contare è che il journal e la UI dicano il vero, e che la mappa non tenga per
+   * sempre richieste a cui nessuno potrà più rispondere.
+   */
+  private chiudiOrfani(l: Live): void {
+    for (const p of rifiutiOrfani(l.snapshot)) {
+      l.pending.delete((p as { requestId: string }).requestId)
+      this.applica(l, p)
+    }
+  }
+
+  /**
+   * Ritira una sessione il cui loop è morto da solo (errore fatale, server sparito).
+   *
+   * Fuori dallo stack dell'adapter (`setTimeout(0)`): quando il `closed` arriva qui
+   * l'adapter sta ancora finendo di emettere, e chiudergli il journal sotto i piedi
+   * rimetterebbe il circolo di `applica`. `close()` prima del `retire()` non è
+   * cerimonia: su OpenCode è ciò che rilascia il refcount del server condiviso
+   * (`lascia()`), senza cui un `opencode serve` resterebbe vivo per sempre.
+   */
+  private ritiraMorta(id: string): void {
+    setTimeout(() => {
+      void (async () => {
+        const l = this.live.get(id)
+        if (!l) return
+        try { await l.adapter.close() } catch { /* già morto */ }
+        this.retire(id)
+      })()
+    }, 0)
+  }
+
   private scartaOrfano(l: Live, requestId: string, rifiuto: Payload): boolean {
     const orfano = l.snapshot.pendingPermissions.some(x => x.requestId === requestId)
       || l.snapshot.pendingQuestions.some(x => x.requestId === requestId)
@@ -1193,6 +1286,7 @@ export class Registry {
     const l = this.live.get(id)
     if (!l) return
     l.journal.close()
+    l.raw?.close()
     l.watchers.clear()
     this.live.delete(id)
     this.bump()

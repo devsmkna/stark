@@ -934,11 +934,27 @@ async function route(
 
     send(res, 404, { error: 'not found' })
   } catch (e) {
-    send(res, 500, { error: String((e as Error).message ?? e) })
+    const msg = String((e as Error).message ?? e)
+    // Un corpo oltre il tetto non è un guasto del daemon: è la richiesta a essere
+    // troppo grande, e il codice che lo dice esiste apposta.
+    send(res, msg === 'corpo troppo grande' ? 413 : 500, { error: msg })
   }
 }
 
 // ─── flusso degli eventi ────────────────────────────────────────────────────
+
+/**
+ * Un evento si serializza UNA volta, chiunque stia guardando: due pannelli sulla
+ * stessa chat erano due `JSON.stringify` per ogni delta di testo — lavoro identico
+ * fatto due volte sul percorso più caldo che c'è. La `WeakMap` muore con gli eventi:
+ * niente da ripulire.
+ */
+const serializzati = new WeakMap<object, string>()
+function jsonDi(e: object): string {
+  let s = serializzati.get(e)
+  if (s === undefined) { s = JSON.stringify(e); serializzati.set(e, s) }
+  return s
+}
 
 function stream(
   req: IncomingMessage, res: ServerResponse, registry: Registry, id: string, from: number,
@@ -955,7 +971,7 @@ function stream(
   const unsubscribe = registry.subscribe(id, from, e => {
     // `id:` è il numero di sequenza: se la connessione cade, il client sa da dove
     // ripartire senza rileggere tutto e senza saltare niente.
-    res.write(`id: ${e.seq}\nevent: canonical\ndata: ${JSON.stringify(e)}\n\n`)
+    res.write(`id: ${e.seq}\nevent: canonical\ndata: ${jsonDi(e)}\n\n`)
   })
 
   // Un proxy o un firewall di mezzo chiude le connessioni mute. Il commento periodico

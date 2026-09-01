@@ -84,7 +84,9 @@ export class ClaudeCodeAdapter implements AgentSession {
   private created = false
   private loop: Promise<void> | null = null
   private pendingTurn: { turnId: string; parts: PromptPart[] } | null = null
-  private turnEnd: (() => void) | null = null
+  /** Chi aspetta la fine del turno (`settled`). Una lista, non un resolver solo: due
+   *  waiter in fila si sovrascrivevano, e il primo non si svegliava più. */
+  private turnEnd: Array<() => void> = []
 
   constructor(opts: AdapterOptions) { this.opts = opts }
 
@@ -568,7 +570,14 @@ export class ClaudeCodeAdapter implements AgentSession {
    *  chiama sa quanti prompt ha mandato, e aspettarne uno alla volta è ciò che serve
    *  a chi guida la sessione da uno script. */
   async settled(): Promise<void> {
-    await new Promise<void>(res => { this.turnEnd = res })
+    await new Promise<void>(res => { this.turnEnd.push(res) })
+  }
+
+  /** Sveglia tutti quelli in attesa della fine del turno. */
+  private sveglia(): void {
+    const chi = this.turnEnd
+    this.turnEnd = []
+    for (const f of chi) f()
   }
 
   /**
@@ -727,7 +736,7 @@ export class ClaudeCodeAdapter implements AgentSession {
           if (p.k === 'turn.ended') {
             finito = true
             this.fermato = false
-            this.turnEnd?.(); this.turnEnd = null
+            this.sveglia()
             // Dopo, non prima: il turno che si è appena chiuso ha consumato quota e
             // contesto, e chiederlo adesso è l'unico modo perché i numeri comprendano
             // anche lui.
@@ -741,10 +750,27 @@ export class ClaudeCodeAdapter implements AgentSession {
         if (finito) this.next()
       }
     } catch (e) {
-      this.emit({ k: 'session.error', message: String((e as Error).message ?? e), fatal: true })
-      this.turnEnd?.()
-      this.turnEnd = null
+      const msg = String((e as Error).message ?? e)
+      this.emit({ k: 'session.error', message: msg, fatal: true })
+      // Il turno aperto si chiude QUI, perché nessun `result` arriverà più a farlo:
+      // senza questa riga il journal restava con un turno aperto per sempre, e alla
+      // rilettura la chat diceva «working» in eterno (la 61f480c1 del 1 settembre).
+      // È la stessa regola che l'adapter OpenCode applica su ogni via d'uscita.
+      const turnId = this.tr.openTurnId
+      if (turnId) {
+        this.emit({
+          k: 'turn.ended', turnId, reason: 'error',
+          usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, detail: msg,
+        })
+      }
+      // E la fila non parte più: dichiararla finita adesso, non lasciarla «queued» per
+      // sempre — stessa ragione di `close()`.
+      this.svuota()
+      this.fermato = false
     }
+    // Anche sull'uscita normale: un `settled()` in attesa mentre la sessione si chiude
+    // senza un ultimo `turn.ended` resterebbe appeso per sempre.
+    this.sveglia()
     this.emit({ k: 'session.state', state: 'closed' })
   }
 
