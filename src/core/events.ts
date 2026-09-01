@@ -180,6 +180,31 @@ export type ModelChoice = {
    *  sceglie non sa quanto paga. Assente su agent che non lo dichiarano (Claude Code
    *  ha un provider solo) e su journal scritti prima del campo. */
   providerName?: string
+  /** Il modello ragiona prima di rispondere. Un **fatto del modello**, misurato e
+   *  non dedotto: Claude Code lo dichiara in `supportsAdaptiveThinking` (1º settembre
+   *  2026, handshake 2.1.241: vero su Opus/Sonnet/Fable, assente su Haiku), OpenCode
+   *  in `capabilities.reasoning` (misurato: vero su tutti i 105 modelli di questa
+   *  macchina). Assente = non dichiarato, e la UI non ne deduce niente.
+   *
+   *  Su Claude Code il toggle è vivo: `alwaysThinkingEnabled` (Settings) si cambia a
+   *  caldo con `applyFlagSettings`. Su OpenCode è un fatto da leggere, non un inter-
+   *  rupttore: il prompt di sessione non accetta opzioni per giro (misurato nei tipi),
+   *  quindi qui non c'è una voce da dichiarare — il dato viaggia, la scelta no. */
+  reasoning?: boolean
+  /** I livelli di effort che **questo modello** accetta, come li dichiara l'agent.
+   *
+   *  Misurato 1º settembre 2026: l'handshake di Claude Code porta
+   *  `supportedEffortLevels` per modello (low/medium/high/xhigh/max su Opus, Sonnet,
+   *  Fable; niente su Haiku), e il livello si cambia a caldo con
+   *  `applyFlagSettings({ effortLevel })` — che accetta anche 'max', session-scoped.
+   *  OpenCode non porta niente: le `options` dei suoi modelli sono vuote e il prompt
+   *  non accetta parametri, quindi qui non c'è niente da dichiarare.
+   *
+   *  Assente = il modello non li supporta, o l'agent non li espone: la voce 'effort'
+   *  semplicemente non compare nel menu. Il CLI può comunque **retrocedere in
+   *  silenzio** un livello oltre il supporto del modello — la scelta resta possibile,
+   *  il risultato lo dice lui. */
+  effortLevels?: string[]
   /** La famiglia del modello (es. "claude-opus", "kimi-k2", "glm"). La dichiara
    *  l'agent quando lo sa (OpenCode la porta nel campo `family`); assente altrimenti.
    *  La UI la usa per raggruppare, ripiegando su `getProviderForModel` quando manca. */
@@ -389,6 +414,16 @@ export type Payload =
    * dichiara `'mode'`.
    */
   | { k: 'session.option'; id: string; value: string }
+  /**
+   * L'elenco delle scelte dichiarate si **rimpiazza**: le scelte di una voce dipendono
+   * da un'altra — su Claude Code i livelli di effort dipendono dal modello in uso
+   * (misurato: `supportedEffortLevels` per modello nell'handshake), quindi cambiare
+   * modello cambia cosa l'utente può scegliere. È un rimpiazzo, non un'aggiunta:
+   * stessa forma di `session.commands`, che ha lo stesso problema e la stessa cura.
+   * Il §4 vuole il rimpiazzo completo perché un elenco che si fonde col precedente
+   * lascerebbe voci vecchie che non esistono più.
+   */
+  | { k: 'session.options'; options: SessionOption[] }
   | { k: 'session.model'; model: string }
   | { k: 'session.mode'; mode: PermissionMode }
   // La lista dei tool non è nota alla nascita della sessione: arriva col primo turno.

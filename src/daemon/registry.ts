@@ -56,6 +56,11 @@ export type OpenSpec = {
   /** I server MCP da accendere. Omesso: quelli che questa conversazione aveva già. */
   mcp?: string[]
   /**
+   * Valori di opzioni extra (reasoning, effort) imposti da chi apre. Omesso: il
+   * registro li rilegge dallo snapshot del journal — stessa ragione di `model`.
+   */
+  extraOptions?: Record<string, string>
+  /**
    * Il profilo da usare — per Claude Code una `CLAUDE_CONFIG_DIR` diversa da quella di
    * default del daemon, per un altro agent qualcos'altro. Da qui in su è una stringa
    * **opaca**: si passa, non si interpreta. Omesso: resta quello di default.
@@ -206,6 +211,21 @@ export const refDaRiprendere = (
   resumeRef: string | undefined,
 ): { ref: string; fork?: boolean } | undefined =>
   resume && !resume.fork && resumeRef ? { ...resume, ref: resumeRef } : resume
+
+/**
+ * I valori delle opzioni extra che lo snapshot porta (`reasoning`, `effort`).
+ * Solo quelle: un id che il registro non conosce non si inoltra — il campo è
+ * della coppia adapter/riduttore, e passare tutto alla cieca sarebbe chiedere a
+ * chi spawna di interpretare vocabolario che non è suo.
+ */
+export const opzioniDaSnapshot = (options: { id: string; value: string }[]):
+  Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const o of options) {
+    if (o.id === 'reasoning' || o.id === 'effort') out[o.id] = o.value
+  }
+  return out
+}
 
 export class Registry {
   private readonly live = new Map<string, Live>()
@@ -366,6 +386,12 @@ export class Registry {
     // Sonnet, senza che niente lo dicesse, perché `snapshot.model` è vuoto solo su una
     // chat che non è mai partita: qui sotto è già popolato da `session.created`.
     const model = spec.model ?? snapshot.model ?? this.defaults.model
+    // Le scelte nuove (reasoning, effort) tornano com'erano, stessa ragione di
+    // `model` e `mcp`: il CLI non le conserva fra un risveglio e l'altro — su
+    // Claude Code sono del layer flag, che non si persiste — e a ripristinarle è
+    // chi rilegge il journal, cioè qui. Solo se lo snapshot le porta: su un journal
+    // scritto prima non c'è niente, e i default valgono.
+    const extra = spec.extraOptions ?? opzioniDaSnapshot(snapshot.options)
 
     // Terzo campo che il risveglio deve restituire com'era, e il più subdolo dei tre:
     // **quale conversazione** riprendere. `spec.resume.ref` fa due mestieri — dà il
@@ -386,6 +412,7 @@ export class Registry {
     const adapter = backendFor(spec.agent ?? DEFAULT_AGENT).open({
       cwd: spec.cwd,
       model,
+      ...(Object.keys(extra).length ? { extraOptions: extra } : {}),
       // La modalità di partenza è un'**impostazione**, non un valore cablato: era
       // l'unica differenza strutturale fra STARK e la CLI nuda (che parte in `default`,
       // misurato) e non c'era modo di toccarla. Chi apre una chat con una modalità

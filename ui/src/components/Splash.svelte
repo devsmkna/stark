@@ -26,20 +26,23 @@
 
   /* Il "glow": il logo è un vettore in `currentColor`, quindi il bagliore lo disegna
      un `drop-shadow` sul contorno — stessa immagine, di giorno e di notte, con
-     l'accento del tema. Il respiro alterna l'intensità, non la geometria. */
+     l'accento del tema. Neon, non nuvola: raggi corti e concentrici che restano
+     attaccati ai tratti — con blur da 30-48px le ombre delle cinque lettere si
+     fondevano in un rettangolo pieno dietro la parola (screenshot Chromium, e
+     segnalato dall'utente, 1º settembre 2026). Il respiro muove solo il filtro:
+     le lettere restano accese. */
   .mark { animation: respiro 2s ease-in-out infinite; }
   .mark :global(svg) { display: block; height: clamp(34px, 8vw, 50px); width: auto; }
 
   @keyframes respiro {
     0%, 100% {
-      opacity: .62;
-      filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 45%, transparent))
-              drop-shadow(0 0 30px color-mix(in srgb, var(--accent) 22%, transparent));
+      filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent) 55%, transparent))
+              drop-shadow(0 0 7px color-mix(in srgb, var(--accent) 32%, transparent));
     }
     50% {
-      opacity: 1;
-      filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 62%, transparent))
-              drop-shadow(0 0 48px color-mix(in srgb, var(--accent) 32%, transparent));
+      filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 85%, transparent))
+              drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 50%, transparent))
+              drop-shadow(0 0 26px color-mix(in srgb, var(--accent) 25%, transparent));
     }
   }
 

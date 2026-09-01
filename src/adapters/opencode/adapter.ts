@@ -993,6 +993,12 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
       for (const [mid, m] of Object.entries(p.models ?? {})) {
         const limit = (m['limit'] ?? {}) as Record<string, unknown>
         const cost = (m['cost'] ?? {}) as Record<string, unknown>
+        // Il fatto che il modello ragiona: capabilities.reasoning dell'SDK
+        // (misurato 1º settembre 2026: vero su tutti e 105 i modelli di questa
+        // macchina). È un fatto da leggere, NON un interruttore — il prompt di
+        // sessione OpenCode non accetta opzioni per giro, quindi qui non nasce
+        // nessuna voce 'reasoning' nel menu: il dato viaggia, la scelta no.
+        const caps = (m['capabilities'] ?? {}) as Record<string, unknown>
         out.push({
           id: `${p.id}/${mid}`,
           ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
@@ -1008,6 +1014,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           // pagando. La scala è quella di models.dev, che è lì che nasce il dato.
           ...(typeof p.name === 'string' ? { providerName: String(p.name) } : {}),
           ...(typeof m['family'] === 'string' ? { family: String(m['family']) } : {}),
+          ...(caps['reasoning'] === true ? { reasoning: true } : {}),
           ...(typeof cost['input'] === 'number' && typeof cost['output'] === 'number'
             ? { cost: { input: cost['input'], output: cost['output'] } } : {}),
         })

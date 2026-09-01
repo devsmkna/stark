@@ -43,9 +43,14 @@
       @media (prefers-color-scheme:dark){#carica{background:#0E1118;color:#E8EAF0}}
       #carica .mark{height:clamp(34px,8vw,50px);animation:respiro 2s ease-in-out infinite}
       #carica .mark svg{display:block;height:100%;width:auto}
+      /* Neon, non nuvola: raggi corti e concentrici che restano attaccati ai tratti.
+           Con blur da 30-48px le ombre delle cinque lettere si fondevano in un
+           rettangolo pieno dietro la parola — visto nello screenshot Chromium e
+           segnalato dall'utente (1º settembre 2026). Niente calo di opacità: le
+           lettere restano accese, respira solo il bagliore. */
       @keyframes respiro{
-        0%,100%{opacity:.62;filter:drop-shadow(0 0 10px rgba(122,146,255,.45)) drop-shadow(0 0 30px rgba(154,111,239,.25))}
-        50%{opacity:1;filter:drop-shadow(0 0 18px rgba(122,146,255,.65)) drop-shadow(0 0 48px rgba(154,111,239,.4))}
+        0%,100%{filter:drop-shadow(0 0 2px rgba(122,146,255,.55)) drop-shadow(0 0 7px rgba(122,146,255,.32))}
+        50%{filter:drop-shadow(0 0 3px rgba(122,146,255,.85)) drop-shadow(0 0 10px rgba(122,146,255,.5)) drop-shadow(0 0 26px rgba(122,146,255,.25))}
       }
     </style>
   </head>

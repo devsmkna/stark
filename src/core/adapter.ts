@@ -112,6 +112,14 @@ export type SessionSpec = {
    */
   mcp?: string[]
   /**
+   * I valori delle opzioni che il risveglio deve restituire com'era (per ora
+   * `reasoning` ed `effort`), letti dallo snapshot del journal. Stessa ragione di
+   * `model` e `mcp`: il CLI non le tiene da solo — su Claude Code sono del layer
+   * flag, che non si persiste — quindi a ripristinarle è chi rilegge il journal.
+   * Un adapter che non le conosce le ignora; nessuno le deduce.
+   */
+  extraOptions?: Record<string, string>
+  /**
    * Su cosa l'utente vuole essere interrogato — **categorie, non nomi di tool**.
    * Sei parole che un utente riconosce guardando cosa sta per succedere; a tradurle
    * nei venti nomi che quell'agent usa è l'adapter, che è l'unico a conoscerli.

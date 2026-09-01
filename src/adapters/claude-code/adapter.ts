@@ -14,7 +14,8 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import {
   EMPTY_USAGE,
-  type AgentQuestion, type McpServer, type Payload, type PermissionMode, type PromptPart,
+  type AgentQuestion, type McpServer, type ModelChoice, type ModeChoice, type Payload,
+  type PermissionMode, type PromptPart, type SessionOption,
 } from '../../core/events.ts'
 import {
   optionsFrom,
@@ -180,6 +181,20 @@ export class ClaudeCodeAdapter implements AgentSession {
     await this.refreshCommands()
     // Non si aspetta: è una domanda al piano (o all'SDK), non alla conversazione, e
     // la chat deve poter partire anche se quella risposta tarda o non arriva mai.
+    // Il risveglio deve restituire la chat com'era anche nelle scelte nuove: le
+    // due chiavi non si persistono nel CLI (sono del layer flag), quindi a
+    // riapplicarle è chi rilegge il journal — e il registro le passa qui
+    // (`extraOptions` in SessionSpec, lette dallo snapshot). Solo dove il valore
+    // dichiarato qui sopra è già quello giusto non si tocca niente.
+    const extra = this.opts.extraOptions ?? {}
+    if (extra['reasoning'] && extra['reasoning'] !== this.ragiona) {
+      void this.setOption('reasoning', extra['reasoning'])
+    }
+    if (extra['effort'] && extra['effort'] !== this.impegno) {
+      void this.setOption('effort', extra['effort'])
+    }
+    // E la correzione delle impostazioni dell'utente, senza attendere.
+    this.correggiIniziali()
     void this.refreshQuota()
     void this.refreshContext()
   }
@@ -627,6 +642,51 @@ export class ClaudeCodeAdapter implements AgentSession {
    * lo sa è chi ha ricevuto il comando, cioè noi.
    */
   private fermato = false
+  /** Il toggle del thinking e il livello di effort **di questa sessione**: partono
+   *  dai default del CLI e si muovono con `setOption`. Sono i valori che la UI
+   *  mostra e che il risveglio ripristina (vedi `extraOptions` in SessionSpec). */
+  private ragiona: 'on' | 'off' = 'on'
+  private impegno = 'high'
+  /** Ciò che l'handshake ha dichiarato: servono a ricostruire l'elenco completo delle
+   *  opzioni quando il modello cambia (i livelli di effort dipendono da lui). */
+  private modelliDichiarati: ModelChoice[] = []
+  private modiDichiarati: ModeChoice[] = []
+  /** La modalità corrente come l'abbiamo dichiarata/imp梦ostata noi: il traduttore
+   *  la tiene privata (`seedMode`), e qui serve per ricostruire l'elenco opzioni. */
+  private modoAdesso: PermissionMode | string = ''
+
+  /**
+   * Le impostazioni **dell'utente** possono dire il contrario dei default: un
+   * `alwaysThinkingEnabled: false` o un `effortLevel` scritto in settings.json
+   * valgono alla partenza, e dichiarare «on/high» sarebbe mentire. Si chiede al CLI
+   * (`getSettings`) subito dopo l'handshake, e solo dove il valore c'è davvero si
+   * corregge — un default che concorda non riscrive niente. Gira senza attendere:
+   * è una domanda di configurazione, non un turno, e la chat non aspetta la risposta.
+   */
+  private correggiIniziali(): void {
+    void (async () => {
+      try {
+        // `getSettings` esiste a runtime (sdk.mjs: `async getSettings()`) ma il d.ts
+        // dell'interfaccia `Query` NON la dichiara — stesso assetto di
+        // `client.question.reply` su OpenCode, corretto in 9f710b1: il metodo c'è,
+        // è il tipo che tace. Si chiama col cast e si scrive qui perché.
+        const leggi = (this.q as unknown as
+          { getSettings?: () => Promise<Record<string, unknown>> } | null | undefined)
+        const st = await leggi?.getSettings?.()
+        if (!st) return
+        if (st['alwaysThinkingEnabled'] === false && this.ragiona === 'on') {
+          this.ragiona = 'off'
+          this.emit({ k: 'session.option', id: 'reasoning', value: 'off' })
+        }
+        const impegno = st['effortLevel']
+        if (typeof impegno === 'string' && impegno && impegno !== this.impegno) {
+          this.impegno = impegno
+          this.emit({ k: 'session.option', id: 'effort', value: impegno })
+        }
+      } catch { /* settings che non si leggono: restano i default dichiarati */ }
+    })()
+  }
+
   /**
    * Il verbo generale (ADR-014). L'`id` lo abbiamo dichiarato noi in `session.created`,
    * quindi qui si sa cosa vuol dire; chi lo manda no, ed e' il punto.
@@ -634,7 +694,27 @@ export class ClaudeCodeAdapter implements AgentSession {
   async setOption(id: string, value: string): Promise<void> {
     if (id === 'mode') return this.setMode(value)
     if (id === 'model') return this.setModel(value)
+    if (id === 'reasoning') return this.setReasoning(value === 'on')
+    if (id === 'effort') return this.setEffort(value)
     this.emit({ k: 'notice', level: 'warn', text: `opzione sconosciuta: ${id}` })
+  }
+
+  /** Il toggle del thinking: `alwaysThinkingEnabled` via `applyFlagSettings`, che è
+   *  la strada ufficiale per un cambio **a caldo** (misurata nei tipi dell'SDK; il
+   *  vecchio `setMaxThinkingTokens` è il meccanismo a budget, non il toggle). */
+  private async setReasoning(on: boolean): Promise<void> {
+    this.ragiona = on ? 'on' : 'off'
+    await this.q?.applyFlagSettings({ alwaysThinkingEnabled: on })
+    this.emit({ k: 'session.option', id: 'reasoning', value: this.ragiona })
+  }
+
+  /** Quanto profondamente ragiona: `effortLevel` via `applyFlagSettings`. Anche un
+   *  livello oltre il supporto del modello si manda: il CLI lo retrocede in silenzio
+   *  e lo dice lui, non qui — qui si dice cosa l'utente ha scelto. */
+  private async setEffort(v: string): Promise<void> {
+    this.impegno = v
+    await this.q?.applyFlagSettings({ effortLevel: v as 'low' | 'medium' | 'high' | 'xhigh' | 'max' })
+    this.emit({ k: 'session.option', id: 'effort', value: v })
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
@@ -651,6 +731,7 @@ export class ClaudeCodeAdapter implements AgentSession {
       return
     }
     await this.q?.setPermissionMode(m)
+    this.modoAdesso = mode
     this.emit({ k: 'session.option', id: 'mode', value: mode })
     // Anche qui: il traduttore riporta i cambi che vengono dal CLI, e senza saperlo
     // riemetterebbe questo stesso valore al prossimo `system:status`.
@@ -659,6 +740,27 @@ export class ClaudeCodeAdapter implements AgentSession {
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model)
     this.emit({ k: 'session.option', id: 'model', value: model })
+    // I livelli di effort dipendono dal modello: cambiato quello, l'elenco delle
+    // scelte si rimpiazza (come fa `session.commands` coi comandi). Il valore scelto
+    // resta: se il modello nuovo non lo regge, il CLI lo retrocede e lo dice lui.
+    this.emit({ k: 'session.options', options: this.opzioniAdesso(model) })
+  }
+
+  /** L'elenco completo delle opzioni allo stato corrente: mode, model, reasoning e
+   *  effort coi livelli del modello passato. Tutto ciò che serve è già in mano
+   *  (dichiarato all'announce), niente da rileggere. */
+  private opzioniAdesso(model: string): SessionOption[] {
+    return [
+      ...(this.modiDichiarati.length
+        ? [{ id: 'mode', label: 'Permissions', kind: 'mode' as const, value: this.modoAdesso || '',
+             choices: this.modiDichiarati.map(m => ({ value: m.mode, ...(m.label ? { label: m.label } : {}),
+               available: m.available, ...(m.reason ? { reason: m.reason } : {}), ...(m.note ? { note: m.note } : {}) })) }]
+        : []),
+      { id: 'model', label: 'Model', kind: 'model' as const, value: model,
+        choices: this.modelliDichiarati.map(m => ({ value: m.id, ...(m.label ? { label: m.label } : {}),
+          available: true, ...(m.note ? { note: m.note } : {}) })) },
+      ...opzioniClaude(this.modelliDichiarati, model, this.ragiona, this.impegno),
+    ]
   }
 
   /** ADR-005: lo Sleep è STARK che chiude la sessione. L'agent non sa cosa sia. */
@@ -688,6 +790,15 @@ export class ClaudeCodeAdapter implements AgentSession {
     const modi = modeChoices()
     const modelli = modelChoices(info['models'], model)
     const modoIniziale = String(info['current_permission_mode'] ?? this.opts.mode)
+    // I default del CLI, misurati: thinking attivo (assenza di alwaysThinkingEnabled
+    // = attivo sui modelli che lo reggono), effort high. Se le impostazioni
+    // dell'utente dicono altro, `correggiIniziali` le corregge un istante dopo —
+    // qui si dichiara il valore più probabile, e la correzione è un evento suo.
+    this.ragiona = 'on'
+    this.impegno = 'high'
+    this.modelliDichiarati = modelli
+    this.modiDichiarati = modi
+    this.modoAdesso = modoIniziale
     this.emit({
       k: 'session.created',
       agent: 'claude-code',
@@ -701,7 +812,10 @@ export class ClaudeCodeAdapter implements AgentSession {
       // ADR-014: gli stessi due, nella forma generale. `models`/`modes` restano
       // perche' un journal scritto prima ha solo quelli — e perche' toglierli
       // significherebbe riscrivere la storia invece di leggerla.
-      options: optionsFrom({ mode: modoIniziale, modes: modi, model, models: modelli }),
+      options: [
+        ...optionsFrom({ mode: modoIniziale, modes: modi, model, models: modelli }),
+        ...opzioniClaude(modelli, model, this.ragiona, this.impegno),
+      ],
       ...(Array.isArray(caps) ? { protocolCapabilities: caps.map(String) } : {}),
     })
 
@@ -998,3 +1112,47 @@ function normalizeQuestions(raw: unknown): AgentQuestion[] {
   }))
 }
 
+/**
+ * Le due scelte nuove del menu (chieste dall'utente, 1º settembre 2026):
+ * **reasoning** — il toggle del thinking — e **effort** — quanto profondamente
+ * ragiona. Sono opzioni *di sessione* come mode e model, e seguono la stessa
+ * regola di ADR-014: le dichiara l'agent, qui, perché è l'unico a sapere cosa
+ * il CLI accetta. Le misure su cui poggiano:
+ *
+ * - il toggle è `alwaysThinkingEnabled` (Settings dell'SDK, verificato nei tipi):
+ *   assente = thinking attivo sui modelli che lo reggono, quindi **on** è il default;
+ *   il cambio a caldo è `applyFlagSettings`, che non si persiste — vedi
+ *   `extraOptions` in SessionSpec per chi lo ripristina al risveglio.
+ * - l'effort parte su **high** («Deep reasoning (default)», tipi dell'SDK) e i
+ *   livelli possibili sono quelli del modello **in uso** (`supportedEffortLevels`
+ *   nell'handshake, misurato): cambiare modello li cambia, quindi al cambio
+ *   modello l'elenco si rimpiazza (`session.options`) e non si fonde.
+ * - su un modello senza livelli (Haiku, misurato) la voce **non compare**: un
+ *   interruttore che il CLI retrocederebbe in silenzio è una promessa a metà.
+ *   Il reasoning invece resta: spento su un modello che non ragiona è un no-op
+ *   onesto, e il CLI accetta comunque.
+ *
+ * Puro e senza sessione, perché è ciò che l'offline-check può verificare contro
+ * la cattura dell'handshake senza spawna nulla.
+ */
+export function opzioniClaude(
+  modelli: ModelChoice[], model: string, ragiona: 'on' | 'off', impegno: string,
+): SessionOption[] {
+  const corrente = modelli.find(m => m.id === model || m.resolved === model)
+  const out: SessionOption[] = [
+    {
+      id: 'reasoning', label: 'Reasoning', value: ragiona,
+      choices: [
+        { value: 'on', available: true, label: 'on', note: 'the model thinks before answering, where it can' },
+        { value: 'off', available: true, label: 'off', note: 'no extended thinking' },
+      ],
+    },
+  ]
+  if (corrente?.effortLevels?.length) {
+    out.push({
+      id: 'effort', label: 'Effort', value: impegno,
+      choices: corrente.effortLevels.map(v => ({ value: v, available: true, label: v })),
+    })
+  }
+  return out
+}
