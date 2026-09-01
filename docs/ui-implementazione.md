@@ -181,8 +181,8 @@ scuro.
 | `POST /api/sessions/:id/command` | i comandi del §11 |
 
 **Comandi che il registro gestisce davvero**: `session.prompt`, `session.interrupt`,
-`session.setModel`, `session.setMode`, `session.setMcp`, `session.rename`, `session.sleep`,
-`session.close`, `permission.reply`, `question.reply`, `question.reject`.
+`session.dequeue`, `session.setModel`, `session.setMode`, `session.setMcp`, `session.rename`,
+`session.sleep`, `session.close`, `permission.reply`, `question.reply`, `question.reject`.
 
 `session.rename` è l'unico che il registro gestisce **prima** del controllo «è attiva?»: si
 rinomina soprattutto ciò che dorme.
@@ -234,6 +234,14 @@ frattempo è passata da previsione a fatto verificato.
 stato dello snapshot. Il journal di una sessione interrotta dal riavvio del daemon finisce a
 metà di un turno: ripeterlo alla lettera mostra una rotellina che gira su niente e una casella
 di scrittura che accetta un messaggio senza nessuno che lo raccolga.
+
+**Trappola nuova (1º settembre 2026): ogni comando del dock porta l'id della chat del
+pannello**, non `store.selected`. Col multi-pannello due dock sono montati insieme: la via
+del mouse è protessa solo dall'effetto laterale del `focusPane` al pointerdown (che corre
+prima del click), la via della tastiera no — Tab fino alla casella dell'altro pannello, poi
+Invio, mandava il prompt all'altra chat (misurato, `tools/prova-dock-pannello.mjs`). Vale
+per tutto ciò che il dock e `Ask` mandano: prompt, Stop, risposte a permessi/domande/piani,
+opzioni, MCP, quota, contesto, file per `@`, passaggio di agent, risveglio.
 
 ### 5.2 I due stati bloccanti — `Ask.svelte`
 

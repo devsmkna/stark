@@ -17,8 +17,8 @@
   import { osservaPercorsi } from '../lib/percorsi.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
-  let { store, snap, canStop }:
-    { store: Store; snap: SessionSnapshot; canStop: boolean } = $props()
+  let { store, snap, canStop, id }:
+    { store: Store; snap: SessionSnapshot; canStop: boolean; id: string } = $props()
 
   const permission = $derived(snap.pendingPermissions[0])
   const question = $derived(snap.pendingQuestions[0])
@@ -71,6 +71,13 @@
       .map(m => snap.modes.find(x => x.mode === m))
       .filter(m => m !== undefined),
   )
+  /**
+   * Ogni risposta qui sotto va alla chat **di questo pannello** (`id`), non a quella
+   * a fuoco: col multi-pannello due Ask sono montati insieme, e chi preme un bottone
+   * da tastiera (Tab, poi Invio) non sposta prima il fuoco — col clic lo fa già il
+   * pannello (`focusPane` al pointerdown), ma un comando non può dipendere da un
+   * effetto laterale del gesto che lo innesca.
+   */
   async function rispondiAlPiano(
     decision: 'approved' | 'rejected', mode?: string,
   ): Promise<void> {
@@ -81,7 +88,7 @@
       c: 'plan.reply', requestId: plan.requestId, decision,
       ...(mode ? { mode: mode as never } : {}),
       ...(decision === 'rejected' && testo ? { feedback: testo } : {}),
-    })
+    }, id)
   }
   const head = $derived(permission ? permissionHeadline(permission.action) : null)
 
@@ -256,7 +263,7 @@
       // lo faceva arrivare finora, e toglierlo perché *dovrebbe* bastare `answers`
       // sarebbe dedurre un comportamento invece di verificarlo.
       ...(scritte.length > 0 ? { response: scritte.join('\n') } : {}),
-    })
+    }, id)
   }
 
   /** L'anteprima dell'opzione scelta in QUESTO passo, quando ne porta una. */
@@ -273,7 +280,7 @@
       <Icon name={head.icon} style="color:var(--accent)" />
       {head.text}
       {#if canStop}
-        <button class="stopb" title="Stop" onclick={() => void store.stop()}>
+        <button class="stopb" title="Stop" onclick={() => void store.stop(id)}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
         </button>
       {/if}
@@ -285,19 +292,19 @@
     </div>
     <div class="opts">
       <button class="opt pri" onclick={() => void store.send({
-        c: 'permission.reply', requestId: permission.requestId, decision: 'once' })}>Allow</button>
+        c: 'permission.reply', requestId: permission.requestId, decision: 'once' }, id)}>Allow</button>
 
       <!-- `scope` non si inventa: è ciò che la richiesta dichiara di poter salvare.
            Senza `savable` non c'è niente da ricordare, e il pulsante non compare. -->
       {#if permission.savable.length > 0}
         <button class="opt" onclick={() => void store.send({
           c: 'permission.reply', requestId: permission.requestId,
-          decision: 'always', scope: permission.savable[0]! })}
+          decision: 'always', scope: permission.savable[0]! }, id)}
           title="Writes a rule so this is allowed from now on">Always allow</button>
       {/if}
 
       <button class="opt" onclick={() => void store.send({
-        c: 'permission.reply', requestId: permission.requestId, decision: 'reject' })}>Deny</button>
+        c: 'permission.reply', requestId: permission.requestId, decision: 'reject' }, id)}>Deny</button>
     </div>
   </div>
 
@@ -307,7 +314,7 @@
       <Icon name="i-doc" style="color:var(--wait)" />
       The agent has a plan
       {#if canStop}
-        <button class="stopb" title="Stop" onclick={() => void store.stop()}>
+        <button class="stopb" title="Stop" onclick={() => void store.stop(id)}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
         </button>
       {/if}
@@ -394,7 +401,7 @@
         </div>
       {/if}
       {#if canStop}
-        <button class="stopb" title="Stop" onclick={() => void store.stop()}>
+        <button class="stopb" title="Stop" onclick={() => void store.stop(id)}>
           <svg viewBox="0 0 24 24"><use href="#i-stop" /></svg>
         </button>
       {/if}
@@ -476,7 +483,7 @@
       <!-- Chiudere non è «nessuna risposta»: è una risposta vera, e l'agent la riceve
            come rifiuto e può cambiare strada. -->
       <button class="opt" onclick={() => void store.send({
-        c: 'question.reject', requestId: question.requestId })}>Dismiss</button>
+        c: 'question.reject', requestId: question.requestId }, id)}>Dismiss</button>
     </div>
   </div>
 {/if}

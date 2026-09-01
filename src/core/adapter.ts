@@ -273,6 +273,23 @@ export interface AgentSession {
   prompt(text: string, allegati?: PromptFile[]): string
   interrupt(): Promise<void>
   /**
+   * Togli un prompt **dalla fila**, prima che parta.
+   *
+   * La fila è dell'adapter (il CLI accoderebbe a lotti fondendo i turni: vedi
+   * `prompt()`), quindi solo lui sa togliere una voce — e solo lui sa dire se quel
+   * `turnId` c'era ancora. Torna `false` se non c'era: un turno già consegnato non
+   * si richiama, e dirlo è meglio che fingere un successo.
+   *
+   * Il journal resta append-only: togliere non cancella, chiude. L'adapter dichiara
+   * finito il turno rimosso (`turn.ended` con `reason: 'aborted'`), lo stesso fatto
+   * che `interrupt()` scrive per l'intera fila — così alla rilettura non resta un
+   * «queued, waiting its turn» che non aspetta niente (§4). Un'eccezione dichiarata
+   * da chi la implementa: chi è entrato in fila **prima della nascita** della sessione
+   * non ha ancora il suo `turn.started`, e chi non c'è nel journal può sparire senza
+   * lasciare traccia.
+   */
+  dequeue(turnId: string): boolean
+  /**
    * Cambia una delle scelte che l'agent ha dichiarato (ADR-014).
    *
    * E' il verbo generale: `setModel` e `setMode` restano perche' del codice interno li

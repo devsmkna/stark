@@ -15,11 +15,12 @@ import { callFor } from '../core/calls.ts'
 import { vigila, type Canale } from '../daemon/chiamate.ts'
 import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
+import { ClaudeCodeAdapter } from '../adapters/claude-code/adapter.ts'
 import { activity } from '../core/activity.ts'
 import {
   ESTENSIONE, filtroFile, IMMAGINI, parteDi, tipiAccettati, tipoDi,
 } from '../core/allegati.ts'
-import { allegabiliDi } from '../adapters/opencode/adapter.ts'
+import { allegabiliDi, OpenCodeAdapter } from '../adapters/opencode/adapter.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
@@ -809,11 +810,58 @@ check('diff: forma unificata, numeri di riga coerenti',
   // il daemon lo scoprirebbe solo su una sessione viva.
   const sessione = backendFor().open(base, { onPayload: () => {} })
   const mancanti = ([
-    'start', 'prompt', 'interrupt', 'setModel', 'setMode', 'setMcp',
+    'start', 'prompt', 'interrupt', 'dequeue', 'setModel', 'setMode', 'setMcp',
     'refreshQuota', 'refreshContext', 'fileSuggestions', 'settled', 'sleep', 'close',
   ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
   check('§1: la sessione aperta dal backend implementa tutto il contratto',
     mancanti.length === 0, mancanti.join(','))
+}
+
+// ─── la fila: togliere una voce prima che parta ─────────────────────────────
+
+// Il metodo vive nell'adapter perché la fila vive nell'adapter, quindi la prova lo
+// chiama dove sta. La coda si semina a mano (campo privato, ma solo per TypeScript:
+// a runtime è un campo come gli altri) invece di farla nascere con `prompt()`, che
+// per OpenCode partirebbe verso il server. Tre fatti da tenere fermo: la voce
+// annunciata chiude il suo turno; quella mai annunciata — arrivata prima della
+// nascita — sparisce senza lasciare turni aperti; e un turno che non c'è è un no
+// detto, non un successo finto.
+{
+  const parti = [{ type: 'text' as const, text: 'ciao' }]
+
+  const cc = new ClaudeCodeAdapter({ cwd: '/tmp', model: 'default', mode: 'auto', onPayload: () => {} })
+  const ccCoda = cc as unknown as {
+    coda: Array<{ turnId: string; parts: unknown; msg: unknown; annunciato: boolean }>
+  }
+  ccCoda.coda = [
+    { turnId: 't1', parts: parti, msg: {}, annunciato: true },
+    { turnId: 't2', parts: parti, msg: {}, annunciato: false },
+  ]
+
+  let visti: Array<Record<string, unknown>> = []
+  ;(cc as unknown as { opts: { onPayload: (p: unknown) => void } }).opts.onPayload
+    = (p) => { visti.push(p as Record<string, unknown>) }
+  check('fila: la voce annunciata tolta dalla fila chiude il turno (aborted)',
+    cc.dequeue('t1') === true
+    && visti.length === 1 && visti[0]!.k === 'turn.ended'
+    && visti[0]!.reason === 'aborted' && visti[0]!.turnId === 't1')
+  check('fila: la voce MAI annunciata sparisce senza lasciare turni aperti',
+    cc.dequeue('t2') === true && visti.length === 1
+    && (cc as unknown as { coda: unknown[] }).coda.length === 0)
+  check('fila: togliere un turno che non è in fila è un no, non un finto ok',
+    cc.dequeue('t1') === false)
+
+  const oc = new OpenCodeAdapter({ cwd: '/tmp', model: 'default', mode: 'auto' }, { onPayload: () => {} })
+  let ocVisti: Array<Record<string, unknown>> = []
+  ;(oc as unknown as { hooks: { onPayload: (p: unknown) => void } }).hooks.onPayload
+    = (p) => { ocVisti.push(p as Record<string, unknown>) }
+  ;(oc as unknown as { coda: Array<{ turnId: string; invio: { parts: unknown[] } }> }).coda
+    = [{ turnId: 't1', invio: { parts: parti } }]
+  check('fila (OpenCode): la voce tolta dalla fila chiude il turno (aborted)',
+    oc.dequeue('t1') === true && ocVisti.length === 1 && ocVisti[0]!.k === 'turn.ended'
+    && ocVisti[0]!.reason === 'aborted')
+  check('fila (OpenCode): togliere un turno che non è in fila è un no',
+    oc.dequeue('t1') === false)
 }
 
 // ─── §10-bis: i due fatti che la prova di carico ha fatto entrare ───────────
