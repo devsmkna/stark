@@ -1411,10 +1411,12 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   const casaPref = mkdtempSync(resolve(tmpdir(), 'stark-pref-'))
   const { readSettings: leggiPref, writeSettings: scriviPref } =
     await import('../daemon/settings.ts')
+  // Il resto delle impostazioni qui è un pallone gonfiato: la funzione tocca solo
+  // la coppia preferita, e costruirla intera testerebbe il test invece del codice.
+  const specchio = { permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto' } as unknown as Record<string, never>
   const conCoppia = scriviPref(casaPref, {
-    permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto',
-    preferredModel: { agent: 'opencode', model: 'opencode/gpt-5-nano' },
-  } as Parameters<typeof scriviPref>[1])
+    ...specchio, preferredModel: { agent: 'opencode', model: 'opencode/gpt-5-nano' },
+  })
   const riletta = leggiPref(casaPref)
   check('§preferred: la coppia preferita si scrive e si rilegge intera',
     conCoppia.preferredModel?.agent === 'opencode'
@@ -1423,9 +1425,8 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
       && riletta.preferredModel?.model === 'opencode/gpt-5-nano',
     JSON.stringify({ scritta: conCoppia.preferredModel, riletta: riletta.preferredModel }))
   const incompleta = scriviPref(casaPref, {
-    permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto',
-    preferredModel: { agent: 'opencode', model: '' } as never,
-  } as Parameters<typeof scriviPref>[1])
+    ...specchio, preferredModel: { agent: 'opencode', model: '' } as never,
+  })
   rmSync(casaPref, { recursive: true, force: true })
   check('§preferred: la coppia incompleta non entra',
     incompleta.preferredModel === undefined,
