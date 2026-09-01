@@ -32,8 +32,8 @@ import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
 import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
-import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent } from '../core/events.ts'
-import { Journal, MemoryJournal } from '../core/journal.ts'
+import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent, type Payload } from '../core/events.ts'
+import { Journal, MemoryJournal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
 import {
   briefingDalJournal, percorsoHandoff, promptBriefing, promptRipresa,
@@ -1050,6 +1050,13 @@ check('diff: forma unificata, numeri di riga coerenti',
   // dello stesso budget e ritarderebbe l'unica cosa da leggere.
   check('OpenCode: un budget free esaurito NON e\' un intoppo passeggero',
     !passeggero('{"type":"FreeUsageLimitError","message":"Error from provider (Console): Rate limit exceeded. Please try again later."}'))
+  // La rete locale (revisione 2026-09-01): il server che sta riavviando e il socket
+  // caduto a meta' sono guai che passano — ed erano proprio i casi in cui STARK
+  // mollava al primo colpo, dove riprovare fra un secondo avrebbe trovato l'altro
+  // capo tornato.
+  check('OpenCode: ECONNREFUSED/ECONNRESET/fetch failed/socket hang up sono passeggeri',
+    passeggero('connect ECONNREFUSED 127.0.0.1:4096') && passeggero('read ECONNRESET')
+    && passeggero('TypeError: fetch failed') && passeggero('socket hang up'))
 
   check('OpenCode: il modello si scrive `provider/id`',
     modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')
@@ -2120,6 +2127,71 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('§tailscale: solo il ramo WSL da Windows porta argomenti davanti',
     (['windows', 'wsl', 'macos', 'linux'] as const).every(so =>
       vieTailscalePer(so).every(v => v.pre.length === 0 || v.dove === 'wsl')))
+}
+
+// ─── revisione 2026-09-01: gli errori non muoiono piu' in silenzio ──────────
+// (docs/revisione-token-errori-2026-09-01.md — i pezzi provabili senza un agent vero)
+{
+  // C2: un troncamento `max_tokens` si DICE. Prima `message_delta` era ignorato e
+  // `step.ended` usciva sempre con finish 'stop': una risposta tagliata dal limite di
+  // output era indistinguibile da un turno normale.
+  const t5 = new Translator()
+  t5.beginTurn('T5')
+  t5.handle({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm5' } } })
+  t5.handle({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'max_tokens' } } })
+  const fine = t5.handle({ type: 'stream_event', event: { type: 'message_stop' } })
+  check('revisione: stop_reason letto da message_delta, non piu\' cablato a stop',
+    fine[0]?.k === 'step.ended' && fine[0].finish === 'max_tokens', JSON.stringify(fine))
+  check('revisione: un max_tokens produce un avviso leggibile nel flusso',
+    fine.some(p => p.k === 'notice' && p.level === 'warn'))
+  const t6 = new Translator()
+  t6.handle({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm6' } } })
+  t6.handle({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } } })
+  const fine6 = t6.handle({ type: 'stream_event', event: { type: 'message_stop' } })
+  check('revisione: end_turn passa com\'e\' e non produce avvisi',
+    fine6.length === 1 && fine6[0]?.k === 'step.ended' && fine6[0].finish === 'end_turn',
+    JSON.stringify(fine6))
+
+  // C1: i rifiuti d'ufficio per cio' che un turno morto lascia in attesa — la regola
+  // del 30 agosto (abbandonaBloccantePendente, solo OpenCode) portata nel registry,
+  // dove vale per QUALUNQUE adapter. Qui la meta' pura: da snapshot a eventi.
+  // Import dinamico come nel test del §resume, e per la stessa ragione: `registry.ts`
+  // legge STARK_HOME al caricamento, e caricarlo in cima a questo file gli farebbe
+  // fissare la home vera prima che quel test imposti la propria.
+  const { rifiutiOrfani } = await import('../daemon/registry.ts')
+  const s = reduce([], 'orfani')
+  let n = 0
+  const w = (payload: Payload): void => {
+    applyTo(s, { v: MODEL_VERSION, seq: ++n, ts: n, sessionId: 'orfani', payload })
+  }
+  w({ k: 'turn.started', turnId: 'T', prompt: [{ type: 'text', text: 'x' }] })
+  w({ k: 'permission.asked', requestId: 'p1', action: 'Bash', resources: [], savable: [], source: {} })
+  w({ k: 'question.asked', requestId: 'q1', questions: [] })
+  w({ k: 'plan.proposed', requestId: 'pl1', plan: 'piano' })
+  const rifiuti = rifiutiOrfani(s)
+  check('revisione: un turno morto rifiuta d\'ufficio permessi, domande e piani',
+    rifiuti.length === 3
+    && rifiuti.some(p => p.k === 'permission.replied' && p.decision === 'reject')
+    && rifiuti.some(p => p.k === 'question.rejected')
+    && rifiuti.some(p => p.k === 'plan.replied' && p.decision === 'rejected'),
+    JSON.stringify(rifiuti))
+  for (const p of rifiuti) w(p)
+  check('revisione: applicati i rifiuti, nessuna card resta pendente',
+    s.pendingPermissions.length === 0 && s.pendingQuestions.length === 0
+    && s.pendingPlans.length === 0)
+  check('revisione: su uno snapshot pulito lo sweep non produce niente',
+    rifiutiOrfani(s).length === 0)
+
+  // D1: il RawLog e' diagnosi, non verita' — non deve poter lanciare MAI, perche'
+  // `write` gira dentro il for-await dell'adapter (`onRaw`) e un disco pieno li'
+  // dentro uccideva la sessione che il file doveva aiutare a diagnosticare.
+  const rl = new RawLog(resolve(dir, 'raw-prova.jsonl'))
+  rl.write('{"a":1}')
+  rl.close()
+  rl.write('{"b":2}')   // dopo la chiusura: si perde, non lancia
+  rl.close()            // due volte: idempotente
+  check('revisione: RawLog con fd persistente, e scrivere dopo la chiusura non lancia',
+    readFileSync(resolve(dir, 'raw-prova.jsonl'), 'utf8') === '{"a":1}\n')
 }
 
 let failed = 0

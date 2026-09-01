@@ -88,6 +88,13 @@ export function passeggero(motivo: string): boolean {
     || m.includes('unavailable') || m.includes('overload')
     || m.includes('rate limit') || m.includes('timeout')
     || m.includes('temporarily')
+    // La rete locale: il server che sta riavviando, il socket caduto a metà. Sono
+    // esattamente i casi in cui riprovare fra qualche secondo trova l'altro capo
+    // tornato — e prima non c'erano: STARK mollava al primo colpo proprio dove il
+    // retry serviva di più.
+    || m.includes('econnrefused') || m.includes('econnreset') || m.includes('econnaborted')
+    || m.includes('socket hang up') || m.includes('fetch failed') || m.includes('epipe')
+    || m.includes('etimedout') || m.includes('network')
 }
 
 /** Il modello nella forma che OpenCode vuole: `providerID/id`, o solo `id`. */
@@ -171,8 +178,12 @@ export class OpenCodeAdapter implements AgentSession {
   async start(): Promise<void> {
     this.emit({ k: 'session.state', state: 'starting' })
     this.client = await clientPer(this.spec.cwd)
-    this.legacy = await clientLegacyPer(this.spec.cwd)
+    // Subito dopo `clientPer`, che è quello che incrementa il refcount del server: un
+    // fallimento in QUALUNQUE punto fra qui e la fine di `start()` deve poter
+    // restituire il giro con `lascia()` (via `spegni()`), se no il server resta vivo
+    // per sempre — visto: dodici `opencode serve` orfani in un giorno di prove.
     this.preso = true
+    this.legacy = await clientLegacyPer(this.spec.cwd)
     const c = this.client
 
     // `'default'` vuol dire «decidi tu», non «un modello scelto da STARK» — e' la
@@ -182,8 +193,13 @@ export class OpenCodeAdapter implements AgentSession {
     // come alias, OpenCode no. Quindi si chiede a lui quale userebbe, e si dice quale
     // e': una barra di stato che scrive «default» non dice niente, e se quel modello e'
     // giu' a monte non c'e' nemmeno modo di capire perche'.
-    this.modelli = await elencoModelli(c)
-    const modi = await elencoModi(c)
+    //
+    // Quattro domande indipendenti allo stesso server: in fila costavano quattro
+    // round-trip prima di poter dire `session.created`, in parallelo uno.
+    const [modelli, modi, tools, commands] = await Promise.all([
+      elencoModelli(c), elencoModi(c), elencoTool(c), elencoComandi(c),
+    ])
+    this.modelli = modelli
     if (!refModello(this.modello)) {
       const suo = await defaultSuo(c)
       if (suo) this.modello = suo
@@ -220,8 +236,8 @@ export class OpenCodeAdapter implements AgentSession {
       cwd: this.spec.cwd,
       model: this.modello,
       capabilities: capacita(),
-      tools: await elencoTool(c),
-      commands: await elencoComandi(c),
+      tools,
+      commands,
       modes: modi,
       // Senza questo elenco la barra di stato non offre niente da scegliere, e una
       // chat che nasce su un modello rotto resta rotta senza via d'uscita. Misurato:
@@ -244,6 +260,16 @@ export class OpenCodeAdapter implements AgentSession {
       this.modo = AGENT_DI_DEFAULT
     }
     this.emit({ k: 'session.option', id: 'mode', value: this.modo })
+    // Un catalogo vuoto non e' un dettaglio da tendina: vuol dire che nessun provider
+    // e' autenticato (o che il server non ha risposto), e senza dirlo la chat sembra
+    // sana fino al primo prompt che non parte. Il catch dentro `elencoModelli` e'
+    // silenzioso di suo — qui e' il posto che sa che la lista serviva.
+    if (this.modelli.length === 0) {
+      this.emit({
+        k: 'notice', level: 'warn',
+        text: 'OpenCode non ha dichiarato nessun modello: controlla i provider autenticati (`opencode auth list`) o il server.',
+      })
+    }
     this.emit({ k: 'session.state', state: 'idle' })
   }
 
@@ -265,7 +291,42 @@ export class OpenCodeAdapter implements AgentSession {
           this.emit({ k: 'notice', level: 'error', text: `evento non gestito: ${String(e)}` })
         }
       }
-    })().catch(() => { /* chiuso da noi, o il server e' andato */ })
+      // Il for-await e' finito e non siamo stati noi ad abortire: il server ha chiuso
+      // il filo. Prima qui c'era il silenzio — vedi `mortoIlServer`.
+      this.mortoIlServer('il server ha chiuso il flusso eventi')
+    })().catch((e: unknown) => {
+      this.mortoIlServer(String((e as Error)?.message ?? e))
+    })
+  }
+
+  /**
+   * Il flusso degli eventi e' morto sotto i piedi (crash o riavvio del server).
+   *
+   * Prima questo caso finiva in un `.catch(() => {})`: l'adapter restava **sordo per
+   * sempre** — nessun evento, nessun errore, un turno in corso appeso senza che
+   * niente lo dicesse (la guardia copre solo l'avvio, e un permesso gia' arrivato
+   * l'aveva smontata). Un turno appeso in silenzio e' la cosa che questa GUI ha
+   * giurato di non fare mai: quindi si **dichiara** — turno chiuso, card abbandonate,
+   * `session.error` fatale, `closed`. Da li' il registry ritira la sessione e
+   * `close()` restituisce il giro al server condiviso (`lascia()`); il risveglio
+   * riapre su un server nuovo e la conversazione e' nel database di OpenCode — non si
+   * perde niente. La riconnessione automatica resta un possibile seguito: prima la
+   * verita', poi l'eroismo.
+   */
+  private mortoIlServer(motivo: string): void {
+    if (this.ac.signal.aborted) return   // chiusura nostra: non e' una morte
+    this.smontaGuardia()
+    this.ultimoPrompt = null
+    this.svuota()
+    this.abbandonaBloccantePendente()
+    this.emit({
+      k: 'session.error',
+      message: `il flusso eventi di OpenCode si è interrotto: ${motivo}`,
+      fatal: true,
+    })
+    this.scrivi(this.tr.chiudiTurno('error', motivo))
+    this.sveglia()
+    this.emit({ k: 'session.state', state: 'closed' })
   }
 
   /**
@@ -384,6 +445,11 @@ export class OpenCodeAdapter implements AgentSession {
    */
   private async forseRitentaErrore(d: Record<string, unknown>): Promise<boolean> {
     const motivo = messaggioErrore(d)
+    // Senza un turno aperto non c'e' niente da riprendere: un `session.error`
+    // **globale** (senza sessionID passa `miaSessione`) a chat ferma faceva partire
+    // la ripresa su un turno che non esisteva — un turno vero sul runner, eventi
+    // orfani nel journal, quota spesa.
+    if (this.tr.turnoAperto() === null) return false
     if (!this.ultimoPrompt || this.fermato) return false
     if (this.tentativi >= RITENTATIVI) return false
     if (!passeggero(motivo)) return false
@@ -424,6 +490,8 @@ export class OpenCodeAdapter implements AgentSession {
   private async forseRitenta(d: Record<string, unknown>): Promise<boolean> {
     const err = (d['error'] ?? {}) as Record<string, unknown>
     const motivo = String(err['message'] ?? '')
+    // Stessa guardia di `forseRitentaErrore`, stessa ragione.
+    if (this.tr.turnoAperto() === null) return false
     if (!this.ultimoPrompt || this.fermato) return false
     if (this.tentativi >= RITENTATIVI) return false
     if (!passeggero(motivo)) return false
@@ -499,13 +567,37 @@ export class OpenCodeAdapter implements AgentSession {
     // `operationId`, quindi il generatore se lo costruisce dal metodo e dal percorso.
     // Lasciarlo com'e' e' meglio che avvolgerlo: un giorno lo correggeranno, e un alias
     // nostro nasconderebbe il fatto che il nome e' cambiato.
-    await this.legacy?.postSessionIdPermissionsPermissionId({
-      path: { id: this.sessionId, permissionID: id },
-      query: { directory: this.spec.cwd },
-      body: { response },
-    } as never).catch((e: unknown) => {
-      this.emit({ k: 'notice', level: 'error', text: `permesso non consegnato: ${String(e)}` })
-    })
+    //
+    // Due cose imparate a caro prezzo, una qui e una su `rispondiDomanda`:
+    // 1. con `ThrowOnError` al default l'SDK **non lancia** su un errore HTTP — torna
+    //    un risultato con `.error`, e guardare solo il throw lo faceva sparire (stessa
+    //    lezione del 30 agosto, applicata a una rotta e dimenticata sull'altra);
+    // 2. una risposta che non arriva lascia il tool `running` per sempre, e la guardia
+    //    a quel punto era gia' smontata (il permesso e' un segno di vita): il turno
+    //    muto durava in eterno. Quindi: un ritentativo dopo 1s, e se fallisce ancora
+    //    lo si dice nel flusso E si rimonta la guardia, cosi' il turno perso viene
+    //    dichiarato invece di durare per sempre.
+    const tenta = async (): Promise<string | null> => {
+      try {
+        const r = await this.legacy?.postSessionIdPermissionsPermissionId({
+          path: { id: this.sessionId, permissionID: id },
+          query: { directory: this.spec.cwd },
+          body: { response },
+        } as never) as { error?: unknown } | undefined
+        return r?.error ? String(r.error).slice(0, 160) : null
+      } catch (e) {
+        return String((e as Error)?.message ?? e).slice(0, 160)
+      }
+    }
+    let motivo = await tenta()
+    if (motivo === null) return
+    await new Promise(x => setTimeout(x, 1000))
+    motivo = await tenta()
+    if (motivo === null) return
+    this.emit({ k: 'notice', level: 'error', text: `permesso non consegnato: ${motivo}` })
+    // Solo se c'e' ancora un turno da dichiarare perso: questa rotta risponde anche
+    // ai rifiuti d'ufficio (`abbandonaBloccantePendente`), a turno gia' chiuso.
+    if (this.tr.turnoAperto() !== null) this.montaGuardia()
   }
 
   private async unaDomanda(d: Record<string, unknown>): Promise<void> {
@@ -683,7 +775,14 @@ export class OpenCodeAdapter implements AgentSession {
       if (p.k === 'session.state' && p.state === 'idle'
         && (this.coda.length > 0 || this.tr.turnoAperto() !== null)) continue
       this.emit(p)
-      if (p.k === 'turn.ended') this.next()
+      if (p.k === 'turn.ended') {
+        // Il turno e' finito: il suo prompt non e' piu' «l'ultimo da ritentare».
+        // Senza questo azzeramento un errore arrivato a chat ferma trovava ancora
+        // materiale per una ripresa che non aveva piu' un turno (vedi la guardia in
+        // `forseRitentaErrore`). `next()` lo rimpiazza subito se c'e' fila.
+        this.ultimoPrompt = null
+        this.next()
+      }
     }
   }
 
@@ -698,7 +797,15 @@ export class OpenCodeAdapter implements AgentSession {
     this.fermato = false
     this.montaGuardia()
 
-    void this.mandaAlRunner(invio).catch((err: unknown) => {
+    void this.mandaAlRunner(invio).catch(async (err: unknown) => {
+      // Un invio fallito per un guaio passeggero (ECONNRESET, il server che sta
+      // riavviando) si ritenta come uno step fallito: stessa regola, stesso annuncio
+      // `session.retried` nel flusso. Prima si chiudeva subito in errore, cioe' STARK
+      // mollava sull'unico caso in cui bastava riprovare fra un secondo.
+      if (await this.forseRitenta({ error: { message: String(err) } })) return
+      // La guardia era armata per questo invio: senza smontarla, novanta secondi dopo
+      // sparerebbe un secondo errore su un turno gia' chiuso.
+      this.smontaGuardia()
       this.emit({ k: 'session.error', message: String(err), fatal: false })
       this.abbandonaBloccantePendente()
       this.scrivi(this.tr.chiudiTurno('error'))

@@ -5,7 +5,7 @@
 // stato che la UI mostrava; nel journal non entra nulla di nativo; ed è il punto unico
 // da cui passa tutto, cioè dove si aggancerà l'anonimizzazione.
 
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MODEL_VERSION, type CanonicalEvent, type Payload } from './events.ts'
 
@@ -155,15 +155,30 @@ function lastSeq(path: string): number {
 /**
  * Il raw nativo va in un file separato e non versionato, mai mescolato al journal (§13).
  * Serve solo a poter dire "l'adapter ha tradotto male questo" senza rieseguire la sessione.
+ *
+ * L'fd resta aperto come nel `Journal` qui sopra: prima c'era `appendFileSync`, cioè
+ * open+write+close per OGNI messaggio nativo — una risposta da trecento delta sono
+ * novecento syscall. E la scrittura non può lanciare: `write` viene chiamata dentro il
+ * for-await dell'adapter (`onRaw`), e un disco pieno lì dentro uccideva la sessione che
+ * questo file doveva aiutare a diagnosticare. È diagnosi, non verità: se una riga si
+ * perde, si perde una riga di debug — non la conversazione.
  */
 export class RawLog {
   private readonly path: string
+  private fd: number | null = null
 
   constructor(path: string) {
     this.path = path
     mkdirSync(dirname(path), { recursive: true })
+    try { this.fd = openSync(path, 'a') } catch { this.fd = null }
   }
-  write(line: string): void { appendFileSync(this.path, line + '\n') }
+  write(line: string): void {
+    if (this.fd === null) return
+    try { writeSync(this.fd, line + '\n') } catch { /* diagnosi, non verità */ }
+  }
+  close(): void {
+    if (this.fd !== null) { try { closeSync(this.fd) } catch { /* già chiuso */ } this.fd = null }
+  }
 }
 
 /**

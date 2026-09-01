@@ -22,6 +22,10 @@ type OpenBlock =
 export class Translator {
   private blocks = new Map<number, OpenBlock>()
   private messageId = 'm0'
+  /** Il `stop_reason` dell'ultimo `message_delta`: è l'unico posto in cui l'API dice
+   *  COME il messaggio è finito, e senza leggerlo un troncamento da `max_tokens` era
+   *  indistinguibile da un turno normale. */
+  private stopReason: string | undefined
   private pendingThinkingTokens: number | undefined
   /** L'ultima modalità permessi che si sa. Vedi `modeChange()`. */
   private mode: string | undefined
@@ -224,7 +228,13 @@ export class Translator {
       case 'message_start': {
         this.messageId = String(ev['message']?.['id'] ?? this.messageId)
         this.blocks.clear()
+        this.stopReason = undefined
         return [{ k: 'step.started', stepId: this.messageId }]
+      }
+      case 'message_delta': {
+        const sr = (ev['delta'] ?? {})['stop_reason']
+        if (typeof sr === 'string' && sr) this.stopReason = sr
+        return []
       }
       case 'content_block_start': {
         const i = num(ev['index']) ?? 0
@@ -289,8 +299,20 @@ export class Translator {
           ...(intent !== undefined ? { intent } : {}),
         }]
       }
-      case 'message_stop':
-        return [{ k: 'step.ended', stepId: this.messageId, finish: 'stop', usage: EMPTY }]
+      case 'message_stop': {
+        const finish = this.stopReason ?? 'stop'
+        const out: Payload[] = [{ k: 'step.ended', stepId: this.messageId, finish, usage: EMPTY }]
+        // Un troncamento va DETTO, non lasciato indovinare: chi legge una risposta che
+        // finisce a metà deve sapere che è il limite di output, non il modello che ha
+        // deciso di fermarsi lì.
+        if (finish === 'max_tokens') {
+          out.push({
+            k: 'notice', level: 'warn',
+            text: 'Risposta troncata: raggiunto il limite di token di output.',
+          })
+        }
+        return out
+      }
       default:
         return []
     }
