@@ -830,17 +830,26 @@ export class Store {
   /**
    * Un prompt può portarsi dietro delle immagini. Il testo vuoto va bene **se** c'è un
    * allegato: «guarda questo» spesso non ha bisogno di parole.
+   *
+   * Il terzo parametro è la **chat a cui va**: chi scrive in una casella scrive nella
+   * chat di quel pannello, e col layout multi-pannello quella non è sempre quella a
+   * fuoco — chi entra dalla tastiera (Tab, poi Invio) non sposta il fuoco, e il
+   * prompt partirebbe verso l'altra chat.
    */
-  prompt(text: string, attachments: Attachment[] = []): Promise<boolean> {
+  prompt(text: string, attachments: Attachment[] = [], id = this.selected): Promise<boolean> {
     const clean = text.trim()
     if (!clean && attachments.length === 0) return Promise.resolve(false)
     return this.send({
       c: 'session.prompt', text: clean,
       ...(attachments.length ? { attachments } : {}),
-    })
+    }, id)
   }
 
-  stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
+  /** Stop **di quella chat**: col multi-pannello due dock sono montati insieme, e il
+   *  quadrato rosso di uno non può fermare l'altro. */
+  stop(id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.interrupt' }, id)
+  }
 
   /**
    * Togli dalla fila un prompt che non è ancora partito. L'esito non si tocca a mano:
@@ -869,11 +878,14 @@ export class Store {
   setMode(mode: PermissionMode, id = this.selected): Promise<boolean> {
     return this.send({ c: 'session.setMode', mode }, id)
   }
-  /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18). */
-  setMcp(server: string, enabled: boolean): Promise<boolean> {
-    return this.send({ c: 'session.setMcp', server, enabled })
+  /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18).
+   *  Il terzo parametro è la chat del pannello che ha aperto il menu. */
+  setMcp(server: string, enabled: boolean, id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setMcp', server, enabled }, id)
   }
-  setModel(model: string): Promise<boolean> { return this.send({ c: 'session.setModel', model }) }
+  setModel(model: string, id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setModel', model }, id)
+  }
 
   /**
    * Rilegge il livello della quota. Non passa da `send`, di proposito: è una domanda
@@ -881,29 +893,30 @@ export class Store {
    * dorme non c'è nessuno a cui chiederlo — non deve accendere la riga rossa che
    * l'utente associa a un comando che *lui* ha dato. Se non risponde, restano i numeri
    * di prima con scritto di quando sono.
+   *
+   * La guardia guarda la **riga di quella chat**, non la globale: col multi-pannello
+   * il pannellino può appartenere a una chat ferma mentre quella a fuoco è viva.
    */
-  async refreshQuota(): Promise<void> {
-    const id = this.selected
-    if (!id || !this.live) return
+  async refreshQuota(id = this.selected): Promise<void> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return
     try { await this.api.command(id, { c: 'session.refreshQuota' }) } catch { /* restano i vecchi */ }
   }
 
   /** Stessa ragione di `refreshQuota`: la domanda a cui risponde `/context` nel
    *  terminale, fatta quando l'utente guarda il pannellino. */
-  async refreshContext(): Promise<void> {
-    const id = this.selected
-    if (!id || !this.live) return
+  async refreshContext(id = this.selected): Promise<void> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return
     try { await this.api.command(id, { c: 'session.refreshContext' }) } catch { /* restano i vecchi */ }
   }
 
   /**
-   * I file del progetto, per le citazioni con `@`. Della chat **selezionata**: `@` è
-   * una cosa che si scrive in una casella, e quella casella appartiene a una chat
-   * sola — chiedere «i file del progetto» senza dire quale non vorrebbe dire niente.
+   * I file del progetto, per le citazioni con `@`. Della chat **a cui la casella
+   * appartiene**: `@` è una cosa che si scrive in una casella, e quella casella
+   * appartiene a una chat sola — chiedere «i file del progetto» senza dire quale non
+   * vorrebbe dire niente. Col multi-pannello non è sempre la chat a fuoco.
    */
-  async files(q: string): Promise<string[]> {
-    const id = this.selected
-    if (!id || !this.live) return []
+  async files(q: string, id = this.selected): Promise<string[]> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return []
     return this.api.files(id, q)
   }
 
@@ -1295,15 +1308,21 @@ export class Store {
   >(null)
 
   /**
-   * Porta il lavoro della chat a fuoco su un altro agent.
+   * Porta il lavoro di una chat su un altro agent. Il quarto parametro è **quale**
+   * chat: col multi-pannello è quella del pannello il cui menu ha aperto la voce, non
+   * sempre quella a fuoco — e `replacePane` qui sotto mette la nuova al posto della
+   * vecchia nello stesso riquadro, quindi sbagliare `da` sposterebbe il pannello
+   * sbagliato.
    *
    * Il pannello **non** cambia: `replacePane` mette la conversazione nuova al posto
    * della vecchia nello stesso riquadro, che e' cio' che rende il passaggio un cambio
    * di modello dal punto di vista di chi guarda, e non un «vai a cercarti l'altra chat
    * nell'elenco». La vecchia resta nell'elenco, con nel journal scritto dov'e' andata.
    */
-  async passaAdAltroAgent(agent: string, model: string, via?: 'agent' | 'journal'): Promise<void> {
-    const da = this.selected
+  async passaAdAltroAgent(
+    agent: string, model: string, via?: 'agent' | 'journal', id = this.selected,
+  ): Promise<void> {
+    const da = id
     if (!da) return
     this.handoff = { fase: 'corso', agent, model }
     // «Svegliala e falla scrivere» e' due cose, non una: il daemon rifiuta `agent` su

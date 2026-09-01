@@ -52,6 +52,10 @@
   const pending = $derived(
     snap.pendingPermissions.length + snap.pendingQuestions.length + snap.pendingPlans.length > 0)
   const asking = $derived(live && pending)
+  // La riga dell'elenco **di questo pannello**, non della chat a fuoco: è la riga
+  // che il risveglio («Reopen») tocca. Col multi-pannello `store.row` sarebbe la
+  // riga sbagliata — e risvegliare l'altra chat costa quota e non è mai stato chiesto.
+  const rigaPannello = $derived(store.rows.find(r => r.id === id))
 
   /**
    * Tornando sulla finestra si riprende a scrivere da dove si era: il fuoco torna
@@ -83,7 +87,11 @@
     text = ''
     allegati = []
     await regrow()
-    const ok = await store.prompt(draft, addosso)
+    // Il prompt va alla chat **di questo pannello**, non a quella a fuoco: col
+    // multi-pannello due dock sono montati insieme, e chi entra dalla tastiera
+    // (Tab, poi Invio) non sposta il fuoco prima — il clic sì, e senza l'id
+    // esplicito il prompt sarebbe partito per l'altra chat.
+    const ok = await store.prompt(draft, addosso, id)
     if (!ok) { text = draft; allegati = addosso; await regrow() }
   }
 
@@ -308,7 +316,7 @@
     // scelto `view.ts`, la citazione era completa e l'elenco tornava su da solo.
     if (!c) { giro++; files = []; return }
     const mio = ++giro
-    void store.files(c.q).then(async r => {
+    void store.files(c.q, id).then(async r => {
       if (mio !== giro) return
       // Un solo ritentativo, e solo su una risposta vuota a una ricerca vera: nei
       // primi ~1,8s di una chat il CLI sta ancora costruendo l'indice dei file e
@@ -318,7 +326,7 @@
       if (r.length === 0 && c.q !== '') {
         await new Promise(res => setTimeout(res, 400))
         if (mio !== giro) return
-        r = await store.files(c.q)
+        r = await store.files(c.q, id)
         if (mio !== giro) return
       }
       files = r
@@ -644,11 +652,11 @@
   // secondo in secondo e quella lettura costa di più.
   let ultimaQuota = 0
   function peek(): void {
-    void store.refreshContext()
+    void store.refreshContext(id)
     const t = Date.now()
     if (t - ultimaQuota < 15_000) return
     ultimaQuota = t
-    void store.refreshQuota()
+    void store.refreshQuota(id)
   }
 
   /** Un numero di token leggibile per il piè del pannello d'uso: come `fmtTok`, ma
@@ -670,7 +678,7 @@
 
   function scegliModello(agent: string, model: string): void {
     if (agent === snap.agent) {
-      void store.setOption(modelOpt?.id ?? 'model', model)
+      void store.setOption(modelOpt?.id ?? 'model', model, id)
       chiudiMenu()
       return
     }
@@ -680,7 +688,9 @@
   async function passa(via: 'agent' | 'journal'): Promise<void> {
     const scelta = conferma ?? (store.handoff?.fase === 'chiede' ? store.handoff : null)
     if (!scelta) return
-    await store.passaAdAltroAgent(scelta.agent, scelta.model, via)
+    // Il passaggio tocca la chat **di questo pannello**: è lei che cambia agent, e
+    // `replacePane` mette la nuova al posto della vecchia nel riquadro che la mostra.
+    await store.passaAdAltroAgent(scelta.agent, scelta.model, via, id)
     // Andata: il pannello mostra gia' la chat nuova, e questo menu appartiene alla
     // vecchia. Se invece e' rimasto uno stato (`chiede`, `fallito`), il menu resta
     // aperto apposta, perche' e' li' che c'e' la domanda o il motivo.
@@ -711,7 +721,10 @@
          arriva mentre l'agent sta ancora lavorando, e lo stato canonico in quel momento
          è `awaiting`, non `busy`. Legarlo a `busy` lo farebbe sparire proprio nel
          momento in cui serve di più. -->
-    <Ask {store} {snap} canStop={live} />
+    <!-- `id` arriva a Ask perché le sue risposte — permessi, domande, piani — vadano
+         alla chat di questo pannello e non a quella a fuoco: la stessa regola del
+         composer qui sotto, per la stessa ragione. -->
+    <Ask {store} {snap} {id} canStop={live} />
   {/if}
 
   {#if files.length > 0}
@@ -826,7 +839,7 @@
             <div class="mcp-list">
               {#each snap.mcpServers as s (s.name)}
                 <button class="mcp-row" class:on={s.enabled} class:off={!s.enabled}
-                  onclick={() => void store.setMcp(s.name, !s.enabled)}>
+                  onclick={() => void store.setMcp(s.name, !s.enabled, id)}>
                   <span class="mcp-ico" class:live={s.status === 'connected'}
                     class:err={s.status === 'failed' || s.status === 'needs-auth'}>
                     <Icon name="i-plug" />
@@ -862,7 +875,7 @@
             <div class="pk-rule"></div>
             {#each modeOpt?.choices ?? [] as c (c.value)}
               <button class="pop-item" class:dis={!c.available} disabled={!c.available}
-                onclick={() => { void store.setOption(modeOpt!.id, c.value); chiudiMenu() }}>
+                onclick={() => { void store.setOption(modeOpt!.id, c.value, id); chiudiMenu() }}>
                 <span class="ico"><Icon name={MODE_ICON[c.value] ?? 'i-shield'}
                   style={c.value === modeOpt!.value ? 'color:var(--accent)' : ''} /></span>
                 <span class="lbl">{c.label ?? c.value}<span class="sub"
@@ -881,7 +894,7 @@
             <div class="pk-rule"></div>
             {#each reasoningOpt?.choices ?? [] as c (c.value)}
               <button class="pop-item" class:dis={!c.available} disabled={!c.available}
-                onclick={() => { void store.setOption('reasoning', c.value); chiudiMenu() }}>
+                onclick={() => { void store.setOption('reasoning', c.value, id); chiudiMenu() }}>
                 <span class="ico"><Icon name="i-brain"
                   style={c.value === reasoningOpt!.value ? 'color:var(--accent)' : ''} /></span>
                 <span class="lbl">{c.label ?? c.value}<span class="sub"
@@ -900,7 +913,7 @@
             <div class="pk-rule"></div>
             {#each effortOpt?.choices ?? [] as c (c.value)}
               <button class="pop-item" class:dis={!c.available} disabled={!c.available}
-                onclick={() => { void store.setOption('effort', c.value); chiudiMenu() }}>
+                onclick={() => { void store.setOption('effort', c.value, id); chiudiMenu() }}>
                 <span class="ico"><Icon name="i-bolt"
                   style={c.value === effortOpt!.value ? 'color:var(--accent)' : ''} /></span>
                 <span class="lbl">{c.label ?? c.value}<span class="sub"
@@ -1066,7 +1079,7 @@
              pollice già occupato a scrivere. Sta in una striscia sopra, allineato
              all'invio — dove l'occhio va comunque a guardare se c'è risposta. -->
         <div class="run-strip">
-          <button class="btn-round stop" title="Stop" onclick={() => void store.stop()}>
+          <button class="btn-round stop" title="Stop" onclick={() => void store.stop(id)}>
             <Icon name="i-stop" />
           </button>
         </div>
@@ -1114,7 +1127,7 @@
           {#if busy}
             <!-- Su schermo largo lo stop sta qui, accanto all'invio come da DS; su
                  stretto la regola lo sposta nella striscia sopra. -->
-            <button class="btn-round stop wide" title="Stop" onclick={() => void store.stop()}>
+            <button class="btn-round stop wide" title="Stop" onclick={() => void store.stop(id)}>
               <Icon name="i-stop" />
             </button>
           {/if}
@@ -1143,8 +1156,8 @@
         {#if pending}It stopped while it was waiting for an answer from you.{/if}
         Reopening it re-reads the whole conversation, which costs quota.
       </div>
-      <button class="btn pri" disabled={store.working || !store.row}
-        onclick={() => { const r = store.row; if (r) void store.wake(r) }}>
+      <button class="btn pri" disabled={store.working || !rigaPannello}
+        onclick={() => { if (rigaPannello) void store.wake(rigaPannello) }}>
         {store.working ? 'Reopening…' : 'Reopen'}
       </button>
     </div>
