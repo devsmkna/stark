@@ -159,20 +159,20 @@ Cosa manca ancora: **regole di divieto** (il riquadro «Never» esiste disegnato
 `deny` sarebbe una promessa non mantenibile); la **scelta dei suoni**; e una prova automatica
 dell'instradamento.
 
-**Da correggere — «Chat about this» allarga la discussione a tutte le domande** (segnalato
-dall'utente il 28 agosto 2026). Una richiesta di `AskUserQuestion` ne porta da 1 a 4, e la voce
-serve a dire «su *questa* non ho abbastanza per scegliere»: le altre risposte passano com'erano.
-Nei fatti l'agent torna con un approfondimento su **tutte**, comprese quelle a cui si era già
-risposto. Quello che parte oggi è `DISCUSS` in `ui/src/components/Ask.svelte:85` — una frase
-fissa («walk me through the options…») che **non nomina la domanda** e finisce in `answers`
-sotto la sua chiave. Il sospetto, da verificare e non da dare per buono, è che quella chiave
-non basti: la frase letta da sola non dice a cosa si riferisce, e l'agent ricomincia da capo.
-La cura probabile è citare la domanda dentro il testo che parte, invece di affidarsi alla
-posizione nella mappa. Va **misurato dal vivo** su una richiesta con tre domande, di cui una
-sola marcata «parliamone»: è l'unico modo di distinguere «la chiave si perde» da «l'agent la
-legge e decide comunque di riaprire tutto», che sono due difetti diversi con due cure diverse.
-Nota che il commento accanto al codice promette già il comportamento giusto («vale **solo per
-quella** — le altre restano risposte»): è una promessa scritta, non una verificata.
+**Da misurare dal vivo — «Chat about this» allargava la discussione a tutte le domande**
+(segnalato dall'utente il 28 agosto 2026, e di nuovo il 2 settembre 2026 su un caso più ampio:
+succedeva anche solo rispondendo a più step senza toccare «parliamone»). Una richiesta di
+`AskUserQuestion` ne porta da 1 a 4, e la voce serve a dire «su *questa* non ho abbastanza per
+scegliere»: le altre risposte devono passare com'erano. Nei fatti l'agent tornava con un
+approfondimento su **tutte**, comprese quelle a cui si era già risposto.
+Applicata il 2 settembre 2026 la cura sospettata: `discussMessage()` in
+`ui/src/components/Ask.svelte` (prima `DISCUSS`, una frase fissa) ora **cita il testo della
+domanda** dentro il messaggio che parte, e dichiara esplicitamente che le altre risposte nello
+stesso invio restano ferme — invece di affidarsi alla sua sola posizione come chiave in
+`answers`. Non ancora **misurato dal vivo**: serve una richiesta reale con tre domande, di cui
+una sola marcata «parliamone», per vedere se l'agent riapre solo quella. Se il difetto persiste
+anche così, vuol dire che non era la chiave a perdersi ma che l'agent rilegge comunque tutta la
+richiesta — un difetto diverso, con un'altra cura.
 
 ~~Due cose non ancora misurate~~ — **fatte** il 27 agosto: vedi «Le due misure mai fatte»
 più sopra. Il classificatore resta sotto la risoluzione della misura; il risveglio arriva
