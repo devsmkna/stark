@@ -21,6 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { configDirOf } from './profiles.ts'
+import { conBlocco, senzaBlocco } from '../../core/blocco.ts'
 
 /** Esportato perché le prove non devono ricopiare la stringa a mano: se cambia
  *  qui, deve cambiare anche lì — e un delimitatore diverso non riconosce più il
@@ -66,7 +67,9 @@ export function allineaMemoria(configDir: string | undefined, accesa: boolean): 
   const path = resolve(dir, 'CLAUDE.md')
   try {
     const prima = existsSync(path) ? readFileSync(path, 'utf8') : ''
-    const dopo = accesa ? conRegola(prima) : senzaRegola(prima)
+    const dopo = accesa
+      ? conBlocco(prima, INIZIO, FINE, REGOLA)
+      : senzaBlocco(prima, INIZIO, FINE)
     if (dopo === prima) return { path, presente: accesa, cambiato: false }
     // Rimasto vuoto: il file c'era solo per la nostra regola. Si toglie invece di
     // lasciare un `CLAUDE.md` di zero byte in giro — ed è sicuro proprio perché è
@@ -86,39 +89,4 @@ export function allineaMemoria(configDir: string | undefined, accesa: boolean): 
     // è successo e si va avanti. È una preferenza, non un pezzo del motore.
     return { path, presente: false, cambiato: false, error: String((e as Error).message ?? e) }
   }
-}
-
-/** C'è già? La si lascia dov'è: riordinarla sposterebbe testo che non è nostro. */
-function conRegola(testo: string): string {
-  if (testo.includes(INIZIO)) return sostituisci(testo)
-  if (testo.trim() === '') return `${REGOLA}\n`
-  // In fondo, non in cima: quello che l'utente ha scritto viene prima del nostro.
-  return `${testo.replace(/\s*$/, '')}\n\n${REGOLA}\n`
-}
-
-/**
- * Il blocco c'è ma il testo dentro è vecchio (STARK aggiornato, regola riscritta): si
- * rimpiazza fra i delimitatori. È il motivo per cui i delimitatori esistono anche nel
- * caso «accesa»: senza, l'unico modo di aggiornare la regola sarebbe aggiungerne una
- * seconda copia.
- */
-function sostituisci(testo: string): string {
-  const a = testo.indexOf(INIZIO)
-  const b = testo.indexOf(FINE)
-  if (a < 0 || b < 0 || b < a) return testo
-  return testo.slice(0, a) + REGOLA + testo.slice(b + FINE.length)
-}
-
-function senzaRegola(testo: string): string {
-  const a = testo.indexOf(INIZIO)
-  const b = testo.indexOf(FINE)
-  if (a < 0 || b < 0 || b < a) return testo
-  // Si portano via anche le righe vuote che il blocco si era portato dietro, se no
-  // accendere e spegnere l'impostazione dieci volte lascerebbe dieci buchi nel file.
-  const testa = testo.slice(0, a).replace(/\s*$/, '')
-  const coda = testo.slice(b + FINE.length).replace(/^\s*/, '')
-  if (testa === '' && coda === '') return ''
-  if (testa === '') return `${coda}\n`.replace(/\n+$/, '\n')
-  if (coda === '') return `${testa}\n`
-  return `${testa}\n\n${coda}\n`.replace(/\n+$/, '\n')
 }

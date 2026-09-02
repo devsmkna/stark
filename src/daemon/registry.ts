@@ -21,6 +21,7 @@ import { DA_ESTENSIONE, ESTENSIONE } from '../core/allegati.ts'
 import { countSnapshot, MINIMO, searchSnapshot, type SessionMatches } from '../core/search.ts'
 import { statsFrom, type Periodo, type Stats } from '../core/stats.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from './settings.ts'
+import { allineaContestoBoard } from './board.ts'
 import type {
   AgentQuestion, Attachment, CanonicalEvent, Command, Payload, PermissionCategory, PermissionMode,
   PromptPart,
@@ -399,6 +400,13 @@ export class Registry {
     // biforcarsi. Un fork invece è una sessione nuova, e deve avere un journal nuovo.
     const id = spec.resume && !spec.resume.fork ? spec.resume.ref : randomUUID()
     if (this.live.has(id)) return id
+
+    // C'è una board in questo progetto? Il contesto di progetto (CLAUDE.md, AGENTS.md)
+    // la deve dire — è la superficie di coordinamento di default, e finora l'agente la
+    // scopriva solo se qualcuno apriva la vista Board. Si allinea a ogni nascita vera
+    // (nuova, ripresa, risveglio), e l'early return qui sopra evita di riscriverlo per
+    // una sessione già viva. Non bloccante: un progetto non scrivibile non ferma la chat.
+    allineaContestoBoard(spec.cwd)
 
     // L'unica differenza fra una chat vera e una effimera e' **dove finiscono le
     // righe**. Tutto il resto di questa funzione non sa quale delle due sta aprendo, ed
