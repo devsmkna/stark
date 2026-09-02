@@ -1,0 +1,33 @@
+# Il server cloud di STARK sul server remoto, in dev.
+#
+# Questo compose NON builda il cloud: l'immagine arriva già caricata con `docker load`
+# (vedi deploy-dev.sh). Avvia il server cloud + il Postgres che gli serve.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Dati (account, sessioni, DB) in bind mount su /opt/stark-cloud/data: stanno in file
+# normali del server, visibili e backuppabili.
+
+services:
+  cloud:
+    image: stark-cloud:dev
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8787:8787"
+    environment:
+      - PORT=8787
+      - DATABASE_URL=postgres://stark:stark@db:5432/stark
+    volumes:
+      - /opt/stark-cloud/data:/data
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=stark
+      - POSTGRES_PASSWORD=stark
+      - POSTGRES_DB=stark
+    volumes:
+      - /opt/stark-cloud/pgdata:/var/lib/postgresql/data

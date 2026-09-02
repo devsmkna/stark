@@ -1,13 +1,18 @@
 # Il server cloud di STARK. Gira su Node 24 (esegue i .ts nativamente, senza build).
-# Non ha dipendenze npm: usa solo i moduli built-in di Node (http, crypto, fs).
+# Usa Drizzle ORM + postgres: le dipendenze stanno in cloud/package.json.
 FROM node:24-alpine
 
 WORKDIR /app
 
-# Solo il server cloud serve: il resto del repo non entra nel container.
-COPY src/cloud ./src/cloud
+# Prima le dipendenze (cache del layer): il package.json cambia meno spesso del codice.
+COPY cloud/package.json cloud/package-lock.json* ./
+RUN npm install --omit=dev --no-fund --no-audit
+
+# Poi il codice del modulo cloud (schema, migrazioni, server).
+COPY cloud/src ./src
+COPY cloud/drizzle.config.ts ./drizzle.config.ts
 
 ENV PORT=8787
 EXPOSE 8787
 
-CMD ["node", "src/cloud/server.ts"]
+CMD ["node", "src/server.ts"]

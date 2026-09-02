@@ -4,7 +4,10 @@
 // l'unico client: il browser non parla con questo server direttamente.
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { drizzle } from 'drizzle-orm/postgres-js'
 import { registra, login, revoca, chi } from './auth.ts'
+import { sql } from './db/client.ts'
 
 const PORTA = Number(process.env['PORT'] ?? 8787)
 
@@ -30,7 +33,11 @@ function bearer(req: IncomingMessage): string {
   return h.startsWith('Bearer ') ? h.slice(7).trim() : ''
 }
 
-export function startCloud(): void {
+export async function startCloud(): Promise<void> {
+  // Le migrazioni si applicano a ogni avvio: sono cumulative e idempotenti, quindi
+  // il server arriva sempre su uno schema aggiornato senza un passo a parte.
+  await migrate(drizzle(sql), { migrationsFolder: './src/db/migrations' })
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
@@ -40,7 +47,7 @@ export function startCloud(): void {
         const body = await readJson<{ email?: string; password?: string }>(req)
         if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
         try {
-          const fatto = registra(body.email, body.password)
+          const fatto = await registra(body.email, body.password)
           return send(res, fatto ? 201 : 409, fatto ? { ok: true } : { error: 'email già registrata' })
         } catch (e) {
           return send(res, 400, { error: String((e as Error).message ?? e) })
@@ -49,16 +56,16 @@ export function startCloud(): void {
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson<{ email?: string; password?: string }>(req)
         if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
-        const sessione = login(body.email, body.password)
+        const sessione = await login(body.email, body.password)
         if (!sessione) return send(res, 401, { error: 'email o password sbagliate' })
         return send(res, 200, { token: sessione.token, email: sessione.email })
       }
       if (method === 'POST' && path === '/api/logout') {
-        revoca(bearer(req))
+        await revoca(bearer(req))
         return send(res, 200, { ok: true })
       }
       if (method === 'GET' && path === '/api/me') {
-        const email = chi(bearer(req))
+        const email = await chi(bearer(req))
         if (!email) return send(res, 401, { error: 'non autenticato' })
         return send(res, 200, { email })
       }

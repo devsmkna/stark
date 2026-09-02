@@ -1,0 +1,32 @@
+# Il server cloud di STARK in dev locale: server + Postgres, senza Traefik.
+#
+#   docker compose -f cloud/docker-compose.dev.yml up -d --build
+#
+# Dati in volumi nominati: sopravvivono al ricambio dei container.
+
+services:
+  cloud:
+    build:
+      context: ..
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8787:8787"
+    environment:
+      - PORT=8787
+      - DATABASE_URL=postgres://stark:stark@db:5432/stark
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=stark
+      - POSTGRES_PASSWORD=stark
+      - POSTGRES_DB=stark
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -15,7 +15,7 @@ import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
   Api, bootToken,
   type AgentModels, type ImportableRow, type LinkStatus, type Memoria, type SessionMatches,
-  type SessionRow, type Settings, type StatoAggiornamento,
+  type SessionRow, type Settings, type StatoAggiornamento, type SystemInfo,
 } from './api.ts'
 import { Pane } from './pane.svelte.ts'
 import {
@@ -275,12 +275,23 @@ export class Store {
    */
   refusedAuth = $state(false)
 
+  // ─── cloud (login obbligatorio) ────────────────────────────────────────────
+  //
+  // Il login cloud è il gate d'accesso a STARK: senza una sessione cloud valida la UI
+  // mostra la schermata di login, non l'app. `null` finché non si è chiesto (o se il
+  // daemon non ha risposto: in quel caso si resta sulla schermata di login, che è la
+  // scelta sicura — meglio non entrare che entrare senza sapere chi è).
+  cloudGate = $state<{ email: string | null; server: 'ok' | 'giu' | 'non-configurato' } | null>(null)
+
   // ─── aggiornamenti ─────────────────────────────────────────────────────────
   //
-  // Il controllo l'ha già fatto il daemon accendendosi: qui si legge il risultato una
-  // volta sola, all'avvio della pagina. Ripeterlo a intervalli non servirebbe — la
-  // risposta non cambia finché il daemon non riparte, e a farlo ripartire è proprio
-  // l'aggiornamento.
+  // Il daemon ricontrolla da solo ogni tre ore (`daemon/aggiornamenti.ts`): qui non
+  // basta più leggerlo una volta sola all'avvio della pagina, perché una scheda tenuta
+  // aperta per ore non se ne accorgerebbe mai. Si rilegge quindi a intervalli — larghi,
+  // perché la risposta cambia raramente — e a ogni riconnessione del flusso
+  // dell'elenco: è il momento in cui un `stark update` lanciato da un altro terminale,
+  // che riavvia il daemon senza passare da questa scheda, diventa visibile senza dover
+  // ricaricare a mano.
   /** `null` finché non si è chiesto, o se il daemon non ha risposto. */
   aggiornamento = $state<StatoAggiornamento | null>(null)
   /** Il banner si può chiudere: chi non vuole aggiornare adesso non deve portarselo
@@ -364,17 +375,23 @@ export class Store {
       // Una rete che non risponde non è un rifiuto: quello lo dice `fatal`, e mostrare
       // «No token» a chi ha solo il daemon spento manderebbe a cercare la cosa sbagliata.
       .catch(() => { this.refusedAuth = false })
+    // Il gate d'accesso: chi è loggato sul cloud? Senza una sessione valida la UI si
+    // ferma sulla schermata di login. Si legge una volta sola all'avvio — il login e il
+    // logout la aggiornano da soli.
+    void this.api.cloudStatus().then(c => { this.cloudGate = c }).catch(() => {
+      // Il daemon non ha risposto: resta sulla schermata di login (scelta sicura).
+      this.cloudGate = { email: null, server: 'giu' }
+    })
     // Servono subito: da qui nascono i colori dei progetti e il silenzio per progetto,
     // che si vedono nella barra laterale prima ancora che si apra una chat.
     void this.loadSettings()
-    // Una lettura sola, e mai bloccante: se il daemon non risponde su questa rotta non
-    // succede niente: nessun banner, che è la risposta giusta quando non si sa.
-    void this.api.update().then(u => {
-      this.aggiornamento = u
-      try {
-        this.aggiornamentoChiuso = localStorage.getItem('stark.update.dismissed') === u.ultima
-      } catch { /* navigazione privata: il banner resta, ed è il male minore */ }
-    }).catch(() => { /* daemon vecchio senza questa rotta, o rete: nessun banner */ })
+    void this.loadProfiles()
+    void this.#checkUpdate()
+    // Larghissimo di proposito: il daemon stesso ricontrolla ogni tre ore, quindi
+    // chiederlo più spesso di così non farebbe comparire il banner prima — servirebbe
+    // solo a scoprire con qualche minuto di anticipo un giro che il daemon ha già fatto.
+    this.#updateTimer = setInterval(() => void this.#checkUpdate(), 30 * 60 * 1000)
+    let primaVoltaViva = true
     this.#stopList = this.api.sessionsStream(
       rows => {
         this.#ring(rows)
@@ -405,9 +422,51 @@ export class Store {
         // Un elenco che non arriva è l'unico guasto che vale la pena gridare: senza
         // di quello non c'è niente da guardare.
         if (s === 'lost') this.fatal = 'the daemon is not answering'
-        else if (s === 'live') this.fatal = null
+        else if (s === 'live') {
+          this.fatal = null
+          // La **prima** volta che il flusso è vivo non è una riconnessione: è
+          // l'apertura della pagina, che ha già chiesto l'aggiornamento qui sopra.
+          // Le volte dopo sì — ed è il momento in cui un `stark update` lanciato da un
+          // altro terminale, che il daemon lo riavvia senza passare da questa scheda,
+          // diventa visibile senza dover ricaricare a mano.
+          if (primaVoltaViva) primaVoltaViva = false
+          else void this.#checkUpdate()
+        }
       },
     )
+  }
+
+  #updateTimer: ReturnType<typeof setInterval> | null = null
+
+  /** Una lettura sola, e mai bloccante: se il daemon non risponde su questa rotta non
+   *  succede niente — nessun banner, che è la risposta giusta quando non si sa. */
+  async #checkUpdate(): Promise<void> {
+    try {
+      const u = await this.api.update()
+      this.aggiornamento = u
+      try {
+        this.aggiornamentoChiuso = localStorage.getItem('stark.update.dismissed') === u.ultima
+      } catch { /* navigazione privata: il banner resta, ed è il male minore */ }
+    } catch { /* daemon vecchio senza questa rotta, o rete: nessun banner */ }
+  }
+
+  /**
+   * Login cloud dal gate d'accesso. `true` se è andato: aggiorna `cloudGate` e la UI
+   * passa all'app. `false` con `motivo` se fallisce (il gate lo mostra).
+   */
+  async loginCloud(email: string, password: string): Promise<{ ok: boolean; motivo?: string }> {
+    const esito = await this.api.cloudLogin(email, password)
+    if (esito.ok) {
+      this.cloudGate = { email: esito.email ?? null, server: 'ok' }
+      return { ok: true }
+    }
+    return { ok: false, motivo: esito.motivo }
+  }
+
+  /** Logout cloud: torna alla schermata di login. */
+  async logoutCloud(): Promise<void> {
+    await this.api.cloudLogout()
+    this.cloudGate = { email: null, server: 'ok' }
   }
 
   /**
@@ -448,8 +507,7 @@ export class Store {
    * dentro un `popstate` aggiungerebbe una voce alla storia mentre la si sta
    * ripercorrendo — cioè il tasto «indietro» smetterebbe di andare indietro.
    */
-  async #apriDaIndirizzo(): Promise<void> {
-    const r = fromPath()
+  async #apriDaIndirizzo(): Promise<void> {    const r = fromPath()
     if (!r) { this.#chiudiTutto(); return }
     if (!this.rows.some(x => x.id === r.id)) {
       // Un indirizzo che punta a una chat cancellata, o di un'altra macchina. Si dice,
@@ -510,6 +568,22 @@ export class Store {
       ...s,
       projects: { ...s.projects, [cwd]: { ...s.projects[cwd], ...patch } },
     })
+  }
+
+  /** I profili Claude Code di questa macchina (le cartelle `~/.claude*`), per il
+   *  menu contestuale della barra laterale e per Settings — condividono la stessa
+   *  cache invece di chiedere `/api/system` ciascuno per conto proprio. `null` finché
+   *  non si è chiesto: un elenco vuoto e «non ancora chiesto» sono due fatti diversi,
+   *  e confonderli mostrerebbe per un istante «un solo profilo» dove ce n'è più di uno. */
+  profiles = $state<SystemInfo['agent']['profiles'] | null>(null)
+
+  /** Si chiede una volta sola per caricamento di pagina: i profili non cambiano mentre
+   *  STARK è aperto (o se cambiano — un `~/.claude-*` creato a mano — non vale la pena
+   *  di un giro a intervalli per una cosa così rara). */
+  async loadProfiles(): Promise<void> {
+    if (this.profiles) return
+    try { this.profiles = (await this.api.system()).agent.profiles }
+    catch { this.profiles = [] }
   }
 
   /**
@@ -830,17 +904,36 @@ export class Store {
   /**
    * Un prompt può portarsi dietro delle immagini. Il testo vuoto va bene **se** c'è un
    * allegato: «guarda questo» spesso non ha bisogno di parole.
+   *
+   * Il terzo parametro è la **chat a cui va**: chi scrive in una casella scrive nella
+   * chat di quel pannello, e col layout multi-pannello quella non è sempre quella a
+   * fuoco — chi entra dalla tastiera (Tab, poi Invio) non sposta il fuoco, e il
+   * prompt partirebbe verso l'altra chat.
    */
-  prompt(text: string, attachments: Attachment[] = []): Promise<boolean> {
+  prompt(text: string, attachments: Attachment[] = [], id = this.selected): Promise<boolean> {
     const clean = text.trim()
     if (!clean && attachments.length === 0) return Promise.resolve(false)
     return this.send({
       c: 'session.prompt', text: clean,
       ...(attachments.length ? { attachments } : {}),
-    })
+    }, id)
   }
 
-  stop(): Promise<boolean> { return this.send({ c: 'session.interrupt' }) }
+  /** Stop **di quella chat**: col multi-pannello due dock sono montati insieme, e il
+   *  quadrato rosso di uno non può fermare l'altro. */
+  stop(id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.interrupt' }, id)
+  }
+
+  /**
+   * Togli dalla fila un prompt che non è ancora partito. L'esito non si tocca a mano:
+   * il `turn.ended` che l'adapter scrive arriva dal flusso e `applyTo` chiude il turno
+   * — la fila smette di mostrarlo in coda da sola (§18).
+   */
+  dequeue(turnId: string): Promise<boolean> {
+    return this.send({ c: 'session.dequeue', turnId })
+  }
+
   sleep(id = this.selected): Promise<boolean> { return this.send({ c: 'session.sleep' }, id) }
   /**
    * Cambia una scelta dichiarata dall'agent (ADR-014).
@@ -859,11 +952,14 @@ export class Store {
   setMode(mode: PermissionMode, id = this.selected): Promise<boolean> {
     return this.send({ c: 'session.setMode', mode }, id)
   }
-  /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18). */
-  setMcp(server: string, enabled: boolean): Promise<boolean> {
-    return this.send({ c: 'session.setMcp', server, enabled })
+  /** Accende o spegne un server MCP per questa chat. L'esito torna dal flusso (§18).
+   *  Il terzo parametro è la chat del pannello che ha aperto il menu. */
+  setMcp(server: string, enabled: boolean, id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setMcp', server, enabled }, id)
   }
-  setModel(model: string): Promise<boolean> { return this.send({ c: 'session.setModel', model }) }
+  setModel(model: string, id = this.selected): Promise<boolean> {
+    return this.send({ c: 'session.setModel', model }, id)
+  }
 
   /**
    * Rilegge il livello della quota. Non passa da `send`, di proposito: è una domanda
@@ -871,29 +967,30 @@ export class Store {
    * dorme non c'è nessuno a cui chiederlo — non deve accendere la riga rossa che
    * l'utente associa a un comando che *lui* ha dato. Se non risponde, restano i numeri
    * di prima con scritto di quando sono.
+   *
+   * La guardia guarda la **riga di quella chat**, non la globale: col multi-pannello
+   * il pannellino può appartenere a una chat ferma mentre quella a fuoco è viva.
    */
-  async refreshQuota(): Promise<void> {
-    const id = this.selected
-    if (!id || !this.live) return
+  async refreshQuota(id = this.selected): Promise<void> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return
     try { await this.api.command(id, { c: 'session.refreshQuota' }) } catch { /* restano i vecchi */ }
   }
 
   /** Stessa ragione di `refreshQuota`: la domanda a cui risponde `/context` nel
    *  terminale, fatta quando l'utente guarda il pannellino. */
-  async refreshContext(): Promise<void> {
-    const id = this.selected
-    if (!id || !this.live) return
+  async refreshContext(id = this.selected): Promise<void> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return
     try { await this.api.command(id, { c: 'session.refreshContext' }) } catch { /* restano i vecchi */ }
   }
 
   /**
-   * I file del progetto, per le citazioni con `@`. Della chat **selezionata**: `@` è
-   * una cosa che si scrive in una casella, e quella casella appartiene a una chat
-   * sola — chiedere «i file del progetto» senza dire quale non vorrebbe dire niente.
+   * I file del progetto, per le citazioni con `@`. Della chat **a cui la casella
+   * appartiene**: `@` è una cosa che si scrive in una casella, e quella casella
+   * appartiene a una chat sola — chiedere «i file del progetto» senza dire quale non
+   * vorrebbe dire niente. Col multi-pannello non è sempre la chat a fuoco.
    */
-  async files(q: string): Promise<string[]> {
-    const id = this.selected
-    if (!id || !this.live) return []
+  async files(q: string, id = this.selected): Promise<string[]> {
+    if (!id || !this.rows.some(r => r.id === id && r.live)) return []
     return this.api.files(id, q)
   }
 
@@ -1285,15 +1382,21 @@ export class Store {
   >(null)
 
   /**
-   * Porta il lavoro della chat a fuoco su un altro agent.
+   * Porta il lavoro di una chat su un altro agent. Il quarto parametro è **quale**
+   * chat: col multi-pannello è quella del pannello il cui menu ha aperto la voce, non
+   * sempre quella a fuoco — e `replacePane` qui sotto mette la nuova al posto della
+   * vecchia nello stesso riquadro, quindi sbagliare `da` sposterebbe il pannello
+   * sbagliato.
    *
    * Il pannello **non** cambia: `replacePane` mette la conversazione nuova al posto
    * della vecchia nello stesso riquadro, che e' cio' che rende il passaggio un cambio
    * di modello dal punto di vista di chi guarda, e non un «vai a cercarti l'altra chat
    * nell'elenco». La vecchia resta nell'elenco, con nel journal scritto dov'e' andata.
    */
-  async passaAdAltroAgent(agent: string, model: string, via?: 'agent' | 'journal'): Promise<void> {
-    const da = this.selected
+  async passaAdAltroAgent(
+    agent: string, model: string, via?: 'agent' | 'journal', id = this.selected,
+  ): Promise<void> {
+    const da = id
     if (!da) return
     this.handoff = { fase: 'corso', agent, model }
     // «Svegliala e falla scrivere» e' due cose, non una: il daemon rifiuta `agent` su
@@ -1328,5 +1431,6 @@ export class Store {
     for (const pane of this.panes.values()) pane.close()
     this.helper?.close()
     this.#stopList?.()
+    if (this.#updateTimer) clearInterval(this.#updateTimer)
   }
 }
