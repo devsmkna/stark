@@ -129,6 +129,11 @@ export type Settings = {
    *  identifica. Non tocca il «New chat here» del menu contestuale, che porta il
    *  modello della chat da cui si è premuto, né le chat riprese. */
   preferredModel?: { agent: string; model: string }
+  /** Freccia su nella casella vuota: richiama gli ultimi prompt mandati in quella
+   *  chat, come la history di una shell. */
+  historyArrowUp: boolean
+  /** Esc mentre l'agent lavora: interrompe il turno in corso. */
+  interruptEscape: boolean
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */

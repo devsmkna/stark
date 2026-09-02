@@ -20,6 +20,7 @@
   import ModelPicker from './ModelPicker.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { SessionOption, Attachment, SlashCommand } from '$core/events.ts'
+  import { promptText } from '$core/events.ts'
   import { optionsFrom } from '$core/adapter.ts'
   import {
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
@@ -111,6 +112,64 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
     // esplicito il prompt sarebbe partito per l'altra chat.
     const ok = await store.prompt(draft, addosso, id)
     if (!ok) { text = draft; allegati = addosso; await regrow() }
+    // Un prompt nuovo è la fine di qualunque sfoglio: la prossima freccia su deve
+    // ripartire da lui, non da dove ci si era fermati la volta scorsa.
+    storicoAt = -1
+  }
+
+  // ─── freccia su: la history di una shell ───────────────────────────────────
+  //
+  // Solo i prompt mandati **in questa chat** (`snap.turns`), nell'ordine in cui sono
+  // partiti — non è una history globale, esattamente come il terminale non mescola
+  // le sessioni. Gli allegati non tornano indietro: si richiama il testo, non il file.
+
+  const storico = $derived(
+    snap.turns.map(t => promptText(t.prompt).trim()).filter(t => t.length > 0),
+  )
+  /** -1: non si sta sfogliando, `text` è il proprio. 0: l'ultimo mandato, 1: quello
+   *  prima, e così via risalendo `storico` dalla coda. */
+  let storicoAt = $state(-1)
+  /** Cosa si stava scrivendo prima di premere freccia su la prima volta: è quello a
+   *  cui si torna scendendo oltre l'ultimo mandato. */
+  let storicoBozza = ''
+
+  async function posizionaCursore(): Promise<void> {
+    await regrow()
+    box?.setSelectionRange(text.length, text.length)
+  }
+
+  function storicoSu(): void {
+    const h = storico
+    if (h.length === 0) return
+    if (storicoAt === -1) storicoBozza = text
+    const next = Math.min(storicoAt + 1, h.length - 1)
+    if (next === storicoAt) return
+    storicoAt = next
+    text = h[h.length - 1 - storicoAt]!
+    void posizionaCursore()
+  }
+
+  function storicoGiu(): void {
+    if (storicoAt === -1) return
+    if (storicoAt === 0) { storicoAt = -1; text = storicoBozza }
+    else { storicoAt -= 1; text = storico[storico.length - 1 - storicoAt]! }
+    void posizionaCursore()
+  }
+
+  // ─── Esc: interrompe, e se non c'era altro in coda restituisce il prompt ───
+  //
+  // Copre chi ha premuto Invio per sbaglio o con un refuso: interrompendo subito,
+  // non deve riscrivere quello che aveva appena mandato. Vale solo **senza** coda —
+  // con più prompt in volo (§7) non è chiaro quale dei due si vorrebbe indietro, e si
+  // lascia la coda continuare per conto suo.
+  async function interrompi(): Promise<void> {
+    const inCorso = snap.turns.filter(t => !t.ended)
+    const daSolo = inCorso.length === 1 ? inCorso[0] : undefined
+    const ok = await store.stop(id)
+    if (ok && daSolo && text.trim() === '') {
+      text = promptText(daSolo.prompt)
+      await regrow()
+    }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -230,6 +289,23 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
         completa(comandi[scelto]!)
         return
       }
+    }
+    // Freccia su: come nel terminale, richiama l'ultimo prompt mandato. Scatta solo
+    // a inizio riga (o già mentre si sfoglia) — altrove è normale muovere il cursore
+    // in un testo di più righe, e prendersela lì romperebbe quello che si sta scrivendo.
+    if (e.key === 'ArrowUp' && store.settings?.historyArrowUp !== false) {
+      const el = e.currentTarget as HTMLTextAreaElement
+      if (storicoAt !== -1 || (el.selectionStart === 0 && el.selectionEnd === 0)) {
+        e.preventDefault(); storicoSu(); return
+      }
+    }
+    if (e.key === 'ArrowDown' && storicoAt !== -1) { e.preventDefault(); storicoGiu(); return }
+    // Esc mentre l'agent lavora: interrompe. Fuori da questo `if` non fa niente qui —
+    // resta il gancio globale che chiude menu e dialog (App.svelte).
+    if (e.key === 'Escape' && busy && store.settings?.interruptEscape !== false) {
+      e.preventDefault()
+      void interrompi()
+      return
     }
     // Invio manda, Maiusc+Invio va a capo. È la convenzione di ogni casella di
     // messaggio, e qui vale a maggior ragione: si scrivono richieste di una riga.
@@ -1347,7 +1423,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
             onpaste={incolla}
             bind:this={box}
             bind:value={text}
-            oninput={e => { chiuso = false; chiusoAt = false; segnaCaret(e); grow() }}
+            oninput={e => { chiuso = false; chiusoAt = false; storicoAt = -1; segnaCaret(e); grow() }}
             onkeydown={key}
             onkeyup={segnaCaret}
             onclick={segnaCaret}
