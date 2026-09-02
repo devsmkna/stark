@@ -93,14 +93,6 @@ import Todo from './components/Todo.svelte'
 
   const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
 
-  /** La voce «Environment» del menu contestuale si apre in una seconda pagina dentro
-   *  lo stesso popup, come Reasoning/Effort nel dock — non uno `store.dialog` a parte
-   *  per una scelta che si fa in un clic. `store.menu` è l'`$state` di riferimento: si
-   *  richiude da sé quando il popup cambia riga o si chiude, così una scelta lasciata
-   *  a metà su una chat non ricompare aperta su un'altra. */
-  let envMenu = $state(false)
-  $effect(() => { store.menu; envMenu = false })
-
   // Dove disegnare il menu del tasto destro. Non è `store.menu` così com'è: quelle
   // sono le coordinate del puntatore, cioè **pixel veri della finestra**, mentre un
   // `left` scritto su un elemento dentro il root zoomato è in unità del root. Al 135%
@@ -297,15 +289,7 @@ import Todo from './components/Todo.svelte'
     <button class="mi" disabled={!row.cwd}
       title={row.cwd ?? 'This chat has no folder: there is nothing to open another one in'}
       onclick={() => {
-        // Modello e agent si catturano PRIMA di chiudere il menu, e non è zelo: il
-        // menu si smonta nello stesso istante in cui `store.menu` va a null, e i
-        // parametri dello snippet diventano undefined — leggere `row.model` dopo
-        // faceva esplodere l'handler («Cannot read properties of undefined»), e il
-        // clic non apriva niente. Gli altri handler già catturavano prima (id, cwd);
-        // questo è l'unico che leggeva campi DOPO.
         const cwd = row.cwd
-        const model = row.model
-        const agent = row.agent
         store.menu = null
         store.refused = null
         if (!cwd) return
@@ -316,8 +300,8 @@ import Todo from './components/Todo.svelte'
         // progetto **e** con lo stesso modello — e il model id appartiene all'agent
         // che l'ha dichiarato, quindi si portano insieme.
         void store.newChat(cwd, {
-          ...(model ? { model } : {}),
-          ...(agent ? { agent } : {}),
+          ...(row.model ? { model: row.model } : {}),
+          ...(row.agent ? { agent: row.agent } : {}),
         }).then(() => {
           // Se non si è aperta — la cartella è stata cancellata nel frattempo — il
           // motivo va letto da qualche parte. `store.refused` si vede nel blocco di
@@ -343,42 +327,6 @@ import Todo from './components/Todo.svelte'
       }}>
       <Icon name="i-panel" /> Add to split view
     </button>
-    <!-- Solo Claude Code (l'unico agent con più `CLAUDE_CONFIG_DIR` sulla stessa
-         macchina), e solo quando ce n'è più di uno da scegliere — una tendina con una
-         voce sola non è una scelta (stessa regola del profilo in «New chat» e in
-         Settings, dove questa stessa cosa vive già come tendina per progetto). Qui è
-         la scorciatoia: la stessa scelta, senza dover andare a cercare la riga giusta
-         fra tutti i progetti di Settings. -->
-    {#if row.agent === 'claude-code' && row.cwd && (store.profiles?.length ?? 0) > 1}
-      {@const profili = store.profiles ?? []}
-      {@const attuale = profili.find(p => p.path === store.project(row.cwd).profile)
-        ?? profili.find(p => p.current)}
-      <hr />
-      {#if !envMenu}
-        <button class="mi" onclick={() => { envMenu = true }}>
-          <Icon name="i-boxes" /> Environment <span class="tag">{attuale?.name ?? '—'}</span>
-        </button>
-      {:else}
-        <button class="mi" onclick={() => { envMenu = false }}>
-          <Icon name="i-back" /> Environment
-        </button>
-        {#each profili as p (p.path)}
-          <button class="mi" class:on={p.path === attuale?.path}
-            title={`${p.conversations} conversations, ${p.mcpServers} MCP servers`}
-            onclick={() => {
-              const cwd = row.cwd
-              store.menu = null
-              // Vale per le chat **nuove** di questo progetto, non per questa: un
-              // processo già avviato porta `CLAUDE_CONFIG_DIR` nel proprio `env` fin
-              // dalla nascita (ADR-009) e non si può spostare da sotto (stessa nota
-              // in Settings — «This only reaches chats you open from now on»).
-              if (cwd) void store.setProject(cwd, { profile: p.path })
-            }}>
-            {p.name} <span class="tag">{p.conversations}</span>
-          </button>
-        {/each}
-      {/if}
-    {/if}
     <hr />
     <button class="mi" onclick={() => { store.renaming = row.id; store.menu = null }}>
       <Icon name="i-pencil" /> Rename

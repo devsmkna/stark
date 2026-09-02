@@ -17,3 +17,38 @@
 {"timestamp":"2026-08-30T18:37:45.999243+02:00","action":"claim","task_id":3,"detail":"veenz"}
 {"timestamp":"2026-08-30T18:37:46.019999+02:00","action":"move","task_id":3,"detail":"backlog -\u003e in-progress"}
 {"timestamp":"2026-09-01T10:08:54.059594+02:00","action":"create","task_id":8,"detail":"Aggiungere la possibilità di lanciare comandi e mostrare output in una finestra su stark direttamente"}
+{"timestamp":"2026-09-01T17:40:21.841772+02:00","action":"create","task_id":9,"detail":"Login cloud obbligatorio come gate d'accesso a STARK"}
+{"timestamp":"2026-09-01T17:40:23.667151+02:00","action":"edit","task_id":9,"detail":"Login cloud obbligatorio come gate d'accesso a STARK"}
+{"timestamp":"2026-09-01T17:40:23.667259+02:00","action":"claim","task_id":9,"detail":"veenz"}
+{"timestamp":"2026-09-01T17:40:23.690059+02:00","action":"move","task_id":9,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-01T22:05:33.796972+02:00","action":"move","task_id":9,"detail":"in-progress -\u003e review"}
+{"timestamp":"2026-09-01T22:26:46.246767+02:00","action":"create","task_id":10,"detail":"Errori fatali: turno mai chiuso, sessione fantasma nel registry, ENOSPC a cascata"}
+{"timestamp":"2026-09-01T22:26:46.45132+02:00","action":"create","task_id":11,"detail":"OpenCode: stream eventi muore in silenzio, retry cieco sulla rete locale"}
+{"timestamp":"2026-09-01T22:26:46.681229+02:00","action":"create","task_id":12,"detail":"Card permesso/domanda orfane su turno morto + troncamento max_tokens invisibile"}
+{"timestamp":"2026-09-01T22:26:46.844892+02:00","action":"create","task_id":13,"detail":"Percorso caldo dei token: RawLog riapre il file a ogni delta, stringify per watcher, avvio OpenCode sequenziale"}
+{"timestamp":"2026-09-01T22:26:47.228613+02:00","action":"create","task_id":14,"detail":"Minori: settled() a un solo waiter, 413 sui corpi troppo grandi, notice su cataloghi vuoti"}
+{"timestamp":"2026-09-01T22:27:15.83974+02:00","action":"edit","task_id":10,"detail":"Errori fatali: turno mai chiuso, sessione fantasma nel registry, ENOSPC a cascata"}
+{"timestamp":"2026-09-01T22:27:15.850088+02:00","action":"claim","task_id":10,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:27:16.203023+02:00","action":"move","task_id":10,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-01T22:43:39.228296+02:00","action":"edit","task_id":10,"detail":"Errori fatali: turno mai chiuso, sessione fantasma nel registry, ENOSPC a cascata"}
+{"timestamp":"2026-09-01T22:43:39.229456+02:00","action":"release","task_id":10,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:44:11.586977+02:00","action":"move","task_id":10,"detail":"in-progress -\u003e done"}
+{"timestamp":"2026-09-01T22:44:11.621217+02:00","action":"edit","task_id":11,"detail":"OpenCode: stream eventi muore in silenzio, retry cieco sulla rete locale"}
+{"timestamp":"2026-09-01T22:44:11.621349+02:00","action":"claim","task_id":11,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:44:11.643042+02:00","action":"move","task_id":11,"detail":"backlog -\u003e done"}
+{"timestamp":"2026-09-01T22:44:11.685273+02:00","action":"edit","task_id":12,"detail":"Card permesso/domanda orfane su turno morto + troncamento max_tokens invisibile"}
+{"timestamp":"2026-09-01T22:44:11.685476+02:00","action":"claim","task_id":12,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:44:11.706992+02:00","action":"move","task_id":12,"detail":"backlog -\u003e done"}
+{"timestamp":"2026-09-01T22:44:11.747944+02:00","action":"edit","task_id":13,"detail":"Percorso caldo dei token: RawLog riapre il file a ogni delta, stringify per watcher, avvio OpenCode sequenziale"}
+{"timestamp":"2026-09-01T22:44:11.748361+02:00","action":"claim","task_id":13,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:44:11.773596+02:00","action":"move","task_id":13,"detail":"backlog -\u003e done"}
+{"timestamp":"2026-09-01T22:44:11.826807+02:00","action":"edit","task_id":14,"detail":"Minori: settled() a un solo waiter, 413 sui corpi troppo grandi, notice su cataloghi vuoti"}
+{"timestamp":"2026-09-01T22:44:11.826929+02:00","action":"claim","task_id":14,"detail":"veenz"}
+{"timestamp":"2026-09-01T22:44:11.863436+02:00","action":"move","task_id":14,"detail":"backlog -\u003e done"}
+{"timestamp":"2026-09-02T10:05:08.440272+02:00","action":"create","task_id":15,"detail":"Fix dalla review adversarial di e013def"}
+{"timestamp":"2026-09-02T10:06:01.796844+02:00","action":"edit","task_id":15,"detail":"Fix dalla review adversarial di e013def"}
+{"timestamp":"2026-09-02T10:06:01.798543+02:00","action":"claim","task_id":15,"detail":"veenz"}
+{"timestamp":"2026-09-02T10:06:01.818679+02:00","action":"move","task_id":15,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-02T10:12:47.922414+02:00","action":"move","task_id":15,"detail":"in-progress -\u003e done"}
+{"timestamp":"2026-09-02T10:12:55.664516+02:00","action":"edit","task_id":15,"detail":"Fix dalla review adversarial di e013def"}
+{"timestamp":"2026-09-02T10:12:55.664621+02:00","action":"release","task_id":15,"detail":"veenz"}
