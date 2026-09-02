@@ -112,6 +112,14 @@ export type SessionSpec = {
    */
   mcp?: string[]
   /**
+   * I valori delle opzioni che il risveglio deve restituire com'era (per ora
+   * `reasoning` ed `effort`), letti dallo snapshot del journal. Stessa ragione di
+   * `model` e `mcp`: il CLI non le tiene da solo — su Claude Code sono del layer
+   * flag, che non si persiste — quindi a ripristinarle è chi rilegge il journal.
+   * Un adapter che non le conosce le ignora; nessuno le deduce.
+   */
+  extraOptions?: Record<string, string>
+  /**
    * Su cosa l'utente vuole essere interrogato — **categorie, non nomi di tool**.
    * Sei parole che un utente riconosce guardando cosa sta per succedere; a tradurle
    * nei venti nomi che quell'agent usa è l'adapter, che è l'unico a conoscerli.
@@ -264,6 +272,23 @@ export interface AgentSession {
   start(): Promise<void>
   prompt(text: string, allegati?: PromptFile[]): string
   interrupt(): Promise<void>
+  /**
+   * Togli un prompt **dalla fila**, prima che parta.
+   *
+   * La fila è dell'adapter (il CLI accoderebbe a lotti fondendo i turni: vedi
+   * `prompt()`), quindi solo lui sa togliere una voce — e solo lui sa dire se quel
+   * `turnId` c'era ancora. Torna `false` se non c'era: un turno già consegnato non
+   * si richiama, e dirlo è meglio che fingere un successo.
+   *
+   * Il journal resta append-only: togliere non cancella, chiude. L'adapter dichiara
+   * finito il turno rimosso (`turn.ended` con `reason: 'aborted'`), lo stesso fatto
+   * che `interrupt()` scrive per l'intera fila — così alla rilettura non resta un
+   * «queued, waiting its turn» che non aspetta niente (§4). Un'eccezione dichiarata
+   * da chi la implementa: chi è entrato in fila **prima della nascita** della sessione
+   * non ha ancora il suo `turn.started`, e chi non c'è nel journal può sparire senza
+   * lasciare traccia.
+   */
+  dequeue(turnId: string): boolean
   /**
    * Cambia una delle scelte che l'agent ha dichiarato (ADR-014).
    *

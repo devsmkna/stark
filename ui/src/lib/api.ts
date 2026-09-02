@@ -125,6 +125,10 @@ export type Settings = {
   /** Le scorciatoie da tastiera, per id di azione. Il valore dice `mod`, non `cmd`:
    *  a risolverlo in ⌘ o Ctrl è il dispositivo (`lib/shortcuts.ts`). */
   shortcuts?: Record<string, string>
+  /** Il modello con cui partono le chat nuove, nella coppia (agent, id) che lo
+   *  identifica. Non tocca il «New chat here» del menu contestuale, che porta il
+   *  modello della chat da cui si è premuto, né le chat riprese. */
+  preferredModel?: { agent: string; model: string }
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */

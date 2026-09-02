@@ -15,16 +15,18 @@ import { callFor } from '../core/calls.ts'
 import { vigila, type Canale } from '../daemon/chiamate.ts'
 import type { PushPayload } from '../daemon/push.ts'
 import { Translator } from '../adapters/claude-code/translate.ts'
+import { ClaudeCodeAdapter } from '../adapters/claude-code/adapter.ts'
 import { activity } from '../core/activity.ts'
 import {
   ESTENSIONE, filtroFile, IMMAGINI, parteDi, tipiAccettati, tipoDi,
 } from '../core/allegati.ts'
-import { allegabiliDi } from '../adapters/opencode/adapter.ts'
+import { allegabiliDi, OpenCodeAdapter } from '../adapters/opencode/adapter.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
 import { passeggero } from '../adapters/opencode/adapter.ts'
 import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
+import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
@@ -541,6 +543,53 @@ check('§7: due prompt ravvicinati restano due turni, nell\'ordine in cui li hai
   && promptText(FILA.turns[0]?.prompt ?? []) === 'uno'
   && promptText(FILA.turns[1]?.prompt ?? []) === 'due',
   JSON.stringify(FILA.turns.map(t => promptText(t.prompt))))
+// §options: le due scelte nuove (reasoning, effort) dichiarate dall'adapter Claude
+// Code, verificate contro la cattura dell'handshake MISURATA il 1º settembre 2026
+// (SDK 0.3.241 ↔ CLI 2.1.241 — spike/tmp-handshake-effort.ts, handshake solo,
+// zero quota): supportsAdaptiveThinking e supportedEffortLevels per modello,
+// assenti su Haiku. Il vecchio commento di sdk-options diceva «nient'altro,
+// verificato sui cinque modelli»: era vero a data 26 agosto e non più — il CLI
+// aggiorna e la misura va rifatta a ogni patch.
+const MODERNI = [
+  { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)',
+    supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    supportsAdaptiveThinking: true, supportsAutoMode: true },
+  { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku' },
+] as unknown[]
+check('§options: modello con effort dichiara reasoning ed effort coi livelli giusti',
+  (() => {
+    const modelli = modelChoices(MODERNI, 'default')
+    const opzioni = opzioniClaude(modelli, 'default', 'on', 'high')
+    const r = opzioni.find(o => o.id === 'reasoning')
+    const e = opzioni.find(o => o.id === 'effort')
+    return !!r && r.value === 'on' && r.choices.length === 2
+      && !!e && e.value === 'high' && e.choices.map(c => c.value).join(',') === 'low,medium,high,xhigh,max'
+      && modelli[0]?.reasoning === true && modelli[0]?.effortLevels?.length === 5
+  })())
+check('§options: modello senza capability non dichiara effort, il reasoning resta',
+  (() => {
+    const modelli = modelChoices(MODERNI, 'haiku')
+    const opzioni = opzioniClaude(modelli, 'haiku', 'on', 'high')
+    const haiku = modelli.find(m => m.id === 'haiku')
+    return opzioni.find(o => o.id === 'effort') === undefined
+      && opzioni.find(o => o.id === 'reasoning') !== undefined
+      && haiku?.reasoning === undefined && haiku?.effortLevels === undefined
+  })())
+check('§options: session.options rimpiazza, non fonde',
+  (() => {
+    const s = reduce([], 'sess-opz')
+    applyTo(s, { v: MODEL_VERSION, seq: 1, ts: 1, sessionId: 'sess-opz',
+      payload: { k: 'session.created', agent: 'claude-code', cwd: '/t', model: 'm',
+        capabilities: capabilitiesFor('m'), tools: [], commands: [],
+        options: [{ id: 'effort', label: 'Effort', value: 'high',
+          choices: [{ value: 'high', available: true, label: 'high' }] }] } })
+    applyTo(s, { v: MODEL_VERSION, seq: 2, ts: 2, sessionId: 'sess-opz',
+      payload: { k: 'session.options', options: [{ id: 'effort', label: 'Effort', value: 'low',
+        choices: [{ value: 'low', available: true, label: 'low' }] }] } })
+    return s.options.length === 1 && s.options[0]?.value === 'low'
+      && s.options[0]?.choices.length === 1
+  })())
+
 check('§7: chiudere il turno in corso non chiude quello che aspetta il suo giro',
   FILA.turns[0]?.ended === true && FILA.turns[1]?.ended === false,
   `t1 ${String(FILA.turns[0]?.ended)} · t2 ${String(FILA.turns[1]?.ended)}`)
@@ -761,11 +810,58 @@ check('diff: forma unificata, numeri di riga coerenti',
   // il daemon lo scoprirebbe solo su una sessione viva.
   const sessione = backendFor().open(base, { onPayload: () => {} })
   const mancanti = ([
-    'start', 'prompt', 'interrupt', 'setModel', 'setMode', 'setMcp',
+    'start', 'prompt', 'interrupt', 'dequeue', 'setModel', 'setMode', 'setMcp',
     'refreshQuota', 'refreshContext', 'fileSuggestions', 'settled', 'sleep', 'close',
   ] as const).filter(m => typeof (sessione as unknown as Record<string, unknown>)[m] !== 'function')
   check('§1: la sessione aperta dal backend implementa tutto il contratto',
     mancanti.length === 0, mancanti.join(','))
+}
+
+// ─── la fila: togliere una voce prima che parta ─────────────────────────────
+
+// Il metodo vive nell'adapter perché la fila vive nell'adapter, quindi la prova lo
+// chiama dove sta. La coda si semina a mano (campo privato, ma solo per TypeScript:
+// a runtime è un campo come gli altri) invece di farla nascere con `prompt()`, che
+// per OpenCode partirebbe verso il server. Tre fatti da tenere fermo: la voce
+// annunciata chiude il suo turno; quella mai annunciata — arrivata prima della
+// nascita — sparisce senza lasciare turni aperti; e un turno che non c'è è un no
+// detto, non un successo finto.
+{
+  const parti = [{ type: 'text' as const, text: 'ciao' }]
+
+  const cc = new ClaudeCodeAdapter({ cwd: '/tmp', model: 'default', mode: 'auto', onPayload: () => {} })
+  const ccCoda = cc as unknown as {
+    coda: Array<{ turnId: string; parts: unknown; msg: unknown; annunciato: boolean }>
+  }
+  ccCoda.coda = [
+    { turnId: 't1', parts: parti, msg: {}, annunciato: true },
+    { turnId: 't2', parts: parti, msg: {}, annunciato: false },
+  ]
+
+  let visti: Array<Record<string, unknown>> = []
+  ;(cc as unknown as { opts: { onPayload: (p: unknown) => void } }).opts.onPayload
+    = (p) => { visti.push(p as Record<string, unknown>) }
+  check('fila: la voce annunciata tolta dalla fila chiude il turno (aborted)',
+    cc.dequeue('t1') === true
+    && visti.length === 1 && visti[0]!.k === 'turn.ended'
+    && visti[0]!.reason === 'aborted' && visti[0]!.turnId === 't1')
+  check('fila: la voce MAI annunciata sparisce senza lasciare turni aperti',
+    cc.dequeue('t2') === true && visti.length === 1
+    && (cc as unknown as { coda: unknown[] }).coda.length === 0)
+  check('fila: togliere un turno che non è in fila è un no, non un finto ok',
+    cc.dequeue('t1') === false)
+
+  const oc = new OpenCodeAdapter({ cwd: '/tmp', model: 'default', mode: 'auto' }, { onPayload: () => {} })
+  let ocVisti: Array<Record<string, unknown>> = []
+  ;(oc as unknown as { hooks: { onPayload: (p: unknown) => void } }).hooks.onPayload
+    = (p) => { ocVisti.push(p as Record<string, unknown>) }
+  ;(oc as unknown as { coda: Array<{ turnId: string; invio: { parts: unknown[] } }> }).coda
+    = [{ turnId: 't1', invio: { parts: parti } }]
+  check('fila (OpenCode): la voce tolta dalla fila chiude il turno (aborted)',
+    oc.dequeue('t1') === true && ocVisti.length === 1 && ocVisti[0]!.k === 'turn.ended'
+    && ocVisti[0]!.reason === 'aborted')
+  check('fila (OpenCode): togliere un turno che non è in fila è un no',
+    oc.dequeue('t1') === false)
 }
 
 // ─── §10-bis: i due fatti che la prova di carico ha fatto entrare ───────────
@@ -1367,7 +1463,50 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('l\'elenco porta `agent` per una riga letta dal journal (non solo viva)',
     rigaVista?.agent === 'opencode', JSON.stringify(rigaVista))
 
-  if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
+  // §preferred: il modello preferito delle chat nuove, in read/write. La coppia
+  // incompleta non entra — una metà (agent senza modello) diverrebbe alla nascita
+  // un modello sbagliato o mancante. E il giro dev'essere rotondo: ciò che si
+  // scrive si rilegge uguale.
+  const casaPref = mkdtempSync(resolve(tmpdir(), 'stark-pref-'))
+  const { readSettings: leggiPref, writeSettings: scriviPref } =
+    await import('../daemon/settings.ts')
+  // Il resto delle impostazioni qui è un pallone gonfiato: la funzione tocca solo
+  // la coppia preferita, e costruirla intera testerebbe il test invece del codice.
+  const specchio = { permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto' } as unknown as Record<string, never>
+  const conCoppia = scriviPref(casaPref, {
+    ...specchio, preferredModel: { agent: 'opencode', model: 'opencode/gpt-5-nano' },
+  })
+  const riletta = leggiPref(casaPref)
+  check('§preferred: la coppia preferita si scrive e si rilegge intera',
+    conCoppia.preferredModel?.agent === 'opencode'
+      && conCoppia.preferredModel?.model === 'opencode/gpt-5-nano'
+      && riletta.preferredModel?.agent === 'opencode'
+      && riletta.preferredModel?.model === 'opencode/gpt-5-nano',
+    JSON.stringify({ scritta: conCoppia.preferredModel, riletta: riletta.preferredModel }))
+  const incompleta = scriviPref(casaPref, {
+    ...specchio, preferredModel: { agent: 'opencode', model: '' } as never,
+  })
+  rmSync(casaPref, { recursive: true, force: true })
+  check('§preferred: la coppia incompleta non entra',
+    incompleta.preferredModel === undefined,
+    JSON.stringify(incompleta.preferredModel))
+
+  check('§options: dal risveglio tornano solo le opzioni che il registro conosce',
+  await (async () => {
+    // Import dinamico e non statico: `SESSIONS` in registry.ts è una costante di
+    // modulo fissata al primo import, e un import statico verrebbe issato PRIMA
+    // che questo check fissi la sua casa — la stessa trappola documentata nel
+    // blocco §resume. La funzione è pura, ma l'import non lo è.
+    const { opzioniDaSnapshot } = await import('../daemon/registry.ts')
+    const tornate = opzioniDaSnapshot([
+      { id: 'reasoning', value: 'off' }, { id: 'effort', value: 'low' },
+      { id: 'model', value: 'x' }, { id: 'ignota', value: 'y' },
+    ])
+    return tornate['reasoning'] === 'off' && tornate['effort'] === 'low'
+      && tornate['model'] === undefined && tornate['ignota'] === undefined
+  })())
+
+if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'] = casaPrima
   if (starkPrima === undefined) delete process.env['STARK_HOME']; else process.env['STARK_HOME'] = starkPrima
   rmSync(casa, { recursive: true, force: true })
 }

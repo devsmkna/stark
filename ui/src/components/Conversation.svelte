@@ -814,6 +814,17 @@
           <button class="thmore" title="Show the full prompt"
             aria-label="Show the full prompt"
             onclick={() => { promptAperto = promptOf(turn) }}>…</button>
+          {#if status === 'queued'}
+            <!-- Togli dalla fila. Esiste solo qui perché solo qui ha un senso: un
+                 turno già consegnato non si richiama. L'esito non si tocca a mano —
+                 il `turn.ended` che l'adapter scrive arriva dal flusso e il turno
+                 smette di essere «queued» da solo. -->
+            <button class="thdel" title="Remove from queue"
+              aria-label="Remove from queue"
+              onclick={() => void store.dequeue(turn.turnId)}>
+              <Icon name="i-x" style="width:10px;height:10px" />
+            </button>
+          {/if}
           <span class="tm">{hhmm(turn.startedAt)}</span>
           <button class="thacc" aria-label="Toggle turn" onclick={() => toggle(turn, i)}>
             <span class="cx chev" class:open={open}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
@@ -1440,7 +1451,18 @@
     align-self: stretch; display: flex; align-items: center;
   }
   .thmore:hover { color: var(--ink); }
+  /* Togli dalla fila. Stessa forma della lente (`.thmore`): un secondo gesto sulla
+     riga, non l'azione principale — quella resta aprire il turno. Compare solo sulle
+     intestazioni dei turni in coda, e al passivo prende il `--stop` dello Stop: è
+     quello stesso significato, ritirare un lavoro che non si vuole più far partire. */
+  .thdel {
+    flex: none; border: 0; background: none; padding: 0 4px; cursor: pointer;
+    color: var(--muted); line-height: 1;
+    align-self: stretch; display: flex; align-items: center;
+  }
+  .thdel:hover { color: var(--stop); }
   .thmain:focus-visible, .thmore:focus-visible, .thacc:focus-visible,
+  .thdel:focus-visible,
   .iconb:focus-visible, .effbtn:focus-visible {
     outline: 2px solid var(--accent); outline-offset: -2px;
   }

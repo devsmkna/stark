@@ -24,8 +24,8 @@
   import {
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
   } from '$core/allegati.ts'
-  import { getLobeIconUrl } from '../lib/lobe.ts'
-  import { MODE_BLURB, MODE_ICON, project, since, stamp, until } from '../lib/view.ts'
+import { getLobeIconUrl, getProviderForModel, providerLabelFor, inputTypesOf } from '../lib/lobe.ts'
+import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '../lib/view.ts'
   import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -52,6 +52,10 @@
   const pending = $derived(
     snap.pendingPermissions.length + snap.pendingQuestions.length + snap.pendingPlans.length > 0)
   const asking = $derived(live && pending)
+  // La riga dell'elenco **di questo pannello**, non della chat a fuoco: è la riga
+  // che il risveglio («Reopen») tocca. Col multi-pannello `store.row` sarebbe la
+  // riga sbagliata — e risvegliare l'altra chat costa quota e non è mai stato chiesto.
+  const rigaPannello = $derived(store.rows.find(r => r.id === id))
 
   /**
    * Tornando sulla finestra si riprende a scrivere da dove si era: il fuoco torna
@@ -83,7 +87,11 @@
     text = ''
     allegati = []
     await regrow()
-    const ok = await store.prompt(draft, addosso)
+    // Il prompt va alla chat **di questo pannello**, non a quella a fuoco: col
+    // multi-pannello due dock sono montati insieme, e chi entra dalla tastiera
+    // (Tab, poi Invio) non sposta il fuoco prima — il clic sì, e senza l'id
+    // esplicito il prompt sarebbe partito per l'altra chat.
+    const ok = await store.prompt(draft, addosso, id)
     if (!ok) { text = draft; allegati = addosso; await regrow() }
   }
 
@@ -308,7 +316,7 @@
     // scelto `view.ts`, la citazione era completa e l'elenco tornava su da solo.
     if (!c) { giro++; files = []; return }
     const mio = ++giro
-    void store.files(c.q).then(async r => {
+    void store.files(c.q, id).then(async r => {
       if (mio !== giro) return
       // Un solo ritentativo, e solo su una risposta vuota a una ricerca vera: nei
       // primi ~1,8s di una chat il CLI sta ancora costruendo l'indice dei file e
@@ -318,7 +326,7 @@
       if (r.length === 0 && c.q !== '') {
         await new Promise(res => setTimeout(res, 400))
         if (mio !== giro) return
-        r = await store.files(c.q)
+        r = await store.files(c.q, id)
         if (mio !== giro) return
       }
       files = r
@@ -436,11 +444,19 @@
   // contenitore** (la riga «indietro» è la stessa del picker), perché un menu che si
   // sposta di posto a ogni clic sembra tre menu diversi.
 
-  type Nav = 'root' | 'mode' | 'mcp' | 'model'
+  type Nav = 'root' | 'mode' | 'mcp' | 'model' | 'reasoning' | 'effort'
   let menu = $state<Nav>('root')
   let aperto = $state(false)
   let leadEl = $state<HTMLElement | null>(null)
   let menuEl = $state<HTMLElement | null>(null)
+
+  /** Il passaggio del mouse sul lead, prima ancora di un clic: mostra un'anteprima
+   *  di sola lettura — modello e quanto ne resta — con lo stesso `pop-item` e lo
+   *  stesso `.usage` del menu vero (§anteprimaConsumo qui sotto), non una copia.
+   *  Non conta da tocco: senza un mouse `pointerenter` o non parte o precede un tap
+   *  che aprirebbe comunque il menu vero un istante dopo — un lampo in più, non
+   *  un'informazione. */
+  let hoverPreview = $state(false)
 
   function chiudiMenu(): void {
     aperto = false
@@ -472,9 +488,10 @@
     chiudiMenu()
   }
 
-  // ⌘O / Ctrl+O apre la scelta del file **mentre il menu è aperto**: è l'unica zona in
-  // cui il suggerimento della voce ha senso, e intercettarlo fuori intercetterebbe
-  // anche l'«apri file» del browser, che non è nostro.
+  // ⌘O / Ctrl+O apre la scelta del file **mentre il menu è aperto**: intercettarlo
+  // fuori intercetterebbe anche l'«apri file» del browser, che non è nostro.
+  // L'etichetta sulla voce «Choose file» non c'è più (chiesta via dall'utente,
+  // 1º settembre 2026) — la scorciatoia invece resta, e continua a valere qui.
   function tastoGlobale(e: KeyboardEvent): void {
     if (!aperto) return
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
@@ -538,11 +555,50 @@
   )
   const modeOpt = $derived(opts.find(o => o.kind === 'mode'))
   const modelOpt = $derived(opts.find(o => o.kind === 'model'))
+  // Le due scelte nuove (chieste dall'utente, 1º settembre 2026): si cercano per
+  // `id`, non per `kind` — sono opzioni 'other' e il vocabolario lo dichiara
+  // l'agent (ADR-014). Dove non ci sono (OpenCode, journal vecchi) le voci non
+  // compaiono: stessa regola delle finestre di quota.
+  const reasoningOpt = $derived(opts.find(o => o.id === 'reasoning'))
+  const effortOpt = $derived(opts.find(o => o.id === 'effort'))
 
-  /** Come si chiama il modello nel chip e nel placeholder: il pezzo dopo l'ultimo slash,
-   *  che è ciò che lo distingue — «GLM-5.3-Flash» e non «opencode/glm-5.3-flash». */
+  /** Come si chiama il modello, in forma breve: il pezzo dopo l'ultimo slash, che è ciò
+   *  che lo distingue — «GLM-5.3-Flash» e non «opencode/glm-5.3-flash». Resta il
+   *  ripiego quando l'elenco dei modelli non dichiara un'etichetta. */
   const nomeBreve = $derived(snap.model?.split('/').pop() ?? 'the agent')
+  /** Come si chiama invece dove si parla all'utente (riga «Model» del menu, placeholder
+   *  della casella): l'etichetta leggibile che l'agent dichiara («Opus (1M context)»),
+   *  non il codice risolto (`claude-opus-5[1m]`). */
+  const nomeLeggibile = $derived(modello?.label || nomeBreve)
   const modelloIcona = $derived(modelOpt ? getLobeIconUrl(modelOpt.value) : null)
+
+  /** Scheda del modello in uso per l'hover: stessa ricerca di ModelPicker `livello0`
+   *  — prima l'agent della chat, poi gli altri — ma qui solo per mostrare, non per
+   *  scegliere. Se il catalogo non è ancora arrivato, resta null e si ripiega sul
+   *  nome già risolto sopra. */
+  const currentCard = $derived.by(() => {
+    const cat = store.catalogo
+    const corrente = modelOpt?.value ?? snap.model ?? ''
+    if (!cat || !corrente) return null
+    const nel = (a: typeof cat[number]) => a.models.find(x => x.id === corrente || (x as any).resolved === corrente)
+    const mio = cat.find(a => a.id === snap.agent)
+    const ordine = mio ? [mio, ...cat.filter(a => a !== mio)] : cat
+    for (const a of ordine) {
+      const m = nel(a)
+      if (m) return { agent: a, model: m }
+    }
+    return null
+  })
+  const nomeESuffisso = (m: { id: string; label?: string }): { nome: string; suffix?: string } => {
+    const label = (m as any).label ?? m.id
+    const mm = /^(.*?)\s*\((.+)\)\s*$/.exec(label)
+    return mm ? { nome: mm[1]!, suffix: mm[2]! } : { nome: label }
+  }
+  const costoFree = $derived.by(() => {
+    const c = (currentCard?.model as any)?.cost
+    return !!c && c.input === 0 && c.output === 0
+  })
+  const capsCard = $derived(inputTypesOf(currentCard?.model as { accepts?: string[] } | undefined))
 
   /** Cosa dice la riga di un server MCP. Gli stati sono quelli del protocollo e si
    *  mostrano come sono: `needs-auth` non è un errore di STARK e non si nasconde — si
@@ -623,21 +679,20 @@
     return () => clearInterval(t)
   })
 
-  /** Da quanto è vecchia la misura. Se ha più di due minuti si dice, perché nel
-   *  frattempo la quota la consumano anche gli altri e nessuno ce lo viene a dire. */
-  const stale = $derived(
-    snap.quotaWindowsAt && clock - snap.quotaWindowsAt > 120_000 ? snap.quotaWindowsAt : null,
-  )
-
-  // Si rilegge quando l'utente apre il menu (o ci passa sopra): è l'unico momento in
-  // cui quei numeri devono essere freschi. Non più di una volta ogni quindici secondi.
-  let ultimaLettura = 0
+  // Si rilegge quando l'utente apre il menu (o ci passa sopra). Il **contesto** si
+  // chiede a ogni apertura, senza cadenza: è una domanda sul canale di controllo
+  // (2-3 ms misurati) ed è il numero che chi apre il menu viene a guardare — la
+  // vecchia cadenza di quindici secondi lo lasciava al turno scorso, uno «shot»
+  // dell'ultimo messaggio invece che la situazione attuale (segnalato dall'utente,
+  // 1º settembre 2026). La quota resta a cadenza: le finestre non si muovono di
+  // secondo in secondo e quella lettura costa di più.
+  let ultimaQuota = 0
   function peek(): void {
+    void store.refreshContext(id)
     const t = Date.now()
-    if (t - ultimaLettura < 15_000) return
-    ultimaLettura = t
-    void store.refreshQuota()
-    void store.refreshContext()
+    if (t - ultimaQuota < 15_000) return
+    ultimaQuota = t
+    void store.refreshQuota(id)
   }
 
   /** Un numero di token leggibile per il piè del pannello d'uso: come `fmtTok`, ma
@@ -659,7 +714,7 @@
 
   function scegliModello(agent: string, model: string): void {
     if (agent === snap.agent) {
-      void store.setOption(modelOpt?.id ?? 'model', model)
+      void store.setOption(modelOpt?.id ?? 'model', model, id)
       chiudiMenu()
       return
     }
@@ -669,7 +724,9 @@
   async function passa(via: 'agent' | 'journal'): Promise<void> {
     const scelta = conferma ?? (store.handoff?.fase === 'chiede' ? store.handoff : null)
     if (!scelta) return
-    await store.passaAdAltroAgent(scelta.agent, scelta.model, via)
+    // Il passaggio tocca la chat **di questo pannello**: è lei che cambia agent, e
+    // `replacePane` mette la nuova al posto della vecchia nel riquadro che la mostra.
+    await store.passaAdAltroAgent(scelta.agent, scelta.model, via, id)
     // Andata: il pannello mostra gia' la chat nuova, e questo menu appartiene alla
     // vecchia. Se invece e' rimasto uno stato (`chiede`, `fallito`), il menu resta
     // aperto apposta, perche' e' li' che c'e' la domanda o il motivo.
@@ -700,7 +757,10 @@
          arriva mentre l'agent sta ancora lavorando, e lo stato canonico in quel momento
          è `awaiting`, non `busy`. Legarlo a `busy` lo farebbe sparire proprio nel
          momento in cui serve di più. -->
-    <Ask {store} {snap} canStop={live} />
+    <!-- `id` arriva a Ask perché le sue risposte — permessi, domande, piani — vadano
+         alla chat di questo pannello e non a quella a fuoco: la stessa regola del
+         composer qui sotto, per la stessa ragione. -->
+    <Ask {store} {snap} {id} canStop={live} />
   {/if}
 
   {#if files.length > 0}
@@ -753,6 +813,224 @@
 
   {#if live}
     <div class="composer-zone">
+      <!-- Le due righe che il menu vero e l'anteprima al passaggio del mouse
+           mostrano tali e quali: uno snippet ciascuna, non due copie della stessa
+           riga da tenere allineate a mano. -->
+      {#snippet modelRow()}
+        {#if modelOpt}
+          <button class="pop-item" class:dis={!modificabile('model')} disabled={!modificabile('model')}
+            title={modificabile('model') ? 'Model' : "This agent can't change its model from here"}
+            onclick={() => { aperto = true; menu = 'model' }}>
+            <span class="ico">
+              {#if modelloIcona}<img src={modelloIcona} alt="" width="15" height="15" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<span class="mdot"></span>{/if}
+            </span>
+            Model
+            <span class="cur">{nomeLeggibile} <span class="chev"><Icon name="i-fwd" /></span></span>
+          </button>
+        {/if}
+      {/snippet}
+      {#snippet modelBlock()}
+        {#if currentCard}
+          {@const head = nomeESuffisso(currentCard.model)}
+          {@const ic0 = getLobeIconUrl((currentCard.model as any).resolved ?? currentCard.model.id)}
+          <div class="preview-head">
+            <div class="pk-avatar">
+              {#if ic0}<img src={ic0} alt="" width="19" height="19" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<Icon name="i-brain" />{/if}
+            </div>
+            <div class="pk-id">
+              <div class="pk-name">{head.nome}{#if head.suffix} <span class="mult">({head.suffix})</span>{/if}</div>
+              <div class="pk-path">{currentCard.agent.label}{#if providerLabelFor(currentCard.model as any)} <span class="arw">›</span> {providerLabelFor(currentCard.model as any)}{/if}</div>
+            </div>
+            {#if capsCard}
+              <div class="pk-caps" title={`accepts: ${[capsCard.text ? 'text' : null, capsCard.image ? 'image' : null, capsCard.docs ? 'documents' : null].filter(Boolean).join(', ')}`}>
+                <Icon name="i-type" class={capsCard.text ? '' : 'off'} />
+                <Icon name="i-image" class={capsCard.image ? '' : 'off'} />
+                <Icon name="i-doc" class={capsCard.docs ? '' : 'off'} />
+              </div>
+            {/if}
+          </div>
+          <div class="pk-meta">
+            <span class="cash"><Icon name="i-dollar" /></span>
+            {#if costoFree}
+              <span class="price free">free</span>
+            {:else if (currentCard.model as any).cost}
+              <span class="unit">/M</span>
+              <span class="price">{fmtCosto((currentCard.model as any).cost.input)} / {fmtCosto((currentCard.model as any).cost.output)}</span>
+            {:else}
+              <span class="price">—</span>
+            {/if}
+            <span class="ctx-lbl">CONTEXT</span>
+            <span class="ctx-val">{fmtTok((currentCard.model as any).contextWindow)}</span>
+          </div>
+          <div class="pk-rule"></div>
+        {:else if modelOpt}
+          <div class="preview-head fallback">
+            <div class="pk-avatar">
+              {#if modelloIcona}<img src={modelloIcona} alt="" width="19" height="19" loading="lazy"
+                onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+              {:else}<span class="mdot"></span>{/if}
+            </div>
+            <div class="pk-id"><div class="pk-name">{nomeLeggibile}</div></div>
+          </div>
+          <div class="pk-meta">
+            <span class="cash"><Icon name="i-dollar" /></span>
+            <span class="price">—</span>
+            {#if contextWindow}
+              <span class="ctx-lbl">CONTEXT</span>
+              <span class="ctx-val">{fmtTok(contextWindow)}</span>
+            {/if}
+          </div>
+          <div class="pk-rule"></div>
+        {/if}
+      {/snippet}
+      {#snippet modelTop()}
+        <button class="model-top" class:dis={!modificabile('model')} disabled={!modificabile('model')}
+          title={modificabile('model') ? 'Change model' : "This agent can't change its model from here"}
+          onclick={() => { if (modificabile('model')) menu = 'model' }}>
+          <div class="model-top-main">
+            {#if currentCard}
+              {@const head = nomeESuffisso(currentCard.model)}
+              {@const ic0 = getLobeIconUrl((currentCard.model as any).resolved ?? currentCard.model.id)}
+              <div class="preview-head" style="padding:0">
+                <div class="pk-avatar">
+                  {#if ic0}<img src={ic0} alt="" width="19" height="19" loading="lazy"
+                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+                  {:else}<Icon name="i-brain" />{/if}
+                </div>
+                <div class="pk-id">
+                  <div class="pk-name">{head.nome}{#if head.suffix} <span class="mult">({head.suffix})</span>{/if}</div>
+                  <div class="pk-path">{currentCard.agent.label}{#if providerLabelFor(currentCard.model as any)} <span class="arw">›</span> {providerLabelFor(currentCard.model as any)}{/if}</div>
+                </div>
+                {#if capsCard}
+                  <div class="pk-caps" style="padding-top:2px">
+                    <Icon name="i-type" class={capsCard.text ? '' : 'off'} />
+                    <Icon name="i-image" class={capsCard.image ? '' : 'off'} />
+                    <Icon name="i-doc" class={capsCard.docs ? '' : 'off'} />
+                  </div>
+                {/if}
+              </div>
+              <div class="pk-meta" style="padding:6px 0 0">
+                <span class="cash"><Icon name="i-dollar" /></span>
+                {#if costoFree}
+                  <span class="price free">free</span>
+                {:else if (currentCard.model as any).cost}
+                  <span class="unit">/M</span>
+                  <span class="price">{fmtCosto((currentCard.model as any).cost.input)} / {fmtCosto((currentCard.model as any).cost.output)}</span>
+                {:else}
+                  <span class="price">—</span>
+                {/if}
+                <span class="ctx-lbl">CONTEXT</span>
+                <span class="ctx-val">{fmtTok((currentCard.model as any).contextWindow)}</span>
+              </div>
+            {:else if modelOpt}
+              <div class="preview-head fallback" style="padding:0">
+                <div class="pk-avatar">
+                  {#if modelloIcona}<img src={modelloIcona} alt="" width="19" height="19" loading="lazy"
+                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
+                  {:else}<span class="mdot"></span>{/if}
+                </div>
+                <div class="pk-id"><div class="pk-name">{nomeLeggibile}</div></div>
+              </div>
+              <div class="pk-meta" style="padding:6px 0 0">
+                <span class="cash"><Icon name="i-dollar" /></span>
+                <span class="price">—</span>
+                {#if contextWindow}
+                  <span class="ctx-lbl">CONTEXT</span>
+                  <span class="ctx-val">{fmtTok(contextWindow)}</span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <span class="chev"><Icon name="i-fwd" /></span>
+        </button>
+      {/snippet}
+      {#snippet usagePanel(hover = false)}
+        {#if contextWindow || haFinestre}
+          {#if !hover}<div class="divider"></div>{/if}
+
+          <div class="usage">
+            {#if contextWindow}
+              <div class="u-row" title={`${fmt(totalNow)} / ${fmt(contextWindow)} tokens`}>
+                <span class="u-lbl">Context</span>
+                <span class="u-bar"><span style="width:{Math.min(100, pct ?? 0)}%;background:{meterColour(pct ?? 0)}"></span></span>
+                <span class="u-pct" class:near={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
+                <!-- Il costo della chat: l'unico della colonna che esiste davvero
+                     (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero».
+                     Dove il costo non c'è lo span non si mette proprio: la barra
+                     (`flex:1`) si allunga fino in fondo a riempire lo spazio,
+                     invece di lasciare un buco bianco (chiesto dall'utente,
+                     1º settembre 2026). -->
+                {#if snap.spentUsd > 0}<span class="u-cost">{fmtUsd(snap.spentUsd)}</span>{/if}
+              </div>
+            {/if}
+            {#if sessionWin?.used !== undefined}
+              <div class="u-row" title="Session · 5 hours">
+                <span class="u-lbl">Session</span>
+                <span class="u-bar"><span style="width:{Math.min(100, sessionWin.used)}%;background:{meterColour(sessionWin.used)}"></span></span>
+                <span class="u-pct" class:near={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
+              </div>
+            {/if}
+            {#if weeklyWin?.used !== undefined}
+              <div class="u-row" title="Weekly">
+                <span class="u-lbl">Week</span>
+                <span class="u-bar"><span style="width:{Math.min(100, weeklyWin.used)}%;background:{meterColour(weeklyWin.used)}"></span></span>
+                <span class="u-pct" class:near={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
+              </div>
+            {/if}
+            {#each weeklyScoped as w (w.scope)}
+              {#if w.used !== undefined}
+                <div class="u-row" title="Weekly · {w.scope}">
+                  <span class="u-lbl">{w.scope}</span>
+                  <span class="u-bar"><span style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></span></span>
+                  <span class="u-pct" class:near={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
+                </div>
+              {/if}
+            {/each}
+            {#if hover}
+              <!-- Hover: sotto l'utilizzo solo repo e branch, niente numeri flat -->
+              <div class="u-foot hover-foot">
+                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                {#if git?.branch}
+                  <span class="sep"></span>
+                  <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                    <Icon name="i-branch" />{git.branch}
+                  </span>
+                {/if}
+              </div>
+            {:else if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
+              <div class="u-foot">
+                <span class="g-foot">
+                  <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                  {#if git?.branch}
+                    <span class="sep"></span>
+                    <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                      <Icon name="i-branch" />{git.branch}
+                    </span>
+                  {/if}
+                </span>
+                {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if hover && !contextWindow && !haFinestre}
+          <!-- Hover senza barre: mostra comunque repo/branch in fondo -->
+          <div class="u-foot hover-foot" style="padding:4px 9px 8px">
+            <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+            {#if git?.branch}
+              <span class="sep"></span>
+              <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                <Icon name="i-branch" />{git.branch}
+              </span>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+
       {#if aperto}
         {#if menu === 'model'}
           <!-- Il selettore dei modelli: box `.picker` del DS (440px), con la conferma
@@ -797,7 +1075,7 @@
               <ModelPicker catalogo={store.catalogo} corrente={modelOpt?.value ?? snap.model ?? ''}
                 agenteCorrente={snap.agent}
                 nota={a => (a === snap.agent ? null : 'handoff')}
-                onScegli={scegliModello} onClose={chiudiMenu} />
+                onScegli={scegliModello} onIndietro={() => { menu = 'root' }} />
             {/if}
           </div>
         {:else if menu === 'mcp'}
@@ -815,7 +1093,7 @@
             <div class="mcp-list">
               {#each snap.mcpServers as s (s.name)}
                 <button class="mcp-row" class:on={s.enabled} class:off={!s.enabled}
-                  onclick={() => void store.setMcp(s.name, !s.enabled)}>
+                  onclick={() => void store.setMcp(s.name, !s.enabled, id)}>
                   <span class="mcp-ico" class:live={s.status === 'connected'}
                     class:err={s.status === 'failed' || s.status === 'needs-auth'}>
                     <Icon name="i-plug" />
@@ -851,7 +1129,7 @@
             <div class="pk-rule"></div>
             {#each modeOpt?.choices ?? [] as c (c.value)}
               <button class="pop-item" class:dis={!c.available} disabled={!c.available}
-                onclick={() => { void store.setOption(modeOpt!.id, c.value); chiudiMenu() }}>
+                onclick={() => { void store.setOption(modeOpt!.id, c.value, id); chiudiMenu() }}>
                 <span class="ico"><Icon name={MODE_ICON[c.value] ?? 'i-shield'}
                   style={c.value === modeOpt!.value ? 'color:var(--accent)' : ''} /></span>
                 <span class="lbl">{c.label ?? c.value}<span class="sub"
@@ -861,30 +1139,58 @@
               </button>
             {/each}
           </div>
-        {:else}
-          <!-- Il menu radice: dove si sta (cartella e ramo), cosa si può dare al
-               modello (file, modalità, strumenti, modello) e quanto ne resta. -->
+        {:else if menu === 'reasoning'}
           <div class="leadbox popup" bind:this={menuEl}>
-            <div class="pop-head">
-              <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
-              {#if git?.branch}
-                <span class="sep"></span>
-                <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
-                  <Icon name="i-branch" />{git.branch}
-                </span>
-              {/if}
-            </div>
+            <button class="pk-nav" onclick={() => { menu = 'root' }}>
+              <span class="back"><Icon name="i-back" /></span>
+              <span class="nv-title">Reasoning</span>
+            </button>
+            <div class="pk-rule"></div>
+            {#each reasoningOpt?.choices ?? [] as c (c.value)}
+              <button class="pop-item" class:dis={!c.available} disabled={!c.available}
+                onclick={() => { void store.setOption('reasoning', c.value, id); chiudiMenu() }}>
+                <span class="ico"><Icon name="i-brain"
+                  style={c.value === reasoningOpt!.value ? 'color:var(--accent)' : ''} /></span>
+                <span class="lbl">{c.label ?? c.value}<span class="sub"
+                  >{c.reason ?? c.note ?? ''}</span></span>
+                {#if !c.available}<span class="tagx">unavailable</span>
+                {:else if c.value === reasoningOpt!.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
+        {:else if menu === 'effort'}
+          <div class="leadbox popup" bind:this={menuEl}>
+            <button class="pk-nav" onclick={() => { menu = 'root' }}>
+              <span class="back"><Icon name="i-back" /></span>
+              <span class="nv-title">Effort</span>
+            </button>
+            <div class="pk-rule"></div>
+            {#each effortOpt?.choices ?? [] as c (c.value)}
+              <button class="pop-item" class:dis={!c.available} disabled={!c.available}
+                onclick={() => { void store.setOption('effort', c.value, id); chiudiMenu() }}>
+                <span class="ico"><Icon name="i-bolt"
+                  style={c.value === effortOpt!.value ? 'color:var(--accent)' : ''} /></span>
+                <span class="lbl">{c.label ?? c.value}<span class="sub"
+                  >{c.reason ?? c.note ?? ''}</span></span>
+                {#if !c.available}<span class="tagx">unavailable</span>
+                {:else if c.value === effortOpt!.value}<Icon name="i-check" style="margin-left:auto;color:var(--accent)" />{/if}
+              </button>
+            {/each}
+          </div>
+        {:else}
+           <!-- Il menu radice: prima il modello corrente (blocco cliccabile → picker),
+                poi dove si sta (cartella e ramo), cosa si può dare al modello e quanto
+                ne resta. La riga «Model» vecchia sopra al Context è rimossa: questo
+                blocco è la nuova via. -->
+           <div class="leadbox popup" bind:this={menuEl}>
+             {@render modelTop()}
+             <div class="divider"></div>
 
-            <div class="divider"></div>
-
-            <!-- Spento, non nascosto: un modello che non legge allegati è un fatto da
-                 dire, e la voce che sparisce sembrerebbe un pezzo di STARK che manca. -->
-            <button class="pop-item" class:dis={!puoAllegare} disabled={!puoAllegare}
+             <button class="pop-item" class:dis={!puoAllegare} disabled={!puoAllegare}
               title={puoAllegare ? `Attach a file — ${nomiBrevi(tipi)}` : `${nomeModello} doesn't read attachments`}
               onclick={() => fileInput?.click()}>
               <span class="ico"><Icon name="i-file" /></span>
               Choose file
-              <span class="kbd">⌘O</span>
             </button>
 
             <div class="divider"></div>
@@ -903,78 +1209,39 @@
               MCP
               <span class="cur">{mcpLabel === 'none' ? '0' : mcpLabel} active <span class="chev"><Icon name="i-fwd" /></span></span>
             </button>
-            {#if modelOpt}
-              <button class="pop-item" class:dis={!modificabile('model')} disabled={!modificabile('model')}
-                title={modificabile('model') ? 'Model' : "This agent can't change its model from here"}
-                onclick={() => { menu = 'model' }}>
-                <span class="ico">
-                  {#if modelloIcona}<img src={modelloIcona} alt="" width="15" height="15" loading="lazy"
-                    onerror={(e)=>{const t=e.currentTarget as HTMLImageElement;t.style.display='none'}} />
-                  {:else}<span class="mdot"></span>{/if}
-                </span>
-                Model
-                <span class="cur">{nomeBreve} <span class="chev"><Icon name="i-fwd" /></span></span>
+            {#if reasoningOpt}
+              <button class="pop-item" disabled={!live}
+                onclick={() => { menu = 'reasoning' }}>
+                <span class="ico"><Icon name="i-brain" /></span>
+                Reasoning
+                <span class="cur">{reasoningOpt.value} <span class="chev"><Icon name="i-fwd" /></span></span>
+              </button>
+            {/if}
+            {#if effortOpt}
+              <button class="pop-item" disabled={!live}
+                onclick={() => { menu = 'effort' }}>
+                <span class="ico"><Icon name="i-bolt" /></span>
+                Effort
+                <span class="cur">{effortOpt.value} <span class="chev"><Icon name="i-fwd" /></span></span>
               </button>
             {/if}
 
-            {#if contextWindow || haFinestre}
-              <div class="divider"></div>
-
-              <div class="usage">
-                {#if contextWindow}
-                  <div class="u-row" title={`${fmt(totalNow)} / ${fmt(contextWindow)} tokens`}>
-                    <span class="u-lbl">Context</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, pct ?? 0)}%;background:{meterColour(pct ?? 0)}"></span></span>
-                    <span class="u-pct" class:warn={(pct ?? 0) >= 75} class:crit={(pct ?? 0) >= 90}>{pct !== null ? `${pct}%` : '—'}</span>
-                    <!-- Il costo della chat: l'unico della colonna che esiste davvero
-                         (listino — vedi `spentUsd` in reduce.ts). Vuota non è «zero». -->
-                    <span class="u-cost">{snap.spentUsd > 0 ? fmtUsd(snap.spentUsd) : ''}</span>
-                  </div>
-                {/if}
-                {#if sessionWin?.used !== undefined}
-                  <div class="u-row" title="Session · 5 hours">
-                    <span class="u-lbl">Session</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, sessionWin.used)}%;background:{meterColour(sessionWin.used)}"></span></span>
-                    <span class="u-pct" class:warn={sessionWin.used >= 75} class:crit={sessionWin.used >= 90}>{sessionWin.used}%</span>
-                    <span class="u-cost"></span>
-                  </div>
-                {/if}
-                {#if weeklyWin?.used !== undefined}
-                  <div class="u-row" title="Weekly">
-                    <span class="u-lbl">Week</span>
-                    <span class="u-bar"><span style="width:{Math.min(100, weeklyWin.used)}%;background:{meterColour(weeklyWin.used)}"></span></span>
-                    <span class="u-pct" class:warn={weeklyWin.used >= 75} class:crit={weeklyWin.used >= 90}>{weeklyWin.used}%</span>
-                    <span class="u-cost"></span>
-                  </div>
-                {/if}
-                {#each weeklyScoped as w (w.scope)}
-                  {#if w.used !== undefined}
-                    <div class="u-row" title="Weekly · {w.scope}">
-                      <span class="u-lbl">{w.scope}</span>
-                      <span class="u-bar"><span style="width:{Math.min(100, w.used)}%;background:{meterColour(w.used)}"></span></span>
-                      <span class="u-pct" class:warn={w.used >= 75} class:crit={w.used >= 90}>{w.used}%</span>
-                      <span class="u-cost"></span>
-                    </div>
-                  {/if}
-                {/each}
-                {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
-                  <div class="u-foot">
-                    <span>
-                      {#if sessionWin?.resetsAt}resets {until(clock, sessionWin.resetsAt)}{/if}
-                      {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
-                      {#if weeklyWin?.resetsAt}{stamp(weeklyWin.resetsAt)}{/if}
-                    </span>
-                    {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
-                  </div>
-                {/if}
-                {#if stale}
-                  <div class="u-foot"><span class="faint">read {since(stale, clock)} ago{
-                    live ? '' : ' — this chat has no process behind it now'}</span></div>
-                {/if}
-              </div>
-            {/if}
+            {@render usagePanel()}
           </div>
         {/if}
+      {/if}
+
+      <!-- L'anteprima al passaggio del mouse: solo prima di un clic — appena il
+           menu vero si apre queste stesse righe sono già lì dentro, mostrarle due
+           volte sarebbe un doppione — e solo con un mouse davvero (`hoverPreview`
+           non parte da tocco, vedi la sua definizione). Qui il modello si mostra
+           come **blocco** (scheda in testa al picker), non come riga cliccabile
+           «Model › Opus». -->
+      {#if hoverPreview && !aperto && !store.narrow && (currentCard || modelOpt || contextWindow || haFinestre)}
+        <div class="leadbox popup preview">
+          {@render modelBlock()}
+          {@render usagePanel(true)}
+        </div>
       {/if}
 
       {#if allegati.length > 0}
@@ -1004,7 +1271,7 @@
              pollice già occupato a scrivere. Sta in una striscia sopra, allineato
              all'invio — dove l'occhio va comunque a guardare se c'è risposta. -->
         <div class="run-strip">
-          <button class="btn-round stop" title="Stop" onclick={() => void store.stop()}>
+          <button class="btn-round stop" title="Stop" onclick={() => void store.stop(id)}>
             <Icon name="i-stop" />
           </button>
         </div>
@@ -1021,7 +1288,15 @@
              attorno al bottone che la apre. Ambra e rosso alle soglie di sempre. -->
         <div class="lead-wrap" class:open={aperto}
           style="--ctx:{pct ?? 0};--ring:{pct !== null ? meterColour(pct) : 'var(--accent)'}">
-          <button class="lead" title="Attachments and usage" onpointerenter={peek}
+          <button class="lead" title="Attachments and usage"
+            onpointerenter={e => {
+              peek()
+              void store.caricaCatalogo()
+              // Solo il mouse: da tocco `pointerenter` precede il tap che apre il
+              // menu vero comunque, e l'anteprima farebbe solo da lampo in mezzo.
+              if (e.pointerType === 'mouse') hoverPreview = true
+            }}
+            onpointerleave={() => { hoverPreview = false }}
             onclick={chooseMenu} aria-label="Attachments and usage">
             <Icon name="i-plus" class={aperto ? 'rot' : ''} />
           </button>
@@ -1040,7 +1315,7 @@
             onselect={segnaCaret}
             onblur={() => { files = [] }}
             rows="1"
-            placeholder={`Message ${nomeBreve}…`}
+            placeholder={`Message ${nomeLeggibile}…`}
           ></textarea>
           <!-- Mentre lavora: lo sweep corre sul bordo basso del campo. È il posto del
                vecchio riquadro «cosa sta facendo»: il racconto di ciò che fa sta nel
@@ -1052,7 +1327,7 @@
           {#if busy}
             <!-- Su schermo largo lo stop sta qui, accanto all'invio come da DS; su
                  stretto la regola lo sposta nella striscia sopra. -->
-            <button class="btn-round stop wide" title="Stop" onclick={() => void store.stop()}>
+            <button class="btn-round stop wide" title="Stop" onclick={() => void store.stop(id)}>
               <Icon name="i-stop" />
             </button>
           {/if}
@@ -1081,8 +1356,8 @@
         {#if pending}It stopped while it was waiting for an answer from you.{/if}
         Reopening it re-reads the whole conversation, which costs quota.
       </div>
-      <button class="btn pri" disabled={store.working || !store.row}
-        onclick={() => { const r = store.row; if (r) void store.wake(r) }}>
+      <button class="btn pri" disabled={store.working || !rigaPannello}
+        onclick={() => { if (rigaPannello) void store.wake(rigaPannello) }}>
         {store.working ? 'Reopening…' : 'Reopen'}
       </button>
     </div>
@@ -1247,7 +1522,6 @@
   .pop-item .ico img { border-radius: 3px; filter: var(--icon-f); display: block; }
   .pop-item .lbl { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; min-height: 0; }
   .pop-item .lbl .sub { font-size: 9.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pop-item .kbd { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--muted); }
   .pop-item .cur {
     margin-left: auto; display: flex; align-items: center; gap: 6px;
     font-family: var(--mono); font-size: 10.5px; color: var(--muted);
@@ -1301,6 +1575,57 @@
   .pk-empty :global(svg.ic) { width: 13px; height: 13px; flex: none; }
   .pk-empty .sub-line { display: block; font-size: 10.5px; }
 
+  /* ── anteprima hover: blocco modello come in testa al picker (ModelPicker .pk-head/.pk-meta) ── */
+  .preview-head { display:flex; align-items:flex-start; gap:9px; padding:10px 11px 0; }
+  .preview-head.fallback { padding-bottom:8px; }
+  .preview-head .pk-avatar { width:32px; height:32px; flex:none; border-radius:9px; background:var(--surface-2);
+    border:1px solid var(--line-2); display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .preview-head .pk-avatar img { filter:var(--icon-f); }
+  .preview-head .pk-id { min-width:0; flex:1; }
+  .preview-head .pk-name { font-size:12.5px; font-weight:600; color:var(--ink); line-height:1.3;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .preview-head .pk-name .mult { font-weight:500; color:var(--muted); }
+  .preview-head .pk-path { display:flex; align-items:center; gap:5px; margin-top:2px;
+    font-family:var(--mono); font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; }
+  .preview-head .pk-path .arw { opacity:.6; flex:none; }
+  .preview-head .pk-caps { display:flex; gap:6px; color:var(--muted); flex:none; padding-top:2px; }
+  .preview-head .pk-caps :global(svg.ic) { width:13px; height:13px; }
+  .preview-head .pk-caps :global(svg.ic.off) { opacity:.32; }
+  .preview .pk-meta { display:flex; align-items:center; gap:7px; padding:8px 11px 9px; font-family:var(--sans); }
+  .preview .pk-meta :global(svg.ic) { width:10px; height:10px; }
+  .preview .pk-meta .cash { color:var(--muted); display:flex; }
+  .preview .pk-meta .unit { font-family:var(--sans); font-size:9px; color:var(--muted); }
+  .preview .pk-meta .price { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  .preview .pk-meta .price.free { color:var(--accent); }
+  .preview .pk-meta .ctx-lbl { margin-left:10px; font-size:8px; font-weight:600; letter-spacing:-0.02em; color:var(--muted); font-stretch:condensed; }
+  .preview .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  /* Hover: un solo separatore, da bordo a bordo (il popup ha padding 4px) */
+  .preview .pk-rule { margin:8px -4px 0; }
+  /* Footer hover con repo/branch, e footer espanso con repo/branch + flat a destra */
+  .u-foot.hover-foot { justify-content:flex-start; }
+  .u-foot .g-foot, .u-foot.hover-foot { display:flex; align-items:center; gap:7px; }
+  .u-foot .g { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:8.5px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .u-foot .g :global(svg.ic) { width:12px; height:12px; color:var(--muted); flex:none; }
+  .u-foot .sep { width:1px; height:11px; background:var(--line-2); flex:none; }
+  /* Seconda riga del blocco modello nell'espanso: stesso stile dell'hover ma senza .preview */
+  .model-top .pk-meta { display:flex; align-items:center; gap:7px; padding:6px 0 0; font-family:var(--sans); }
+  .model-top .pk-meta :global(svg.ic) { width:10px; height:10px; }
+  .model-top .pk-meta .cash { color:var(--muted); display:flex; }
+  .model-top .pk-meta .unit { font-family:var(--sans); font-size:9px; color:var(--muted); }
+  .model-top .pk-meta .price { font-family:var(--sans); font-size:10px; color:var(--ink); }
+  .model-top .pk-meta .price.free { color:var(--accent); }
+  .model-top .pk-meta .ctx-lbl { margin-left:10px; font-size:8px; font-weight:600; letter-spacing:-0.02em; color:var(--muted); font-stretch:condensed; }
+  .model-top .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
+
+  /* Bottone modello in cima al menu espanso: lo stesso blocco dell'hover ma cliccabile */
+  .model-top { display:flex; align-items:center; gap:8px; width:100%; padding:8px 9px; border-radius:8px;
+    background:none; border:0; cursor:pointer; text-align:left; font:inherit; color:inherit; }
+  .model-top:hover:not(:disabled) { background:var(--surface-2); }
+  .model-top:disabled { opacity:.5; cursor:default; }
+  .model-top .model-top-main { flex:1; min-width:0; }
+  .model-top .chev { color:var(--muted); display:flex; flex:none; align-self:center; }
+  .model-top .chev :global(svg.ic) { width:12px; height:12px; }
+
   /* ── il pannello d'uso ────────────────────────────────────────────────────
      Tre righe invece di tre blocchi: etichetta, barra, percentuale, costo. La colonna
      del costo è larga fissa anche dove è vuota: l'allineamento delle barre vale più
@@ -1313,7 +1638,11 @@
   .u-bar span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
   .u-pct { width: 30px; flex: none; text-align: right; font-family: var(--mono);
     font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .u-pct.warn { color: var(--wait); }
+  /* `near`, non `warn`: il nome collide con la `.warn` globale di `app.css` (il
+     riquadro d'avviso, con fondo `--wait-bg`, padding e display:flex) — applicata
+     a questi span faceva una pillola gialla attorno alla percentuale, chiesta
+     via dall'utente il 1º settembre 2026. Qui il colore basta. */
+  .u-pct.near { color: var(--wait); }
   .u-pct.crit { color: var(--stop); }
   .u-cost { width: 48px; flex: none; text-align: right; font-family: var(--mono);
     font-size: 10.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -1321,7 +1650,6 @@
     display: flex; justify-content: space-between; margin-top: 8px; padding-top: 7px;
     border-top: 1px solid var(--line); font-family: var(--mono); font-size: 8.5px; color: var(--muted);
   }
-  .u-foot .faint { font-style: italic; }
 
   /* La conferma del passaggio a un altro agent: le stesse regole che avevano le
      tendine della barra (`.pg`/`.pnote` stanno in app.css per `.hpop` e `.menu`,

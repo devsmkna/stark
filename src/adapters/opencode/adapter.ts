@@ -872,6 +872,27 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   /**
+   * Togli **una** voce dalla fila, su richiesta (`session.dequeue`).
+   *
+   * Lo stesso fatto di `svuota()`, per una voce sola — e qui senza eccezioni: il
+   * `turn.started` l'hanno avuto **tutti** entrando in fila, quindi la voce tolta
+   * lascia sempre dietro un turno aperto che si dichiara finito senza che sia mai
+   * partito. `false` se il turno non era in fila: già consegnato, o mai esistito —
+   * chi chiama lo dice all'utente invece di fingere.
+   */
+  dequeue(turnId: string): boolean {
+    const i = this.coda.findIndex(p => p.turnId === turnId)
+    if (i < 0) return false
+    const [p] = this.coda.splice(i, 1)
+    if (!p) return false
+    this.emit({
+      k: 'turn.ended', turnId: p.turnId, reason: 'aborted',
+      usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+    })
+    return true
+  }
+
+  /**
    * Il prompt al runner che esegue davvero.
    *
    * Un metodo solo perche' lo chiamano in due — l'invio e il ritentativo — e due copie
@@ -1112,6 +1133,12 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
       for (const [mid, m] of Object.entries(p.models ?? {})) {
         const limit = (m['limit'] ?? {}) as Record<string, unknown>
         const cost = (m['cost'] ?? {}) as Record<string, unknown>
+        // Il fatto che il modello ragiona: capabilities.reasoning dell'SDK
+        // (misurato 1º settembre 2026: vero su tutti e 105 i modelli di questa
+        // macchina). È un fatto da leggere, NON un interruttore — il prompt di
+        // sessione OpenCode non accetta opzioni per giro, quindi qui non nasce
+        // nessuna voce 'reasoning' nel menu: il dato viaggia, la scelta no.
+        const caps = (m['capabilities'] ?? {}) as Record<string, unknown>
         out.push({
           id: `${p.id}/${mid}`,
           ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
@@ -1127,6 +1154,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           // pagando. La scala è quella di models.dev, che è lì che nasce il dato.
           ...(typeof p.name === 'string' ? { providerName: String(p.name) } : {}),
           ...(typeof m['family'] === 'string' ? { family: String(m['family']) } : {}),
+          ...(caps['reasoning'] === true ? { reasoning: true } : {}),
           ...(typeof cost['input'] === 'number' && typeof cost['output'] === 'number'
             ? { cost: { input: cost['input'], output: cost['output'] } } : {}),
         })

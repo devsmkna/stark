@@ -16,8 +16,8 @@
    *
    * Qui c'è **solo il contenuto**. Il contenitore e la posizione restano di chi lo
    * ospita: il dock del composer lo ospita nel suo box `.picker`, Helper e AgentPanel
-   * nelle loro tendine. `onClose` serve alla riga «indietro» del primo livello, dove
-   * non c'è un livello sopra a cui tornare: chi ospita decide cosa chiudere.
+   * nelle loro tendine. `onIndietro` serve alla riga «indietro» del primo livello:
+   * chi ospita dice a cosa tornare — la Dock al suo menu radice.
    */
   import Icon from './Icon.svelte'
   import {
@@ -37,10 +37,13 @@
     /** Cosa scrivere accanto a una voce di un altro agent. `null` per niente. */
     nota?: (agentId: string) => string | null
     onScegli: (agent: string, model: string) => void
-    /** Chiusura richiesta dal primo livello: lì «indietro» non ha un livello sopra. */
-    onClose?: () => void
+    /** «Indietro» dal primo livello: il menu che ha aperto il picker. La Dock ci
+     *  torna al menu radice invece di chiudere tutto (chiesto dall'utente,
+     *  1º settembre 2026). Senza, la riga di navigazione al primo livello tace:
+     *  non c'è un livello sopra a cui tornare e niente da chiudere. */
+    onIndietro?: () => void
   }
-  const { catalogo, corrente, agenteCorrente, nota, onScegli, onClose }: Props = $props()
+  const { catalogo, corrente, agenteCorrente, nota, onScegli, onIndietro }: Props = $props()
 
   /** Quale agent si sta guardando dentro. `null` = si è al primo livello. */
   let dentro = $state<string | null>(null)
@@ -96,7 +99,7 @@
    *  nome «Default» e suffisso «recommended», che nel DS sta in mono spento accanto.
    *  Un'etichetta senza parentesi è solo nome. */
   const nomeESuffisso = (m: { id: string; label?: string }): { nome: string; suffix?: string } => {
-    const label = m.id
+    const label = m.label ?? m.id
     const mm = /^(.*?)\s*\((.+)\)\s*$/.exec(label)
     return mm ? { nome: mm[1]!, suffix: mm[2]! } : { nome: label }
   }
@@ -256,10 +259,10 @@
   /**
    * La riga «indietro» in testa all'elenco, che porta al livello sopra: l'elenco
    * degli agent, quello dei provider o quello delle famiglie, a seconda di dove si è.
-   * Al primo livello «indietro» non ha un livello sopra: chiude il picker, e come lo
-   * chiude lo dice chi ospita (`onClose`). Durante la ricerca il titolo diventa
-   * «Results» col conto dei trovati sul totale. Sta nel flusso sopra la lista, così
-   * non sparisce con lo scorrimento dell'elenco.
+   * Al primo livello «indietro» porta al menu che ha aperto il picker, se l'host lo
+   * dichiara (`onIndietro` — la Dock: il menu radice); senza, la riga tace. Durante
+   * la ricerca il titolo diventa «Results» col conto dei trovati sul totale. Sta nel
+   * flusso sopra la lista, così non sparisce con lo scorrimento dell'elenco.
    */
   const back = $derived.by(() => {
     if (risultati) {
@@ -294,12 +297,16 @@
         indietro: true,
       }
     }
-    return {
-      onClick: () => onClose?.(),
-      title: 'Models',
-      count: `${totaleModelli}`,
-      indietro: false,
-    }
+    // Primo livello: il bottone a sinistra torna al menu precedente — quello che ha
+    // aperto il picker — quando l'host lo dichiara; altrimenti la riga non c'è.
+    return onIndietro
+      ? {
+          onClick: () => onIndietro(),
+          title: 'Models',
+          count: `${totaleModelli}`,
+          indietro: true,
+        }
+      : null
   })
 
   /** Le tre icone di capacità del modello in testa (testo, immagini, documenti):
@@ -346,9 +353,10 @@
   {/if}
 
   <!-- La riga di navigazione compare solo dove c'è un gesto da fare: ai livelli
-       interni porta indietro, al primo livello chiude il picker (se chi ospita sa
-       chiuderlo — Helper e AgentPanel non passano `onClose`, e lì la riga tace). -->
-  {#if back.indietro || onClose}
+       interni porta indietro, al primo livello torna al menu che ha aperto il
+       picker (se l'host lo dichiara — Helper e AgentPanel non passano
+       `onIndietro`, e lì la riga tace). -->
+  {#if back}
     <button class="pk-nav" onclick={back.onClick}>
       {#if back.indietro}<span class="back"><Icon name="i-back" /></span>{/if}
       <span class="nv-title">{back.title}</span>
@@ -562,16 +570,15 @@
   .pk-caps :global(svg.ic){width:13px;height:13px}
   .pk-caps :global(svg.ic.off){opacity:.32}
 
-  /* La riga dei numeri del modello in uso: prezzo per milione e finestra. Mono e
-     tabulare, perché chi confronta due modelli confronta cifre. */
-  .pk-meta{display:flex;align-items:center;gap:7px;padding:8px 11px 9px}
-  .pk-meta :global(svg.ic){width:12px;height:12px}
-  .pk-meta .cash{color:var(--done);display:flex}
-  .pk-meta .unit{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
-  .pk-meta .price{font-family:var(--mono);font-size:11px;color:var(--ink);font-variant-numeric:tabular-nums}
+  /* Seconda riga: font classico, dollaro neutro, CONTEXT condensed */
+  .pk-meta{display:flex;align-items:center;gap:7px;padding:8px 11px 9px;font-family:var(--sans)}
+  .pk-meta :global(svg.ic){width:10px;height:10px}
+  .pk-meta .cash{color:var(--muted);display:flex}
+  .pk-meta .unit{font-family:var(--sans);font-size:9px;color:var(--muted)}
+  .pk-meta .price{font-family:var(--sans);font-size:10px;color:var(--ink)}
   .pk-meta .price.free{color:var(--accent)}
-  .pk-meta .ctx-lbl{margin-left:10px;font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--muted)}
-  .pk-meta .ctx-val{font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .pk-meta .ctx-lbl{margin-left:10px;font-size:8px;font-weight:600;letter-spacing:-0.02em;color:var(--muted);font-stretch:condensed}
+  .pk-meta .ctx-val{font-family:var(--sans);font-size:10px;color:var(--ink)}
   .pk-rule{height:1px;background:var(--line);flex:none}
 
   /* La riga di navigazione: indietro + titolo + conteggio, una riga sola. */

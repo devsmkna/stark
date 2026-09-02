@@ -160,22 +160,34 @@ let noto: StatoAggiornamento | null = null
 /** Quello che si sa adesso, o `null` se il controllo non è ancora tornato. */
 export function aggiornamentoNoto(): StatoAggiornamento | null { return noto }
 
+/** Ogni quanto si ripete il controllo dopo il primo, all'accensione. Un giro di rete
+ *  verso il remoto del repo (zero oggetti scaricati), quindi non è il costo a porre un
+ *  limite: è che una release non esce due volte in un'ora, e ricontrollare più spesso
+ *  di così non farebbe comparire il banner prima, solo più chiamate a vuoto. */
+const RICONTROLLO_MS = 3 * 60 * 60 * 1000
+
 /**
- * Il controllo all'avvio. **Non si aspetta**: chi accende STARK non deve stare fermo
- * per un giro di rete che non gli serve, e il banner può comparire un secondo dopo che
- * la pagina si è aperta senza che nessuno se ne accorga.
+ * Il controllo all'avvio, e poi a intervalli. **Non si aspetta**: chi accende STARK non
+ * deve stare fermo per un giro di rete che non gli serve, e il banner può comparire un
+ * secondo dopo che la pagina si è aperta senza che nessuno se ne accorga.
  *
- * Gira una volta sola, all'accensione, e la conseguenza va detta invece che scoperta:
- * un daemon lasciato acceso per una settimana non si accorge di una release uscita nel
- * frattempo. È accettabile perché aggiornare **riavvia** — quindi ogni aggiornamento
- * rimette in moto il controllo — ma è il limite che questa scelta si porta dietro.
+ * Il giro periodico esiste perché un daemon lasciato acceso per giorni non deve
+ * dipendere da un riavvio per accorgersi di una release uscita nel frattempo — prima
+ * girava solo all'accensione, e chi non riavviava (la maggioranza: STARK è pensato per
+ * restare su) vedeva il banner comparire solo se e quando toccava `stark update` a
+ * mano, cioè mai da sé. `unref()` perché questo timer non è un motivo per tenere vivo
+ * il processo: se tutto il resto è fermo, il daemon deve poter uscire lo stesso.
  */
 export function controllaAllAvvio(radice: string): void {
-  void controlla(radice).then(s => {
-    noto = s
-    if (s.errore) console.error(`[update] controllo non riuscito: ${s.errore}`)
-    else if (s.disponibile) console.log(`[update] disponibile la ${s.ultima} (hai la ${s.installata})`)
-  })
+  const giro = (): void => {
+    void controlla(radice).then(s => {
+      noto = s
+      if (s.errore) console.error(`[update] controllo non riuscito: ${s.errore}`)
+      else if (s.disponibile) console.log(`[update] disponibile la ${s.ultima} (hai la ${s.installata})`)
+    })
+  }
+  giro()
+  setInterval(giro, RICONTROLLO_MS).unref()
 }
 
 /**
