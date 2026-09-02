@@ -94,7 +94,11 @@ export function passeggero(motivo: string): boolean {
     // retry serviva di più.
     || m.includes('econnrefused') || m.includes('econnreset') || m.includes('econnaborted')
     || m.includes('socket hang up') || m.includes('fetch failed') || m.includes('epipe')
-    || m.includes('etimedout') || m.includes('network')
+    || m.includes('etimedout')
+  // `network` nudo era in questa lista e ne e' uscito: e' una parola che compare anche
+  // in guasti **permanenti** («network policy violation», certi errori di proxy
+  // aziendale), e ritentarli tre volte e' esattamente cio' che il commento in cima a
+  // questa funzione dice di voler evitare. I codici qui sopra sono specifici e bastano.
 }
 
 /** Il modello nella forma che OpenCode vuole: `providerID/id`, o solo `id`. */
@@ -456,11 +460,23 @@ export class OpenCodeAdapter implements AgentSession {
     this.tentativi++
     this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })
     await new Promise(r => setTimeout(r, ATTESE_RIPRESA[this.tentativi - 1]))
-    if (this.fermato) return false
+    // Si ricontrolla **dopo** l'attesa, non solo prima: fra i 5 e i 30 secondi di
+    // backoff ci sta comodo uno Sleep o una chiusura, e quelli passano da `spegni()`,
+    // che chiude il turno senza essere un «Stop». Senza questa riga il risveglio
+    // mandava un prompt fantasma a una chat dormiente e riarmava una guardia che
+    // novanta secondi dopo avrebbe scritto su un journal ormai chiuso.
+    if (!this.vivoPerRitentare()) return false
     this.montaGuardia()
     await this.mandaAlRunner({ parts: [{ type: 'text' as const, text: RIPRESA }] })
       .catch(() => { /* il prossimo errore chiudera' il turno */ })
     return true
+  }
+
+  /** C'e' ancora qualcuno per cui valga la pena riprovare? Da chiedersi **dopo** ogni
+   *  attesa, perche' durante l'attesa la sessione puo' essersi fermata in tre modi
+   *  diversi: lo Stop dell'utente, lo Sleep, la chiusura. */
+  private vivoPerRitentare(): boolean {
+    return !this.fermato && this.tr.turnoAperto() !== null && this.ultimoPrompt !== null
   }
 
   /**
@@ -500,10 +516,13 @@ export class OpenCodeAdapter implements AgentSession {
     this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })
     // Un po' di attesa crescente: riprovare nello stesso istante ha buone probabilita'
     // di trovare l'altro capo ancora giu'.
+    const prompt = this.ultimoPrompt
     await new Promise(r => setTimeout(r, 1500 * this.tentativi))
-    if (this.fermato) return false
+    // Stessa ragione di `forseRitentaErrore`: chi si e' addormentato durante l'attesa
+    // non vuole vedersi ripartire il turno addosso.
+    if (!this.vivoPerRitentare()) return false
     this.montaGuardia()
-    await this.mandaAlRunner(this.ultimoPrompt)
+    await this.mandaAlRunner(prompt)
       .catch(() => { /* il prossimo errore chiudera' il turno */ })
     return true
   }
@@ -591,9 +610,17 @@ export class OpenCodeAdapter implements AgentSession {
     }
     let motivo = await tenta()
     if (motivo === null) return
-    await new Promise(x => setTimeout(x, 1000))
-    motivo = await tenta()
-    if (motivo === null) return
+    // Si ritenta **solo su un guasto di rete**, non su un rifiuto del server. Un 404 o
+    // un 409 vogliono dire «quel permesso e' gia' stato risolto»: rimandarlo non lo
+    // consegnerebbe una seconda volta, lo farebbe **valere** una seconda volta, e su un
+    // `always` questo significa autorizzare di nuovo qualcosa che nessuno ha
+    // riautorizzato. Se la prima risposta e' arrivata e a perdersi e' stata la
+    // conferma, tacere e' il verso sicuro.
+    if (passeggero(motivo)) {
+      await new Promise(x => setTimeout(x, 1000))
+      motivo = await tenta()
+      if (motivo === null) return
+    }
     this.emit({ k: 'notice', level: 'error', text: `permesso non consegnato: ${motivo}` })
     // Solo se c'e' ancora un turno da dichiarare perso: questa rotta risponde anche
     // ai rifiuti d'ufficio (`abbandonaBloccantePendente`), a turno gia' chiuso.
@@ -976,6 +1003,12 @@ export class OpenCodeAdapter implements AgentSession {
   }
 
   private async spegni(): Promise<void> {
+    // `fermato` non e' «l'utente ha premuto Stop»: e' «da qui in poi non si ritenta
+    // piu' niente». Lo Sleep e la chiusura sono altrettanto definitivi di uno Stop, e
+    // finche' lo alzava solo `interrupt()` un retry addormentato si risvegliava
+    // credendo di avere ancora una sessione a cui parlare.
+    this.fermato = true
+    this.ultimoPrompt = null
     this.smontaGuardia()
     this.svuota()
     this.scrivi(this.tr.chiudiTurno('interrupted'))

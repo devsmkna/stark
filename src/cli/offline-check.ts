@@ -1057,6 +1057,10 @@ check('diff: forma unificata, numeri di riga coerenti',
   check('OpenCode: ECONNREFUSED/ECONNRESET/fetch failed/socket hang up sono passeggeri',
     passeggero('connect ECONNREFUSED 127.0.0.1:4096') && passeggero('read ECONNRESET')
     && passeggero('TypeError: fetch failed') && passeggero('socket hang up'))
+  // Dalla review del 2 settembre: `network` nudo era troppo largo — compare anche nei
+  // guasti permanenti, e ritentarli e' proprio cio' che questa funzione evita.
+  check('OpenCode: «network policy violation» NON e\' passeggero',
+    !passeggero('network policy violation: provider blocked'))
 
   check('OpenCode: il modello si scrive `provider/id`',
     modelloDa({ providerID: 'opencode', id: 'glm-5' }) === 'opencode/glm-5')
@@ -2151,6 +2155,21 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   check('revisione: end_turn passa com\'e\' e non produce avvisi',
     fine6.length === 1 && fine6[0]?.k === 'step.ended' && fine6[0].finish === 'end_turn',
     JSON.stringify(fine6))
+  // Dalla review del 2 settembre: l'avviso e' del TURNO, non dello step. Un turno con
+  // tre chiamate di tool puo' troncare tre volte, e tre avvisi identici di fila non
+  // dicono niente piu' del primo. Secondo step dello stesso turno:
+  t5.handle({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm5b' } } })
+  t5.handle({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'max_tokens' } } })
+  const fine5b = t5.handle({ type: 'stream_event', event: { type: 'message_stop' } })
+  check('revisione: il troncamento si annuncia una volta per turno, non per step',
+    fine5b.length === 1 && fine5b[0]?.k === 'step.ended', JSON.stringify(fine5b))
+  // Ma un turno NUOVO lo deve poter ridire: e' un altro fatto.
+  t5.beginTurn('T5-bis')
+  t5.handle({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm5c' } } })
+  t5.handle({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'max_tokens' } } })
+  const fine5c = t5.handle({ type: 'stream_event', event: { type: 'message_stop' } })
+  check('revisione: un turno nuovo troncato lo dice di nuovo',
+    fine5c.some(p => p.k === 'notice'), JSON.stringify(fine5c))
 
   // C1: i rifiuti d'ufficio per cio' che un turno morto lascia in attesa — la regola
   // del 30 agosto (abbandonaBloccantePendente, solo OpenCode) portata nel registry,
@@ -2168,6 +2187,14 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
   w({ k: 'permission.asked', requestId: 'p1', action: 'Bash', resources: [], savable: [], source: {} })
   w({ k: 'question.asked', requestId: 'q1', questions: [] })
   w({ k: 'plan.proposed', requestId: 'pl1', plan: 'piano' })
+  // Dalla review del 2 settembre: finche' un turno e' ancora APERTO non si rifiuta
+  // niente — quelle card appartengono a lui, non al turno che ha appena chiuso. Oggi
+  // i due casi coincidono sempre, ma appoggiarsi alla coincidenza vorrebbe dire
+  // rifiutare la card di un turno vivo il giorno in cui smettesse di valere.
+  check('revisione: con un turno ancora aperto nessuna card viene rifiutata',
+    rifiutiOrfani(s).length === 0, JSON.stringify(rifiutiOrfani(s)))
+  w({ k: 'turn.ended', turnId: 'T', reason: 'aborted', usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 } })
+
   const rifiuti = rifiutiOrfani(s)
   check('revisione: un turno morto rifiuta d\'ufficio permessi, domande e piani',
     rifiuti.length === 3
