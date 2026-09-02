@@ -52,3 +52,4 @@
 {"timestamp":"2026-09-02T10:12:47.922414+02:00","action":"move","task_id":15,"detail":"in-progress -\u003e done"}
 {"timestamp":"2026-09-02T10:12:55.664516+02:00","action":"edit","task_id":15,"detail":"Fix dalla review adversarial di e013def"}
 {"timestamp":"2026-09-02T10:12:55.664621+02:00","action":"release","task_id":15,"detail":"veenz"}
+{"timestamp":"2026-09-02T10:48:17.348708+02:00","action":"create","task_id":16,"detail":"macOS: il perimetro Tailscale non si rileva quasi mai all'avvio (timeout 2s contro un CLI che al primo colpo costa 20-34s)"}
