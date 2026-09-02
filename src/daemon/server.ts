@@ -726,6 +726,12 @@ async function route(
           // non c'e' posto per una card di permesso, e un permesso che chiede senza
           // avere dove rispondere non e' cauto — e' una chat piantata.
           deny: ['shell', 'edit', 'net', 'agents', 'external'],
+          // L'helper e' per domande veloci, non per un lavoro profondo: a differenza
+          // della chat grande (thinking on, effort high — i default del CLI), qui si
+          // parte spenti e al minimo. Chi vuole di piu' lo sceglie dal pannello
+          // (AgentPanel.svelte); un agent che non conosce queste due opzioni le ignora
+          // (vedi extraOptions in core/adapter.ts).
+          extraOptions: { reasoning: 'off', effort: 'low' },
         })
         return send(res, 201, { id, snapshot: registry.snapshot(id) })
       } catch (e) {
