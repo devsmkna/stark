@@ -33,7 +33,7 @@ import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.t
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
-import { askCategories, readSettings, writeSettings } from '../daemon/settings.ts'
+import { askCategories, readSettings, writeSettings, type Settings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent, type Payload } from '../core/events.ts'
 import { Journal, MemoryJournal, RawLog } from '../core/journal.ts'
 import { applyTo, reduce, type SessionSnapshot } from '../core/reduce.ts'
@@ -1472,7 +1472,7 @@ check('§notifiche: restare fermi non chiama', callFor('idle', 'idle') === null)
     await import('../daemon/settings.ts')
   // Il resto delle impostazioni qui è un pallone gonfiato: la funzione tocca solo
   // la coppia preferita, e costruirla intera testerebbe il test invece del codice.
-  const specchio = { permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto' } as unknown as Record<string, never>
+  const specchio = { permissions: {}, projects: {}, toolDescriptions: true, defaultMode: 'auto' } as unknown as Settings
   const conCoppia = scriviPref(casaPref, {
     ...specchio, preferredModel: { agent: 'opencode', model: 'opencode/gpt-5-nano' },
   })
