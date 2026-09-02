@@ -4,16 +4,47 @@
 // è la credenziale con cui il daemon sincronizza la board (e le altre feature cloud).
 // Il browser non parla col server cloud: passa sempre da qui.
 //
-// L'indirizzo del server viene da `STARK_CLOUD_URL` (come `STARK_PUBLIC_HOST` per il
-// perimetro): è configurazione della macchina, non un'impostazione scrivibile dalla UI.
+// L'indirizzo del server ha un default cablato (`CLOUD_PREDEFINITO`) e si sovrascrive
+// con `STARK_CLOUD_URL`, come `STARK_PUBLIC_HOST` fa per il perimetro: è configurazione
+// della macchina, non un'impostazione scrivibile dalla UI.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-/** L'indirizzo del server cloud, o `null` se non è configurato. */
+/**
+ * Il server cloud di STARK, cablato qui.
+ *
+ * È un default e non un limite: `STARK_CLOUD_URL` lo sovrascrive, ed è la stessa
+ * disciplina di `STARK_PUBLIC_HOST` — una variabile d'ambiente e non un'impostazione,
+ * perché `settings.json` si scrive via `PUT /api/settings`, cioè dalla superficie che
+ * il login dovrebbe proteggere.
+ *
+ * Sta scritto nel codice perché **è un fatto del prodotto**, non della macchina: chi
+ * installa STARK non deve sapere a quale indirizzo vive il server per potersi
+ * autenticare, esattamente come non gli si chiede la porta del daemon. Chi ne ha uno
+ * suo (un altro deploy, una prova in locale) lo dice con la variabile.
+ *
+ * L'indirizzo è quello che `cloud/deploy-dev.sh` pubblica, ed è stato verificato
+ * rispondere prima di scriverlo qui: `GET /api/me` → 401 in 0,2s, cioè vivo e in
+ * attesa di credenziali.
+ */
+const CLOUD_PREDEFINITO = 'http://80.211.239.109:8787'
+
+/**
+ * L'indirizzo del server cloud, o `null` se il cloud è **spento**.
+ *
+ * Tre casi, e la distinzione fra i primi due è voluta: variabile assente vuol dire
+ * «vale il default», mentre una variabile impostata a vuoto (o a `off`) vuol dire
+ * «niente cloud» — serve allo sviluppo in locale e alle prove, che devono poter
+ * vedere lo stato «non configurato» senza cambiare il codice. Senza questa via
+ * d'uscita, cablare il default renderebbe quello stato irraggiungibile.
+ */
 export function cloudUrl(): string | null {
-  const u = process.env['STARK_CLOUD_URL']?.trim()
-  return u ? u.replace(/\/+$/, '') : null
+  const grezzo = process.env['STARK_CLOUD_URL']
+  if (grezzo === undefined) return CLOUD_PREDEFINITO
+  const u = grezzo.trim()
+  if (u === '' || u.toLowerCase() === 'off') return null
+  return u.replace(/\/+$/, '')
 }
 
 export const cloudTokenPath = (home: string): string => resolve(home, 'cloud-token')

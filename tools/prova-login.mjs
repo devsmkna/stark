@@ -19,7 +19,12 @@ import { resolve } from 'node:path'
 const CASA = mkdtempSync(resolve(tmpdir(), 'stark-login-'))
 mkdirSync(CASA, { recursive: true })
 process.env['STARK_HOME'] = CASA
-delete process.env['STARK_CLOUD_URL']   // il caso della segnalazione
+// Il caso della segnalazione: nessun server cloud, quindi la schermata mostra
+// l'avviso «non configurato». `off` e non `delete`: da quando l'indirizzo ha un
+// default cablato (`cloud.ts`), togliere la variabile vuol dire «usa il server vero»
+// — e questa prova finirebbe per misurare una schermata senza avviso, cioè non
+// quella che deve guardare.
+process.env['STARK_CLOUD_URL'] = 'off'
 
 const { startDaemon } = await import('../src/daemon/server.ts')
 const s = await startDaemon({ port: 0 })
