@@ -758,9 +758,19 @@ export class ClaudeCodeAdapter implements AgentSession {
       // È la stessa regola che l'adapter OpenCode applica su ogni via d'uscita.
       const turnId = this.tr.openTurnId
       if (turnId) {
+        // `fermato` vale anche qui, non solo sulla strada normale (vedi il giro degli
+        // eventi qui sopra): se l'eccezione che ci ha portati in questo catch è **lo
+        // Stop dell'utente** — l'SDK può far terminare l'iteratore con un throw invece
+        // che con un ultimo `result` — allora la verità è «l'hai fermato tu», e
+        // scrivere «Turn error» rosso sarebbe la stessa bugia che `fermato` esiste per
+        // evitare.
+        const reason = this.fermato ? 'aborted' as const : 'error' as const
         this.emit({
-          k: 'turn.ended', turnId, reason: 'error',
-          usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 }, detail: msg,
+          k: 'turn.ended', turnId, reason,
+          usage: { ...EMPTY_USAGE }, cost: { nominalUsd: 0 },
+          // Il dettaglio accompagna un errore vero; su uno Stop il messaggio
+          // dell'abort non spiegherebbe niente a chi ha premuto il quadrato rosso.
+          ...(reason === 'error' ? { detail: msg } : {}),
         })
       }
       // E la fila non parte più: dichiararla finita adesso, non lasciarla «queued» per

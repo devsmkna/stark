@@ -936,8 +936,10 @@ async function route(
   } catch (e) {
     const msg = String((e as Error).message ?? e)
     // Un corpo oltre il tetto non è un guasto del daemon: è la richiesta a essere
-    // troppo grande, e il codice che lo dice esiste apposta.
-    send(res, msg === 'corpo troppo grande' ? 413 : 500, { error: msg })
+    // troppo grande, e il codice che lo dice esiste apposta. Si riconosce dal **tipo**
+    // e non dal testo: un confronto di stringhe risponderebbe 413 a qualunque altro
+    // errore che un domani si trovasse a dire la stessa frase.
+    send(res, e instanceof CorpoTroppoGrande ? 413 : 500, { error: msg })
   }
 }
 
@@ -1190,13 +1192,19 @@ function send(res: ServerResponse, code: number, body: unknown): void {
  * comando è due righe, ma un prompt con dentro uno schermo incollato viaggia in base64,
  * che cresce di un terzo. Con il limite unico a 4 MB, un'immagine da 3 MB non passava.
  */
+/** Il corpo della richiesta ha superato il tetto. Un tipo e non una stringa: chi la
+ *  intercetta deve poterla riconoscere senza confrontare messaggi. */
+class CorpoTroppoGrande extends Error {
+  constructor() { super('corpo troppo grande') }
+}
+
 async function readJson<T>(req: IncomingMessage, max = 4 * 1024 * 1024): Promise<T | null> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     size += (c as Buffer).length
     // Un corpo senza limite è un modo di finire la memoria del daemon.
-    if (size > max) throw new Error('corpo troppo grande')
+    if (size > max) throw new CorpoTroppoGrande()
     chunks.push(c as Buffer)
   }
   if (chunks.length === 0) return null

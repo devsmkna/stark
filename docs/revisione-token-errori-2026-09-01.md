@@ -182,6 +182,72 @@ notice che dice cosa guardare, invece di una tendina vuota senza spiegazione.
 - **Corpo troppo grande → 500**: ora risponde `413`, che è il suo nome. — RISOLTO
 - **Cataloghi OpenCode in catch silenzioso**: vedi D3 (notice sui modelli vuoti). — RISOLTO
 
+## La review adversarial, e cosa ha trovato (2 settembre 2026, task #15)
+
+Tre reviewer indipendenti su Sonnet, uno per area (adapter Claude Code / adapter
+OpenCode / registry-journal-server), ciascuno con gli scenari da tracciare a mano invece
+che «guarda se va bene». Il timore più grosso è stato **escluso**, e sono usciti due
+difetti veri che la sola scrittura non aveva visto.
+
+**Escluso: il seq non monotono.** `applica()` fabbrica un evento con `seq =
+lastSeq + 1` quando il disco rifiuta la riga, e il sospetto era che il contatore del
+`Journal` restasse indietro, facendo poi regredire i `seq` alla ripresa del disco — con
+la UI che salta o duplica eventi alla riconnessione. Non succede: `journal.ts:71`
+assegna `seq: ++this.seq` **prima** della `writeSync`, quindi il contatore avanza anche
+quando la scrittura fallisce, e i due restano in passo. Verificato riga per riga, non
+dedotto.
+
+**Trovato (Importante): il retry di OpenCode si risvegliava su una sessione chiusa.**
+I due `forseRitenta*` controllavano `turnoAperto()` **prima** di addormentarsi, e al
+risveglio guardavano solo `fermato` — che però lo alzava soltanto `interrupt()`. Uno
+Sleep o una chiusura durante i 5-30 secondi di attesa passano invece da `spegni()`, che
+chiude il turno senza essere uno Stop: al risveglio partiva un prompt fantasma verso una
+chat dormiente e si riarmava una guardia che novanta secondi dopo avrebbe scritto su un
+journal ormai chiuso. Curato in due punti, perché erano due metà dello stesso errore:
+`vivoPerRitentare()` ricontrolla **dopo** ogni attesa, e `spegni()` alza `fermato` —
+perché quel flag non vuol dire «l'utente ha premuto Stop», vuol dire «da qui in poi non
+si ritenta più niente», e Sleep e chiusura sono altrettanto definitivi.
+
+**Trovato (Importante): lo sweep degli orfani non risolveva la Promise, e non era
+scoped.** `chiudiOrfani` cancellava l'entry dalla mappa `pending` **senza mai leggerla**:
+la `Promise` che l'adapter stava aspettando dentro `canUseTool` restava appesa. Innocuo
+quando il processo è morto davvero, ma su Claude Code uno Stop non uccide il processo —
+restava una callback appesa in un agent **vivo**. Ora la si risolve con un rifiuto, che
+è anche la verità: quel permesso non l'ha concesso nessuno. E `rifiutiOrfani` non
+rifiuta più niente **finché resta un turno aperto**: una richiesta è orfana quando non
+c'è più nessuno che possa riceverne la risposta, e adesso è quella la domanda che il
+codice fa — prima si appoggiava a una coincidenza (chi svuota la fila sta fermando anche
+il turno attivo) che il giorno in cui smettesse di valere avrebbe fatto rifiutare la
+card di un turno vivo.
+
+**Minori, chiusi nello stesso giro:**
+
+- Il `turn.ended` sintetico del catch fatale (Claude Code) ignorava `fermato`: se lo
+  Stop arriva come eccezione dall'SDK invece che come `result`, il turno finiva scritto
+  «error» dove la verità è «l'hai fermato tu» — la distorsione esatta che quel flag
+  esiste per evitare.
+- Finestra fra l'errore fatale e il ritiro effettivo: la sessione restava nella mappa
+  delle vive e accettava comandi. Un prompt arrivato lì rientrava nel difetto da cui è
+  nato tutto il giro. Ora `Live.morente` la mette fuori uso **subito**, e `command()` lo
+  guarda.
+- Il ritiro non si esegue più mentre `start()` sta ancora girando (`Live.avviata`): su
+  OpenCode il flusso eventi può morire prima che l'apertura finisca, e chiudere il
+  journal a metà nascita lasciava scritta solo la prima parte. `open()` lo ritira da sé
+  appena `start()` è tornato.
+- `passeggero()` non riconosce più `network` nudo: compare anche nei guasti permanenti
+  («network policy violation»), che sarebbero stati ritentati tre volte — cioè proprio
+  ciò che quella funzione evita. I codici specifici bastano.
+- Il retry sulla risposta a un permesso ora scatta **solo su un guasto di rete**: un 404
+  o un 409 vogliono dire «già risolto», e reinviare un `always` lo farebbe *valere* due
+  volte, non consegnare due volte.
+- L'avviso di troncamento è del turno, non dello step: tre tool in un turno potevano
+  produrre tre avvisi identici di fila.
+- Il 413 si riconosce da un tipo (`CorpoTroppoGrande`) e non dal testo del messaggio.
+
+Quattro prove nuove nella suite offline (313/313): lo sweep che tace con un turno
+aperto, il troncamento annunciato una volta per turno ma ridetto su un turno nuovo, e
+`network policy violation` che non è passeggero.
+
 ## Non fatto, di proposito
 
 - **Estrarre la FIFO comune ai due adapter in `core/`**: le due code si somigliano ma

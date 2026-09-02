@@ -136,6 +136,18 @@ type Live = {
   journal: EventSink
   /** Il log nativo di diagnosi. Tiene un fd aperto: chi ritira la sessione lo chiude. */
   raw: RawLog | null
+  /**
+   * Sta morendo: il suo adapter ha dichiarato un errore fatale e il ritiro è in
+   * arrivo. Esiste perché il ritiro non è istantaneo (deve lasciar finire di emettere
+   * chi lo ha innescato), e in quella finestra la sessione era ancora nella mappa
+   * delle vive: un prompt arrivato lì finiva in una coda che nessuno avrebbe più
+   * consumato — cioè esattamente il difetto che il ritiro serve a togliere.
+   */
+  morente: boolean
+  /** `start()` è ritornato. Prima di allora il ritiro non si esegue: si annota e basta
+   *  (vedi `ritiraMorta`), perché chiudere il journal mentre l'apertura sta ancora
+   *  emettendo lascerebbe metà nascita scritta e metà no. */
+  avviata: boolean
   /** Non sta su disco: va tenuta fuori da elenco, ricerca e notifiche. */
   ephemeral: boolean
   snapshot: SessionSnapshot
@@ -152,8 +164,19 @@ type Live = {
  * Questa è la stessa regola messa nel posto che vale per **qualunque** adapter, presente
  * e futuro. Funzione pura, esportata per la prova offline: da uno snapshot agli eventi
  * di rifiuto, senza toccare niente.
+ *
+ * **Finché resta un turno aperto non si rifiuta niente**, ed è la precisione che
+ * mancava: con la fila dei prompt (§7) più turni convivono nello snapshot, e una card
+ * appartiene a quello che sta girando — non a quello che ha appena chiuso. Oggi i due
+ * casi coincidono sempre (chi svuota la fila sta fermando anche il turno attivo, quindi
+ * il suo `turn.ended` arriva un istante dopo e lo sweep parte lì), ma appoggiarsi a
+ * quella coincidenza vorrebbe dire che il giorno in cui un solo turno venisse annullato
+ * a sessione viva, questa funzione rifiuterebbe la card di un turno **vivo**. Una
+ * richiesta è orfana quando non c'è più nessuno che possa riceverne la risposta: è
+ * questa la domanda, e adesso è quella che il codice fa.
  */
 export function rifiutiOrfani(s: SessionSnapshot): Payload[] {
+  if (s.turns.some(t => !t.ended)) return []
   return [
     ...s.pendingPermissions.map(x =>
       ({ k: 'permission.replied', requestId: x.requestId, decision: 'reject' } as const)),
@@ -375,7 +398,10 @@ export class Registry {
     const watchers = new Set<(e: CanonicalEvent) => void>()
     const startFrom = journal.lastSeq
 
-    const entry: Live = { id, adapter: null as never, journal, raw, ephemeral: effimera, snapshot, watchers, pending }
+    const entry: Live = {
+      id, adapter: null as never, journal, raw, ephemeral: effimera, snapshot, watchers, pending,
+      morente: false, avviata: false,
+    }
 
     // La bandierina dell'errore fatale: si alza su `session.error fatal` e fa ritirare
     // la sessione quando arriva il `closed` che lo segue. NON si ritira sul `closed`
@@ -457,7 +483,12 @@ export class Registry {
         // Il loop dell'adapter è finito male: senza questo la sessione resterebbe
         // nella mappa delle vive per sempre — `live:true` nell'elenco, e ogni prompt
         // successivo in una coda che nessuno consuma più (la 61f480c1 del 1 settembre).
-        if (fatale && p.k === 'session.state' && p.state === 'closed') this.ritiraMorta(id)
+        // `morente` la mette fuori uso **subito**, prima ancora che il ritiro giri: è
+        // la differenza fra «sta per essere ritirata» e «accetta ancora comandi».
+        if (fatale && p.k === 'session.state' && p.state === 'closed' && !entry.morente) {
+          entry.morente = true
+          this.ritiraMorta(id)
+        }
         this.bump()                      // e infine chi guarda l'elenco
       },
       // Una richiesta resta appesa finché l'utente non risponde, e va bene così: la
@@ -478,6 +509,11 @@ export class Registry {
 
     try {
       await adapter.start()
+      entry.avviata = true
+      // È morta mentre nasceva: il ritiro era stato rimandato apposta (vedi
+      // `ritiraMorta`) perché il journal non si chiude in mezzo a un'apertura. Adesso
+      // l'apertura è finita, e la sessione va tolta di mezzo come qualunque altra.
+      if (entry.morente) { this.ritiraMorta(id); return id }
       if (spec.resume) {
         const e = journal.append({ k: 'session.woke', resumedFromSeq: startFrom })
         applyTo(snapshot, e)
@@ -1004,14 +1040,24 @@ export class Registry {
   /**
    * Chiude d'ufficio ciò che un turno morto lascia in attesa. Vedi `rifiutiOrfani`.
    *
-   * Le `Promise` nella mappa non si risolvono — non c'è più nessuno dall'altra parte
-   * ad ascoltare la risposta, ed è la stessa scelta di `scartaOrfano` qui sotto. A
-   * contare è che il journal e la UI dicano il vero, e che la mappa non tenga per
-   * sempre richieste a cui nessuno potrà più rispondere.
+   * La `Promise` che l'adapter sta aspettando si **risolve con un rifiuto**, non si
+   * abbandona: prima questo metodo cancellava l'entry dalla mappa senza mai leggerla,
+   * ed era una svista con un costo vero — su Claude Code uno Stop non uccide il
+   * processo, quindi c'era una `canUseTool` ancora appesa in un agent **vivo**, e il
+   * turno dopo poteva trovarsela fra i piedi. Rispondere «no» è anche la verità: quel
+   * permesso non è stato concesso da nessuno.
+   *
+   * Resta com'era il caso di `scartaOrfano` qui sotto, dove la Promise non c'è più
+   * per davvero (il processo che la teneva non esiste): lì non c'è niente da risolvere.
    */
   private chiudiOrfani(l: Live): void {
     for (const p of rifiutiOrfani(l.snapshot)) {
-      l.pending.delete((p as { requestId: string }).requestId)
+      const requestId = (p as { requestId: string }).requestId
+      const attesa = l.pending.get(requestId)
+      l.pending.delete(requestId)
+      if (attesa?.kind === 'permission') attesa.resolve({ allow: false, reason: 'Il turno è terminato' })
+      else if (attesa?.kind === 'question') attesa.resolve(null)
+      else if (attesa?.kind === 'plan') attesa.resolve({ approved: false })
       this.applica(l, p)
     }
   }
@@ -1030,6 +1076,11 @@ export class Registry {
       void (async () => {
         const l = this.live.get(id)
         if (!l) return
+        // Non mentre la sessione sta ancora nascendo: `open()` la ritirerà da sé
+        // appena `start()` sarà tornato. Chiudere il journal in mezzo all'apertura
+        // vorrebbe dire perdere la seconda metà della nascita — e su OpenCode il caso
+        // è reale, perché il flusso eventi può morire prima che `start()` finisca.
+        if (!l.avviata) return
         try { await l.adapter.close() } catch { /* già morto */ }
         this.retire(id)
       })()
@@ -1086,9 +1137,8 @@ export class Registry {
    * nessun ciclo di vita da indovinare, nessun orfano che si accumula a ogni reload.
    */
   async openHelper(spec: Omit<OpenSpec, 'ephemeral'>): Promise<string> {
-    const vivo = this.helperId && this.live.has(this.helperId)
-      ? this.live.get(this.helperId)
-      : null
+    const inVita = this.helperId ? this.live.get(this.helperId) : undefined
+    const vivo = inVita && !inVita.morente ? inVita : null
     if (vivo) {
       // Riusala se non si chiede un agent diverso: la scelta del **modello** sullo
       // stesso agent non passa di qui (e' `session.setOption`), quindi il confronto
@@ -1111,9 +1161,12 @@ export class Registry {
     await this.command(id, { c: 'session.close' })
   }
 
-  /** Qual e' l'helper vivo. `null` se nessuno lo ha ancora aperto. */
+  /** Qual e' l'helper vivo. `null` se nessuno lo ha ancora aperto — o se quello che
+   *  c'era sta morendo: riagganciarsi a una sessione in ritiro darebbe un pannello che
+   *  non risponde, invece di aprirne uno nuovo che funziona. */
   get helper(): string | null {
-    return this.helperId && this.live.has(this.helperId) ? this.helperId : null
+    const l = this.helperId ? this.live.get(this.helperId) : undefined
+    return l && !l.morente ? (this.helperId as string) : null
   }
 
   private helperId: string | null = null
@@ -1149,6 +1202,12 @@ export class Registry {
 
     const l = this.live.get(id)
     if (!l) return { ok: false, error: 'session not active' }
+    // Sta morendo: il ritiro è già deciso e arriverà fra un istante. Inoltrare un
+    // comando adesso vorrebbe dire parlare a un adapter il cui ciclo è finito — un
+    // prompt accodato lì non partirebbe mai, che è il difetto da cui è nato tutto
+    // questo giro. Chi chiama riceve la stessa risposta di una sessione già ritirata,
+    // e la UI sa già offrire il risveglio.
+    if (l.morente) return { ok: false, error: 'session not active' }
     switch (cmd.c) {
       case 'session.prompt':
         // I byte finiscono su disco **prima** di partire: il journal scriverà il
