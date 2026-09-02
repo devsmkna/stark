@@ -24,10 +24,14 @@ import {
 import { Notifier } from './notify.svelte.ts'
 import { CALL_HEAD, callFor, type Call } from '$core/calls.ts'
 import { PushPhone } from './push.svelte.ts'
-import { fromPath, go } from './route.ts'
+import { fromPath, go, goView } from './route.ts'
+import { Viste } from './viste.svelte.ts'
+import { decisione, foglieVere } from './viste-regola.ts'
 import { Themer } from './theme.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
 import { Grouper } from './grouping.svelte.ts'
+import { Collapser } from './collapse.svelte.ts'
+import { Orderer } from './order.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
 import { activityText, project } from './view.ts'
 
@@ -61,8 +65,14 @@ export type Dialog =
  */
 export type NewTab = 'new' | 'import'
 
-/** Il menu del tasto destro su una riga dell'elenco. */
-export type ContextMenu = { id: string; x: number; y: number } | null
+/** Il menu del tasto destro su una riga dell'elenco.
+ *
+ *  `kind` perché l'elenco ha due specie di righe: le chat e le viste salvate. È lo
+ *  stesso stato di prima con un campo in più, non un secondo `$state`: la correzione
+ *  della posizione (il menu che non deve sfondare il bordo, `App.svelte`) è la parte
+ *  che costa, e duplicarla vorrebbe dire che un giorno una delle due esce dallo
+ *  schermo e l'altra no. `chat` è il default per non toccare i chiamanti di prima. */
+export type ContextMenu = { id: string; x: number; y: number; kind?: 'chat' | 'view' } | null
 
 /**
  * La foglia del layout che mostra il selettore «quale chat in questo pannello».
@@ -94,6 +104,12 @@ export class Store {
   /** Come si raggruppa l'elenco — per stato o per progetto. Stesso motivo del tema:
    *  è una preferenza di questo schermo. Vedi `grouping.svelte.ts`. */
   readonly grouping = new Grouper()
+  /** Quali progetti sono chiusi nell'elenco. Stesso motivo del tema. Vedi
+   *  `collapse.svelte.ts`. */
+  readonly collapse = new Collapser()
+  /** L'ordine manuale dei progetti nell'elenco. Stesso motivo del tema. Vedi
+   *  `order.svelte.ts`. */
+  readonly order = new Orderer()
 
   /**
    * Le impostazioni della macchina. `null` finché non sono arrivate: prima di allora
@@ -127,10 +143,63 @@ export class Store {
    * verità che possono divergere.
    */
   panes = $state<Map<string, Pane>>(new Map())
+
+  /**
+   * Le disposizioni salvate, e quale stai guardando. Vedi `viste.svelte.ts`.
+   *
+   * Prima qui c'era un `layout` e basta: **un** albero, quello sullo schermo. Aprire
+   * un'altra chat dall'elenco ci scriveva sopra, quindi affiancare due conversazioni
+   * durava finché non cliccavi altrove. Ora lo split è una cosa con un nome, e `layout`
+   * è diventato la finestra su quella cosa.
+   */
+  readonly viste = new Viste()
+
   /** La disposizione dei pannelli sullo schermo largo. `null` vuol dire nessun
    *  pannello aperto (lo stato vuoto di sempre). Sotto la soglia stretta è ignorato:
-   *  là si vede solo il pannello a fuoco. */
-  layout = $state<LayoutNode | null>(null)
+   *  là si vede solo il pannello a fuoco.
+   *
+   *  Non è più un campo: leggerlo vuol dire chiedere alla vista attiva (o alla chat
+   *  singola) il suo albero, e **scriverlo** passa dall'invariante qui sotto. Restano
+   *  accessori invece di diventare un metodo perché le dieci assegnazioni sparse in
+   *  questo file dicono già la cosa giusta — è dove finiscono a dover cambiare. */
+  get layout(): LayoutNode | null { return this.viste.tree }
+  set layout(next: LayoutNode | null) { this.#scriviAlbero(next) }
+
+  /**
+   * L'invariante che tiene insieme viste e pannelli: **più di una chat sullo schermo
+   * ⟺ c'è una vista attiva**.
+   *
+   * Le foglie si contano escludendo `SPLIT_PICK`: il selettore aperto non è ancora una
+   * seconda chat, e far nascere una vista lì vorrebbe dire crearne una da cancellare un
+   * secondo dopo se chiudi il selettore senza scegliere.
+   */
+  #scriviAlbero(next: LayoutNode | null): void {
+    const vere = foglieVere(next, SPLIT_PICK)
+    const attiva = this.viste.attiva
+    const che = decisione(vere.length, !!attiva)
+    if (che === 'crea') {
+      this.viste.crea(next!, this.selected, this.#nomeVista(vere))
+      return
+    }
+    if (che === 'elimina' && attiva) {
+      // La vista si è svuotata fino a una chat sola: non è più una disposizione, è una
+      // chat. Sparisce dall'elenco — una riga «vista» con dentro un pannello solo
+      // prometterebbe qualcosa che non c'è.
+      this.viste.elimina(attiva.id)
+      this.viste.single = next ? { tree: next, focused: this.selected } : null
+      this.viste.salva()
+      return
+    }
+    this.viste.scrivi(next, this.selected)
+  }
+
+  /** «Chat A + Chat B», dai titoli di **adesso**. Si congela alla nascita: ricalcolarlo
+   *  a ogni rinomina di una chat vorrebbe dire che una vista che hai nominato tu cambia
+   *  nome da sola. */
+  #nomeVista(ids: string[]): string {
+    const titoli = ids.map(id => this.rows.find(r => r.id === id)?.title ?? 'Chat')
+    return titoli.length <= 2 ? titoli.join(' + ') : `${titoli[0]} +${titoli.length - 1}`
+  }
 
   /** Il pannello a fuoco: quello a cui si riferiscono `snap`/`link`/`view` e ogni
    *  comando senza id esplicito. */
@@ -153,7 +222,9 @@ export class Store {
    */
   show(view: View): void {
     this.view = view
-    go(this.selected, view)
+    // Stessa ragione di `focusPane`: dentro una vista gli effetti sono la lettura di
+    // **un** pannello, e l'indirizzo parla della vista intera. Fuori, restano un posto.
+    if (!this.viste.active) go(this.selected, view)
   }
   dialog = $state<Dialog>(null)
   menu = $state<ContextMenu>(null)
@@ -239,6 +310,14 @@ export class Store {
    * trascinate sulla casella di scrittura, che è un gesto diverso con un altro esito.
    */
   draggingChat = $state<string | null>(null)
+
+  /**
+   * Il progetto che si sta trascinando per riordinarlo nella sidebar. È **diverso**
+   * da `draggingChat`: quello sposta una chat fra pannelli; questo riordina i progetti
+   * nell'elenco. Tenuti separati perché le zone di rilascio dei pannelli si accendono
+   * solo su `draggingChat` — un trascinamento di progetto non deve aprire un pannello.
+   */
+  draggingProject = $state<string | null>(null)
 
   /**
    * La chat che sta **accanto** al selettore del pannello destro: quella su cui era
@@ -509,6 +588,20 @@ export class Store {
    */
   async #apriDaIndirizzo(): Promise<void> {    const r = fromPath()
     if (!r) { this.#chiudiTutto(); return }
+    if (r.kind === 'view') {
+      if (!this.viste.trova(r.id)) {
+        // Una vista vive nel `localStorage` di **questo** dispositivo: lo stesso
+        // indirizzo aperto altrove non trova niente. Si dice e si torna all'elenco,
+        // invece di una pagina che gira a vuoto. `replace`, perché un indirizzo morto
+        // non deve restare fra i posti in cui il tasto «indietro» ti riporta.
+        this.refused = 'that view is not on this device'
+        go(null, 'chat', true)
+        this.#chiudiTutto()
+        return
+      }
+      await this.apriVista(r.id, { indirizzo: false })
+      return
+    }
     if (!this.rows.some(x => x.id === r.id)) {
       // Un indirizzo che punta a una chat cancellata, o di un'altra macchina. Si dice,
       // e si resta all'elenco: meglio di una schermata che gira a vuoto.
@@ -516,7 +609,11 @@ export class Store {
       go(null, 'chat', true)
       return
     }
-    if (this.panes.has(r.id)) this.focusPane(r.id)
+    // `/chat/<id>` apre la chat **da sola**, anche se sta dentro la vista aperta: è la
+    // regola che rende prevedibile il link di una notifica. Quindi se una vista è
+    // attiva non basta spostare il fuoco su quel pannello — si esce.
+    if (this.viste.active) await this.select(r.id, { indirizzo: false })
+    else if (this.panes.has(r.id)) this.focusPane(r.id)
     else if (this.selected !== r.id) await this.select(r.id, { indirizzo: false })
     this.view = r.view
   }
@@ -610,8 +707,13 @@ export class Store {
    */
   async select(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
     if (opts.indirizzo !== false) go(id, 'chat')
-    if (this.selected === id) return
+    if (this.selected === id && !this.viste.active) return
     this.refused = null
+    // Dentro una vista, un clic sull'elenco **esce**: la vista resta in cima
+    // all'elenco com'era, e davanti compare la chat da sola. È il senso di tutta
+    // questa parte — prima la chat scelta si mangiava un pannello della
+    // disposizione, che quindi non si ritrovava più.
+    if (this.viste.active) { await this.#esciVersoChat(id); return }
     // Già aperta in un altro pannello: ci si sposta sopra invece di aprirne una
     // seconda copia — due sottoscrizioni SSE sulla stessa sessione non servono a
     // nessuno, e il §«una chat = un pannello» della spec nasce da lì.
@@ -633,6 +735,27 @@ export class Store {
       if (this.splitPickTarget === uscente) this.splitPickTarget = id
       if (uscente && uscente !== id && !leafIds(this.layout).includes(uscente)) this.#dropPane(uscente)
       this.selected = id
+      this.#saveLayout()
+    } finally {
+      this.aprendo--
+    }
+  }
+
+  /** Esce dalla vista attiva e apre `id` da sola. I pannelli della vista chiudono i
+   *  loro flussi; l'albero salvato resta dov'è. */
+  async #esciVersoChat(id: string): Promise<void> {
+    this.aprendo++
+    try {
+      const pane = new Pane(id)
+      const esito = await pane.open(this.api)
+      if (!esito.ok) { this.refused = esito.error; return }
+      for (const p of this.panes.values()) p.close()
+      this.panes = new Map()
+      this.splitPickTarget = null
+      this.viste.esci()
+      this.#addPane(pane)
+      this.selected = id
+      this.layout = { type: 'leaf', paneId: id }
       this.#saveLayout()
     } finally {
       this.aprendo--
@@ -793,7 +916,11 @@ export class Store {
     if (chatId === SPLIT_PICK) return
     if (!this.panes.has(chatId)) return
     if (this.selected !== chatId) this.selected = chatId
-    go(chatId, this.panes.get(chatId)?.view ?? 'chat')
+    // Dentro una vista l'indirizzo è la vista. Spostare il fuoco da un riquadro
+    // all'altro non è una navigazione — è guardare un altro pezzo della stessa cosa —
+    // e scriverci `/chat/<id>` vorrebbe dire che F5 apre quella chat da sola,
+    // buttando via la disposizione che stavi usando.
+    if (!this.viste.active) go(chatId, this.panes.get(chatId)?.view ?? 'chat')
     this.#saveLayout()
   }
 
@@ -819,14 +946,19 @@ export class Store {
     this.panes = new Map(this.panes)
   }
 
-  /** Chiude tutti i pannelli e torna allo stato vuoto. */
+  /** Chiude tutti i pannelli e torna allo stato vuoto.
+   *
+   *  Non passa dall'accessore `layout`: quello applica l'invariante, e con zero foglie
+   *  **eliminerebbe** la vista attiva. Qui invece si sta uscendo, non smontando — la
+   *  freccia indietro non deve cancellare una disposizione salvata. */
   #chiudiTutto(): void {
     for (const pane of this.panes.values()) pane.close()
     this.panes = new Map()
-    this.layout = null
+    this.viste.esci()
+    this.viste.single = null
+    this.viste.salva()
     this.selected = null
     this.splitPickTarget = null
-    this.#saveLayout()
   }
 
   // ─── persistenza del layout ───────────────────────────────────────────────
@@ -839,10 +971,12 @@ export class Store {
    * ricaricamento una conversazione ferma a ieri.
    */
   #saveLayout(): void {
-    try {
-      if (!this.layout) localStorage.removeItem(Store.#LAYOUT_KEY)
-      else localStorage.setItem(Store.#LAYOUT_KEY, JSON.stringify({ tree: this.layout, focused: this.selected }))
-    } catch { /* modalità privata: il layout non sopravvive al ricaricamento, e va bene */ }
+    // L'albero l'ha già scritto `#scriviAlbero`; qui si aggiorna il **fuoco**, che i
+    // chiamanti spostano dopo aver toccato la disposizione — e si persiste.
+    const v = this.viste.attiva
+    if (v) this.viste.scrivi(v.tree, this.selected)
+    else if (this.viste.single) this.viste.single = { ...this.viste.single, focused: this.selected }
+    this.viste.salva()
   }
 
   /**
@@ -852,15 +986,22 @@ export class Store {
    * resta nessuna, lo stato è quello vuoto di sempre.
    */
   async #ripristinaLayout(): Promise<void> {
-    let salvato: { tree: LayoutNode; focused: string | null } | null = null
-    try {
-      const raw = localStorage.getItem(Store.#LAYOUT_KEY)
-      if (raw) salvato = JSON.parse(raw) as { tree: LayoutNode; focused: string | null }
-    } catch { /* localStorage assente o JSON corrotto: si riparte senza layout */ }
-    if (!salvato?.tree) return
+    this.viste.carica(
+      tree => this.#nomeVista(foglieVere(tree, SPLIT_PICK)),
+      tree => foglieVere(tree, SPLIT_PICK).length,
+    )
+    // Le viste che non hanno più nemmeno una chat viva si tolgono: una riga che apre
+    // il vuoto è peggio di una riga assente. `reconcile` è lo stesso di sempre.
     const vive = new Set(this.rows.map(r => r.id))
-    const tree = reconcile(salvato.tree, id => vive.has(id))
-    if (!tree) { this.#saveLayout(); return }
+    this.viste.lista = this.viste.lista
+      .map(v => ({ v, tree: reconcile(v.tree, id => vive.has(id)) }))
+      .filter((x): x is { v: typeof x.v; tree: LayoutNode } => x.tree !== null)
+      .map(({ v, tree }) => ({ ...v, tree }))
+    if (this.viste.active && !this.viste.trova(this.viste.active)) this.viste.active = null
+    this.viste.salva()
+
+    const tree = this.viste.tree ? reconcile(this.viste.tree, id => vive.has(id)) : null
+    if (!tree) { this.#chiudiTutto(); return }
 
     await Promise.all(leafIds(tree).map(async id => {
       const pane = new Pane(id)
@@ -870,11 +1011,70 @@ export class Store {
     // si riconcilia una seconda volta sui pannelli che ci sono davvero.
     const superstiti = reconcile(tree, id => this.panes.has(id))
     if (!superstiti) { this.#chiudiTutto(); return }
+    const salvatoFocus = this.viste.focused
     this.layout = superstiti
     const foglie = leafIds(superstiti)
-    this.selected = salvato.focused && foglie.includes(salvato.focused) ? salvato.focused : foglie[0]!
-    go(this.selected, this.pane?.view ?? 'chat', true)
+    this.selected = salvatoFocus && foglie.includes(salvatoFocus) ? salvatoFocus : foglie[0]!
+    // Dentro una vista l'indirizzo è la vista, non il pannello a fuoco: spostare il
+    // fuoco fra i riquadri non è una navigazione, e scrivere `/chat/<id>` qui vorrebbe
+    // dire che un ricaricamento successivo apre quella chat da sola.
+    if (this.viste.active) goView(this.viste.active, true)
+    else go(this.selected, this.pane?.view ?? 'chat', true)
     this.#saveLayout()
+  }
+
+  // ─── le viste ─────────────────────────────────────────────────────────────
+
+  /** Entra in una vista salvata: chiude i pannelli di adesso e riapre i suoi.
+   *
+   *  I pannelli si chiudono davvero (§4a): una vista è un **segnalibro di
+   *  disposizione**, non uno stato vivo. Le chat non muoiono — girano sul daemon, non
+   *  nel browser — e tenerne aperti i flussi mentre guardi altro vorrebbe dire N
+   *  sottoscrizioni SSE appese per ogni vista nascosta, più la domanda di cosa fa un
+   *  clic su una chat già viva dentro una vista che non stai guardando. */
+  async apriVista(id: string, opts: { indirizzo?: boolean } = {}): Promise<void> {
+    const v = this.viste.trova(id)
+    if (!v) { this.refused = 'that view is not on this device'; return }
+    if (this.viste.active === id) { if (opts.indirizzo !== false) goView(id); return }
+    if (opts.indirizzo !== false) goView(id)
+    this.refused = null
+    this.aprendo++
+    try {
+      for (const pane of this.panes.values()) pane.close()
+      this.panes = new Map()
+      this.splitPickTarget = null
+      this.viste.entra(id)
+
+      const vive = new Set(this.rows.map(r => r.id))
+      const tree = reconcile(v.tree, pid => vive.has(pid))
+      if (!tree) { this.viste.elimina(id); this.#chiudiTutto(); return }
+      await Promise.all(leafIds(tree).map(async pid => {
+        const pane = new Pane(pid)
+        if ((await pane.open(this.api)).ok) this.#addPane(pane)
+      }))
+      const superstiti = reconcile(tree, pid => this.panes.has(pid))
+      if (!superstiti) { this.viste.elimina(id); this.#chiudiTutto(); return }
+      const foglie = leafIds(superstiti)
+      this.selected = v.focused && foglie.includes(v.focused) ? v.focused : foglie[0]!
+      this.layout = superstiti
+      this.#saveLayout()
+    } finally {
+      this.aprendo--
+    }
+  }
+
+  /** Toglie una vista dall'elenco. Se era quella aperta, si torna allo stato vuoto:
+   *  restare dentro i pannelli di una vista che non esiste più sarebbe guardare una
+   *  cosa che l'elenco dice non esserci. */
+  eliminaVista(id: string): void {
+    const era = this.viste.active === id
+    this.viste.elimina(id)
+    if (era) { this.#chiudiTutto(); go(null, 'chat') }
+  }
+
+  rinominaVista(id: string, name: string): void {
+    this.viste.rinomina(id, name)
+    this.renaming = null
   }
 
   // ─── comandi ──────────────────────────────────────────────────────────────

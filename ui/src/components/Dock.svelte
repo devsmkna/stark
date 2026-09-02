@@ -58,6 +58,24 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   const rigaPannello = $derived(store.rows.find(r => r.id === id))
 
   /**
+   * La conversazione sotto questa chat è sparita: il CLI risponde «No conversation
+   * found with session ID», l'`open` di risveglio lancia e la riga resta «stopped»
+   * per sempre — l'unica via d'uscita era cancellarla e rifarla. Lo dice lo stato
+   * d'errore **fatale** e il suo messaggio: è l'errore esatto che arriva quando il
+   * trascritto è stato ripulito fuori da STARK. Si abbina sul testo perché è l'unica
+   * firma affidabile che arrivi fin qui (l'SDK non la espone come codice).
+   *
+   * Lo stato non si confronta: il fatal error fa `session.error` e subito dopo
+   * `session.state: closed`, quindi sulla riga ferma lo snapshot racconta `closed`,
+   * non `error` — resta solo il messaggio. Per questo la guardia è `!live` unita al
+   * testo: se c'è scritto che la conversazione non c'è e non c'è un processo dietro,
+   * quella chat non si può più riaprire, punto.
+   */
+  const persa = $derived(
+    !live && /no conversation found with session id/i.test(snap.error ?? ''),
+  )
+
+  /**
    * Tornando sulla finestra si riprende a scrivere da dove si era: il fuoco torna
    * nella casella del pannello a fuoco.
    *
@@ -1350,16 +1368,43 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
          Lo Sleep libera memoria, non quota. -->
     <div class="asleep">
       <div class="t">
-        {snap.state === 'sleeping' ? 'This chat is asleep.' : 'This chat has no process behind it.'}
+        {#if persa}
+          This conversation no longer exists.
+        {:else}
+          {snap.state === 'sleeping' ? 'This chat is asleep.' : 'This chat has no process behind it.'}
+        {/if}
       </div>
       <div class="d">
-        {#if pending}It stopped while it was waiting for an answer from you.{/if}
-        Reopening it re-reads the whole conversation, which costs quota.
+        {#if persa}
+          It can't be reopened: its CLI conversation is gone. Starting a new one removes this chat.
+        {:else}
+          {#if pending}It stopped while it was waiting for an answer from you.{/if}
+          Reopening it re-reads the whole conversation, which costs quota.
+        {/if}
       </div>
-      <button class="btn pri" disabled={store.working || !rigaPannello}
-        onclick={() => { if (rigaPannello) void store.wake(rigaPannello) }}>
-        {store.working ? 'Reopening…' : 'Reopen'}
-      </button>
+      {#if persa}
+        <button class="btn pri" disabled={store.working || !rigaPannello}
+          onclick={() => {
+            if (!rigaPannello) return
+            const { id: vecchia, cwd, model, agent } = rigaPannello
+            if (!cwd) return
+            void (async () => {
+              // Prima la nuova, poi la vecchia: se la cartella non esiste più e la
+              // sostituta non parte, la chat incastrata resta dov'è invece di finire
+              // eliminata a vuoto. `newChat` seleziona già la nuova al posto di
+              // questa; il remove finale chiude il pannello se per caso ci è rimasta.
+              await store.newChat(cwd, { ...(model ? { model } : {}), ...(agent ? { agent } : {}) })
+              await store.remove(vecchia)
+            })()
+          }}>
+          {store.working ? 'Opening…' : 'New conversation'}
+        </button>
+      {:else}
+        <button class="btn pri" disabled={store.working || !rigaPannello}
+          onclick={() => { if (rigaPannello) void store.wake(rigaPannello) }}>
+          {store.working ? 'Reopening…' : 'Reopen'}
+        </button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -1547,8 +1592,6 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
 
   /* ── il pannello MCP ────────────────────────────────────────────────────── */
   .mcp-list { max-height: 322px; overflow-y: auto; padding: 0 0 3px; }
-  .mcp-list::-webkit-scrollbar { width: 8px; }
-  .mcp-list::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 2px solid var(--surface); }
   .mcp-row {
     display: flex; align-items: center; gap: 9px; padding: 6px 9px; cursor: pointer;
     border: 0; background: none; font: inherit; width: 100%; text-align: left; color: inherit;

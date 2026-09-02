@@ -281,11 +281,28 @@ Decisioni già prese:
   file che cresce in coda deve leggere la coda. Vale per l'elenco (da 619 ms a 0,13) e vale
   per chiunque altro dovrà rileggere un journal a ripetizione.
 - le chat si **affiancano** in pannelli ridimensionabili, aperti trascinando una riga
-  dell'elenco sul bordo (divide) o sul centro (sostituisce) di un pannello. Un clic
-  semplice continua a **sostituire** la chat a fuoco: aggiungere un riquadro è un gesto
-  che si fa apposta. Una chat sta in un pannello solo — trascinarne una già aperta la
-  sposta. Il layout sta nel browser, non sul daemon: è del dispositivo. Sotto gli 860px
-  è ignorato, non rimpicciolito, e resta salvato per quando lo schermo torna largo.
+  dell'elenco sul bordo (divide) o sul centro (sostituisce) di un pannello. Una chat sta
+  in un pannello solo — trascinarne una già aperta la sposta. Il layout sta nel browser,
+  non sul daemon: è del dispositivo. Sotto gli 860px è ignorato, non rimpicciolito, e
+  resta salvato per quando lo schermo torna largo.
+- ~~un clic semplice sull'elenco **sostituisce** la chat a fuoco~~ — **rovesciata il 2
+  settembre 2026 su segnalazione dell'utente**. La premessa era «aggiungere un riquadro è
+  un gesto che si fa apposta», e regge; il difetto stava dall'altra parte. Con un albero
+  solo, uno split **non era una cosa**: era lo stato dello schermo, quindi un clic
+  qualunque sull'elenco ne mangiava un pannello e la disposizione non si ritrovava più.
+  Adesso uno split è una **vista** — nome, riga sua in cima all'elenco, indirizzo
+  `/view/<id>` — e il clic su una chat **esce dalla vista** e la apre da sola, lasciando
+  la vista intatta dov'è. Tre scelte che vale la pena tenere ferme: la vista nasce e
+  muore **da sola** con la disposizione (due chat sullo schermo ⟺ c'è una vista, provato
+  in `tools/viste-check.ts`), perché un tasto «salva» avrebbe portato dietro la domanda
+  «vuoi salvare le modifiche?», che in una barra laterale nessuno vuole vedere; uscire
+  **chiude i flussi** dei suoi pannelli, perché una vista è un segnalibro di
+  disposizione e non uno stato vivo — le chat girano sul daemon, non nel browser; e
+  `/chat/<id>` apre **sempre** la chat da sola, anche se sta dentro la vista aperta,
+  perché è la regola che rende prevedibile il link di una notifica. Costo accettato,
+  detto qui perché non è deducibile dal codice: la vista vive nel `localStorage` di
+  **quel** dispositivo, quindi `/view/<id>` aperto altrove non trova niente — ricade
+  sull'elenco con l'avviso, invece di girare a vuoto.
 - il **perimetro si allarga dichiarandolo** (`STARK_PUBLIC_HOST`), non facendo mentire un
   proxy su `Host` e `Origin`: quella strada sposterebbe il perimetro in un file di
   configurazione dove nessuno lo cerca e dove si rompe in silenzio. È una variabile
@@ -547,3 +564,18 @@ trappole che costano di più): `docs/fuori-casa.md`. Come si verifica che il tun
 strozzi il flusso: `npm run tunnel`, a costo zero di quota — misura **quando** arrivano
 i pezzi, non quanti, perché un proxy che bufferizza li consegna tutti, solo tutti
 insieme alla fine.
+
+<!-- stark:board -->
+## C'è una board in questo progetto
+
+Questo progetto ha una board (kanban, in `.stark/kanban/`), la superficie di
+coordinamento di default. Prima di lavorare **leggila** e parti da un task che c'è già
+— se un lavoro non c'è, è una card da creare. Segna il task come preso in carico
+(claim) **subito**, e aggiorna lo stato **nel momento** in cui cambia, mai in coda a
+fine lavoro.
+
+Per i comandi esatti usa la skill `stark-kanban`.
+
+*Questo blocco lo gestisce STARK: vive finché c'è `.stark/kanban/`. Se lo togli a
+mano, lo riscrive alla prossima sessione.*
+<!-- /stark:board -->

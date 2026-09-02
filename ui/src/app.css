@@ -155,6 +155,34 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
 .dlg{z-index:9}
 .shell *{min-width:0}
 .scroller{overflow:auto}
+
+/* ── le barre di scorrimento ─────────────────────────────────────────────
+   Erano quelle di sistema. Su macOS con un mouse — non un trackpad — il sistema le
+   tiene **sempre visibili e larghe**: una banda grigia piena addosso a ogni pannello,
+   che in una UI a riquadri affiancati diventa una colonna di rumore per ogni riquadro.
+   Su trackpad non si vede il problema, perché lì si nascondono da sole: è un difetto
+   che dipende dalla periferica, non dal CSS, e per questo si trova solo guardando.
+
+   Sottile, senza traccia, e del colore della linea: la barra dice **dove sei**, non
+   deve disegnare un bordo. Il pollice ha un bordo trasparente ritagliato
+   (`background-clip: padding-box`) invece di essere semplicemente più stretto — così
+   la zona da agganciare col puntatore resta larga quanto prima, mentre a vedersi sono
+   sei pixel. Su tocco non cambia niente: lì le barre sono già a scomparsa, disegnate
+   dal sistema sopra il contenuto.
+
+   Globale e non per componente: le due liste che l'avevano (`.mcp-list`, `.pk-list`)
+   se l'erano scritta ognuna per conto suo, ed erano gli unici due punti dell'app dove
+   la barra era diversa da tutte le altre. */
+*{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+*::-webkit-scrollbar{width:12px;height:12px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{
+  background:var(--line-2);border:3px solid transparent;background-clip:padding-box;
+  border-radius:999px;
+}
+*::-webkit-scrollbar-thumb:hover{background:var(--muted);border:3px solid transparent;background-clip:padding-box}
+/* L'angolo fra le due barre: senza questo resta un quadretto del colore di sistema. */
+*::-webkit-scrollbar-corner{background:transparent}
 /* `color:inherit` e `background:none` qui e non solo sui singoli bottoni: senza,
    ogni <button> senza uno stile proprio prende l'aspetto di default dei controlli
    di sistema — testo quasi nero (illeggibile in tema scuro) su un fondo grigio
@@ -182,7 +210,6 @@ code{font-family:var(--mono);font-size:.9em;color:var(--code);background:var(--c
 
 /* ── componenti ──────────────────────────────────────────────────────────*/
 
-.scroller{overflow:auto}
 /* icone: Lucide 1.33 (ISC), disegnate su griglia 24 */
 svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
