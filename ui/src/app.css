@@ -216,7 +216,10 @@ button{font-family:inherit;cursor:pointer;color:inherit;background:none}
    ha la sua regola e resta separata: prima versione di questa richiesta l'aveva presa
    lei per sbaglio, corretto). */
 code{font-family:var(--mono);font-size:.9em;color:var(--code);background:var(--code-bg);padding:1px 5px;border-radius:5px}
-.dotk{width:7px;height:7px;border-radius:50%;flex:none}
+/* Il colore di un progetto: un quadrato stondato, non un pallino — così non si
+   confonde a colpo d'occhio con `.unread` e `.vsign`, che sono segni di stato e
+   restano tondi. */
+.dotk{width:7px;height:7px;border-radius:2px;flex:none}
 /* un colore per progetto, assegnato in ordine — vedi docs/ui-schermate.md */
 .p0{background:var(--p1)}.p1{background:var(--p2)}.p2{background:var(--p3)}
 .p3{background:var(--p4)}.p4{background:var(--p5)}.p5{background:var(--p6)}.p6{background:var(--p7)}

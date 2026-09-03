@@ -29,7 +29,6 @@ import { Viste } from './viste.svelte.ts'
 import { decisione, foglieVere } from './viste-regola.ts'
 import { Themer } from './theme.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
-import { Grouper } from './grouping.svelte.ts'
 import { Collapser } from './collapse.svelte.ts'
 import { Orderer } from './order.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
@@ -105,9 +104,6 @@ export class Store {
   /** Larghezza della conversazione e riduzione delle animazioni, stesso motivo del
    *  tema: è del dispositivo. Vedi `lettura.svelte.ts`. */
   readonly lettura = new Lettura()
-  /** Come si raggruppa l'elenco — per stato o per progetto. Stesso motivo del tema:
-   *  è una preferenza di questo schermo. Vedi `grouping.svelte.ts`. */
-  readonly grouping = new Grouper()
   /** Quali progetti sono chiusi nell'elenco. Stesso motivo del tema. Vedi
    *  `collapse.svelte.ts`. */
   readonly collapse = new Collapser()

@@ -221,13 +221,19 @@ function titleOf(s: SessionSnapshot): string {
  * Lo stato di una sessione che **non ha un processo dietro**.
  *
  * Un journal che finisce a metà di un turno senza `session.slept` è una sessione che
- * il daemon stava seguendo quando è stato fermato. Ripeterne l'ultimo stato scritto la
- * lascerebbe in *Working* per sempre, e l'interfaccia direbbe che qualcosa sta girando
- * mentre non gira niente — la bugia peggiore, perché è quella su cui si aspetta.
- * Dormiente invece è uno stato vero e va rispettato: è stato scelto.
+ * il daemon stava seguendo quando è stato fermato — al riavvio, o perché il processo
+ * è morto durante il funzionamento. Ripeterne l'ultimo stato scritto la lascerebbe in
+ * *Working* per sempre, e l'interfaccia direbbe che qualcosa sta girando mentre non
+ * gira niente — la bugia peggiore, perché è quella su cui si aspetta.
+ *
+ * Diventa *Sleeping*, non *Stopped*: le due situazioni si aprono allo stesso modo,
+ * con un `wake()` che rilegge il journal e riparte con `--resume` — la stessa via
+ * di una sessione messa a dormire a mano. Dire «stopped» prometterebbe un errore da
+ * indagare che qui non c'è: è solo un processo che non c'è più dietro, esattamente
+ * come dopo un Sleep esplicito.
  */
 function settled(state: string): string {
-  return state === 'busy' || state === 'starting' || state === 'awaiting' ? 'closed' : state
+  return state === 'busy' || state === 'starting' || state === 'awaiting' ? 'sleeping' : state
 }
 
 export const STARK_HOME = process.env['STARK_HOME'] ?? resolve(homedir(), '.stark')
