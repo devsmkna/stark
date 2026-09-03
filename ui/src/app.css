@@ -124,6 +124,25 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
 #app{height:100%;display:flex;flex-direction:column}
 .shell{flex:1;min-height:0;display:flex;background:var(--surface);overflow:hidden;position:relative}
 
+/* Larghezza della conversazione: la variabile la scrive `lettura.svelte.ts` sul root
+   (720 / 900 / none) e la legge `.conv`. Il default sta in `var()` perché prima
+   dell'impostazione esisteva una colonna senza tetto: chi non ha mai toccato la
+   voce non deve vederla cambiare sotto di lui. */
+
+/* «Reduce animations»: lo stesso schermo che il sistema chiede a `prefers-reduced-motion`,
+   esteso a tutto ciò che STARK disegna quando l'utente lo accende. Un attributo sul
+   root e due regole: le transizioni di stato (hover, chevron che ruota) si spegnono,
+   e con loro anche gli spinner **non** di caricamento — il respiro del logo e il fascio
+   restano, perché sono decorazione, non feedback. Gli spinner che dicono «sta
+   lavorando» restano: spegnerli sarebbe togliere l'unica prova che qualcosa gira. */
+:root[data-reduce-motion] *{transition-duration:.01ms !important}
+:root[data-reduce-motion] .mark,
+:root[data-reduce-motion] .field .beam{animation:none !important}
+@media(prefers-reduced-motion:reduce){
+  :root:not([data-reduce-motion="off"]) .mark,
+  :root:not([data-reduce-motion="off"]) .field .beam{animation:none !important}
+}
+
 /* La banda «c'è una versione nuova». Blu-azzurro come il turno in corso e non gialla
    come l'attesa o rossa come la quota finita: non è un guasto e non è una scadenza —
    è una cosa che si può fare quando si vuole. */
@@ -291,7 +310,7 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    Portando i 12px sul primo figlio come margine, il prompt si aggancia **a filo** del
    bordo che taglia: sopra di lui non c'è più niente da vedere, per costruzione e non per
    un numero azzeccato. A riposo l'aria in cima è la stessa di prima. */
-.conv{padding:12px 12px 12px;padding-top:0;display:flex;flex-direction:column;gap:8px;flex:1}
+.conv{padding:12px 12px 12px;padding-top:0;display:flex;flex-direction:column;gap:8px;flex:1;max-width:var(--conv-max,720px);width:100%;margin:0 auto}
 .conv>:first-child{margin-top:12px}
 /* `flex:none` non è decorativo: `.conv` è una colonna flex, e senza, un turno lungo
    fa schiacciare tutti gli altri fino a farli sparire — si vede solo su una

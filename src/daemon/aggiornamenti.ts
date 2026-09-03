@@ -160,6 +160,14 @@ let noto: StatoAggiornamento | null = null
 /** Quello che si sa adesso, o `null` se il controllo non è ancora tornato. */
 export function aggiornamentoNoto(): StatoAggiornamento | null { return noto }
 
+/** Scrive il risultato di un controllo — all'avvio come a un «check» esplicito: è un
+ *  solo fatto dell'installazione, e due scrittori diverrebbero due verità. */
+export function notaAggiornamento(s: StatoAggiornamento): void {
+  noto = s
+  if (s.errore) console.error(`[update] controllo non riuscito: ${s.errore}`)
+  else if (s.disponibile) console.log(`[update] disponibile la ${s.ultima} (hai la ${s.installata})`)
+}
+
 /** Ogni quanto si ripete il controllo dopo il primo, all'accensione. Un giro di rete
  *  verso il remoto del repo (zero oggetti scaricati), quindi non è il costo a porre un
  *  limite: è che una release non esce due volte in un'ora, e ricontrollare più spesso
@@ -180,11 +188,7 @@ const RICONTROLLO_MS = 3 * 60 * 60 * 1000
  */
 export function controllaAllAvvio(radice: string): void {
   const giro = (): void => {
-    void controlla(radice).then(s => {
-      noto = s
-      if (s.errore) console.error(`[update] controllo non riuscito: ${s.errore}`)
-      else if (s.disponibile) console.log(`[update] disponibile la ${s.ultima} (hai la ${s.installata})`)
-    })
+    void controlla(radice).then(notaAggiornamento)
   }
   giro()
   setInterval(giro, RICONTROLLO_MS).unref()

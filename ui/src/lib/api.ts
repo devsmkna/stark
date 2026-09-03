@@ -250,6 +250,13 @@ export type SystemInfo = {
     profiles: { name: string; path: string; conversations: number; mcpServers: number; current: boolean }[]
   }
   /**
+   * La diagnostica di **ciascun** agent installato, per id: versione del CLI (o del
+   * server, che è la stessa cosa per OpenCode) e dell'SDK. Assente per un agent che
+   * non sa dirlo, `null` per uno che non ha risposto — e la pagina lo dice invece di
+   * inventarsi un numero.
+   */
+  diagnosticaAgenti?: Record<string, { cli?: string; sdk?: string; available: boolean } | null>
+  /**
    * Gli agent che questa macchina sa guidare, chi c'è davvero installato, e **quali
    * modalità ha ciascuno** — che le impostazioni devono poter offrire prima che esista
    * una conversazione (ADR-014).
@@ -470,6 +477,11 @@ export class Api {
   /** Cosa sa il daemon sulle versioni. Il controllo l'ha fatto lui all'accensione:
    *  questa è una lettura, non una domanda al remoto. */
   update(): Promise<StatoAggiornamento> { return this.json('/api/update') }
+  /** Rifà il controllo **adesso**: un giro di rete verso il remoto del repo, che è
+   *  ciò che chi preme «Check for updates» si aspetta — non la rilettura della cache. */
+  checkUpdate(): Promise<StatoAggiornamento> {
+    return this.json('/api/update/check', { method: 'POST' })
+  }
   /** Aggiorna e riavvia. La risposta arriva **prima** che il daemon muoia, quindi un
    *  200 vuol dire «è partito», non «è finito»: a dire che è finito è il ritorno del
    *  daemon, che la UI aspetta come già fa per il riavvio. */

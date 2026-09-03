@@ -991,38 +991,54 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
               {/if}
             {/each}
             {#if hover}
-              <!-- Hover: sotto l'utilizzo solo repo e branch, niente numeri flat -->
+              <!-- Hover: reset times + repo/branch su riga dedicata -->
+              {#if sessionWin?.resetsAt || weeklyWin?.resetsAt}
+                <div class="u-foot reset-foot">
+                  {#if sessionWin?.resetsAt}<span>Session resets {until(clock, sessionWin.resetsAt)}</span>{/if}
+                  {#if weeklyWin?.resetsAt}<span>Weekly {stamp(weeklyWin.resetsAt)}</span>{/if}
+                </div>
+              {/if}
               <div class="u-foot hover-foot">
                 <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
                 {#if git?.branch}
-                  <span class="sep"></span>
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
                   </span>
                 {/if}
               </div>
-            {:else if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
-              <div class="u-foot">
-                <span class="g-foot">
-                  <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
-                  {#if git?.branch}
-                    <span class="sep"></span>
-                    <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
-                      <Icon name="i-branch" />{git.branch}
-                    </span>
-                  {/if}
-                </span>
-                {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+            {:else}
+              {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
+                <div class="u-foot reset-flat-foot">
+                  <span class="reset-info">
+                    {#if sessionWin?.resetsAt}Session resets {until(clock, sessionWin.resetsAt)}{/if}
+                    {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
+                    {#if weeklyWin?.resetsAt}Weekly {stamp(weeklyWin.resetsAt)}{/if}
+                  </span>
+                  {#if contextWindow}<span class="flat">{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+                </div>
+              {/if}
+              <div class="u-foot repo-branch-foot">
+                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                {#if git?.branch}
+                  <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                    <Icon name="i-branch" />{git.branch}
+                  </span>
+                {/if}
               </div>
             {/if}
           </div>
         {/if}
         {#if hover && !contextWindow && !haFinestre}
-          <!-- Hover senza barre: mostra comunque repo/branch in fondo -->
+          <!-- Hover senza barre: reset + repo/branch comunque -->
+          {#if sessionWin?.resetsAt || weeklyWin?.resetsAt}
+            <div class="u-foot reset-foot" style="padding:4px 9px 4px">
+              {#if sessionWin?.resetsAt}<span>Session resets {until(clock, sessionWin.resetsAt)}</span>{/if}
+              {#if weeklyWin?.resetsAt}<span>Weekly {stamp(weeklyWin.resetsAt)}</span>{/if}
+            </div>
+          {/if}
           <div class="u-foot hover-foot" style="padding:4px 9px 8px">
             <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
             {#if git?.branch}
-              <span class="sep"></span>
               <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                 <Icon name="i-branch" />{git.branch}
               </span>
@@ -1601,8 +1617,11 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   .preview .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
   /* Hover: un solo separatore, da bordo a bordo (il popup ha padding 4px) */
   .preview .pk-rule { margin:8px -4px 0; }
-  /* Footer hover con repo/branch, e footer espanso con repo/branch + flat a destra */
-  .u-foot.hover-foot { justify-content:flex-start; }
+  /* Footer: hover repo/branch separati, espanso reset+flat + repo/branch */
+  .u-foot.hover-foot, .u-foot.repo-branch-foot { justify-content:space-between; }
+  .u-foot.reset-foot, .u-foot.reset-flat-foot { justify-content:space-between; }
+  .u-foot.reset-foot span, .u-foot.reset-flat-foot .reset-info { font-size:8.5px; }
+  .u-foot .flat { font-size:8.5px; }
   .u-foot .g-foot, .u-foot.hover-foot { display:flex; align-items:center; gap:7px; }
   .u-foot .g { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:8.5px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .u-foot .g :global(svg.ic) { width:12px; height:12px; color:var(--muted); flex:none; }

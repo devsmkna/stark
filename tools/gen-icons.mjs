@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 const DIR = resolve('node_modules/lucide-static/icons')
 const ICONS = {
   'i-term': 'terminal', 'i-brick': 'brick-wall', 'i-brain': 'brain', 'i-doc': 'file-text',
-  'i-globe': 'globe', 'i-plug': 'plug', 'i-block': 'ban', 'i-ask': 'circle-question-mark',
+  'i-globe': 'globe', 'i-plug': 'plug', 'i-block': 'ban', 'i-ask': 'circle-question-mark', 'i-cloud': 'cloud',
   'i-mail': 'mail', 'i-cut': 'scissors', 'i-bolt': 'zap', 'i-branch': 'git-branch',
   'i-folder': 'folder', 'i-gear': 'settings', 'i-back': 'chevron-left', 'i-stop': 'circle-stop',
   'i-bars': 'align-justify', 'i-chart': 'chart-column', 'i-plus': 'plus',
@@ -16,7 +16,8 @@ const ICONS = {
   'i-shield': 'shield', 'i-palette': 'palette', 'i-monitor': 'monitor', 'i-search': 'search',
   'i-bell': 'bell', 'i-bell-off': 'bell-off', 'i-disk': 'hard-drive',
   'i-sliders': 'sliders-horizontal',
-  'i-wifi-off': 'wifi-off', 'i-loader': 'loader-circle', 'i-x': 'x',
+  'i-wifi-off': 'wifi-off', 'i-wifi': 'wifi', 'i-reset': 'rotate-ccw',
+  'i-loader': 'loader-circle', 'i-x': 'x',
   'i-import': 'download', 'i-chat': 'message-circle', 'i-fwd': 'chevron-right',
   'i-copy': 'copy',
   'i-reveal': 'folder-open',
