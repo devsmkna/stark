@@ -101,11 +101,26 @@ export type Settings = {
    * parte col default di quello, non col preferito.
    */
   preferredModel?: { agent: string; model: string }
+  /**
+   * Freccia su nella casella vuota: richiama l'ultimo prompt mandato in quella chat,
+   * poi quello prima ancora — come la history di una shell. Non è nell'elenco
+   * `shortcuts` sopra perché non è una combinazione da catturare: è sempre la stessa
+   * freccia, e a cambiare è solo se è accesa.
+   */
+  historyArrowUp: boolean
+  /**
+   * Esc mentre l'agent lavora: interrompe il turno in corso. Stessa cosa che Esc fa
+   * già ovunque in STARK — chiudere ciò che è aperto — applicata al lavoro
+   * dell'agent invece che a un menu. Per questo resta **fuori** da `VIETATI` in
+   * `shortcuts.ts`: qui non si assegna un tasto diverso, si spegne o si accende il
+   * significato che Esc ha già.
+   */
+  interruptEscape: boolean
 }
 
 export const DEFAULTS: Settings = {
   permissions: { ...CATEGORY_DEFAULTS }, projects: {}, toolDescriptions: true,
-  defaultMode: 'auto',
+  defaultMode: 'auto', historyArrowUp: true, interruptEscape: true,
 }
 
 /**
@@ -191,6 +206,8 @@ export function readSettings(home: string): Settings {
       // non ce l'ha, e per quel file la risposta giusta è il default, cioè accesa.
       toolDescriptions: raw.toolDescriptions !== false,
       defaultMode: saneMode(raw.defaultMode),
+      historyArrowUp: raw.historyArrowUp !== false,
+      interruptEscape: raw.interruptEscape !== false,
       ...(sanePerAgent(raw['defaultModes'])),
       ...(saneShortcuts(raw['shortcuts'])),
       ...(sanePreferred(raw['preferredModel']) ? { preferredModel: sanePreferred(raw['preferredModel']) } : {}),
@@ -207,6 +224,8 @@ export function writeSettings(home: string, s: Settings): Settings {
     projects: saneProjects(s.projects),
     toolDescriptions: s.toolDescriptions !== false,
     defaultMode: saneMode(s.defaultMode),
+    historyArrowUp: s.historyArrowUp !== false,
+    interruptEscape: s.interruptEscape !== false,
     ...(sanePerAgent(s.defaultModes)),
     ...(saneShortcuts(s.shortcuts)),
     ...(sanePreferred(s.preferredModel) ? { preferredModel: sanePreferred(s.preferredModel) } : {}),

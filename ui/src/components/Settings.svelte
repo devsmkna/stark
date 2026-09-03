@@ -166,6 +166,20 @@
     await store.saveSettings({ ...s, toolDescriptions: v })
   }
 
+  // ─── freccia su / Esc ─────────────────────────────────────────────────────
+
+  async function setHistoryArrowUp(v: boolean): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    await store.saveSettings({ ...s, historyArrowUp: v })
+  }
+
+  async function setInterruptEscape(v: boolean): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    await store.saveSettings({ ...s, interruptEscape: v })
+  }
+
   /** La modalità con cui partono le chat nuove. Non tocca quelle già aperte: i loro
    *  hook sono stati installati all'avvio, e rinegoziarli a metà turno non si può. */
   async function salvaModo(agent: string, m: string): Promise<void> {
@@ -696,6 +710,39 @@
             letter is text, and taking it would open windows while you write a prompt.
             <b>Esc can't be assigned</b>: it is how everything closes, this capture included.</span>
           </div>
+        </div>
+
+        <div class="fgroup">
+          <div class="flabel">In the box</div>
+          <div>
+            <div class="prow">
+              <div>
+                <div class="pn">↑ recalls what you sent</div>
+                <div class="pd">on an empty line, like a shell's history</div>
+              </div>
+              <span class="seg">
+                <button class:on={store.settings.historyArrowUp !== false}
+                  onclick={() => void setHistoryArrowUp(true)}>on</button>
+                <button class:on={store.settings.historyArrowUp === false}
+                  onclick={() => void setHistoryArrowUp(false)}>off</button>
+              </span>
+            </div>
+            <div class="prow">
+              <div>
+                <div class="pn">Esc stops the running turn</div>
+                <div class="pd">and, if nothing else is queued behind it, brings the prompt back
+                  so you don't have to retype it</div>
+              </div>
+              <span class="seg">
+                <button class:on={store.settings.interruptEscape !== false}
+                  onclick={() => void setInterruptEscape(true)}>on</button>
+                <button class:on={store.settings.interruptEscape === false}
+                  onclick={() => void setInterruptEscape(false)}>off</button>
+              </span>
+            </div>
+          </div>
+          <div class="hint">These two are always the same key — there's nothing to capture,
+            only whether they fire.</div>
         </div>
 
       <!-- ─── Projects — v11 ──────────────────────────────────────────── -->

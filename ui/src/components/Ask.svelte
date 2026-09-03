@@ -113,9 +113,18 @@
    * Cosa riceve l'agent quando una domanda è marcata «parliamone». Non è un codice da
    * interpretare: è la frase vera che gli arriva come risposta a quella domanda, ed è
    * il canale garantito dal contratto del tool (`answers`, una voce per domanda).
+   *
+   * Cita la domanda dentro il testo invece di affidarsi alla sua posizione nella mappa
+   * `answers`: senza un riferimento esplicito il modello leggeva «parliamone» da sola e
+   * riapriva tutta la richiesta, comprese le domande già risposte nello stesso invio —
+   * segnalato dall'utente il 2 settembre 2026, e coerente col sospetto già scritto qui
+   * (vedi CLAUDE.md, «Da correggere»). La frase dice anche esplicitamente di non
+   * ritoccare le altre, che prima si contava sul modello per dedurlo da solo.
    */
-  const DISCUSS = 'Let\'s talk this one through before I answer — walk me through the '
-    + 'options and what each one costs, then ask me again.'
+  const discussMessage = (q: AgentQuestion): string =>
+    `About "${q.question}" — let's talk this one through before I answer: walk me `
+    + 'through the options and what each one costs, then ask me again. My answers to '
+    + 'the other question(s) in this same request already stand — do not re-ask those.'
 
   // Le risposte in corso di composizione, azzerate a ogni richiesta nuova: `requestId`
   // nella chiave è ciò che impedisce a una scelta fatta per la domanda di prima di
@@ -254,7 +263,7 @@
         answers[q.question] = q.multiSelect ? [t] : t
         scritte.push(t)
       } else {
-        answers[q.question] = DISCUSS
+        answers[q.question] = discussMessage(q)
       }
     }
     await store.send({
