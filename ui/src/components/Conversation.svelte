@@ -561,15 +561,11 @@
       <Icon name={debugCopiato ? 'i-check' : 'i-copy'} />
     </button>
 
-    <button class="iconb" title="Put to sleep — frees memory, not quota"
-      style="margin-left:auto" disabled={!live}
-      onclick={() => void store.sleep(id)}><Icon name="i-moon" /></button>
-
     <!-- Il conteggio in parole non ci sta su uno schermo stretto: sotto la soglia
          resta solo l'icona, stesso bottone, stessa destinazione — non è nascosta,
          è un'etichetta che qui non c'è spazio a scrivere per intero (Principio 5:
          quello che sparisce è il testo, non la funzione). -->
-    <button class="effbtn" style="margin-left:0" onclick={() => setView('effects')}
+    <button class="effbtn" style="margin-left:auto" onclick={() => setView('effects')}
       title="{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} · {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}">
       {#if !store.narrow}
         <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
@@ -577,6 +573,10 @@
       {/if}
       <Icon name="i-bars" />
     </button>
+
+    <button class="iconb" title="Put to sleep — frees memory, not quota"
+      style="margin-left:0" disabled={!live}
+      onclick={() => void store.sleep(id)}><Icon name="i-moon" /></button>
 
     <button class="iconb" title="Toggle agent panel" aria-label="Toggle agent panel"
       aria-pressed={store.todoOpen || store.helperOn}

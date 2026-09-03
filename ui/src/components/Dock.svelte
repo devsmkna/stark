@@ -1466,7 +1466,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
      la casella scriveva in JetBrains Mono, e l'utente l'ha vista subito. */
   .field {
     flex: 1; position: relative; min-height: 34px; display: flex; align-items: center;
-    padding: 4px 18px; border: 1px solid var(--line-2); border-radius: 20px;
+    padding: 6px 16px; border: 1px solid var(--line-2); border-radius: 20px;
     background: var(--surface-2); overflow: hidden; font-family: var(--sans);
   }
   .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -1486,7 +1486,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
        dall'utente. La misura in grow() arrotonda alla riga intera successiva. */
     font: inherit; font-family: var(--sans); font-size: 12px; line-height: 17.5px;
     background: transparent; color: var(--ink); max-height: 140px;
-    border: none; outline: none; padding: 0;
+    border: none; border-radius: 0; outline: none; padding: 0;
   }
   textarea.input::placeholder { color: var(--muted); }
 

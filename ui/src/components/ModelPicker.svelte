@@ -62,6 +62,10 @@
   $effect(() => { void provider; famiglia = null })
   let cerca = $state('')
 
+  /** Toglie tutto ciò che non è lettera o cifra, minuscolo: la ricerca confronta
+   *  solo quello, quindi "-" e "/" digitati o no non fanno differenza. */
+  const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+
   /**
    * Quale **voce** è quella in uso.
    *
@@ -235,11 +239,15 @@
   const risultati = $derived.by(() => {
     const t = cerca.trim().toLowerCase()
     if (!t) return null
+    // Senza lettere/cifre: "-", "/", spazi non contano. Chi cerca "gpt5" trova
+    // "gpt-5" e chi cerca "gpt-5" trova "gpt 5" — il trattino non è un carattere
+    // che uno ricorda di dover digitare uguale a come compare nel nome.
+    const nt = norm(t)
     const out: { a: AgentModels; m: AgentModels['models'][number]; free?: boolean }[] = []
     for (const a of catalogo ?? []) {
       for (const m of a.models) {
-        const testo = `${m.label ?? ''} ${m.id} ${m.resolved ?? ''}`.toLowerCase()
-        if (testo.includes(t)) {
+        const testo = norm(`${m.label ?? ''} ${m.id} ${m.resolved ?? ''}`)
+        if (testo.includes(nt)) {
           const anyM = m as any
           // Detect "free" OpenCode models via a best-effort heuristic:
           // - explicit free flag on the model (if provided by the backend)
