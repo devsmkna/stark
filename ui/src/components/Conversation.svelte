@@ -1241,6 +1241,11 @@
      senza risalire a mano tutto il blocco. L'offset è l'altezza dell'header
      misurata dall'azione `misuraTh` (`--th-h`, in unità locali del root zoomato):
      a mano sarebbe stato un numero che cade alla prima modifica dei suoi 33px.
+     Diviso per `--conv-body-zoom` perché questa pill vive dentro `.tb`, che ha un
+     secondo zoom — quello di «Chat text» in Settings — che l'header non ha: un
+     `top` in unità locali di `.tb` rende `× zoomRoot × conv-body-zoom` pixel veri,
+     e l'header ne vale solo `× zoomRoot`. Senza la divisione la pill scivolerebbe
+     sempre più giù dell'header a ogni scatto di «Chat text» sopra 100%.
      Vale solo da aperto: da chiuso la pill è una riga sola al suo posto, e non
      c'è nulla da richiudere. Il fondo opaco copre il contenuto che le scorre
      dietro — ed è lo stesso colore che le sta dietro anche da ferma, quindi
@@ -1248,7 +1253,7 @@
      alla stessa quota: l'ultimo disegnato copre il primo, ed è il compromesso
      accettato — il caso comune è un gruppo aperto per turno. */
   .row.ops.pin {
-    position: sticky; top: var(--th-h, 34px); z-index: 1;
+    position: sticky; top: calc(var(--th-h, 34px) / var(--conv-body-zoom, 1)); z-index: 1;
     background: var(--surface);
   }
   .opgroup {

@@ -10,12 +10,14 @@
   // perché cambiano cosa fa l'agent e devono valere da qualunque browser; il tema e i
   // suoni restano nel browser, perché sono del dispositivo.
   import Icon from './Icon.svelte'
+  import ModelPicker from './ModelPicker.svelte'
   import QRCode from 'qrcode'
   import type { CloudStatus, StatoTelefono, Storage, SystemInfo } from '../lib/api.ts'
   import type { Stats } from '$core/stats.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
+  import { ZOOM_CHAT_MIN, ZOOM_CHAT_MAX, ZOOM_CHAT_STEP } from '../lib/lettura.svelte.ts'
   import type { FontFamily } from '../lib/fontfamily.svelte.ts'
   import { MODE_BLURB, MODE_ICON, project } from '../lib/view.ts'
   import { AZIONI, combos } from '../lib/actions.ts'
@@ -38,8 +40,6 @@
   let swpopOpen: string | null = $state(null)
   let projectFilter = $state('')
   let agentDdOpen: string | null = $state(null)
-  // TODO: Sizer is single-value (store.textSize for whole UI). Chat text zoom should have its own persisted key — keep local state for now so the two sliders diverge as designed (Interface 100% vs Chat 130%)
-  let chatZoom = $state(store.textSize.scelto)
 
   const SEZIONI: { id: Sezione; nome: string; icona: string }[] = [
     { id: 'agent', nome: 'Agent', icona: 'i-brain' },
@@ -152,38 +152,6 @@
   /** La coppia selezionata, come chiave per il selettore: agent e id uniti da un
    *  separatore che nessun id contiene. */
   const chiavePreferita = (a: string, m: string): string => `${a}\u0000${m}`
-  const preferitaChiave = $derived(store.settings?.preferredModel
-    ? chiavePreferita(store.settings.preferredModel.agent, store.settings.preferredModel.model)
-    : '')
-
-  // ─── la ricerca del modello preferito ──────────────────────────────────────
-  //
-  // Filtra **tutto** il catalogo, di entrambi gli agent, e ogni risultato dice nome,
-  // agent e provider: gli id si ripetono fra provider con costi diversi, e un elenco
-  // che mostra solo il nome è una scelta cieca. Tetto a 40 voci, detto: la ricerca
-  // serve a restringere, non a sfogliare.
-  let modCerca = $state('')
-  type ModTrovata = { key: string; nome: string; agent: string; provider?: string }
-  const modTrovate = $derived.by<ModTrovata[]>(() => {
-    if (!catalogo) return []
-    const t = modCerca.trim().toLowerCase()
-    const out: ModTrovata[] = []
-    for (const grp of catalogo) {
-      for (const m of grp.models) {
-        if (out.length >= 40) return out
-        const hay = `${m.label ?? ''} ${m.id} ${grp.label} ${m.providerName ?? ''}`.toLowerCase()
-        if (t === '' || hay.includes(t)) {
-          out.push({
-            key: chiavePreferita(grp.id, m.id),
-            nome: m.label ?? m.id,
-            agent: grp.label,
-            ...(m.providerName ? { provider: m.providerName } : {}),
-          })
-        }
-      }
-    }
-    return out
-  })
   /** Cosa legge la riga quando è chiusa: il default, o la coppia come la conosce il
    *  resto di STARK (agent/model). */
   const preferitaEtichetta = $derived(store.settings?.preferredModel
@@ -324,9 +292,12 @@
       ? [...trovate].sort((a, b) => Number(b.toLowerCase().includes('mono')) - Number(a.toLowerCase().includes('mono')))
       : trovate
   }
-  /** Cosa legge la riga quando è chiusa: il family scelto, o la voce fissa di prima. */
-  const fontEtichetta = (f: FontFamily): string =>
-    f === 'default' ? 'Inter' : f === 'system' ? "This computer's font" : f
+  /** Cosa legge la riga quando è chiusa: il family scelto, o la voce fissa di prima.
+   *  «Default» non è lo stesso nome per le due righe — Inter per il testo, JetBrains
+   *  Mono per il codice — perché sono due `STACK` diversi in `fontfamily.svelte.ts`. */
+  const fontEtichetta = (f: FontFamily, quale: 'ui' | 'code' = 'ui'): string =>
+    f === 'default' ? (quale === 'code' ? 'JetBrains Mono' : 'Inter')
+      : f === 'system' ? "This computer's font" : f
 
   // ─── quello che si chiede al daemon solo quando serve ──────────────────────
 
@@ -639,37 +610,18 @@
         </div>
         <div class="sec">
           <div class="sec-h"><span class="t">New chats start with</span><span class="line"></span></div>
-          <div class="dfrow" class:open={agentDdOpen === 'model'} onclick={() => { if (agentDdOpen !== 'model') { agentDdOpen = 'model'; modCerca = '' } else agentDdOpen = null }}><span class="o-body"><span class="o-t">Model</span><span class="o-sub">except “New chat here”, which carries the model of the chat you pressed</span></span><span class="dfval">{preferitaEtichetta} <Icon name={agentDdOpen === 'model' ? 'i-back' : 'i-fwd'} /></span></div>
+          <div class="dfrow" class:open={agentDdOpen === 'model'} onclick={() => { agentDdOpen = agentDdOpen === 'model' ? null : 'model' }}><span class="o-body"><span class="o-t">Model</span><span class="o-sub">except “New chat here”, which carries the model of the chat you pressed</span></span><span class="dfval">{preferitaEtichetta} <Icon name={agentDdOpen === 'model' ? 'i-back' : 'i-fwd'} /></span></div>
           {#if agentDdOpen === 'model'}
-            <!-- Una ricerca, non una tendina: il catalogo di questa macchina passa i
-                 150 modelli, e un `<select>` non si scorre — si cerca. I risultati
-                 portano **agent e provider** perché lo stesso modello esiste su più
-                 case con costi diversi: senza quelle due colonne la scelta è una
-                 lotteria di nomi uguali. -->
+            <!-- Lo stesso `ModelPicker` della Dock, di Helper e di AgentPanel: una
+                 ricerca sola invece di tre, e la stessa già misurata («troppo lungo»,
+                 220px di lista). Qui in più c'è `onClear`, perché solo questa
+                 preferenza — a differenza di una chat viva — può restare senza
+                 valore («lascia decidere l'agent»). -->
             <div class="dd moddd">
-              <div class="filter dd-filter"><Icon name="i-search" /><input placeholder="Search models…" bind:value={modCerca} /></div>
-              {#if !store.settings?.preferredModel}
-                <div class="dd-item" class:on={!store.settings?.preferredModel} onclick={() => { void salvaPreferita(null); agentDdOpen = null }}>
-                  <span class="dd-ico"><Icon name="i-brain" /></span><span class="dd-body"><span class="dd-n">Default</span><span class="dd-d">the agent's own first choice</span></span><Icon name="i-check" />
-                </div>
-              {/if}
-              {#if catalogo}
-                {#if modTrovate.length === 0}
-                  <div class="dd-item off"><span class="dd-ico"><Icon name="i-warn" /></span><span class="dd-body"><span class="dd-n">No model matches “{modCerca}”</span></span></div>
-                {/if}
-                {#each modTrovate as r (r.key)}
-                  <div class="dd-item" class:on={preferitaChiave === r.key} onclick={() => { void salvaPreferita(r.key); agentDdOpen = null }}>
-                    <span class="dd-ico"><Icon name="i-brain" /></span>
-                    <span class="dd-body"><span class="dd-n">{r.nome}</span><span class="dd-d">{r.agent}{#if r.provider} · {r.provider}{/if}</span></span>
-                    {#if preferitaChiave === r.key}<Icon name="i-check" />{/if}
-                  </div>
-                {/each}
-                {#if modTrovate.length === 40}
-                  <div class="dd-item off"><span class="dd-body"><span class="dd-n">Keep typing — the list is cut at 40</span></span></div>
-                {/if}
-              {:else}
-                <div class="dd-item off"><span class="dd-ico"><Icon name="i-brain" /></span><span class="dd-body"><span class="dd-n">Loading models…</span><span class="dd-d">catalog not ready</span></span></div>
-              {/if}
+              <ModelPicker catalogo={catalogo} corrente={store.settings?.preferredModel?.model ?? ''}
+                onScegli={(agent, model) => { void salvaPreferita(chiavePreferita(agent, model)); agentDdOpen = null }}
+                onClear={() => { void salvaPreferita(null); agentDdOpen = null }}
+                clearLabel="Default — the agent's own first choice" />
             </div>
           {/if}
           <div class="dfrow" class:open={agentDdOpen === 'claude-code'} onclick={() => agentDdOpen = agentDdOpen === 'claude-code' ? null : 'claude-code'}><span class="o-body"><span class="o-t">Claude Code mode</span><span class="o-sub">a classifier checks every action, no cards</span></span><span class="dfval">{modoDi('claude-code') || 'auto'} <Icon name={agentDdOpen === 'claude-code' ? 'i-back' : 'i-fwd'} /></span></div>
@@ -891,8 +843,9 @@
         <div class="sec">
           <div class="sec-h"><span class="t">Size</span><span class="line"></span><span class="pill">this browser</span></div>
           <div class="prow num"><span class="o-body"><span class="o-t">Interface zoom</span><span class="o-sub">sidebar, panels, settings — everything but the conversation</span></span><span class="numstack">{#if store.textSize.scelto !== 100}<button class="linkbtn small" title="Back to 100%" onclick={() => store.textSize.set(100)}><Icon name="i-reset" />Reset</button>{/if}<span class="numf"><button onclick={() => store.textSize.set(Math.max(TAGLIA_MIN, store.textSize.scelto-TAGLIA_STEP))}>−</button><span class="val">{store.textSize.scelto}%</span><button onclick={() => store.textSize.set(Math.min(TAGLIA_MAX, store.textSize.scelto+TAGLIA_STEP))}>+</button></span></span></div>
-          <!-- TODO: chatZoom is local-only; persist via separate key when Sizer is split (store.textSize currently controls global zoom) -->
-          <div class="prow num"><span class="o-body"><span class="o-t">Chat text</span><span class="o-sub">prompts, answers and the blocks inside them</span></span><span class="numstack">{#if chatZoom !== 100}<button class="linkbtn small" title="Back to 100%" onclick={() => chatZoom = 100}><Icon name="i-reset" />Reset</button>{/if}<span class="numf"><button onclick={() => chatZoom = Math.max(TAGLIA_MIN, chatZoom - TAGLIA_STEP)}>−</button><span class="val">{chatZoom}%</span><button onclick={() => chatZoom = Math.min(TAGLIA_MAX, chatZoom + TAGLIA_STEP)}>+</button></span></span></div>
+          <!-- Solo `.tb` — risposta e blocchi — non l'intestazione col prompt: vedi il
+               commento in lettura.svelte.ts sul perché non può zoomare anche lei. -->
+          <div class="prow num"><span class="o-body"><span class="o-t">Chat text</span><span class="o-sub">answers and the blocks inside them</span></span><span class="numstack">{#if store.lettura.zoomChat !== 100}<button class="linkbtn small" title="Back to 100%" onclick={() => store.lettura.setZoomChat(100)}><Icon name="i-reset" />Reset</button>{/if}<span class="numf"><button onclick={() => store.lettura.setZoomChat(Math.max(ZOOM_CHAT_MIN, store.lettura.zoomChat - ZOOM_CHAT_STEP))}>−</button><span class="val">{store.lettura.zoomChat}%</span><button onclick={() => store.lettura.setZoomChat(Math.min(ZOOM_CHAT_MAX, store.lettura.zoomChat + ZOOM_CHAT_STEP))}>+</button></span></span></div>
         </div>
         <div class="sec">
           <div class="sec-h"><span class="t">Font</span><span class="line"></span><span class="pill">this browser</span></div>
@@ -901,7 +854,7 @@
                font **installati su questa macchina**. Il permesso lo chiede il browser
                dentro il gesto di apertura; negato o assente, le due voci di prima
                restano e la riga lo dice (mai nascosto — Principio 5). -->
-          <div class="dfrow" class:open={fontDdOpen !== null} onclick={() => apriFont('ui')}><span class="o-body"><span class="o-t">Interface font</span><span class="o-sub">the font you are reading right now</span></span><span class="dfval">{fontEtichetta(store.font.scelto)} <Icon name="i-fwd" /></span></div>
+          <div class="dfrow" class:open={fontDdOpen === 'ui'} onclick={() => apriFont('ui')}><span class="o-body"><span class="o-t">Interface font</span><span class="o-sub">the font you are reading right now</span></span><span class="dfval">{fontEtichetta(store.font.scelto)} <Icon name="i-fwd" /></span></div>
           {#if fontDdOpen === 'ui'}
             <div class="dd fontdd">
               {#if fontErrore}<div class="dd-item off"><span class="dd-ico"><Icon name="i-warn" /></span><span class="dd-body"><span class="dd-n">{fontErrore}</span></span></div>{/if}
@@ -923,23 +876,23 @@
               {/if}
             </div>
           {/if}
-          <div class="dfrow" class:open={fontDdOpen !== null} onclick={() => apriFont('code')}><span class="o-body"><span class="o-t">Code font</span><span class="o-sub mono">JetBrains Mono</span></span><span class="dfval">{fontEtichetta(store.font.scelto)} <Icon name="i-fwd" /></span></div>
+          <div class="dfrow" class:open={fontDdOpen === 'code'} onclick={() => apriFont('code')}><span class="o-body"><span class="o-t">Code font</span><span class="o-sub mono">grep -rn "model" src/</span></span><span class="dfval">{fontEtichetta(store.font.codeScelto, 'code')} <Icon name="i-fwd" /></span></div>
           {#if fontDdOpen === 'code'}
             <div class="dd fontdd">
               {#if fontErrore}<div class="dd-item off"><span class="dd-ico"><Icon name="i-warn" /></span><span class="dd-body"><span class="dd-n">{fontErrore}</span></span></div>{/if}
               <div class="filter dd-filter"><Icon name="i-search" /><input placeholder="Search fonts…" bind:value={fontCerca} /></div>
               {#if fontLocali}
                 {#each fontFiltrate('code') as f (f)}
-                  <div class="dd-item" class:on={store.font.scelto === f} style={`font-family:'${f}'`} onclick={() => { store.font.set(f); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f}</span></span>{#if store.font.scelto === f}<Icon name="i-check" />{/if}
+                  <div class="dd-item" class:on={store.font.codeScelto === f} style={`font-family:'${f}'`} onclick={() => { store.font.setCode(f); chiudiFont() }}>
+                    <span class="dd-body"><span class="dd-n">{f}</span></span>{#if store.font.codeScelto === f}<Icon name="i-check" />{/if}
                   </div>
                 {:else}
                   <div class="dd-item off"><span class="dd-body"><span class="dd-n">No font matches “{fontCerca}”</span></span></div>
                 {/each}
               {:else}
                 {#each FONT as f (f.id)}
-                  <div class="dd-item" class:on={store.font.scelto === f.id} onclick={() => { store.font.set(f.id); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.scelto === f.id}<Icon name="i-check" />{/if}
+                  <div class="dd-item" class:on={store.font.codeScelto === f.id} onclick={() => { store.font.setCode(f.id); chiudiFont() }}>
+                    <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.codeScelto === f.id}<Icon name="i-check" />{/if}
                   </div>
                 {/each}
               {/if}
@@ -1535,9 +1488,12 @@
 
   /* Il pannello di scelta modello con ricerca: fila, non griglia. Il nome in mono
      resta un manico, agent e provider dicono di chi è. */
-  .moddd { max-height:280px; overflow-y:auto; }
-  .moddd .dd-item .dd-n { flex:none; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .moddd .dd-body { flex-direction:column; align-items:flex-start; gap:1px; }
+  /* `.moddd` ospita `<ModelPicker>`, non righe `.dd-item`: quel componente gestisce da
+     sé lo scorrimento della sua lista (220px, la stessa misura del dock). Il solo
+     ritocco che serve qui è il padding — 4px, non i 5px di `.dd` — perché la casella
+     di ricerca del picker si stacca dal bordo con un margine negativo tarato su 4px
+     (`.pk-search{margin:2px -4px -4px}`), la stessa cornice che usa nel dock. */
+  .moddd { padding:4px; }
   .dd-filter { margin:0 5px 6px; }
   .dd-filter input { width:100%; background:transparent; border:none; outline:none; color:var(--ink); font-family:inherit; font-size:11.5px; }
   .dd-filter input::placeholder { color:var(--muted); }

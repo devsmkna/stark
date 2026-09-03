@@ -389,7 +389,11 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    Il colore-firma resta sull'ora e sullo sfondo, che bastano a riconoscere il blocco. */
 .th .q{font-weight:600;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .th .n{color:var(--muted);font-size:10px;flex:none}
-.tb{padding:6px 12px 12px;display:flex;flex-direction:column;gap:8px}
+/* «Chat text» in Settings → Appearance: uno zoom sul corpo del turno soltanto — non
+   sull'intestazione (`.th`, il prompt), che `misuraTh` misura in pixel veri per
+   appiccicarci sotto la pill del gruppo aperto. Zoomare anche lei avrebbe cambiato
+   quella misura sotto i piedi di chi la legge (vedi lettura.svelte.ts). */
+.tb{padding:6px 12px 12px;display:flex;flex-direction:column;gap:8px;zoom:var(--conv-body-zoom,1)}
 .tb .prose{color:var(--ink)}
 .tb .prose b{color:var(--ink)}
 .tb .prose :global(code){background:var(--code-bg);color:var(--code);border-radius:4px;padding:1px 4px}

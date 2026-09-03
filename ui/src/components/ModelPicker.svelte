@@ -42,8 +42,14 @@
      *  1º settembre 2026). Senza, la riga di navigazione al primo livello tace:
      *  non c'è un livello sopra a cui tornare e niente da chiudere. */
     onIndietro?: () => void
+    /** Una scelta che non punta a un modello preciso — «lascia decidere l'agent».
+     *  Solo Settings la usa (la preferenza globale delle chat nuove può restare
+     *  senza valore); una chat viva ha sempre un modello in corso, quindi Dock,
+     *  Helper e AgentPanel non passano questa prop e la riga non compare. */
+    onClear?: () => void
+    clearLabel?: string
   }
-  const { catalogo, corrente, agenteCorrente, nota, onScegli, onIndietro }: Props = $props()
+  const { catalogo, corrente, agenteCorrente, nota, onScegli, onIndietro, onClear, clearLabel }: Props = $props()
 
   /** Quale agent si sta guardando dentro. `null` = si è al primo livello. */
   let dentro = $state<string | null>(null)
@@ -508,6 +514,15 @@
         {/each}
       {/if}
     {:else}
+      {#if onClear}
+        <button class="pk-row" class:on={!livello0} onclick={() => onClear()}>
+          <span class="pk-ico"><Icon name="i-brain" /></span>
+          <span class="pk-name-1">{clearLabel ?? 'Default'}</span>
+          <span class="pk-right">
+            {#if !livello0}<span class="pk-check"><Icon name="i-check" /></span>{/if}
+          </span>
+        </button>
+      {/if}
       {#each catalogo as a (a.id)}
         {@const aIcon = getLobeIconUrl(a.id)}
         <button class="pk-row" class:dis={!a.available} disabled={!a.available}
