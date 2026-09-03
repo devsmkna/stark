@@ -92,7 +92,15 @@ import Login from './components/Login.svelte'
     mostroApertura = false
   })
 
-  const menuRow = $derived(store.menu ? store.rows.find(r => r.id === store.menu?.id) : undefined)
+  const menuRow = $derived(
+    store.menu && store.menu.kind !== 'view' ? store.rows.find(r => r.id === store.menu?.id) : undefined,
+  )
+  /** Il menu di una **vista**. Stesso `store.menu`, quindi stessa correzione di
+   *  posizione qui sotto: due stati separati avrebbero voluto dire due copie di quel
+   *  calcolo, e prima o poi una delle due che esce dallo schermo. */
+  const menuVista = $derived(
+    store.menu?.kind === 'view' ? store.viste.trova(store.menu.id) : undefined,
+  )
 
   /** La voce «Environment» del menu contestuale si apre in una seconda pagina dentro
    *  lo stesso popup, come Reasoning/Effort nel dock — non uno `store.dialog` a parte
@@ -421,6 +429,37 @@ import Login from './components/Login.svelte'
       <Icon name="i-trash" /> Delete
     </button>
   {/snippet}
+
+  {#snippet vociVista(v: import('./lib/viste.svelte.ts').Vista)}
+    <button class="mi" onclick={() => { store.renaming = v.id; store.menu = null }}>
+      <Icon name="i-pencil" /> Rename
+    </button>
+    <hr />
+    <!-- Elimina la **disposizione**, non le chat: quelle restano nell'elenco e sul
+         daemon. Il titolo lo dice, se no «Delete» accanto a due conversazioni fa
+         sospettare che se ne porti via due. -->
+    <button class="mi dgr" title="Removes the layout. The chats stay."
+      onclick={() => { const id = v.id; store.menu = null; store.eliminaVista(id) }}>
+      <Icon name="i-trash" /> Delete view
+    </button>
+  {/snippet}
+
+  {#if store.menu && menuVista}
+    {#if store.narrow}
+      <div class="sheet" role="menu">
+        <div class="grab" role="presentation"></div>
+        <div class="shead">{menuVista.name}</div>
+        {@render vociVista(menuVista)}
+      </div>
+    {:else}
+      <div class="ctx-menu" bind:this={menuEl}
+        style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
+        {@render vociVista(menuVista)}
+      </div>
+    {/if}
+    <div class="catch" role="presentation" onclick={() => { store.menu = null }}
+      oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
+  {/if}
 
   {#if store.menu && menuRow}
     {#if store.narrow}

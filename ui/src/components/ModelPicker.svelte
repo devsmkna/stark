@@ -611,8 +611,6 @@
      dall'utente: «troppo lungo»). 220 tiene otto-dieci righe a vista, che è ciò che
      serve a orientarsi; il resto si scorre. */
   .pk-list{max-height:220px;overflow-y:auto;padding:2px 0;min-height:0}
-  .pk-list::-webkit-scrollbar{width:8px}
-  .pk-list::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:8px;border:2px solid var(--surface)}
   .pk-empty{display:flex;align-items:center;gap:7px;padding:9px 11px;color:var(--muted);font-size:11.5px}
   .pk-empty.warn :global(svg.ic){color:var(--wait)}
 

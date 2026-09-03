@@ -32,6 +32,7 @@ import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
+import { allineaContestoBoard, boardDir } from '../daemon/board.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
@@ -327,6 +328,54 @@ check('§7: un messaggio assistant vero resta ignorato, non duplica lo streaming
   allineaMemoria(casa, false)
   check('memoria: un blocco senza chiusura non fa cancellare il resto del file',
     readFileSync(file, 'utf8').includes('# Le mie preferenze'))
+
+  rmSync(casa, { recursive: true, force: true })
+}
+
+// La presenza della board nel contesto di progetto: CLAUDE.md e AGENTS.md allineati
+// all'esistenza di .stark/kanban. Stessa disciplina della memoria globale — file
+// dell'utente, si tocca solo il proprio blocco — quindi le prove sono le stesse.
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-board-regola-'))
+  const MIO = '# Il mio progetto\n\nNon cancellare questo.\n'
+
+  // Con la board presente la regola compare su entrambi i file che gli agent caricano
+  // sempre, IN FONDO a quello che l'utente ha scritto.
+  mkdirSync(boardDir(casa), { recursive: true })
+  writeFileSync(resolve(casa, 'CLAUDE.md'), MIO)
+  writeFileSync(resolve(casa, 'AGENTS.md'), MIO)
+  allineaContestoBoard(casa)
+  const claude = readFileSync(resolve(casa, 'CLAUDE.md'), 'utf8')
+  const agents = readFileSync(resolve(casa, 'AGENTS.md'), 'utf8')
+  check('board-regola: CLAUDE.md e AGENTS.md portano il blocco board',
+    claude.includes('stark:board') && agents.includes('stark:board'))
+  check('board-regola: il blocco sta in fondo, dopo quello che ha scritto l\'utente',
+    claude.indexOf('# Il mio progetto') < claude.indexOf('stark:board'))
+
+  // Idempotenza: allinea gira a ogni apertura di sessione.
+  allineaContestoBoard(casa)
+  const due = readFileSync(resolve(casa, 'CLAUDE.md'), 'utf8')
+  check('board-regola: allineare due volte non aggiunge due copie', due === claude)
+
+  // Board sparita: il blocco sparisce e il file dell'utente resta esattamente com'era.
+  rmSync(boardDir(casa), { recursive: true, force: true })
+  allineaContestoBoard(casa)
+  check('board-regola: senza board il blocco sparisce e il resto non si tocca',
+    readFileSync(resolve(casa, 'CLAUDE.md'), 'utf8') === MIO)
+
+  // Un file che conteneva SOLO il nostro blocco (era stato creato da noi, perché in
+  // quel progetto non esisteva) torna a non esistere invece di restare un CLAUDE.md
+  // vuoto.
+  const casa2 = mkdtempSync(resolve(tmpdir(), 'stark-board-regola-'))
+  mkdirSync(boardDir(casa2), { recursive: true })
+  allineaContestoBoard(casa2)
+  check('board-regola: senza file di contesto la board li fa nascere con il blocco',
+    existsSync(resolve(casa2, 'CLAUDE.md')) && existsSync(resolve(casa2, 'AGENTS.md')))
+  rmSync(boardDir(casa2), { recursive: true, force: true })
+  allineaContestoBoard(casa2)
+  check('board-regola: togliendo la board un file vuoto creato da noi non resta in giro',
+    !existsSync(resolve(casa2, 'AGENTS.md')))
+  rmSync(casa2, { recursive: true, force: true })
 
   rmSync(casa, { recursive: true, force: true })
 }

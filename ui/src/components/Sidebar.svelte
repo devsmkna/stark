@@ -13,6 +13,8 @@
     ORDER, colours, group, hhmm, label, needsYou, project, stamp,
   } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
+  import { leafIds } from '../lib/layout.ts'
+  import type { Vista } from '../lib/viste.svelte.ts'
   import { quandoRiparte, quotaFerma } from '$core/quota.ts'
   import { longpress, longPressAppenaFatto } from '../lib/longpress.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -114,7 +116,8 @@
   let soloNonLette = $state(false)
   const recenti = $derived(soloNonLette ? recentiAll.filter(r => needsYou(r.state)) : recentiAll)
 
-  /** Le righe di una lista, raccolte per progetto e i progetti in ordine alfabetico. */
+  /** Le righe di una lista, raccolte per progetto, nell'ordine scelto dall'utente
+   *  (`store.order`); chi non è stato riordinato resta in coda, alfabetico. */
   function perProgetto(righe: SessionRow[]): [string, SessionRow[]][] {
     const m = new Map<string, SessionRow[]>()
     for (const r of righe) {
@@ -122,7 +125,7 @@
       const list = m.get(p)
       if (list) list.push(r); else m.set(p, [r])
     }
-    return [...m].sort((a, b) => a[0].localeCompare(b[0]))
+    return store.order.sort([...m.keys()]).map(name => [name, m.get(name)!])
   }
 
   const tree = $derived.by<Blocco[]>(() => {
@@ -137,14 +140,16 @@
         key: `p:${name}`,
         head: name,
         proj: name,
-        sub: [{ rows: [...rows].sort((a, b) => peso(a) - peso(b)) }],
+        // Chiuso: l'intestazione resta, le righe no. È il `Blocco` a portare il fatto,
+        // così il disegno non deve sapere in quale modo di raggruppare sta guardando.
+        sub: [{ rows: store.collapse.isClosed(name) ? [] : [...rows].sort((a, b) => peso(a) - peso(b)) }],
       }))
     }
     return ORDER.map(g => ({
       key: `s:${g}`,
       head: g,
       sub: perProgetto(recenti.filter(r => group(r.state) === g))
-        .map(([name, rows]) => ({ name, rows })),
+        .map(([name, rows]) => ({ name, rows: store.collapse.isClosed(name) ? [] : rows })),
     })).filter(x => x.sub.length > 0)
   })
 
@@ -214,6 +219,40 @@
     apriMenu(row, e.clientX, e.clientY)
   }
 
+  // ─── riordinare i progetti ────────────────────────────────────────────────
+  //
+  // Trascinare un progetto su un altro lo sposta alla sua posizione. Il bersaglio è
+  // l'intestazione del progetto sotto il puntatore; l'ordine risultante lo tiene
+  // `store.order` (vedi `order.svelte.ts`). `draggingProject` è separato da
+  // `draggingChat`, così le zone di rilascio dei pannelli non si accendono.
+  const allProjects = $derived([...new Set(store.rows.map(r => project(r.cwd)))])
+  let dropTarget = $state<string | null>(null)
+
+  function dragProjectStart(e: DragEvent, name: string): void {
+    e.dataTransfer?.setData('text/stark-project-id', name)
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+    store.draggingProject = name
+  }
+
+  function dragProjectOver(e: DragEvent, name: string): void {
+    if (!store.draggingProject || store.draggingProject === name) return
+    e.preventDefault()
+    dropTarget = name
+  }
+
+  function dropProject(e: DragEvent, name: string): void {
+    e.preventDefault()
+    const from = store.draggingProject
+    dropTarget = null
+    store.draggingProject = null
+    if (from && from !== name) store.order.move(allProjects, from, name)
+  }
+
+  function dragProjectEnd(): void {
+    store.draggingProject = null
+    dropTarget = null
+  }
+
   async function commit(row: SessionRow): Promise<void> {
     const text = draft
     store.renaming = null
@@ -222,8 +261,56 @@
 
   $effect(() => {
     const id = store.renaming
-    if (id) draft = store.rows.find(r => r.id === id)?.title ?? ''
+    if (id) {
+      const v = store.viste.trova(id)
+      draft = v ? v.name : store.rows.find(r => r.id === id)?.title ?? ''
+    }
   })
+
+  // ─── le viste ─────────────────────────────────────────────────────────────
+  //
+  /** La chiave con cui la sezione «Views» sta in `store.collapse`. I due underscore
+   *  la tengono fuori dallo spazio dei nomi dei progetti, che sono percorsi. */
+  const VISTE = '__views__'
+  //
+  // Una vista è una disposizione di pannelli con un nome (`lib/viste.svelte.ts`).
+  // Prima non esisteva come cosa: affiancare due chat era uno stato dello schermo, e
+  // un clic altrove lo scriveva via. Ora ha una riga sua, in cima — sopra i gruppi e
+  // fuori dal loro `{#each}`, perché una vista non appartiene a uno stato né a un
+  // progetto: dentro può averne due diversi.
+
+  /** Cosa mostra la riga: i progetti coinvolti e se là dentro c'è qualcosa da
+   *  guardare. Deriva dalle righe che l'elenco ha già — nessuna richiesta in più al
+   *  daemon per una cosa che si sa. */
+  function riassunto(v: Vista): { progetti: string[]; attesa: boolean; lavora: boolean; n: number } {
+    const ids = leafIds(v.tree)
+    const righe = ids.map(id => store.rows.find(r => r.id === id)).filter(Boolean) as SessionRow[]
+    const progetti = [...new Set(righe.map(r => project(r.cwd)))]
+    return {
+      progetti,
+      attesa: righe.some(r => needsYou(r.state)),
+      // «Lavora» solo se nessuna aspetta: due segni sulla stessa riga direbbero due
+      // cose insieme, e quella che conta è sempre quella che chiede a te.
+      lavora: !righe.some(r => needsYou(r.state)) && righe.some(r => group(r.state) === 'Working'),
+      n: ids.length,
+    }
+  }
+
+  function apriMenuVista(v: Vista, x: number, y: number): void {
+    store.menu = { id: v.id, x, y, kind: 'view' }
+  }
+
+  function openMenuVista(e: MouseEvent, v: Vista): void {
+    e.preventDefault()
+    if (longPressAppenaFatto()) return
+    apriMenuVista(v, e.clientX, e.clientY)
+  }
+
+  function commitVista(v: Vista): void {
+    const text = draft
+    store.renaming = null
+    if (text.trim() && text !== v.name) store.rinominaVista(v.id, text)
+  }
 
   // Overflow "…" : raggruppa Notifiche / Todo / Helper / Telefono, come da screenshot 2.
   // Resta in testata solo [+] e […] — "Segui sistema" quindi niente forzatura dark.
@@ -416,13 +503,97 @@
         </div>
       {/if}
     {:else}
+    <!-- Le viste salvate. Sopra i gruppi e fuori dal loro `{#each}`: una vista non sta
+         dentro uno stato né dentro un progetto — può contenerne due diversi, e
+         infilarla in un gruppo vorrebbe dire sceglierne uno a caso. Non compare se non
+         ce ne sono: una sezione vuota è rumore che insegna a saltare quella zona. -->
+    {#if store.viste.lista.length > 0}
+      <!-- Stessa `store.collapse` dei progetti, con una chiave che non può collidere
+           con un nome di progetto: due meccanismi di apertura nella stessa colonna
+           sarebbero due cose da imparare per lo stesso gesto. -->
+      <button class="gstate vhead" class:closed={store.collapse.isClosed(VISTE)}
+        aria-expanded={!store.collapse.isClosed(VISTE)}
+        onclick={() => store.collapse.toggle(VISTE)}>
+        <Icon name="i-down" class="chev" />
+        <span>Views</span>
+      </button>
+      {#if !store.collapse.isClosed(VISTE)}
+        {#each store.viste.lista as v (v.id)}
+          {@const r = riassunto(v)}
+          {#if store.renaming === v.id}
+            <div class="sit">
+              <!-- svelte-ignore a11y_autofocus -->
+              <input class="rn" autofocus bind:value={draft}
+                onblur={() => commitVista(v)}
+                onkeydown={e => {
+                  if (e.key === 'Enter') commitVista(v)
+                  if (e.key === 'Escape') store.renaming = null
+                }} />
+            </div>
+          {:else}
+            <button class="sit vrow" class:on={store.viste.active === v.id}
+              use:longpress={(x, y) => apriMenuVista(v, x, y)}
+              onclick={() => void store.apriVista(v.id)}
+              oncontextmenu={e => openMenuVista(e, v)}>
+              <span class="vic"><Icon name="i-panel" /></span>
+              <div style="flex:1;text-align:left;min-width:0">
+                <div class="ttl">{v.name}</div>
+                <div class="meta">
+                  {r.n} panes
+                  <!-- Al massimo tre pallini, poi il conto: una vista con sei progetti
+                       dentro riempirebbe la riga di puntini che non si contano. -->
+                  {#each r.progetti.slice(0, 3) as p (p)}<i class="dotk p{palette.get(p) ?? 0}"></i>{/each}
+                  {#if r.progetti.length > 3}<span class="vmore">+{r.progetti.length - 3}</span>{/if}
+                </div>
+              </div>
+              <!-- Il segno: le viste ora si chiudono, quindi una chat che chiede
+                   qualcosa può finire fuori vista. Senza questo te ne accorgi solo
+                   ripassando di lì per caso. -->
+              {#if r.attesa}<i class="vsign asking" title="Something in here needs you"></i>
+              {:else if r.lavora}<i class="vsign working" title="Something in here is working"></i>{/if}
+            </button>
+          {/if}
+        {/each}
+      {/if}
+    {/if}
     {#each tree as section (section.key)}
-      <div class="gstate" class:dotted={section.proj}>
-        {#if section.proj}<i class="dotk p{palette.get(section.proj) ?? 0}"></i>{/if}{section.head}
-      </div>
+      {#if section.proj}
+        <!-- Un progetto è un nodo di albero: si apre e si chiude. Nel raggruppamento
+             per progetto è la sezione stessa, per stato è il sotto-gruppo — la stessa
+             forma nei due modi, e la stessa chiave `store.collapse` li tiene insieme. -->
+        <button class="gstate dotted" class:closed={store.collapse.isClosed(section.proj)}
+          class:drop={dropTarget === section.proj}
+          aria-expanded={!store.collapse.isClosed(section.proj)}
+          onclick={() => store.collapse.toggle(section.proj)}
+          draggable="true"
+          ondragstart={e => dragProjectStart(e, section.proj)}
+          ondragover={e => dragProjectOver(e, section.proj)}
+          ondragleave={() => { if (dropTarget === section.proj) dropTarget = null }}
+          ondrop={e => dropProject(e, section.proj)}
+          ondragend={dragProjectEnd}>
+          <Icon name="i-down" class="chev" />
+          <i class="dotk p{palette.get(section.proj) ?? 0}"></i>
+          <span class="ghead">{section.head}</span>
+        </button>
+      {:else}
+        <div class="gstate">{section.head}</div>
+      {/if}
       {#each section.sub as sub (sub.name ?? section.key)}
         {#if sub.name}
-          <div class="gproj"><i class="dotk p{palette.get(sub.name) ?? 0}"></i> {sub.name}</div>
+          <button class="gproj" class:closed={store.collapse.isClosed(sub.name)}
+            class:drop={dropTarget === sub.name}
+            aria-expanded={!store.collapse.isClosed(sub.name)}
+            onclick={() => store.collapse.toggle(sub.name)}
+            draggable="true"
+            ondragstart={e => dragProjectStart(e, sub.name)}
+            ondragover={e => dragProjectOver(e, sub.name)}
+            ondragleave={() => { if (dropTarget === sub.name) dropTarget = null }}
+            ondrop={e => dropProject(e, sub.name)}
+            ondragend={dragProjectEnd}>
+            <Icon name="i-down" class="chev" />
+            <i class="dotk p{palette.get(sub.name) ?? 0}"></i>
+            <span class="ghead">{sub.name}</span>
+          </button>
         {/if}
         {#each sub.rows as row (row.id)}
           {#if store.renaming === row.id}
@@ -559,6 +730,27 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* ─── le viste ──────────────────────────────────────────────────────────────
+     La riga di una vista è una `.sit` come quella di una chat: nell'elenco è un posto
+     dove si va, e darle una forma sua vorrebbe dire insegnare due volte la stessa
+     cosa. Cambia solo cosa porta: l'icona dei pannelli al posto di quella del modello,
+     e il segno di attenzione a destra. */
+  .vhead {
+    display: flex; align-items: center; gap: 4px;
+    width: 100%; border: 0; background: none; cursor: pointer; text-align: left;
+  }
+  .vhead :global(svg.chev) { width: 12px; height: 12px; transition: transform .12s; }
+  .vhead.closed :global(svg.chev) { transform: rotate(-90deg); }
+  .vic { flex: none; display: grid; place-items: center; width: 14px; height: 14px; color: var(--muted); }
+  .vic :global(svg.ic) { width: 13px; height: 13px; }
+  .vmore { font-variant-numeric: tabular-nums; }
+  /* Il segno di attenzione. Un punto e basta: la riga dice già di cosa si tratta, e
+     un'etichetta come quelle di stato (`.sst`) qui sarebbe falsa — dentro una vista
+     gli stati sono più d'uno, e nominarne uno solo direbbe una cosa non vera. */
+  .vsign { flex: none; width: 7px; height: 7px; border-radius: 999px; }
+  .vsign.asking { background: var(--wait); }
+  .vsign.working { background: var(--work); }
+
   /* La riga del raggruppamento.
      Il primo giro le aveva dato la voce delle intestazioni di sezione (`.gstate`):
      maiuscoletto spaziato, grassetto. Sbagliato, e l'utente l'ha detto guardandola —
@@ -602,6 +794,30 @@
      solo raggruppando per progetto. Senza, il pallino resterebbe un carattere in linea
      e cadrebbe sotto la riga di base del testo invece che al suo centro. */
   .gstate.dotted { display: flex; align-items: center; gap: 6px; }
+  /* Un progetto è un nodo di albero: l'intestazione è un <button> che apre e chiude.
+     Togliere l'aspetto di pulsante senza perderne il mestiere, come le righe `.sit`. */
+  .gstate.dotted, .gproj {
+    background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; color: inherit;
+  }
+  .gproj { display: flex; align-items: center; gap: 6px; }
+  .gstate.dotted:focus-visible, .gproj:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: -2px;
+  }
+  .gstate.dotted .chev, .gproj .chev {
+    flex: none; width: 11px; height: 11px; color: var(--muted);
+    transition: transform .12s ease;
+  }
+  .gstate.dotted.closed .chev, .gproj.closed .chev { transform: rotate(-90deg); }
+  .gstate.dotted .ghead, .gproj .ghead {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gstate.dotted:hover .chev, .gproj:hover .chev { color: var(--ink); }
+  /* Il bersaglio di un trascinamento: un bordo che dice «qui finisce». */
+  .gstate.dotted.drop, .gproj.drop {
+    background: var(--accent-soft); border-radius: 6px;
+  }
+  .gstate.dotted.drop .chev, .gproj.drop .chev { color: var(--accent); }
   /* Nomi progetto più grandi — nello screenshot STARK sotto WAITING è più grande del section header. */
   :global(.side .gstate) { font-size: 10px; letter-spacing: .10em; padding: 10px 10px 4px; }
   :global(.side .gproj) { font-size: 11.5px; font-weight: 700; letter-spacing: .02em; padding: 6px 10px 4px 12px; }
