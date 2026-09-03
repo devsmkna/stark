@@ -229,10 +229,14 @@ export type ModelChoice = {
    *  l'agent quando lo sa (OpenCode la porta nel campo `family`); assente altrimenti.
    *  La UI la usa per raggruppare, ripiegando su `getProviderForModel` quando manca. */
   family?: string
-  /** Il costo per milione di token, come lo dichiara l'agent. Su OpenCode ogni
-   *  provider ha il suo prezzo per lo stesso modello, quindi un GLM 5.2 su tre
-   *  provider ha tre costi diversi — e chi sceglie deve poterli confrontare.
-   *  Assente quando l'agent non lo dichiara o su journal precedenti al campo. */
+  /** Il costo per milione di token. Su OpenCode lo dichiara l'agent: ogni provider
+   *  ha il suo prezzo per lo stesso modello, quindi un GLM 5.2 su tre provider ha tre
+   *  costi diversi — e chi sceglie deve poterli confrontare. Su Claude Code il CLI
+   *  non lo dichiara affatto (nessun handshake porta un prezzo): qui è STARK a
+   *  saperlo, da un listino statico (`claude-code/sdk-options.ts`), perché chi paga
+   *  a consumo deve poter vedere quanto costa un modello prima di sceglierlo, non
+   *  solo quanto ha già speso (`spentUsd`). Assente quando nessuno dei due lo sa, o
+   *  su journal precedenti al campo. */
   cost?: { input: number; output: number }
 }
 
