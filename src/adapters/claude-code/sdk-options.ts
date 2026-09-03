@@ -160,10 +160,40 @@ const CONTESTO_1M = [
   'claude-fable-5', 'claude-mythos-5', 'claude-opus-5', 'claude-opus-4-8',
   'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6',
 ]
+/** Toglie la data appesa a un alias (`-20260101`) e le parentesi di una variante
+ *  (`[1m]`): la forma sotto cui questo modello sta nelle tabelle statiche qui sotto. */
+function baseModelId(model: string): string {
+  return model.replace(/-\d{8}$/, '').replace(/\[[^\]]*\]$/, '')
+}
 export function contextWindowFor(model: string): number {
   if (/\[1m\]/i.test(model)) return 1_000_000
-  const base = model.replace(/-\d{8}$/, '').replace(/\[[^\]]*\]$/, '')
+  const base = baseModelId(model)
   return CONTESTO_1M.some(m => base === m || base.startsWith(`${m}-`)) ? 1_000_000 : 200_000
+}
+
+/**
+ * Il listino di Claude Code, $ per milione di token — a differenza di OpenCode, il
+ * CLI non lo dichiara mai nell'handshake (nessun `list_models` porta un prezzo):
+ * qui è STARK a saperlo, dalla pagina prezzi pubblica di Anthropic (skill
+ * `claude-api`, letta il 3 settembre 2026). Un modello assente dalla tabella resta
+ * senza prezzo — mostra «—» nel picker — invece di indovinarlo: un listino sbagliato
+ * mentirebbe a chi paga a consumo, che è esattamente chi ha chiesto questo campo.
+ * Sonnet 5 aveva un prezzo di lancio più basso fino al 31 agosto 2026: quella
+ * finestra è già chiusa, e la tabella porta solo il prezzo pieno.
+ */
+const LISTINO: Record<string, { input: number; output: number }> = {
+  'claude-fable-5': { input: 10, output: 50 },
+  'claude-mythos-5': { input: 10, output: 50 },
+  'claude-opus-5': { input: 5, output: 25 },
+  'claude-opus-4-8': { input: 5, output: 25 },
+  'claude-opus-4-7': { input: 5, output: 25 },
+  'claude-opus-4-6': { input: 5, output: 25 },
+  'claude-sonnet-5': { input: 3, output: 15 },
+  'claude-sonnet-4-6': { input: 3, output: 15 },
+  'claude-haiku-4-5': { input: 1, output: 5 },
+}
+export function costFor(model: string): { input: number; output: number } | undefined {
+  return LISTINO[baseModelId(model)]
 }
 
 export function capabilitiesFor(model: string): Capabilities {
@@ -265,6 +295,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
         // un agent senza classificatore non distinguerebbe niente — vedi `optionsFrom`.
         ...(auto ? {} : { note: SENZA_AUTO }),
         ...(label ? { label } : {}), ...(resolved ? { resolved } : {}),
+        ...(costFor(resolved ?? id) ? { cost: costFor(resolved ?? id) } : {}),
       })
     }
   }
@@ -277,6 +308,7 @@ export function modelChoices(raw: unknown, current: string): ModelChoice[] {
       contextWindow: contextWindowFor(current),
       accepts: ALLEGABILI,
       ...(modelSupportsAutoMode(current) ? {} : { note: SENZA_AUTO }),
+      ...(costFor(current) ? { cost: costFor(current) } : {}),
     })
   }
   return out
