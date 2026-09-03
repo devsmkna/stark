@@ -187,23 +187,43 @@ export type ModelChoice = {
    *  macchina). Assente = non dichiarato, e la UI non ne deduce niente.
    *
    *  Su Claude Code il toggle è vivo: `alwaysThinkingEnabled` (Settings) si cambia a
-   *  caldo con `applyFlagSettings`. Su OpenCode è un fatto da leggere, non un inter-
-   *  rupttore: il prompt di sessione non accetta opzioni per giro (misurato nei tipi),
-   *  quindi qui non c'è una voce da dichiarare — il dato viaggia, la scelta no. */
+   *  caldo con `applyFlagSettings`. **Su OpenCode resta un fatto da leggere, non un
+   *  interruttore** — ma non per la ragione scritta qui fino al 3 settembre 2026
+   *  («il prompt non accetta opzioni per giro»): quella era vera ed era la domanda
+   *  sbagliata. La domanda giusta — verificata sull'OpenAPI live e con un turno vero,
+   *  non sui tipi del client installato, che su questo campo mentivano per omissione
+   *  (§ `effortLevels`) — è se OpenCode ha un modo di spegnere il pensiero
+   *  **indipendente dal livello**. Non ce l'ha: l'unico canale è la `variant`
+   *  dell'effort (sotto), e un modello senza una variante "none"/"minimal" non lo si
+   *  spegne affatto — è così che si comporta il CLI vero, e STARK non inventa un
+   *  interruttore che lui non ha. */
   reasoning?: boolean
-  /** I livelli di effort che **questo modello** accetta, come li dichiara l'agent.
+  /**
+   * I livelli di effort che **questo modello** accetta, come li dichiara l'agent.
    *
-   *  Misurato 1º settembre 2026: l'handshake di Claude Code porta
-   *  `supportedEffortLevels` per modello (low/medium/high/xhigh/max su Opus, Sonnet,
-   *  Fable; niente su Haiku), e il livello si cambia a caldo con
-   *  `applyFlagSettings({ effortLevel })` — che accetta anche 'max', session-scoped.
-   *  OpenCode non porta niente: le `options` dei suoi modelli sono vuote e il prompt
-   *  non accetta parametri, quindi qui non c'è niente da dichiarare.
+   * Misurato 1º settembre 2026: l'handshake di Claude Code porta
+   * `supportedEffortLevels` per modello (low/medium/high/xhigh/max su Opus, Sonnet,
+   * Fable; niente su Haiku), e il livello si cambia a caldo con
+   * `applyFlagSettings({ effortLevel })` — che accetta anche 'max', session-scoped.
    *
-   *  Assente = il modello non li supporta, o l'agent non li espone: la voce 'effort'
-   *  semplicemente non compare nel menu. Il CLI può comunque **retrocedere in
-   *  silenzio** un livello oltre il supporto del modello — la scelta resta possibile,
-   *  il risultato lo dice lui. */
+   * **Corretto il 3 settembre 2026**: qui c'era scritto che OpenCode non avesse
+   * niente da dichiarare, dedotto dai tipi del client SDK installato (che di questo
+   * campo non parlavano affatto). Falso — misurato sull'OpenAPI **live** del server
+   * (versione piu' recente di quella con cui il client era stato generato):
+   * `config.providers()` porta `variants`, mappa effort → parametri del provider
+   * sotto, e si cambia a caldo con `v2.session.switchModel({ model: { id, providerID,
+   * variant } })`. Confermato con un turno vero e non solo con lo schema: stesso
+   * prompt, `variant` diverso, `tokens.reasoning` diverso (125 → 166 → 224 su
+   * minimal/default/xhigh dello stesso modello gratuito). Vedi `opzioniOpenCode` in
+   * adapters/opencode/adapter.ts. Il campo che sembrava assente era solo non ancora
+   * letto — la lezione vale in generale: un client con la versione indietro rispetto
+   * al server non è un'assenza, è un tipo non aggiornato.
+   *
+   * Assente = il modello non li supporta, o l'agent non li espone: la voce 'effort'
+   * semplicemente non compare nel menu. Il CLI può comunque **retrocedere in
+   * silenzio** un livello oltre il supporto del modello — la scelta resta possibile,
+   * il risultato lo dice lui.
+   */
   effortLevels?: string[]
   /** La famiglia del modello (es. "claude-opus", "kimi-k2", "glm"). La dichiara
    *  l'agent quando lo sa (OpenCode la porta nel campo `family`); assente altrimenti.

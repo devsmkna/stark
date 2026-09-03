@@ -557,8 +557,13 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   const modelOpt = $derived(opts.find(o => o.kind === 'model'))
   // Le due scelte nuove (chieste dall'utente, 1º settembre 2026): si cercano per
   // `id`, non per `kind` — sono opzioni 'other' e il vocabolario lo dichiara
-  // l'agent (ADR-014). Dove non ci sono (OpenCode, journal vecchi) le voci non
-  // compaiono: stessa regola delle finestre di quota.
+  // l'agent (ADR-014). 'effort' compare anche su OpenCode dal 3 settembre 2026
+  // (`opzioniOpenCode` in adapters/opencode/adapter.ts, solo sui modelli che
+  // dichiarano `variants`); 'reasoning' resta solo di Claude Code, perche' OpenCode
+  // non ha un interruttore indipendente dal livello di effort (misurato — vedi il
+  // commento su `ModelChoice.reasoning` in core/events.ts). Dove una voce non c'e'
+  // (journal vecchi, un modello senza quella capacita') non compare: stessa regola
+  // delle finestre di quota.
   const reasoningOpt = $derived(opts.find(o => o.id === 'reasoning'))
   const effortOpt = $derived(opts.find(o => o.id === 'effort'))
 
