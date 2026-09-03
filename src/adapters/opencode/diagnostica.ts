@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
-import { esegui } from '../../core/platform.ts'
+import { esegui, WIN } from '../../core/platform.ts'
 import { clientPer, lascia } from './host.ts'
 import { tmpdir } from 'node:os'
 
@@ -25,7 +25,20 @@ export type OpencodeDiagnostics = {
   cli?: string
   /** La versione dell'SDK ufficiale, dal suo `package.json`. */
   sdk?: string
+  /** Dove sta il binario, dal `PATH` di questo processo — lo stesso che lo cerca
+   *  `esegui('opencode', …)` qui sotto. Manca solo se `which`/`where` non lo trova. */
+  executable?: string
   available: boolean
+}
+
+/** `where` invece di `which` su Windows nativo, stessa ragione di `native-browse.ts`. */
+async function risolviEseguibile(nome: string): Promise<string | undefined> {
+  try {
+    const r = await esegui(WIN ? 'where' : 'which', [nome])
+    return r.stdout.trim().split(/\r?\n/)[0] || undefined
+  } catch {
+    return undefined
+  }
 }
 
 function versionOfSdk(): string | undefined {
@@ -57,6 +70,7 @@ export function diagnosticsOpencode(): Promise<OpencodeDiagnostics> {
 
 async function chiedi(): Promise<OpencodeDiagnostics> {
   const sdk = versionOfSdk()
+  const executable = await risolviEseguibile('opencode')
   // Prima il server: è lo stesso che guiderebbe le conversazioni, quindi la versione
   // che risponde è la versione che STARK usa davvero. Solo se non parte si chiede al
   // binario, che comunque sta nel PATH (è così che lo cerca anche `presente()`).
@@ -65,7 +79,7 @@ async function chiedi(): Promise<OpencodeDiagnostics> {
     try {
       const h = await c.global.health()
       const v = (h.data as { version?: string } | undefined)?.version
-      return { ...(v ? { cli: v } : {}), ...(sdk ? { sdk } : {}), available: true }
+      return { ...(v ? { cli: v } : {}), ...(sdk ? { sdk } : {}), ...(executable ? { executable } : {}), available: true }
     } finally {
       lascia()
     }
@@ -73,7 +87,7 @@ async function chiedi(): Promise<OpencodeDiagnostics> {
   const via = await esegui('opencode', ['--version'], { timeout: 15_000 })
     .then(r => r.stdout.trim().split(/\s+/)[0])
     .catch(() => undefined)
-  return { ...(via ? { cli: via } : {}), ...(sdk ? { sdk } : {}), available: via !== undefined }
+  return { ...(via ? { cli: via } : {}), ...(sdk ? { sdk } : {}), ...(executable ? { executable } : {}), available: via !== undefined }
 }
 
 /** Nulla da scaldare che non si scaldi da sé: il primo `clientPer` accende il server,

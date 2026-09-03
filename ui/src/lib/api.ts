@@ -255,7 +255,7 @@ export type SystemInfo = {
    * non sa dirlo, `null` per uno che non ha risposto — e la pagina lo dice invece di
    * inventarsi un numero.
    */
-  diagnosticaAgenti?: Record<string, { cli?: string; sdk?: string; available: boolean } | null>
+  diagnosticaAgenti?: Record<string, { cli?: string; sdk?: string; executable?: string; available: boolean } | null>
   /**
    * Gli agent che questa macchina sa guidare, chi c'è davvero installato, e **quali
    * modalità ha ciascuno** — che le impostazioni devono poter offrire prima che esista

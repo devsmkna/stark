@@ -29,7 +29,10 @@
    * unico, stesso elenco di dispositivi collegati alla fine.
    */
   $effect(() => {
-    const url = stato?.tailscale.url
+    // `tailscale.url` porta già la barra finale (`https://host/`): senza togliere quella,
+    // `${url}/pair` diventava `https://host//pair`, un doppio slash che il telefono non
+    // apriva. Misurato dall'utente il 3 settembre 2026.
+    const url = stato?.tailscale.url?.replace(/\/+$/, '')
     if (!codice || !url) { qr = null; return }
     let vivo = true
     void QRCode.toDataURL(`${url}/pair?c=${codice.codice}`, { margin: 1, width: 220 })

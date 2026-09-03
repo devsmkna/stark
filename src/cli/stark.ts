@@ -366,6 +366,13 @@ function avviaConSystemd(): boolean {
     '--unit', `stark-${impronta}`,
     '--description', `STARK — ${STARK_HOME}`,
     '--collect', '--quiet',
+    // Senza, l'unità parte con la `WorkingDirectory` di default di systemd (la radice,
+    // non il checkout): i percorsi relativi che leggono la versione dell'SDK
+    // (`node_modules/@anthropic-ai/claude-agent-sdk`, il suo gemello per OpenCode)
+    // puntano al posto sbagliato e la pagina System mostra «unknown» per sempre — non
+    // per un `try/catch` che fallisce, ma perché guarda una cartella che non esiste lì.
+    // Stessa proprietà già presente nel ricambio del riavvio (`riavvio.ts`); qui mancava.
+    `--property=WorkingDirectory=${RADICE}`,
     `--property=StandardOutput=append:${log}`,
     `--property=StandardError=append:${log}`,
     ...ambienteSystemd(),

@@ -233,68 +233,39 @@
     { id: 'light', nome: 'Light' }, { id: 'dark', nome: 'Dark' }, { id: 'system', nome: 'System' },
   ]
 
-  const FONT: { id: FontFamily; nome: string }[] = [
-    { id: 'default', nome: 'Default' }, { id: 'system', nome: "This computer's font" },
+  const FONT_UI: { id: FontFamily; nome: string }[] = [
+    { id: 'default', nome: 'Default' },
+    { id: 'system', nome: "This computer's font" },
+    { id: 'Arial', nome: 'Arial' },
+    { id: 'Georgia', nome: 'Georgia' },
+    { id: 'Verdana', nome: 'Verdana' },
+  ]
+  const FONT_CODE: { id: FontFamily; nome: string }[] = [
+    { id: 'default', nome: 'Default' },
+    { id: 'system', nome: "This computer's font" },
+    { id: 'Consolas', nome: 'Consolas' },
+    { id: 'Courier New', nome: 'Courier New' },
   ]
 
   // ─── la scelta del font ────────────────────────────────────────────────────
   //
-  // L'elenco viene da `queryLocalFonts` (font **installati sulla macchina**, chiesti
-  // dal browser dentro il gesto di apertura) e si filtra scrivendo. Il tipo non è in
-  // `lib.dom` di questa versione di TypeScript, quindi si guarda la funzione invece di
-  // fingere di conoscerla — stessa lezione dei tipi-non-sono-fatti.
-  type FontChooser = { queryLocalFonts?: () => Promise<Array<{ family: string }>> }
+  // Portava un selettore con ricerca sopra `queryLocalFonts`, l'elenco dei font
+  // **installati sulla macchina** chiesto al browser dentro il gesto di apertura. In
+  // pratica il permesso non arriva mai in questo ambiente — misurato: sempre
+  // `NotAllowedError`, anche concedendolo dal prompt del browser — e un selettore che
+  // promette "i tuoi font" e non ne mostra mai nessuno è peggio di non promettere
+  // niente. Al posto della query, un paio di font classici del browser: sempre
+  // presenti, nessun permesso da chiedere.
   let fontDdOpen = $state<'ui' | 'code' | null>(null)
-  let fontCerca = $state('')
-  let fontLocali = $state<string[] | null>(null)
-  let fontErrore = $state('')
 
-  /** Una tendina aperta alla volta, e chiudendola si riparte dall'elenco pieno. */
-  async function apriFont(quale: 'ui' | 'code'): Promise<void> {
-    if (fontDdOpen === quale) { chiudiFont(); return }
-    fontDdOpen = quale
-    fontCerca = ''
-    fontErrore = ''
-    if (fontLocali === null) {
-      const chooser = document as FontChooser
-      if (typeof chooser.queryLocalFonts !== 'function') {
-        // Il browser non offre l'API (Firefox, Safari): le due voci di prima restano,
-        // e la ragione scritta nel selettore è ciò che resta al posto della lista.
-        fontErrore = 'This browser cannot list the fonts installed on this machine'
-        fontLocali = []
-        return
-      }
-      try {
-        const voci = await chooser.queryLocalFonts()
-        // Duplicati fra pesi e stili dello stesso family: il conteggio dice quanto
-        // capita, e la mappa li porta a uno.
-        const viste = new Map<string, number>()
-        for (const v of voci) viste.set(v.family, (viste.get(v.family) ?? 0) + 1)
-        fontLocali = [...viste.keys()].sort((a, b) => a.localeCompare(b))
-      } catch (e) {
-        fontErrore = e instanceof Error && e.name === 'NotAllowedError'
-          ? 'The browser did not allow reading the font list'
-          : 'The font list could not be read'
-        fontLocali = []
-      }
-    }
+  /** Una tendina aperta alla volta. */
+  function apriFont(quale: 'ui' | 'code'): void {
+    fontDdOpen = fontDdOpen === quale ? null : quale
   }
-  function chiudiFont(): void { fontDdOpen = null; fontCerca = '' }
-  /** Il filtro lo fa la casella: include e senza espressioni regolari — una `(` che
-   *  esplode non è una ricerca. */
-  const fontFiltrate = (quale: 'ui' | 'code'): string[] => {
-    const base = fontLocali ?? []
-    const t = fontCerca.trim().toLowerCase()
-    const trovate = t === '' ? base : base.filter(f => f.toLowerCase().includes(t))
-    // Il font di codice lo si cerca anche tra i monospace: non è un filtro vero —
-    // il browser non lo dichiara — ma le voci che lo dicono nel nome salgono in cima.
-    return quale === 'code'
-      ? [...trovate].sort((a, b) => Number(b.toLowerCase().includes('mono')) - Number(a.toLowerCase().includes('mono')))
-      : trovate
-  }
-  /** Cosa legge la riga quando è chiusa: il family scelto, o la voce fissa di prima.
-   *  «Default» non è lo stesso nome per le due righe — Inter per il testo, JetBrains
-   *  Mono per il codice — perché sono due `STACK` diversi in `fontfamily.svelte.ts`. */
+  function chiudiFont(): void { fontDdOpen = null }
+  /** Cosa legge la riga quando è chiusa. «Default» non è lo stesso nome per le due
+   *  righe — Inter per il testo, JetBrains Mono per il codice — perché sono due
+   *  `STACK` diversi in `fontfamily.svelte.ts`. */
   const fontEtichetta = (f: FontFamily, quale: 'ui' | 'code' = 'ui'): string =>
     f === 'default' ? (quale === 'code' ? 'JetBrains Mono' : 'Inter')
       : f === 'system' ? "This computer's font" : f
@@ -449,15 +420,41 @@
 
   // ─── il QR del pairing ─────────────────────────────────────────────────────
   //
-  // Sincronizzato col link che si copia (`linkAltrove`): cambia la chat selezionata,
-  // cambia anche il QR. Si genera solo aprendo la sezione Connectivity, e mai per la
-  // pagina intera — stessa condotta diagnostica dello storage qui sotto.
+  // NON è `linkAltrove`: quello è `location.origin`, giusto per un'altra finestra su
+  // *questa* macchina e sbagliato per un telefono, che deve raggiungerla da fuori — è
+  // perché il QR mostrava `127.0.0.1` anche guardando la pagina da Tailscale. Stessa
+  // ricetta di Phone.svelte: un codice a uso singolo che scade, con l'indirizzo di
+  // Tailscale letto da `telStato`, generato su richiesta col bottone «Show QR code».
   let qr = $state<string | null>(null)
+  let pairCodice = $state<{ codice: string; scade: number } | null>(null)
+  let pairErrore = $state<string | null>(null)
+  let pairAdesso = $state(Date.now())
+  const pairRestano = $derived(
+    pairCodice ? Math.max(0, Math.round((pairCodice.scade - pairAdesso) / 1000)) : 0)
+
   $effect(() => {
-    if (sez !== 'phone') return
-    const testo = linkAltrove
+    if (!pairCodice) return
+    const t = setInterval(() => { pairAdesso = Date.now() }, 1000)
+    return () => clearInterval(t)
+  })
+  // Il codice scaduto sparisce da solo, come in Phone.svelte: lasciarlo a schermo
+  // vorrebbe dire mostrare qualcosa che il telefono scoprirebbe non funzionare più.
+  $effect(() => { if (pairCodice && pairRestano === 0) pairCodice = null })
+
+  async function mostraCodicePairing(): Promise<void> {
+    pairErrore = null
+    try { pairCodice = await store.api.phoneCode() }
+    catch { pairErrore = 'Could not create a code' }
+  }
+
+  $effect(() => {
+    // `tailscale.url` porta già la barra finale (`https://host/`): senza togliere quella,
+    // `${url}/pair` diventava `https://host//pair`, un doppio slash che il telefono non
+    // apriva. Misurato dall'utente il 3 settembre 2026.
+    const url = telStato?.tailscale.url?.replace(/\/+$/, '')
+    if (!pairCodice || !url) { qr = null; return }
     let vivo = true
-    void QRCode.toDataURL(testo, { margin: 1, width: 240 })
+    void QRCode.toDataURL(`${url}/pair?c=${pairCodice.codice}`, { margin: 1, width: 240 })
       .then(d => { if (vivo) qr = d })
       .catch(() => { if (vivo) qr = null })
     return () => { vivo = false }
@@ -805,26 +802,43 @@
               <div class="dev"><span class="d-ico"><Icon name="i-phone" /></span><span class="d-body"><span class="d-name">{d.nome}</span><span class="d-meta">{d.id}</span></span><span class="d-seen">{(d as any).seen ?? (d as any).visto ?? ''}</span><button class="icon-btn ghost" onclick={() => { store.dialog = { kind: 'phone' } }}><Icon name="i-x" /></button></div>
             {/each}
           {/if}
-          {#if qr}
+          {#if !telStato?.tailscale.pronto}
             <div class="pair">
-              <!-- Il QR vero, non un segnaposto: `qrcode` è già dipendenza e
-                   Phone.svelte lo usa per lo stesso gesto. Il link che codifica è
-                   quello completo (token compreso): è ciò che il telefono deve
-                   leggere per entrare senza battere niente. -->
-              <span class="pair-qr"><img src={qr} alt="QR code — scan to open this address on your phone" width="120" height="120" /></span>
+              <span class="pair-qr"><Icon name="i-phone" /></span>
               <span class="pair-body">
-                <span class="p1">Pair a new phone</span>
-                <span class="p2">Scan the QR from your phone, or copy the link below.</span>
-                <span class="linkbox"><span class="lk">{linkMostrato}</span><button class="btn" onclick={() => void copia('link', linkAltrove)}>{copiato==='link'?'Copied':'Copy'}</button></span>
+                <span class="pt">Pair a new phone</span>
+                <span class="ps">Connect this machine to Tailscale first — see Connectivity above.</span>
+              </span>
+            </div>
+          {:else if !pairCodice}
+            <div class="pair">
+              <span class="pair-qr"><Icon name="i-phone" /></span>
+              <span class="pair-body">
+                <span class="pt">Pair a new phone</span>
+                <span class="ps">Good for 5 minutes and a single phone.</span>
+                <span class="linkbox"><button class="btn" onclick={() => void mostraCodicePairing()}>Show QR code</button>{#if pairErrore}<span style="color:var(--stop)">{pairErrore}</span>{/if}</span>
+              </span>
+            </div>
+          {:else if !qr}
+            <div class="pair">
+              <span class="pair-qr"><span class="spin"></span></span>
+              <span class="pair-body">
+                <span class="pt">Pair a new phone</span>
+                <span class="ps">Scan the QR from your phone, or type the code by hand.</span>
               </span>
             </div>
           {:else}
             <div class="pair">
-              <span class="pair-qr"><span class="spin"></span></span>
+              <!-- Il QR vero, non un segnaposto: `qrcode` è già dipendenza e
+                   Phone.svelte lo usa per lo stesso gesto. Porta l'indirizzo di
+                   Tailscale e un codice a uso singolo — mai il token, e mai
+                   `location.origin`, che da questa stessa pagina letta in locale
+                   direbbe `127.0.0.1`, inutile per un telefono. -->
+              <span class="pair-qr"><img src={qr} alt="QR code — scan to pair a phone" width="120" height="120" /></span>
               <span class="pair-body">
-                <span class="p1">Pair a new phone</span>
-                <span class="p2">Scan the QR from your phone, or copy the link below.</span>
-                <span class="linkbox"><span class="lk">{linkMostrato}</span><button class="btn" onclick={() => void copia('link', linkAltrove)}>{copiato==='link'?'Copied':'Copy'}</button></span>
+                <span class="pt">Pair a new phone</span>
+                <span class="ps">Scan the QR from your phone, or type the code below by hand.</span>
+                <span class="linkbox"><span class="lk">{pairCodice.codice}</span><span style="color:var(--muted); font-size:11px">Expires in {Math.floor(pairRestano / 60)}:{String(pairRestano % 60).padStart(2, '0')} · one use</span></span>
               </span>
             </div>
           {/if}
@@ -849,53 +863,27 @@
         </div>
         <div class="sec">
           <div class="sec-h"><span class="t">Font</span><span class="line"></span><span class="pill">this browser</span></div>
-          <!-- La scelta del font apre un selettore con ricerca, non una tendina fissa:
-               l'elenco viene da `queryLocalFonts`, che è ciò che il browser offre ai
-               font **installati su questa macchina**. Il permesso lo chiede il browser
-               dentro il gesto di apertura; negato o assente, le due voci di prima
-               restano e la riga lo dice (mai nascosto — Principio 5). -->
+          <!-- `queryLocalFonts` non arriva mai al permesso in questo ambiente: al posto
+               della lista "i tuoi font" che non si popolava mai, una tendina fissa con
+               un paio di font classici del browser — nessun permesso da chiedere. -->
           <div class="dfrow" class:open={fontDdOpen === 'ui'} onclick={() => apriFont('ui')}><span class="o-body"><span class="o-t">Interface font</span><span class="o-sub">the font you are reading right now</span></span><span class="dfval">{fontEtichetta(store.font.scelto)} <Icon name="i-fwd" /></span></div>
           {#if fontDdOpen === 'ui'}
             <div class="dd fontdd">
-              {#if fontErrore}<div class="dd-item off"><span class="dd-ico"><Icon name="i-warn" /></span><span class="dd-body"><span class="dd-n">{fontErrore}</span></span></div>{/if}
-              <div class="filter dd-filter"><Icon name="i-search" /><input placeholder="Search fonts…" bind:value={fontCerca} /></div>
-              {#if fontLocali}
-                {#each fontFiltrate('ui') as f (f)}
-                  <div class="dd-item" class:on={store.font.scelto === f} style={`font-family:'${f}'`} onclick={() => { store.font.set(f); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f}</span></span>{#if store.font.scelto === f}<Icon name="i-check" />{/if}
-                  </div>
-                {:else}
-                  <div class="dd-item off"><span class="dd-body"><span class="dd-n">No font matches “{fontCerca}”</span></span></div>
-                {/each}
-              {:else}
-                {#each FONT as f (f.id)}
-                  <div class="dd-item" class:on={store.font.scelto === f.id} onclick={() => { store.font.set(f.id); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.scelto === f.id}<Icon name="i-check" />{/if}
-                  </div>
-                {/each}
-              {/if}
+              {#each FONT_UI as f (f.id)}
+                <div class="dd-item" class:on={store.font.scelto === f.id} style={f.id === 'default' || f.id === 'system' ? '' : `font-family:'${f.id}'`} onclick={() => { store.font.set(f.id); chiudiFont() }}>
+                  <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.scelto === f.id}<Icon name="i-check" />{/if}
+                </div>
+              {/each}
             </div>
           {/if}
           <div class="dfrow" class:open={fontDdOpen === 'code'} onclick={() => apriFont('code')}><span class="o-body"><span class="o-t">Code font</span><span class="o-sub mono">grep -rn "model" src/</span></span><span class="dfval">{fontEtichetta(store.font.codeScelto, 'code')} <Icon name="i-fwd" /></span></div>
           {#if fontDdOpen === 'code'}
             <div class="dd fontdd">
-              {#if fontErrore}<div class="dd-item off"><span class="dd-ico"><Icon name="i-warn" /></span><span class="dd-body"><span class="dd-n">{fontErrore}</span></span></div>{/if}
-              <div class="filter dd-filter"><Icon name="i-search" /><input placeholder="Search fonts…" bind:value={fontCerca} /></div>
-              {#if fontLocali}
-                {#each fontFiltrate('code') as f (f)}
-                  <div class="dd-item" class:on={store.font.codeScelto === f} style={`font-family:'${f}'`} onclick={() => { store.font.setCode(f); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f}</span></span>{#if store.font.codeScelto === f}<Icon name="i-check" />{/if}
-                  </div>
-                {:else}
-                  <div class="dd-item off"><span class="dd-body"><span class="dd-n">No font matches “{fontCerca}”</span></span></div>
-                {/each}
-              {:else}
-                {#each FONT as f (f.id)}
-                  <div class="dd-item" class:on={store.font.codeScelto === f.id} onclick={() => { store.font.setCode(f.id); chiudiFont() }}>
-                    <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.codeScelto === f.id}<Icon name="i-check" />{/if}
-                  </div>
-                {/each}
-              {/if}
+              {#each FONT_CODE as f (f.id)}
+                <div class="dd-item" class:on={store.font.codeScelto === f.id} style={f.id === 'default' || f.id === 'system' ? '' : `font-family:'${f.id}'`} onclick={() => { store.font.setCode(f.id); chiudiFont() }}>
+                  <span class="dd-body"><span class="dd-n">{f.nome}</span></span>{#if store.font.codeScelto === f.id}<Icon name="i-check" />{/if}
+                </div>
+              {/each}
             </div>
           {/if}
           <div class="hint">Commands and code always stay monospaced.</div>
@@ -1081,7 +1069,7 @@
             <div class="agent">
               <div class="a-top"><span class="a-name">OpenCode</span><span class="a-ver">{diaOc.cli ?? 'unknown'}</span><span class="pill">system</span><span class="a-right"><span class="dot" style="background:var(--done)"></span>available</span></div>
               <div class="a-sub"><span>SDK {diaOc.sdk ?? 'unknown'}</span><span class="sep">·</span><span>{store.catalogo?.find(c=>c.id==='opencode')?.models.length ?? '…'} models</span></div>
-              <div class="a-path"><span class="p" title="opencode">opencode</span></div>
+              <div class="a-path"><span class="p" title={diaOc.executable ?? ''}>{diaOc.executable ?? 'not found'}</span><button class="copy" onclick={() => void copia('agent-opencode', diaOc.executable ?? '')}><Icon name="i-copy" /></button></div>
             </div>
           {:else if sys.diagnosticaAgenti?.['opencode']}
             <div class="agent">
@@ -1414,8 +1402,8 @@
   .linkbtn.small { font-size:11px; gap:5px; }
   .pair { display:flex; align-items:flex-start; gap:18px; padding:16px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); }
   .pair-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:7px; }
-  .pair-body .p1 { font-size:13px; font-weight:500; color:var(--ink); }
-  .pair-body .p2 { font-size:11.5px; line-height:1.55; color:var(--muted); }
+  .pair-body .pt { font-size:13px; font-weight:500; color:var(--ink); }
+  .pair-body .ps { font-size:11.5px; line-height:1.55; color:var(--muted); }
   .linkbox { display:flex; align-items:center; gap:9px; margin-top:2px; padding:7px 9px; border-radius:8px; background:var(--surface); border:1px solid var(--line); color:var(--muted); }
   .linkbox .lk { flex:1; min-width:0; font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .linkbox .btn { height:24px; padding:0 9px; flex:none; font-size:11px; }
@@ -1494,9 +1482,6 @@
      di ricerca del picker si stacca dal bordo con un margine negativo tarato su 4px
      (`.pk-search{margin:2px -4px -4px}`), la stessa cornice che usa nel dock. */
   .moddd { padding:4px; }
-  .dd-filter { margin:0 5px 6px; }
-  .dd-filter input { width:100%; background:transparent; border:none; outline:none; color:var(--ink); font-family:inherit; font-size:11.5px; }
-  .dd-filter input::placeholder { color:var(--muted); }
 
   /* Il QR vero nel blocco di pairing: il fondo resta bianco fisso (contrasto per la
      fotocamera, non per il tema), l'immagine ci sta dentro senza dilatarsi. */
@@ -1505,5 +1490,5 @@
   .pair-qr .spin { width:14px; height:14px; margin:53px; border-radius:50%;
     border:1.5px solid var(--line-2); border-top-color:var(--accent); animation:spin .8s linear infinite; }
   .pair .linkbox { margin-top:2px; }
-  .pair .p2 { max-width:34ch; }
+  .pair .ps { max-width:34ch; }
 </style>
