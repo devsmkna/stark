@@ -718,10 +718,14 @@
      testo invece che al suo centro. */
   .gstate.dotted { display: flex; align-items: center; gap: 6px; }
   /* Un progetto è un nodo di albero: l'intestazione è un <button> che apre e chiude.
-     Togliere l'aspetto di pulsante senza perderne il mestiere, come le righe `.sit`. */
+     Togliere l'aspetto di pulsante senza perderne il mestiere, come le righe `.sit`.
+     Niente `font`/`color: inherit` qui: `.gstate` (app.css) porta già `color: var(--muted)`
+     e `font-weight: 600` — alla stessa specificità, un `inherit` scritto qui li avrebbe
+     spenti, ed è esattamente il modo in cui l'intestazione del progetto aveva smesso di
+     sembrare un'intestazione `.gstate`. Il reset del bottone lo fa già la regola globale
+     `button{color:inherit;font-family:inherit;...}`. */
   .gstate.dotted {
     background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
-    font: inherit; color: inherit;
   }
   .gstate.dotted:focus-visible {
     outline: 2px solid var(--accent); outline-offset: -2px;
