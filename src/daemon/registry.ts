@@ -1398,11 +1398,22 @@ export class Registry {
     this.bump()
   }
 
+  /**
+   * Il daemon che si ferma non è un errore di nessuna sessione: è la stessa cosa di
+   * uno Sleep esplicito, fatto per tutte insieme. Prima chiamava `close()`, che scrive
+   * solo `session.state: closed` — un fatto vero (il processo finisce) ma letto da
+   * solo dice «si è fermata», non «l'ho fermata io e torna con un reopen». Stessa cura
+   * di `session.sleep` sopra: si interrompe un turno in corso prima di addormentarsi,
+   * per non perdere lavoro in volo.
+   */
   async shutdown(): Promise<void> {
     await Promise.all([...this.live.keys()].map(async id => {
       const l = this.live.get(id)
       if (!l) return
-      try { await l.adapter.close() } catch { /* il processo è già andato */ }
+      try {
+        if (l.snapshot.state === 'busy') await l.adapter.interrupt()
+        await l.adapter.sleep()
+      } catch { /* il processo è già andato */ }
       this.retire(id)
     }))
   }
