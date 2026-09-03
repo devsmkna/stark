@@ -1,11 +1,9 @@
 <script lang="ts">
   // L'elenco compatto: è la navigazione, non una barra di navigazione.
   //
-  // Due modi di raggrupparlo, scelti dal bottone sopra la lista (`store.grouping`):
-  // **per stato** e, dentro ogni stato, per progetto — sempre, anche quando il progetto
-  // è uno solo, perché la struttura non deve cambiare forma sotto gli occhi; oppure
-  // **per progetto**, in ordine alfabetico. Sono due domande diverse: la prima è «a
-  // cosa devo rispondere adesso», la seconda «cosa sta succedendo su questo lavoro».
+  // Raggruppato per progetto, in ordine alfabetico (o nell'ordine scelto a mano,
+  // `store.order`): dentro ogni progetto le righe restano ordinate per stato prima
+  // che per tempo, così chi ti aspetta sta sempre sopra chi dorme.
   import Icon from './Icon.svelte'
   import Logo from './Logo.svelte'
   import type { Match, SessionMatches, SessionRow } from '../lib/api.ts'
@@ -86,17 +84,11 @@
     return [...nostri] as string[]
   })
 
-  /**
-   * Una sezione dell'elenco, con la stessa forma nei due modi di raggruppare: chi
-   * disegna non deve sapere quale dei due è attivo, se no il `{#each}` diventerebbe due
-   * `{#each}` che divergono al primo ritocco. `proj` c'è solo quando è il progetto a
-   * fare da sezione — raggruppando per stato il pallino colorato sta sui sotto-gruppi.
-   */
+  /** Una sezione dell'elenco: un progetto, con le sue righe. */
   type Blocco = {
     key: string
-    head: string
-    proj?: string
-    sub: { name?: string; rows: SessionRow[] }[]
+    proj: string
+    rows: SessionRow[]
   }
 
   /**
@@ -129,28 +121,31 @@
   }
 
   const tree = $derived.by<Blocco[]>(() => {
-    if (store.grouping.by === 'project') {
-      // Dentro un progetto le chat restano ordinate per stato **prima** che per tempo:
-      // fuori dal raggruppamento per stato nessuno lo fa più, e senza, una che dorme
-      // capiterebbe sopra una che ti sta aspettando. `ORDER` è lo stesso elenco che dà
-      // l'ordine alle sezioni nell'altro modo — la convinzione «prima chi aspetta te»
-      // è una sola, e sta in un posto solo.
-      const peso = (r: SessionRow): number => ORDER.indexOf(group(r.state))
-      return perProgetto(recenti).map(([name, rows]) => ({
-        key: `p:${name}`,
-        head: name,
-        proj: name,
-        // Chiuso: l'intestazione resta, le righe no. È il `Blocco` a portare il fatto,
-        // così il disegno non deve sapere in quale modo di raggruppare sta guardando.
-        sub: [{ rows: store.collapse.isClosed(name) ? [] : [...rows].sort((a, b) => peso(a) - peso(b)) }],
-      }))
+    // Dentro un progetto le chat restano ordinate per stato **prima** che per tempo:
+    // senza, una che dorme capiterebbe sopra una che ti sta aspettando. `ORDER` è lo
+    // stesso elenco che dava l'ordine alle sezioni quando esisteva il raggruppamento
+    // per stato — la convinzione «prima chi aspetta te» è una sola, e sta in un
+    // posto solo.
+    const peso = (r: SessionRow): number => ORDER.indexOf(group(r.state))
+    return perProgetto(recenti).map(([name, rows]) => ({
+      key: `p:${name}`,
+      proj: name,
+      // Chiuso: l'intestazione resta, le righe no.
+      rows: store.collapse.isClosed(name) ? [] : [...rows].sort((a, b) => peso(a) - peso(b)),
+    }))
+  })
+
+  /** Quante chat di un progetto ti aspettano — contate sulle righe vere, non su
+   *  `tree`, che per un progetto chiuso le ha già svuotate. Serve solo chiuso: aperto,
+   *  il pallino di ogni riga (`.unread`) dice già la stessa cosa una per una. */
+  const needsCounts = $derived.by(() => {
+    const m = new Map<string, number>()
+    for (const r of recenti) {
+      if (!needsYou(r.state)) continue
+      const p = project(r.cwd)
+      m.set(p, (m.get(p) ?? 0) + 1)
     }
-    return ORDER.map(g => ({
-      key: `s:${g}`,
-      head: g,
-      sub: perProgetto(recenti.filter(r => group(r.state) === g))
-        .map(([name, rows]) => ({ name, rows: store.collapse.isClosed(name) ? [] : rows })),
-    })).filter(x => x.sub.length > 0)
+    return m
   })
 
   // ─── cercare ──────────────────────────────────────────────────────────────
@@ -425,23 +420,6 @@
     </div>
   {/if}
 
-  <!-- Raggruppare è un modo di guardare l'elenco, quindi il comando sta **sull'elenco**
-       e non nelle impostazioni: la scelta si fa guardando il risultato, e andarla a
-       cercare dietro un pannello vorrebbe dire sceglierla al buio. Sparisce mentre si
-       cerca, perché lì l'albero non c'è: un comando che non muove niente di ciò che
-       vedi è peggio di un comando assente. -->
-  {#if !inRicerca && store.rows.length > 0}
-    <div class="grpby">
-      <span class="lbl">Group by</span>
-      <span class="pick">
-        <button class:on={store.grouping.by === 'project'}
-          onclick={() => store.grouping.set('project')}>Project</button>
-        <button class:on={store.grouping.by === 'status'}
-          onclick={() => store.grouping.set('status')}>Status</button>
-      </span>
-    </div>
-  {/if}
-
   <div class="scroller" style="flex:1;padding-bottom:6px">
     {#if inRicerca}
       {#if perTitolo.length > 0}
@@ -557,45 +535,30 @@
       {/if}
     {/if}
     {#each tree as section (section.key)}
-      {#if section.proj}
-        <!-- Un progetto è un nodo di albero: si apre e si chiude. Nel raggruppamento
-             per progetto è la sezione stessa, per stato è il sotto-gruppo — la stessa
-             forma nei due modi, e la stessa chiave `store.collapse` li tiene insieme. -->
-        <button class="gstate dotted" class:closed={store.collapse.isClosed(section.proj)}
-          class:drop={dropTarget === section.proj}
-          aria-expanded={!store.collapse.isClosed(section.proj)}
-          onclick={() => store.collapse.toggle(section.proj)}
-          draggable="true"
-          ondragstart={e => dragProjectStart(e, section.proj)}
-          ondragover={e => dragProjectOver(e, section.proj)}
-          ondragleave={() => { if (dropTarget === section.proj) dropTarget = null }}
-          ondrop={e => dropProject(e, section.proj)}
-          ondragend={dragProjectEnd}>
-          <Icon name="i-down" class="chev" />
-          <i class="dotk p{palette.get(section.proj) ?? 0}"></i>
-          <span class="ghead">{section.head}</span>
-        </button>
-      {:else}
-        <div class="gstate">{section.head}</div>
-      {/if}
-      {#each section.sub as sub (sub.name ?? section.key)}
-        {#if sub.name}
-          <button class="gproj" class:closed={store.collapse.isClosed(sub.name)}
-            class:drop={dropTarget === sub.name}
-            aria-expanded={!store.collapse.isClosed(sub.name)}
-            onclick={() => store.collapse.toggle(sub.name)}
-            draggable="true"
-            ondragstart={e => dragProjectStart(e, sub.name)}
-            ondragover={e => dragProjectOver(e, sub.name)}
-            ondragleave={() => { if (dropTarget === sub.name) dropTarget = null }}
-            ondrop={e => dropProject(e, sub.name)}
-            ondragend={dragProjectEnd}>
-            <Icon name="i-down" class="chev" />
-            <i class="dotk p{palette.get(sub.name) ?? 0}"></i>
-            <span class="ghead">{sub.name}</span>
-          </button>
-        {/if}
-        {#each sub.rows as row (row.id)}
+      <!-- Un progetto è un nodo di albero: si apre e si chiude. Il quadrato di colore
+           sta a sinistra come sulle righe delle chat, che portano lo stesso segno
+           (§8); l'accordion sta a destra, dove si guarda per ultimo. -->
+      {@const closed = store.collapse.isClosed(section.proj)}
+      {@const n = needsCounts.get(section.proj) ?? 0}
+      <button class="gstate dotted" class:closed
+        class:drop={dropTarget === section.proj}
+        aria-expanded={!closed}
+        onclick={() => store.collapse.toggle(section.proj)}
+        draggable="true"
+        ondragstart={e => dragProjectStart(e, section.proj)}
+        ondragover={e => dragProjectOver(e, section.proj)}
+        ondragleave={() => { if (dropTarget === section.proj) dropTarget = null }}
+        ondrop={e => dropProject(e, section.proj)}
+        ondragend={dragProjectEnd}>
+        <i class="dotk p{palette.get(section.proj) ?? 0}"></i>
+        <span class="ghead">{section.proj}</span>
+        <!-- Compresso, il pallino di ogni riga sparisce con lei: il conto lo
+             rimpiazza, se no chiudere un progetto nasconderebbe anche il fatto che
+             qualcosa lì dentro ti aspetta. -->
+        {#if closed && n > 0}<span class="gcount">{n}</span>{/if}
+        <Icon name="i-down" class="chev" />
+      </button>
+      {#each section.rows as row (row.id)}
           {#if store.renaming === row.id}
             <!-- Rinominare non apre una schermata: il titolo diventa scrivibile dov'è.
                  svelte-ignore a11y_autofocus -->
@@ -641,7 +604,6 @@
             </button>
           {/if}
         {/each}
-      {/each}
     {/each}
 
     {#if tree.length === 0}
@@ -751,76 +713,47 @@
   .vsign.asking { background: var(--wait); }
   .vsign.working { background: var(--work); }
 
-  /* La riga del raggruppamento.
-     Il primo giro le aveva dato la voce delle intestazioni di sezione (`.gstate`):
-     maiuscoletto spaziato, grassetto. Sbagliato, e l'utente l'ha detto guardandola —
-     quella voce dice «da qui in giù c'è questa roba», mentre questa riga è un
-     **comando**, e a 9.5px in maiuscolo pesava più delle sezioni vere che stanno sotto.
-     Adesso è un'etichetta e basta: minuscola, muta, sottile. A farsi guardare è il
-     controllo, non la parola che lo introduce.
-     Il margine è 8+4 = 12px, cioè lo stesso di logo, lente della ricerca e pallino di
-     progetto: erano quattro cose incolonnate su tre ascisse diverse (12, 12, 10). */
-  .grpby {
-    display: flex; align-items: center; gap: 8px;
-    margin: 2px 8px 4px; padding: 0 4px;
-    font-size: 10px; color: var(--muted);
-  }
-  .grpby .lbl { white-space: nowrap; }
-
-  /* Non `.seg`: quella è la levetta a due vie delle impostazioni, dove sta dentro una
-     tabella e un bordo pieno la separa dalla riga accanto. Qui è sola su un fondo
-     piatto, e lo stesso bordo diventava un riquadro pesante attorno a due bottoni
-     squadrati — «brutti», detto guardandoli. Qui la traccia è un fondo, e a essere
-     disegnata è la voce **scelta**: sale sopra la traccia invece di accendersi. */
-  .pick {
-    margin-left: auto; flex: none;
-    display: flex; gap: 2px; padding: 2px;
-    border-radius: 999px; background: var(--surface-3);
-  }
-  .pick button {
-    padding: 2.5px 10px; border: 0; border-radius: 999px;
-    font: inherit; font-size: 10px; color: var(--muted); line-height: 1.5;
-  }
-  .pick button:hover:not(.on) { color: var(--ink); }
-  .pick button.on {
-    background: var(--surface); color: var(--ink); font-weight: 600;
-    /* Invisibile in tema scuro, e va bene: là a staccare è già `--surface`, che è più
-       **scuro** della traccia. In tema chiaro è il contrario — bianco su grigio — e
-       l'ombra è ciò che le impedisce di sembrare un buco invece di una pastiglia. */
-    box-shadow: 0 1px 1.5px rgba(0, 0, 0, .10);
-  }
-  .pick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  /* `.gstate` non è flex: lo diventa solo quando porta il pallino del progetto, cioè
-     solo raggruppando per progetto. Senza, il pallino resterebbe un carattere in linea
-     e cadrebbe sotto la riga di base del testo invece che al suo centro. */
+  /* `.gstate` non è flex: lo diventa solo quando porta il quadrato del progetto. Senza,
+     il segno resterebbe un carattere in linea e cadrebbe sotto la riga di base del
+     testo invece che al suo centro. */
   .gstate.dotted { display: flex; align-items: center; gap: 6px; }
   /* Un progetto è un nodo di albero: l'intestazione è un <button> che apre e chiude.
      Togliere l'aspetto di pulsante senza perderne il mestiere, come le righe `.sit`. */
-  .gstate.dotted, .gproj {
+  .gstate.dotted {
     background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
     font: inherit; color: inherit;
   }
-  .gproj { display: flex; align-items: center; gap: 6px; }
-  .gstate.dotted:focus-visible, .gproj:focus-visible {
+  .gstate.dotted:focus-visible {
     outline: 2px solid var(--accent); outline-offset: -2px;
   }
-  .gstate.dotted .chev, .gproj .chev {
-    flex: none; width: 11px; height: 11px; color: var(--muted);
+  /* L'accordion sta in fondo alla riga, non in testa: il colore e il nome sono ciò
+     che identifica il progetto, l'apri/chiudi è un comando e i comandi si guardano
+     per ultimi. Stessa direzione di sempre — giù aperto, verso destra chiuso — solo
+     ruotando lo stesso chevron, non due icone diverse da tenere sincronizzate. */
+  .gstate.dotted .chev {
+    flex: none; width: 11px; height: 11px; color: var(--muted); margin-left: auto;
     transition: transform .12s ease;
   }
-  .gstate.dotted.closed .chev, .gproj.closed .chev { transform: rotate(-90deg); }
-  .gstate.dotted .ghead, .gproj .ghead {
+  .gstate.dotted.closed .chev { transform: rotate(-90deg); }
+  .gstate.dotted .ghead {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .gstate.dotted:hover .chev, .gproj:hover .chev { color: var(--ink); }
+  .gstate.dotted:hover .chev { color: var(--ink); }
   /* Il bersaglio di un trascinamento: un bordo che dice «qui finisce». */
-  .gstate.dotted.drop, .gproj.drop {
+  .gstate.dotted.drop {
     background: var(--accent-soft); border-radius: 6px;
   }
-  .gstate.dotted.drop .chev, .gproj.drop .chev { color: var(--accent); }
-  /* Nomi progetto più grandi — nello screenshot STARK sotto WAITING è più grande del section header. */
+  .gstate.dotted.drop .chev { color: var(--accent); }
   :global(.side .gstate) { font-size: 10px; letter-spacing: .10em; padding: 10px 10px 4px; }
-  :global(.side .gproj) { font-size: 11.5px; font-weight: 700; letter-spacing: .02em; padding: 6px 10px 4px 12px; }
+
+  /* Il conto di quante chat aspettano, quando il progetto è chiuso e quindi le loro
+     righe — e i loro pallini (`.unread`, stesso `--accent`) — non si vedono più. */
+  .gcount {
+    flex: none; min-width: 15px; padding: 1px 5px; border-radius: 999px;
+    background: var(--accent); color: var(--on-accent);
+    font-size: 9.5px; font-weight: 700; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
 
   .sit, .sidefoot, .plus, .more {
     background: none;

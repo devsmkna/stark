@@ -1,9 +1,8 @@
 // Quali progetti sono **chiusi** nell'elenco.
 //
-// Sta nel browser e non sulla macchina per la stessa ragione del raggruppamento
-// (`grouping.svelte.ts`): «su questo schermo voglio vedere solo questi progetti»
-// è del dispositivo, non del progetto — e salvarlo sul daemon lo farebbe cambiare a
-// sorpresa sull'altra macchina.
+// Sta nel browser e non sulla macchina per la stessa ragione del tema: «su questo
+// schermo voglio vedere solo questi progetti» è del dispositivo, non del progetto —
+// e salvarlo sul daemon lo farebbe cambiare a sorpresa sull'altra macchina.
 //
 // Il default è **tutto aperto**: chi non tocca mai il comando non deve accorgersi
 // che esiste. Un progetto chiuso resta chiuso finché lo riapri, per dispositivo.

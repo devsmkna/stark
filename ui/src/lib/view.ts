@@ -44,8 +44,14 @@ export function label(state: SessionState | string, lastTurnAborted = false): La
  * sparisce quando la chat riprende a lavorare. Sotto questa regola coincide con
  * l'essere in Waiting, ed è voluto — la sezione è un'intestazione che scorre via,
  * il pallino viaggia con la riga.
+ *
+ * Eccetto **stopped**: `closed`/`error` finiscono in Waiting per l'ordinamento (§3,
+ * `group`), ma non sono un turno tuo da giocare — sono un processo che non c'è più
+ * dietro. Il pallino lì mentirebbe («c'è qualcosa che ti aspetta») su una riga che in
+ * realtà aspetta solo di essere riaperta.
  */
-export const needsYou = (state: SessionState | string): boolean => group(state) === 'Waiting'
+export const needsYou = (state: SessionState | string): boolean =>
+  group(state) === 'Waiting' && state !== 'closed' && state !== 'error'
 
 export const ORDER: Group[] = ['Waiting', 'Working', 'Sleeping']
 
@@ -75,6 +81,21 @@ export function colours(
     if (c !== undefined) perCartella.set(project(r.cwd), c)
   }
   return new Map(names.map((n, i) => [n, perCartella.get(n) ?? i % 7]))
+}
+
+/** Solo l'orario, senza la data — per le righe dei turni, dove il giorno lo dice il
+ *  bannerino sopra il primo messaggio della giornata, non ogni riga. */
+export function timeOnly(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** `03 Sep` — il bannerino di giornata sopra il primo messaggio di ogni giorno,
+ *  come WhatsApp: separa il flusso senza ripetere la data su ogni riga. */
+export function dayBanner(ts: number): string {
+  const d = new Date(ts)
+  return `${String(d.getDate()).padStart(2, '0')} ${MESI[d.getMonth()]}`
 }
 
 export function hhmm(ts: number): string {
