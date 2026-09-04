@@ -291,6 +291,13 @@ export class Registry {
    */
   private readonly all = new Set<() => void>()
   /**
+   * Chi vuole sapere che un turno è finito. Uno solo, e assegnato da fuori: serve alla
+   * sincronizzazione dell'uso in cloud, che ha bisogno dell'unico momento in cui le
+   * statistiche cambiano per davvero. Non è un `Set` come `all` perché non è un flusso
+   * a cui ci si abbona — è un aggancio del daemon, e due sarebbero due invii.
+   */
+  onTurnEnded?: () => void
+  /**
    * Quanto si è già letto del journal di ogni conversazione **ferma**, e lo stato a
    * cui si era arrivati. Vedi `leggi()`: è la cache che toglie la rilettura integrale
    * di tutta la storia a ogni aggiornamento dell'elenco.
@@ -520,6 +527,13 @@ export class Registry {
         // ciò che aspettava una risposta si chiude d'ufficio, su QUALUNQUE adapter.
         // Su OpenCode l'abbandono locale corre prima e questo trova già vuoto.
         if (p.k === 'turn.ended' && p.reason !== 'completed') this.chiudiOrfani(entry)
+        // Un turno finito è il momento in cui le statistiche cambiano davvero. Chi
+        // ascolta lo usa per mandarle al cloud, e non deve poter rompere niente qui:
+        // l'errore si mangia, perché questo è il percorso caldo di una conversazione
+        // e un problema di rete non è affare del turno che sta chiudendo.
+        if (p.k === 'turn.ended') {
+          try { this.onTurnEnded?.() } catch { /* affari di chi ascolta */ }
+        }
         if (p.k === 'session.error' && p.fatal) fatale = true
         // Il loop dell'adapter è finito male: senza questo la sessione resterebbe
         // nella mappa delle vive per sempre — `live:true` nell'elenco, e ogni prompt
@@ -737,7 +751,13 @@ export class Registry {
    * che una dimenticasse di saltare gli effimeri perché le due schermate dicessero
    * cose diverse sulla stessa macchina.
    */
-  private tuttiGliSnapshot(): Map<string, SessionSnapshot> {
+  /**
+   * Tutti gli snapshot, vivi e fermi. Pubblico perché non serve più solo qui dentro:
+   * anche la sincronizzazione dell'uso in cloud parte da questi, ed è la stessa fonte
+   * di verità delle statistiche locali — mandarne una diversa vorrebbe dire che il
+   * cloud e la schermata locale possono non essere d'accordo.
+   */
+  tuttiGliSnapshot(): Map<string, SessionSnapshot> {
     const snapshots = new Map<string, SessionSnapshot>()
     if (existsSync(SESSIONS)) {
       for (const f of readdirSync(SESSIONS)) {

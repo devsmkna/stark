@@ -177,6 +177,114 @@ const perCartella: ChiaveProgetto = s => ({ key: s.cwd ?? 'unknown', label: s.cw
     righe.length === 1 && righe[0]!.day === '2026-09-05', righe.map(r => r.day).join(','))
 }
 
+// ─── 6. il daemon: quando manda, e cosa ──────────────────────────────────────
+//
+// Qui non si prova la rete ma le tre regole che la circondano, e sono tutte cose che
+// se sbagliano non fanno rumore: che spento voglia dire spento, che il collasso non
+// mandi un invio per turno, e che la finestra dichiarata combaci con i giorni che ci
+// finiscono dentro. L'ultima è quella che è già stata sbagliata scrivendo il file:
+// partire da «adesso meno due giorni» dichiarava una giornata intera e ne mandava
+// mezza, e siccome un invio è una sostituzione il server cancellava l'altra metà.
+
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { creaUsageSync } from '../src/daemon/usage-sync.ts'
+
+type Corpo = {
+  window: { from: string; to: string }
+  rows: { day: string }[]
+  machine: { key: string; label: string }
+}
+
+async function provaDaemon(): Promise<void> {
+  const home = mkdtempSync(join(tmpdir(), 'stark-usage-'))
+  const veroFetch = globalThis.fetch
+  const inviati: Corpo[] = []
+  let rifiuta = false
+
+  process.env['STARK_CLOUD_URL'] = 'http://127.0.0.1:1/finto'
+  // Il token cloud sta su disco: senza, `manda()` si ferma prima di provarci e la
+  // prova misurerebbe il fatto di non essere loggati invece del collasso.
+  writeFileSync(join(home, 'cloud-token'), JSON.stringify({ token: 'x', email: 'a@b.c' }))
+
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    if (rifiuta) throw new Error('rete giù')
+    inviati.push(JSON.parse(String(init?.body ?? '{}')) as Corpo)
+    return new Response(JSON.stringify({ ok: true, rows: 0 }), { status: 200 })
+  }) as typeof fetch
+
+  try {
+    // Lo storico è già stato mandato: qui interessa l'invio normale, non il primo.
+    writeFileSync(join(home, 'usage-synced'), 'x\n')
+
+    const oggi = new Date(); oggi.setHours(9, 30, 0, 0)
+    // Un turno all'alba di due giorni fa: è il caso che smaschera la finestra che
+    // parte da «adesso meno due giorni» invece che da mezzanotte. Con quella, questo
+    // turno resterebbe fuori dall'invio ma **dentro** la finestra cancellata — cioè
+    // sparirebbe dal cloud a ogni sincronizzazione, senza che niente lo dica.
+    const dueGiorniFa = new Date(oggi); dueGiorniFa.setDate(dueGiorniFa.getDate() - 2)
+    dueGiorniFa.setHours(3, 0, 0, 0)
+    const unSnap = snap({
+      id: 'd1', cwd: '/p1', agent: 'claude-code', model: 'opus',
+      turns: [turno(oggi.getTime()), turno(dueGiorniFa.getTime())],
+    })
+    const comeGiorno = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+    // ─ spento vuol dire spento ─
+    let accesa = false
+    const sync = creaUsageSync({
+      home, snapshots: () => [unSnap], accesa: () => accesa, collassoMs: 50,
+    })
+    sync.turnoFinito()
+    await new Promise(r => setTimeout(r, 120))
+    check('con la sincronizzazione spenta non parte niente',
+      inviati.length === 0, `${inviati.length} invii`)
+
+    // ─ acceso: un invio, e la finestra è fatta di giorni interi ─
+    accesa = true
+    const esito = await sync.sincronizza()
+    check('acceso, l\'invio parte e va a buon fine', esito.ok, JSON.stringify(esito))
+    const primo = inviati[0]
+    check('la finestra dichiarata va da due giorni fa a oggi, per giorni interi',
+      primo?.window.to === comeGiorno(oggi) && primo?.window.from === comeGiorno(dueGiorniFa),
+      `${primo?.window.from} → ${primo?.window.to}`)
+    check('il turno di oggi è dentro l\'invio, non solo dentro la finestra',
+      (primo?.rows ?? []).some(r => r.day === comeGiorno(oggi)),
+      JSON.stringify(primo?.rows))
+    check('e anche quello delle 3 di notte del primo giorno della finestra',
+      (primo?.rows ?? []).some(r => r.day === comeGiorno(dueGiorniFa)),
+      JSON.stringify(primo?.rows))
+    check('ogni riga cade dentro la finestra dichiarata',
+      (primo?.rows ?? []).every(r => r.day >= primo!.window.from && r.day <= primo!.window.to))
+
+    // ─ il collasso: tre turni ravvicinati fanno un invio, non tre ─
+    inviati.length = 0
+    sync.turnoFinito(); sync.turnoFinito(); sync.turnoFinito()
+    await new Promise(r => setTimeout(r, 200))
+    check('tre turni dentro la finestra di collasso fanno un invio solo',
+      inviati.length === 1, `${inviati.length} invii`)
+
+    // ─ offline: non si accoda, e il giro dopo riprova ─
+    inviati.length = 0
+    rifiuta = true
+    const giu = await sync.sincronizza()
+    check('offline si fallisce dicendolo, senza accodare',
+      !giu.ok && giu.motivo.includes('raggiungibile'), JSON.stringify(giu))
+    rifiuta = false
+    const ripreso = await sync.sincronizza()
+    check('il giro dopo rimanda la stessa finestra, senza recuperare code',
+      ripreso.ok && inviati.length === 1, `${inviati.length} invii`)
+  } finally {
+    globalThis.fetch = veroFetch
+    delete process.env['STARK_CLOUD_URL']
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+await provaDaemon()
+
 // ─── esito ────────────────────────────────────────────────────────────────────
 let ko = 0
 for (const [name, ok, detail] of checks) {
