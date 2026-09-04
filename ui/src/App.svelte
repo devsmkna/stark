@@ -241,8 +241,9 @@ import Login from './components/Login.svelte'
     {#if showList}
       <Sidebar {store} />
     {:else if store.sidebarCollapsed && !store.narrow}
-      <!-- Sidebar collassata: una striscia sottile a sinistra per riaprirla. Senza,
-           l'unica via sarebbe la scorciatoia, e chi non la conosce resterebbe fuori. -->
+      <!-- Sidebar collassata: una striscia sottile a sinistra per riaprirla, con
+           l'icona in alto — dov'era il bottone di collasso — non a mezza altezza,
+           che sarebbe un posto nuovo da cercare ogni volta. -->
       <button class="sidebar-restore" title="Expand sidebar (mod+b)" aria-label="Expand sidebar"
         onclick={() => store.toggleSidebar()}>
         <Icon name="i-panel" />
@@ -597,11 +598,12 @@ import Login from './components/Login.svelte'
 
   .btn { cursor: pointer; }
 
-  /* Striscia di ripristino della sidebar collassata: sottile, con l'icona per
-     riaprirla. Sta dove andrebbe la sidebar, così la posizione è prevedibile. */
+  /* Striscia di ripristino della sidebar collassata: sottile, con l'icona in alto —
+     non a mezza altezza, che sarebbe un posto nuovo da imparare ogni volta che si
+     riapre. Sta dove andrebbe la sidebar, così la posizione resta prevedibile. */
   .sidebar-restore {
     width: 36px; flex: none; align-self: stretch;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 13px;
     background: var(--side); border: 0; border-right: 1px solid var(--line);
     color: var(--muted); cursor: pointer;
   }

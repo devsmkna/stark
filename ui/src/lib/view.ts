@@ -143,13 +143,13 @@ export function toolIcon(name: string): string {
   return 'i-doc'
 }
 
-/** `3s`, `1m 12s`, `2h 04m`. Mai decimi: nessuno decide niente sui decimi. */
+/** `00:00:03`, `01:12:07`. Sempre le tre unità, mai i decimi: nessuno decide niente
+ *  sui decimi, e un turno che dura ore non deve cambiare formato a metà. */
 export function since(from: number, to: number): string {
   const s = Math.max(0, Math.round((to - from) / 1000))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 }
 
 /**

@@ -325,74 +325,11 @@
   <div class="sidetop">
     <Logo height={16} />
     <div class="acts">
-      <button class="plus" title="New chat" aria-label="New chat"
-        onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
-        <Icon name="i-plus" />
-      </button>
-      <button class="more" title="More" aria-label="More" aria-expanded={moreOpen}
-        aria-haspopup="menu"
-        onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen }}>
-        <Icon name="i-more" />
-      </button>
       <button class="collapse" title="Collapse sidebar (mod+b)" aria-label="Collapse sidebar"
         onclick={() => store.toggleSidebar()}>
         <Icon name="i-panel" />
       </button>
     </div>
-    {#if moreOpen}
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="more-scrim" onclick={closeMore} oncontextmenu={e => { e.preventDefault(); closeMore() }}></div>
-      <div class="more-pop" role="menu">
-        <button class="mp-item" role="menuitem"
-          onclick={() => { void store.calls.toggle(); closeMore() }}>
-          <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
-          <span class="mp-label">Notifications</span>
-          {#if store.calls.on}<span class="mp-check"><Icon name="i-check" /></span>{/if}
-        </button>
-        <button class="mp-item" role="menuitem"
-          onclick={() => { soloNonLette = false; closeMore() }}>
-          <span class="mp-ico">{#if !soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
-          <span class="mp-label">Show completed</span>
-        </button>
-        <button class="mp-item" role="menuitem"
-          onclick={() => { soloNonLette = true; closeMore() }}>
-          <span class="mp-ico">{#if soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
-          <span class="mp-label">Unread only</span>
-        </button>
-        <hr class="mp-sep" />
-        <!-- La board arriva da main e sta qui, non in testata: il design ha svuotato
-             la barra a [+] e […] di proposito («come da screenshot 2»), e un modo a
-             tutto schermo come le impostazioni è roba dell'overflow, non un bottone
-             sempre visibile. -->
-        <button class="mp-item" role="menuitem"
-          onclick={() => { store.toggleBoard(); closeMore() }}>
-          <Icon name="i-brick" />
-          <span class="mp-label">Board</span>
-        </button>
-        <hr class="mp-sep" />
-        <button class="mp-item" role="menuitem"
-          onclick={() => { store.refused = null; store.dialog = { kind: 'phone' }; closeMore() }}>
-          <Icon name="i-phone" />
-          <span class="mp-label">Connected devices</span>
-        </button>
-        <hr class="mp-sep" />
-        <button class="mp-item" role="menuitem"
-          onclick={() => { store.refused = null; store.dialog = { kind: 'settings' }; closeMore() }}>
-          <Icon name="i-gear" />
-          <span class="mp-label">Settings</span>
-        </button>
-        {#if store.aggiornamento?.installata}
-          <hr class="mp-sep" />
-          <!-- In sola lettura, di proposito: qui si mostra cosa gira, non si aggiorna
-               niente — l'azione ha già il suo posto nella banda in cima. -->
-          <div class="mp-item mp-static">
-            <span class="mp-label">Version</span>
-            <span class="mp-ver">{store.aggiornamento.installata}</span>
-          </div>
-        {/if}
-      </div>
-    {/if}
   </div>
 
   <!-- La ricerca sta **sopra** l'elenco e non dentro un pannello suo: cercare è un
@@ -616,6 +553,75 @@
     {/if}
   </div>
 
+  <!-- Il fondo della barra: i tre puntini a sinistra, «New Chat» a destra — lungo,
+       perché è l'azione che si preme più spesso e non deve competere in un angolo
+       da 22px con tutto il resto (notifiche, board, impostazioni: quello sta
+       comunque dietro ai puntini). -->
+  <div class="sidebottom">
+    <button class="more" title="More" aria-label="More" aria-expanded={moreOpen}
+      aria-haspopup="menu"
+      onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen }}>
+      <Icon name="i-more" />
+    </button>
+    <button class="newchat" title="New chat" aria-label="New chat"
+      onclick={() => { store.refused = null; store.dialog = { kind: 'new' } }}>
+      <Icon name="i-plus" />
+      <span>New Chat</span>
+    </button>
+    {#if moreOpen}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="more-scrim" onclick={closeMore} oncontextmenu={e => { e.preventDefault(); closeMore() }}></div>
+      <div class="more-pop" role="menu">
+        <button class="mp-item" role="menuitem"
+          onclick={() => { void store.calls.toggle(); closeMore() }}>
+          <Icon name={store.calls.on ? 'i-bell' : 'i-bell-off'} />
+          <span class="mp-label">Notifications</span>
+          {#if store.calls.on}<span class="mp-check"><Icon name="i-check" /></span>{/if}
+        </button>
+        <button class="mp-item" role="menuitem"
+          onclick={() => { soloNonLette = false; closeMore() }}>
+          <span class="mp-ico">{#if !soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
+          <span class="mp-label">Show completed</span>
+        </button>
+        <button class="mp-item" role="menuitem"
+          onclick={() => { soloNonLette = true; closeMore() }}>
+          <span class="mp-ico">{#if soloNonLette}<Icon name="i-check" />{:else}<Icon name="i-circle" />{/if}</span>
+          <span class="mp-label">Unread only</span>
+        </button>
+        <hr class="mp-sep" />
+        <!-- La board sta nel menu e non come bottone suo: un modo a tutto schermo
+             come le impostazioni è roba dell'overflow, non un bottone sempre visibile. -->
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.toggleBoard(); closeMore() }}>
+          <Icon name="i-brick" />
+          <span class="mp-label">Board</span>
+        </button>
+        <hr class="mp-sep" />
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.refused = null; store.dialog = { kind: 'phone' }; closeMore() }}>
+          <Icon name="i-phone" />
+          <span class="mp-label">Connected devices</span>
+        </button>
+        <hr class="mp-sep" />
+        <button class="mp-item" role="menuitem"
+          onclick={() => { store.refused = null; store.dialog = { kind: 'settings' }; closeMore() }}>
+          <Icon name="i-gear" />
+          <span class="mp-label">Settings</span>
+        </button>
+        {#if store.aggiornamento?.installata}
+          <hr class="mp-sep" />
+          <!-- In sola lettura, di proposito: qui si mostra cosa gira, non si aggiorna
+               niente — l'azione ha già il suo posto nella banda in cima. -->
+          <div class="mp-item mp-static">
+            <span class="mp-label">Version</span>
+            <span class="mp-ver">{store.aggiornamento.installata}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
 </div>
 
 <style>
@@ -763,41 +769,51 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .sit, .sidefoot, .plus, .more {
+  .sit, .sidefoot, .more, .newchat, .collapse {
     background: none;
     border: 0;
     width: 100%;
     font: inherit;
     color: inherit;
   }
-  /* Testata: Logo a sinistra, a destra solo [+] viola e […] — il resto è nel menu.
-     [+] è l'unico bottone pieno della barra, come nello screenshot 1 (viola #8b5cf6). */
-  .plus, .more { width: auto; display: flex; cursor: pointer; align-items: center; justify-content: center; }
-  /* Plus più piccola nello screenshot: quadrato viola compatto, icona più piccola. */
-  .plus {
-    width: 22px; height: 22px; border-radius: 7px; background: var(--accent); color: var(--on-accent);
-    border: 1px solid transparent; box-shadow: 0 1px 2px rgba(16,20,32,.10);
-  }
-  .plus :global(svg.ic) { width: 11px; height: 11px; }
-  .plus:hover { filter: brightness(1.06); }
-  .more {
+  /* Testata: solo il logo e il collasso — [+] e […] sono scesi in fondo (vedi
+     `.sidebottom`), dove stanno gli altri comandi della barra. */
+  .collapse {
     width: 22px; height: 22px; border-radius: 7px; color: var(--muted);
+    display: flex; cursor: pointer; align-items: center; justify-content: center;
+  }
+  .collapse :global(svg.ic) { width: 14px; height: 14px; }
+  .collapse:hover { background: var(--surface-3); color: var(--ink); }
+
+  /* Il fondo della barra: i puntini a sinistra, «New Chat» lunga a destra. */
+  .sidebottom {
+    position: relative; flex: none; display: flex; align-items: center; gap: 7px;
+    padding: 8px 10px; border-top: 1px solid var(--line);
+  }
+  .more {
+    flex: none; width: 30px; height: 30px; border-radius: 8px; color: var(--muted);
+    display: flex; cursor: pointer; align-items: center; justify-content: center;
   }
   .more :global(svg.ic) { width: 14px; height: 14px; }
   .more:hover { background: var(--surface-3); color: var(--ink); }
   .more[aria-expanded="true"] { background: var(--surface-3); color: var(--ink); }
-  .collapse {
-    width: 22px; height: 22px; border-radius: 7px; color: var(--muted);
-    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  /* «+ New Chat»: l'icona sostituisce il carattere, il testo dice cosa fa. È il
+     bottone pieno della barra (viola #8b5cf6), come lo era il vecchio [+] isolato. */
+  .newchat {
+    flex: 1; height: 30px; border-radius: 8px; background: var(--accent); color: var(--on-accent);
+    display: flex; cursor: pointer; align-items: center; justify-content: center; gap: 6px;
+    font-size: 11.5px; font-weight: 600; box-shadow: 0 1px 2px rgba(16,20,32,.10);
   }
-  .collapse :global(svg.ic) { width: 14px; height: 14px; }
-  .collapse:hover { background: var(--surface-3); color: var(--ink); }
+  .newchat :global(svg.ic) { width: 12px; height: 12px; }
+  .newchat:hover { filter: brightness(1.06); }
 
   /* Menu … — fedele allo screenshot 2: card scura con bordi arrotondati, voci con icone a sinistra
      e spunta a destra, separator sottili. Segue il tema (surface/line) quindi "Segui sistema". */
   .more-scrim { position: fixed; inset: 0; z-index: 9; }
   .more-pop {
-    position: absolute; top: 40px; left: 8px; right: 8px; z-index: 10;
+    /* Apre verso l'alto, ancorata a `.sidebottom`: il bottone che la apre sta in
+       fondo alla barra adesso, non più in testata. */
+    position: absolute; bottom: 100%; margin-bottom: 8px; left: 0; right: 0; z-index: 10;
     width: auto; padding: 6px;
     background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px;
     box-shadow: 0 12px 32px rgba(16,20,32,.18); display: flex; flex-direction: column; gap: 1px;
@@ -828,7 +844,8 @@
        non devono contendergli il gesto — un dito fermo su una riga vale «menu», non
        «seleziona». */
     -webkit-touch-callout: none; user-select: none; }
-  .sit:focus-visible, .sidefoot:focus-visible, .plus:focus-visible, .more:focus-visible {
+  .sit:focus-visible, .sidefoot:focus-visible, .more:focus-visible,
+  .newchat:focus-visible, .collapse:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
