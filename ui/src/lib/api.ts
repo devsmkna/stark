@@ -112,7 +112,7 @@ export type ImportableRow = {
 /** Le impostazioni della macchina. Il tema e i suoni no: quelli sono del browser. */
 export type Settings = {
   permissions: Record<string, 'allow' | 'ask'>
-  projects: Record<string, { colour?: number; muted?: boolean; profile?: string }>
+  projects: Record<string, { colour?: number; muted?: boolean; profile?: string; name?: string }>
   /** Se l'agent deve scrivere **perché** lancia un comando. Vive nel `CLAUDE.md`
    *  globale dell'agent, quindi vale anche fuori da STARK. */
   toolDescriptions: boolean

@@ -63,6 +63,20 @@ export function project(cwd: string | undefined): string {
 }
 
 /**
+ * Il nome mostrato: quello scelto a mano se c'è, altrimenti la cartella. `project()`
+ * resta la sola funzione da usare per l'identità (raggruppamento, colore, ordine,
+ * aperto/chiuso) — non cambia mai con questa. `projectName()` è solo per il testo
+ * che l'utente legge.
+ */
+export function projectName(
+  cwd: string | undefined,
+  overrides: Record<string, { name?: string }> | undefined,
+): string {
+  const custom = cwd ? overrides?.[cwd]?.name?.trim() : undefined
+  return custom || project(cwd)
+}
+
+/**
  * Un progetto ha **un colore solo**, in qualunque gruppo compaia. Assegnati in ordine
  * alfabetico e non di apparizione: l'ordine di apparizione cambia a ogni avvio, e un
  * colore che cambia da solo non identifica più niente.
