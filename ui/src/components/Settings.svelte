@@ -19,7 +19,7 @@
   import { MIN as TAGLIA_MIN, MAX as TAGLIA_MAX, STEP as TAGLIA_STEP } from '../lib/textsize.svelte.ts'
   import { ZOOM_CHAT_MIN, ZOOM_CHAT_MAX, ZOOM_CHAT_STEP } from '../lib/lettura.svelte.ts'
   import type { FontFamily } from '../lib/fontfamily.svelte.ts'
-  import { MODE_BLURB, MODE_ICON, project } from '../lib/view.ts'
+  import { MODE_BLURB, MODE_ICON, project, projectName } from '../lib/view.ts'
   import { AZIONI, combos } from '../lib/actions.ts'
   import { conflicts, format, fromEvent, parse, stringify } from '../lib/shortcuts.ts'
   import type { Store } from '../lib/store.svelte.ts'
@@ -38,6 +38,8 @@
   let dentro = $state(false)
   let storageConfirm: string | null = $state(null)
   let swpopOpen: string | null = $state(null)
+  let renamingProj = $state<string | null>(null)
+  let projDraft = $state('')
   let projectFilter = $state('')
   let agentDdOpen: string | null = $state(null)
 
@@ -220,9 +222,9 @@
    *  un'impostazione: una cartella silenziata resta in elenco anche a chat cancellate. */
   const progetti = $derived.by(() => {
     const m = new Map<string, string>()
-    for (const r of store.rows) if (r.cwd) m.set(r.cwd, project(r.cwd))
+    for (const r of store.rows) if (r.cwd) m.set(r.cwd, projectName(r.cwd, store.settings?.projects))
     for (const cwd of Object.keys(store.settings?.projects ?? {})) {
-      if (!m.has(cwd)) m.set(cwd, project(cwd))
+      if (!m.has(cwd)) m.set(cwd, projectName(cwd, store.settings?.projects))
     }
     return [...m].sort((a, b) => a[1].localeCompare(b[1]))
   })
@@ -234,6 +236,18 @@
           cwd.toLowerCase().includes(projectFilter.toLowerCase())
         )
   )
+
+  function startRenameProj(cwd: string, nome: string): void {
+    projDraft = nome
+    renamingProj = cwd
+  }
+  async function commitRenameProj(cwd: string): Promise<void> {
+    const raw = project(cwd)
+    const value = projDraft.trim()
+    renamingProj = null
+    if (value === raw) { await store.setProject(cwd, { name: undefined }); return }
+    if (value && value !== (store.project(cwd).name ?? raw)) await store.setProject(cwd, { name: value })
+  }
 
   // ─── notifiche ────────────────────────────────────────────────────────────
 
@@ -758,7 +772,21 @@
             {@const col = store.project(cwd).colour ?? 0}
             <div class="pjrow" class:open={swpopOpen === cwd}>
               <span class="pj-dot" style="--c:var(--p{col+1})" onclick={() => swpopOpen = swpopOpen === cwd ? null : cwd}></span>
-              <span class="o-body"><span class="o-t">{nome}</span><span class="o-sub mono">{cwd}</span></span>
+              <span class="o-body">
+                {#if renamingProj === cwd}
+                  <!-- svelte-ignore a11y_autofocus -->
+                  <input class="pj-rn" autofocus bind:value={projDraft}
+                    onblur={() => void commitRenameProj(cwd)}
+                    onkeydown={e => {
+                      if (e.key === 'Enter') void commitRenameProj(cwd)
+                      if (e.key === 'Escape') renamingProj = null
+                    }} />
+                {:else}
+                  <button class="o-t pj-name" ondblclick={() => startRenameProj(cwd, nome)}
+                    title="{nome} — double-click to rename">{nome}</button>
+                {/if}
+                <span class="o-sub mono">{cwd}</span>
+              </span>
               {#if system && system.agent.profiles.length >= 1}
                 {@const dflt = system.agent.profiles.find(p=>p.current)?.path}
                 <span class="seg perm">
@@ -992,7 +1020,7 @@
             <div class="sec-h"><span class="t">By project</span><span class="line"></span></div>
             {#each uso.perProgetto as r (r.key)}
               <div class="brow">
-                <span class="b-body"><span class="b-name">{r.key==='unknown'?'no folder':project(r.key)}</span><span class="b-meta">{migliaia(r.c.prompts)} prompts · {durata(r.c.agentMs)}</span></span>
+                <span class="b-body"><span class="b-name">{r.key==='unknown'?'no folder':projectName(r.key, store.settings?.projects)}</span><span class="b-meta">{migliaia(r.c.prompts)} prompts · {durata(r.c.agentMs)}</span></span>
                 <span class="b-time">{migliaia(r.c.chars)} ch</span><span class="b-cost">{durata(r.c.agentMs)}</span>
               </div>
             {/each}
@@ -1023,14 +1051,14 @@
             {#each storage.sessions as s (s.id)}
               {#if storageConfirm === s.id}
                 <div class="jrow confirm">
-                  <span class="j-body"><span class="j-title">{s.title}</span><span class="j-proj">{s.cwd ? project(s.cwd) : 'no folder'}</span></span>
+                  <span class="j-body"><span class="j-title">{s.title}</span><span class="j-proj">{s.cwd ? projectName(s.cwd, store.settings?.projects) : 'no folder'}</span></span>
                   <span class="j-confirm">Delete this journal and free {mb(s.bytes)}?</span>
                   <button class="btn" onclick={() => storageConfirm = null}>Cancel</button>
                   <button class="btn solid-danger" onclick={async () => { const ok = await store.api.remove(s.id); if(ok.ok){ storage = await store.api.storage(); storageConfirm = null } else { storageConfirm = null; store.refused = ok.error ?? 'delete failed' } }}>Delete</button>
                 </div>
               {:else}
                 <div class="jrow">
-                  <span class="j-body"><span class="j-title">{s.title}</span><span class="j-proj">{s.cwd ? project(s.cwd) : 'no folder'}</span></span>
+                  <span class="j-body"><span class="j-title">{s.title}</span><span class="j-proj">{s.cwd ? projectName(s.cwd, store.settings?.projects) : 'no folder'}</span></span>
                   <span class="j-bar"><span style="width:{(s.bytes/maxBytes)*100}%"></span></span>
                   <span class="j-size">{mb(s.bytes)}</span>
                   <button class="icon-btn" title="Delete journal" onclick={() => storageConfirm = s.id}><Icon name="i-trash" /></button>
@@ -1391,6 +1419,15 @@
   .sw.on { background:var(--accent); }
   .sw.on .kn { background:#fff; transform:translateX(15px); }
   .pjrow { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .pj-name {
+    background: none; border: none; padding: 0; font: inherit; font-size: 13px;
+    font-weight: 600; color: var(--ink); text-align: left; cursor: text; width: fit-content;
+  }
+  .pj-rn {
+    font: inherit; font-size: 13px; font-weight: 600; width: 100%;
+    border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px;
+    background: var(--surface); color: var(--ink); outline: none;
+  }
   .pj-dot { flex:none; width:14px; height:14px; border-radius:5px; background:var(--c); cursor:pointer; box-shadow:0 0 0 0 rgba(255,255,255,0); transition:.15s; }
   .segbig { display:inline-flex; gap:6px; }
   .segbig button { display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 16px; border:1px solid var(--line-2); background:var(--surface-2); color:var(--muted); font-family:inherit; font-size:13px; border-radius:8px; cursor:pointer; transition:.15s; }
