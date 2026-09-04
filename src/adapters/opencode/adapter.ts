@@ -457,6 +457,9 @@ export class OpenCodeAdapter implements AgentSession {
     if (!this.ultimoPrompt || this.fermato) return false
     if (this.tentativi >= RITENTATIVI) return false
     if (!passeggero(motivo)) return false
+    // Un permesso o una domanda gia' in attesa: non e' il momento di rimandare un
+    // prompt, vedi `vivoPerRitentare`.
+    if (this.bloccantePendente) return false
     this.tentativi++
     this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })
     await new Promise(r => setTimeout(r, ATTESE_RIPRESA[this.tentativi - 1]))
@@ -474,9 +477,16 @@ export class OpenCodeAdapter implements AgentSession {
 
   /** C'e' ancora qualcuno per cui valga la pena riprovare? Da chiedersi **dopo** ogni
    *  attesa, perche' durante l'attesa la sessione puo' essersi fermata in tre modi
-   *  diversi: lo Stop dell'utente, lo Sleep, la chiusura. */
+   *  diversi: lo Stop dell'utente, lo Sleep, la chiusura. Anche `bloccantePendente` conta:
+   *  se durante l'attesa e' arrivato un permesso o una domanda, il runner sta aspettando
+   *  l'utente su quello — rimandargli sopra un prompt di ripresa lo fa lavorare su due
+   *  cose insieme, e uno Stop successivo trova un `legacy.session.abort()` che non sa
+   *  piu' quale delle due fermare (segnalato dall'utente il 3 settembre 2026: sessione
+   *  bloccata in `busy` dopo un rate limit, insensibile allo Stop).
+   */
   private vivoPerRitentare(): boolean {
     return !this.fermato && this.tr.turnoAperto() !== null && this.ultimoPrompt !== null
+      && this.bloccantePendente === null
   }
 
   /**
@@ -511,6 +521,7 @@ export class OpenCodeAdapter implements AgentSession {
     if (!this.ultimoPrompt || this.fermato) return false
     if (this.tentativi >= RITENTATIVI) return false
     if (!passeggero(motivo)) return false
+    if (this.bloccantePendente) return false
 
     this.tentativi++
     this.emit({ k: 'session.retried', attempt: this.tentativi, reason: motivo })

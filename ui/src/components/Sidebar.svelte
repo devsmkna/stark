@@ -339,6 +339,10 @@
         onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen }}>
         <Icon name="i-more" />
       </button>
+      <button class="collapse" title="Collapse sidebar (mod+b)" aria-label="Collapse sidebar"
+        onclick={() => store.toggleSidebar()}>
+        <Icon name="i-panel" />
+      </button>
     </div>
     {#if moreOpen}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -845,6 +849,12 @@
   .more :global(svg.ic) { width: 14px; height: 14px; }
   .more:hover { background: var(--surface-3); color: var(--ink); }
   .more[aria-expanded="true"] { background: var(--surface-3); color: var(--ink); }
+  .collapse {
+    width: 22px; height: 22px; border-radius: 7px; color: var(--muted);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .collapse :global(svg.ic) { width: 14px; height: 14px; }
+  .collapse:hover { background: var(--surface-3); color: var(--ink); }
 
   /* Menu … — fedele allo screenshot 2: card scura con bordi arrotondati, voci con icone a sinistra
      e spunta a destra, separator sottili. Segue il tema (surface/line) quindi "Segui sistema". */

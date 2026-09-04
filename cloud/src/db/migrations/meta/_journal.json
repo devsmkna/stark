@@ -8,6 +8,13 @@
       "when": 1788276555500,
       "tag": "0000_bent_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788351041089,
+      "tag": "0001_cold_ego",
+      "breakpoints": true
     }
   ]
 }

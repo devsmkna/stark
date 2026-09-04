@@ -61,6 +61,11 @@ function leggiToken(home: string): CloudToken | null {
   return null
 }
 
+/** Il token cloud, o `null` se non loggati. Serve allo stream che inoltra al cloud. */
+export function tokenCloud(home: string): string | null {
+  return leggiToken(home)?.token ?? null
+}
+
 function scriviToken(home: string, t: CloudToken): void {
   mkdirSync(home, { recursive: true })
   const path = cloudTokenPath(home)
@@ -125,4 +130,91 @@ export async function cloudStatus(home: string): Promise<{
   // Se il token non vale più (scaduto/revocato) lo si toglie: la UI dirà di rifare login.
   if (!r.ok) rmSync(cloudTokenPath(home), { force: true })
   return { url, email: r.ok ? t.email : null, server: r.status === 0 ? 'giu' : 'ok' }
+}
+
+// ─── la board cloud (il daemon fa da proxy) ─────────────────────────────────
+//
+// Il `cwd` della sessione è un path locale, che cambia da macchina a macchina: non va
+// bene come chiave della board remota. L'ID stabile è l'**origin della repo git** — lo
+// stesso per chiunque abbia il progetto. Il daemon lo risale dal `cwd` e lo passa al
+// cloud come query param.
+
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { dirname } from 'node:path'
+
+const execFileP = promisify(execFile)
+
+/**
+ * L'origin della repo git che contiene `cwd`, o `null` se non è dentro una repo.
+ *
+ * Si risale fino alla root della repo (`git rev-parse --show-toplevel`) e si legge
+ * l'origin (`git remote get-url origin`). Se manca l'origin (repo locale senza remoto)
+ * la board cloud non ha una chiave stabile: si restituisce `null` e la UI lo dirà.
+ */
+export async function originRepo(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 5000 })
+    const root = stdout.trim()
+    if (!root) return null
+    const { stdout: origin } = await execFileP('git', ['-C', root, 'remote', 'get-url', 'origin'], { timeout: 5000 })
+    const o = origin.trim()
+    return o || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Inoltra una richiesta board al cloud. `pathCloud` è la rotta cloud (es. `/api/board`),
+ * con l'origin già codificato. `null` se il cloud è spento o non loggati.
+ */
+async function proxyBoard(
+  home: string, origin: string, pathCloud: string, init?: RequestInit,
+): Promise<{ ok: boolean; status: number; body: unknown }> {
+  const url = cloudUrl()
+  const token = tokenCloud(home)
+  if (!url || !token) return { ok: false, status: 401, body: { error: 'cloud non configurato o non loggato' } }
+  const q = new URLSearchParams({ origin })
+  return chiama(url, `${pathCloud}?${q}`, {
+    ...init,
+    headers: { ...(init?.headers ?? {}), authorization: `Bearer ${token}` },
+  })
+}
+
+/** Legge la board cloud di un progetto. */
+export async function boardCloud(home: string, origin: string): Promise<unknown> {
+  const r = await proxyBoard(home, origin, '/api/board')
+  return r.body
+}
+
+/** Crea la board cloud di un progetto se non c'è. */
+export async function boardInitCloud(home: string, origin: string): Promise<unknown> {
+  const r = await proxyBoard(home, origin, '/api/board/init', { method: 'POST' })
+  return r.body
+}
+
+/** Crea una card nella board cloud. */
+export async function boardTaskCloud(
+  home: string, origin: string, input: { title: string; priority?: string; body?: string },
+): Promise<unknown> {
+  const r = await proxyBoard(home, origin, '/api/board/task', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return r.body
+}
+
+/** Modifica una card nella board cloud (stato, titolo, priorità, claim, posizione). */
+export async function boardEditCloud(
+  home: string, origin: string, id: number,
+  input: { status?: string; title?: string; priority?: string; claimed_by?: string; position?: number },
+): Promise<unknown> {
+  const r = await proxyBoard(home, origin, `/api/board/task/${id}/edit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return r.body
 }

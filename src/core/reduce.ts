@@ -357,7 +357,12 @@ export function applyTo(s: SessionSnapshot, e: CanonicalEvent): SessionSnapshot 
     case 'session.continued': s.continuedFrom = { id: p.from, file: p.file }; break
     case 'session.state':
       s.state = p.state
-      if (p.reason !== undefined) s.stateReason = p.reason
+      // Sempre riscritto, anche a `undefined`: una `reason` di una transizione vecchia
+      // (es. il permesso che aveva messo `awaiting`/`external_directory`) non deve
+      // sopravvivere a uno stato nuovo che non ne porta una — altrimenti un `busy`
+      // senza motivo eredita l'etichetta di un `awaiting` di prima, e la UI mostra
+      // «busy (external_directory)» su un turno che con quel permesso non c'entra piu'.
+      s.stateReason = p.reason
       break
     // ADR-014: la via nuova. `mode` e `model` restano come **comodita'** sullo
     // snapshot — l'elenco delle chat e le notifiche li vogliono senza aprire una

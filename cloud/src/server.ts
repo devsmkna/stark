@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { registra, login, revoca, chi } from './auth.ts'
+import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
 import { sql } from './db/client.ts'
 
 const PORTA = Number(process.env['PORT'] ?? 8787)
@@ -33,6 +34,26 @@ function bearer(req: IncomingMessage): string {
   return h.startsWith('Bearer ') ? h.slice(7).trim() : ''
 }
 
+// ─── pub/sub della board (stream event-driven) ──────────────────────────────
+// I client connessi a `/board/stream` di un origin, in memoria. Quando una board
+// cambia si notifica chi la sta guardando: è la stessa idea del flusso SSE del daemon.
+const ascoltatori = new Map<string, Set<ServerResponse>>()
+
+function sottoscrivi(origin: string, res: ServerResponse): void {
+  let s = ascoltatori.get(origin)
+  if (!s) { s = new Set(); ascoltatori.set(origin, s) }
+  s.add(res)
+  res.on('close', () => { s!.delete(res); if (s!.size === 0) ascoltatori.delete(origin) })
+}
+
+function notifica(origin: string, board: unknown): void {
+  const s = ascoltatori.get(origin)
+  if (!s) return
+  for (const res of s) {
+    try { res.write(`event: board\ndata: ${JSON.stringify(board)}\n\n`) } catch { /* client morto */ }
+  }
+}
+
 export async function startCloud(): Promise<void> {
   // Le migrazioni si applicano a ogni avvio: sono cumulative e idempotenti, quindi
   // il server arriva sempre su uno schema aggiornato senza un passo a parte.
@@ -42,6 +63,7 @@ export async function startCloud(): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
     const method = req.method ?? 'GET'
+    const origin = (url.searchParams.get('origin') ?? '').trim()
     try {
       if (method === 'POST' && path === '/api/register') {
         const body = await readJson<{ email?: string; password?: string }>(req)
@@ -69,6 +91,52 @@ export async function startCloud(): Promise<void> {
         if (!email) return send(res, 401, { error: 'non autenticato' })
         return send(res, 200, { email })
       }
+
+      // ─── la board (dietro auth Bearer) ─────────────────────────────────────
+      // L'`origin` arriva come query param, non come segmento di path: è un URL git
+      // con slash, che in un segmento si romperebbe.
+      if (origin && path.startsWith('/api/board')) {
+        const email = await chi(bearer(req))
+        if (!email) return send(res, 401, { error: 'non autenticato' })
+
+        if (method === 'GET' && path === '/api/board') {
+          return send(res, 200, await leggiBoard(origin))
+        }
+        if (method === 'GET' && path === '/api/board/stream') {
+          res.writeHead(200, {
+            'content-type': 'text/event-stream',
+            'cache-control': 'no-cache',
+            connection: 'keep-alive',
+          })
+          res.write(`event: board\ndata: ${JSON.stringify(await leggiBoard(origin))}\n\n`)
+          sottoscrivi(origin, res)
+          return
+        }
+        if (method === 'POST' && path === '/api/board/init') {
+          const esito = await initBoard(origin)
+          if (esito.ok) notifica(origin, await leggiBoard(origin))
+          return send(res, esito.ok ? 200 : 400, esito)
+        }
+        if (method === 'POST' && path === '/api/board/task') {
+          const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
+          if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
+          const esito = await creaTask(origin, email, {
+            title: body.title, priority: body.priority, body: body.body,
+          })
+          if (esito.ok) notifica(origin, await leggiBoard(origin))
+          return send(res, esito.ok ? 200 : 400, esito)
+        }
+        const em = /^\/api\/board\/task\/(\d+)\/edit$/.exec(path)
+        if (method === 'POST' && em) {
+          const body = await readJson<{
+            status?: string; title?: string; priority?: string; claimed_by?: string; position?: number
+          }>(req)
+          const esito = await modificaTask(origin, email, Number(em[1]), body ?? {})
+          if (esito.ok) notifica(origin, await leggiBoard(origin))
+          return send(res, esito.ok ? 200 : 400, esito)
+        }
+      }
+
       send(res, 404, { error: 'non trovato' })
     } catch (e) {
       send(res, 500, { error: String((e as Error).message ?? e) })

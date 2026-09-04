@@ -54,3 +54,12 @@
 {"timestamp":"2026-09-02T10:12:55.664621+02:00","action":"release","task_id":15,"detail":"veenz"}
 {"timestamp":"2026-09-02T10:48:17.348708+02:00","action":"create","task_id":16,"detail":"macOS: il perimetro Tailscale non si rileva quasi mai all'avvio (timeout 2s contro un CLI che al primo colpo costa 20-34s)"}
 {"timestamp":"2026-09-02T11:41:57.122829+02:00","action":"create","task_id":17,"detail":"Registrazione dalla UI: oggi un account nuovo si crea solo con curl"}
+{"timestamp":"2026-09-02T14:07:20.5176+02:00","action":"create","task_id":18,"detail":"Board cloud su Postgres: schema, rotte, proxy daemon"}
+{"timestamp":"2026-09-02T14:07:25.795544+02:00","action":"edit","task_id":18,"detail":"Board cloud su Postgres: schema, rotte, proxy daemon"}
+{"timestamp":"2026-09-02T14:07:25.795732+02:00","action":"claim","task_id":18,"detail":"veenz"}
+{"timestamp":"2026-09-02T14:07:25.82037+02:00","action":"move","task_id":18,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-02T18:47:10.366727+02:00","action":"move","task_id":18,"detail":"in-progress -\u003e review"}
+{"timestamp":"2026-09-02T18:57:49.770522+02:00","action":"create","task_id":19,"detail":"Sidebar collassabile con scorciatoia mod+b"}
+{"timestamp":"2026-09-03T13:46:52.160357+02:00","action":"edit","task_id":19,"detail":"Sidebar collassabile con scorciatoia mod+b"}
+{"timestamp":"2026-09-03T13:46:52.161198+02:00","action":"claim","task_id":19,"detail":"veenz"}
+{"timestamp":"2026-09-03T13:46:52.181226+02:00","action":"move","task_id":19,"detail":"backlog -\u003e review"}

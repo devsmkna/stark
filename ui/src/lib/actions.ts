@@ -27,6 +27,12 @@ export const AZIONI: Azione[] = [
     hint: 'Open or close the project board.',
     default: 'mod+l',
   },
+  {
+    id: 'sidebar',
+    label: 'Toggle the sidebar',
+    hint: 'Collapse or expand the sidebar.',
+    default: 'mod+b',
+  },
 ]
 
 /** La combinazione in vigore per ogni azione: quella scelta, o quella di partenza. */

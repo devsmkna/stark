@@ -21,7 +21,7 @@ import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.t
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
-import { leggiBoard, guardaBoard, initBoard, creaTask, modificaTask } from './board.ts'
+import { boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
@@ -864,29 +864,40 @@ async function route(
       }
       if (method === 'GET' && resto === '') {
         if (senzaCwd()) return
-        return send(res, 200, await leggiBoard(cwd!))
+        // La board è cloud: il daemon risale l'origin della repo e inoltra.
+        const origin = await originRepo(cwd!)
+        if (!origin) return send(res, 200, { origin: null, columns: [], assente: true, motivo: 'nessun origin git' })
+        return send(res, 200, await boardCloud(STARK_HOME, origin))
       }
       if (method === 'GET' && resto === 'stream') {
         if (senzaCwd()) return
-        return boardStream(req, res, cwd!)
+        const origin = await originRepo(cwd!)
+        if (!origin) return send(res, 404, { error: 'nessun origin git' })
+        return boardStream(req, res, origin)
       }
       if (method === 'POST' && resto === '/init') {
         if (senzaCwd()) return
-        return send(res, 200, await initBoard(cwd!))
+        const origin = await originRepo(cwd!)
+        if (!origin) return send(res, 400, { error: 'nessun origin git' })
+        return send(res, 200, await boardInitCloud(STARK_HOME, origin))
       }
       if (method === 'POST' && resto === '/task') {
         if (senzaCwd()) return
+        const origin = await originRepo(cwd!)
+        if (!origin) return send(res, 400, { error: 'nessun origin git' })
         const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
         if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
-        return send(res, 200, await creaTask(cwd!, {
+        return send(res, 200, await boardTaskCloud(STARK_HOME, origin, {
           title: body.title.slice(0, 500), priority: body.priority, body: body.body,
         }))
       }
       const em = /^\/task\/(\d+)\/edit$/.exec(resto)
       if (method === 'POST' && em) {
         if (senzaCwd()) return
-        const body = await readJson<{ status?: string; title?: string; priority?: string }>(req)
-        return send(res, 200, await modificaTask(cwd!, Number(em[1]), body ?? {}))
+        const origin = await originRepo(cwd!)
+        if (!origin) return send(res, 400, { error: 'nessun origin git' })
+        const body = await readJson<{ status?: string; title?: string; priority?: string; claimed_by?: string; position?: number }>(req)
+        return send(res, 200, await boardEditCloud(STARK_HOME, origin, Number(em[1]), body ?? {}))
       }
     }
 
@@ -1057,7 +1068,7 @@ function cartelleNote(registry: Registry): string[] {
  * Si manda lo stato **intero** a ogni cambio: è la forma che rende impossibile restare
  * disallineati dopo una riconnessione.
  */
-async function boardStream(req: IncomingMessage, res: ServerResponse, cwd: string): Promise<void> {
+async function boardStream(req: IncomingMessage, res: ServerResponse, origin: string): Promise<void> {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
     'cache-control': 'no-store',
@@ -1065,24 +1076,51 @@ async function boardStream(req: IncomingMessage, res: ServerResponse, cwd: strin
   })
   res.write(': collegato\n\n')
 
-  const invia = async (): Promise<void> => {
-    res.write(`event: board\ndata: ${JSON.stringify(await leggiBoard(cwd))}\n\n`)
+  // La board è cloud: il daemon apre uno stream SSE verso il server cloud e lo ripassa
+  // alla UI. Il cloud manda lo stato intero a ogni cambio, quindi qui basta inoltrare.
+  const url = cloudUrl()
+  const token = tokenCloud(STARK_HOME)
+  if (!url || !token) {
+    res.write(`event: board\ndata: ${JSON.stringify({ origin, columns: [], assente: true, motivo: 'cloud non configurato o non loggato' })}\n\n`)
+    res.end()
+    return
   }
-  void invia()
-
-  // Il watcher spara più volte per una scrittura sola: senza questa attesa la board si
-  // ridisegnerebbe due o tre volte per ogni modifica, e con essa si legge una volta a
-  // file fermo.
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const stacca = guardaBoard(cwd, () => {
-    if (timer === null) timer = setTimeout(() => { timer = null; void invia() }, 120)
-  })
+  const q = new URLSearchParams({ origin })
+  const ctrl = new AbortController()
+  try {
+    const upstream = await fetch(`${url}/api/board/stream?${q}`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    })
+    if (!upstream.ok || !upstream.body) throw new Error(`upstream ${upstream.status}`)
+    const reader = upstream.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    const pump = async (): Promise<void> => {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        // Inoltra gli eventi completi (`event:` ... `data:` ... riga vuota).
+        let idx: number
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, idx + 2)
+          buf = buf.slice(idx + 2)
+          res.write(chunk)
+        }
+      }
+    }
+    void pump().catch(() => {})
+  } catch {
+    res.write(`event: board\ndata: ${JSON.stringify({ origin, columns: [], assente: true, motivo: 'cloud non raggiungibile' })}\n\n`)
+    res.end()
+    return
+  }
 
   const battito = setInterval(() => res.write(': .\n\n'), 15000)
   req.on('close', () => {
     clearInterval(battito)
-    if (timer) clearTimeout(timer)
-    stacca()
+    ctrl.abort()
   })
 }
 
