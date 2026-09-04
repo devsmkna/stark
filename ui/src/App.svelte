@@ -53,6 +53,7 @@ import Login from './components/Login.svelte'
 
   function esegui(id: string): void {
     if (id === 'board') { store.toggleBoard(); return }
+    if (id === 'sidebar') { store.toggleSidebar(); return }
     if (id !== 'palette') return
     // Premerla di nuovo mentre è aperta la chiude: è la stessa combinazione, e
     // riaprirla sopra sé stessa non vuol dire niente.
@@ -145,7 +146,7 @@ import Login from './components/Login.svelte'
   const soloPanel = $derived(store.narrow && rightOpen)
   // retrocompat: vecchio soloHelper usato solo per decidere layout stretto
   const soloHelper = $derived(soloPanel)
-  const showList = $derived(!soloPanel && (!store.narrow || (store.selected === null && !store.fatal)))
+  const showList = $derived(!soloPanel && !store.sidebarCollapsed && (!store.narrow || (store.selected === null && !store.fatal)))
   const showRight = $derived(!soloPanel && (!store.narrow || store.selected !== null || !!store.fatal))
 
   // ─── gate d'accesso: login cloud ───────────────────────────────────────────
@@ -238,6 +239,14 @@ import Login from './components/Login.svelte'
   {:else}
     {#if showList}
       <Sidebar {store} />
+    {:else if store.sidebarCollapsed && !store.narrow}
+      <!-- Sidebar collassata: una striscia sottile a sinistra per riaprirla, con
+           l'icona in alto — dov'era il bottone di collasso — non a mezza altezza,
+           che sarebbe un posto nuovo da cercare ogni volta. -->
+      <button class="sidebar-restore" title="Expand sidebar (mod+b)" aria-label="Expand sidebar"
+        onclick={() => store.toggleSidebar()}>
+        <Icon name="i-panel" />
+      </button>
     {/if}
 
     {#if !showRight}
@@ -587,4 +596,16 @@ import Login from './components/Login.svelte'
   .sheet hr { margin: 3px 6px; }
 
   .btn { cursor: pointer; }
+
+  /* Striscia di ripristino della sidebar collassata: sottile, con l'icona in alto —
+     non a mezza altezza, che sarebbe un posto nuovo da imparare ogni volta che si
+     riapre. Sta dove andrebbe la sidebar, così la posizione resta prevedibile. */
+  .sidebar-restore {
+    width: 36px; flex: none; align-self: stretch;
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 13px;
+    background: var(--side); border: 0; border-right: 1px solid var(--line);
+    color: var(--muted); cursor: pointer;
+  }
+  .sidebar-restore :global(svg.ic) { width: 16px; height: 16px; }
+  .sidebar-restore:hover { background: var(--surface-3); color: var(--ink); }
 </style>

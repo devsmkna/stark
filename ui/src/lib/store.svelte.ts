@@ -309,6 +309,17 @@ export class Store {
   narrow = $state(false)
 
   /**
+   * La barra laterale è collassata? È una preferenza del dispositivo, non del progetto:
+   * sta nel browser e non sul daemon, come `boardOpen`. Si apre con la scorciatoia.
+   */
+  sidebarCollapsed = $state(leggiPreferenza('stark.sidebar'))
+
+  toggleSidebar(): void {
+    this.sidebarCollapsed = !this.sidebarCollapsed
+    try { localStorage.setItem('stark.sidebar', this.sidebarCollapsed ? '1' : '0') } catch { /* privato */ }
+  }
+
+  /**
    * L'id della chat che si sta trascinando dalla barra laterale, o `null`.
    *
    * Sta qui e non dentro `Workspace` perché serve a **tutti** i pannelli insieme: è
