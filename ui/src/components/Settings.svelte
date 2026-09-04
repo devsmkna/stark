@@ -12,7 +12,7 @@
   import Icon from './Icon.svelte'
   import ModelPicker from './ModelPicker.svelte'
   import QRCode from 'qrcode'
-  import type { CloudStatus, StatoTelefono, Storage, SystemInfo } from '../lib/api.ts'
+  import type { CloudStatus, StatoTelefono, Storage, SystemInfo, UsoRipartizione } from '../lib/api.ts'
   import type { Stats } from '$core/stats.ts'
   import type { Call } from '../lib/notify.svelte.ts'
   import type { Theme } from '../lib/theme.svelte.ts'
@@ -327,6 +327,15 @@
   let periodo = $state('7d')
   let uso = $state<Stats | null>(null)
   let erroreUso = $state('')
+  /** I dispositivi, quando i numeri arrivano dal cloud. Vuoto quando sono locali:
+   *  su una macchina sola «By device» sarebbe una riga che dice ciò che si sta già
+   *  guardando. */
+  let dispositivi = $state<(UsoRipartizione & { lastSeen: string })[]>([])
+  /** Perché stai guardando solo questa macchina, quando la sync è accesa ma i numeri
+   *  del cloud non sono arrivati. Vuoto = non c'è niente da spiegare. */
+  let ricaduta = $state('')
+  let sincronizzando = $state(false)
+  let esitoSync = $state('')
 
   /** L'inizio del periodo scelto, a **mezzanotte**: «7 days» vuol dire sette giornate,
    *  non sette volte ventiquattr'ore a partire da adesso — se no la barra di oggi
@@ -345,11 +354,80 @@
     // dire spedire la storia intera di ogni conversazione per calcolare venti numeri.
     if (sez !== 'usage') return
     const p = periodo
-    const from = daQuando(p)
-    void store.api.stats(from === undefined ? {} : { from }).then(
-      s => { if (periodo === p) { uso = s; erroreUso = '' } },
-      e => { if (periodo === p) { erroreUso = String(e.message ?? e) } })
+    const sync = store.settings?.usageSync === true
+    void leggiUso(p, sync)
   })
+
+  /**
+   * I numeri della schermata: dal cloud se la sincronizzazione è accesa, dal locale
+   * altrimenti — e dal locale **anche** se il cloud non risponde, dicendolo.
+   *
+   * L'ordine conta: si prova prima il cloud e si ricade sul locale, mai il contrario.
+   * Mostrare i numeri locali e poi sostituirli farebbe cambiare le cifre sotto gli
+   * occhi di chi le sta leggendo.
+   */
+  async function leggiUso(p: string, sync: boolean): Promise<void> {
+    const from = daQuando(p)
+    const periodoMs = from === undefined ? {} : { from }
+    if (sync) {
+      const r = await store.api.uso(periodoMs)
+      if (periodo !== p) return
+      if (r.uso) {
+        uso = { ...r.uso, perGiorno: r.uso.perGiorno } as Stats
+        dispositivi = r.uso.perDevice
+        ricaduta = ''
+        erroreUso = ''
+        return
+      }
+      ricaduta = r.motivo ?? 'cloud non raggiungibile'
+    } else {
+      ricaduta = ''
+    }
+    dispositivi = []
+    try {
+      const s = await store.api.stats(periodoMs)
+      if (periodo === p) { uso = s; erroreUso = '' }
+    } catch (e) {
+      if (periodo === p) erroreUso = String((e as Error).message ?? e)
+    }
+  }
+
+  async function setUsageSync(v: boolean): Promise<void> {
+    const s = store.settings
+    if (!s) return
+    await store.saveSettings({ ...s, usageSync: v })
+    esitoSync = ''
+    // Accendendola si manda subito: chi tocca l'interruttore vuole vedere se funziona,
+    // non scoprirlo alla fine del prossimo turno. Spegnendola si torna al locale.
+    if (v) await sincronizzaOra()
+    else await leggiUso(periodo, false)
+  }
+
+  async function sincronizzaOra(): Promise<void> {
+    sincronizzando = true
+    esitoSync = ''
+    try {
+      const r = await store.api.sincronizzaUso()
+      esitoSync = r.ok ? '' : (r.motivo ?? 'invio fallito')
+      await leggiUso(periodo, store.settings?.usageSync === true)
+    } finally {
+      sincronizzando = false
+    }
+  }
+
+  /** «2 ore fa» per l'ultima volta che un dispositivo si è fatto vivo. Una data intera
+   *  su una riga di elenco è rumore: quello che si vuole sapere è se è di oggi. */
+  function daAllora(iso: string): string {
+    const t = Date.parse(iso)
+    if (!Number.isFinite(t)) return ''
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000))
+    if (s < 90) return 'just now'
+    const m = Math.round(s / 60)
+    if (m < 90) return `${m}m ago`
+    const h = Math.round(m / 60)
+    if (h < 36) return `${h}h ago`
+    return `${Math.round(h / 24)}d ago`
+  }
 
   const migliaia = (n: number): string => n.toLocaleString()
 
@@ -405,7 +483,11 @@
     // Aprendo la sezione, non all'avvio: legge lo stato di Tailscale, che costa due
     // `execFile`. Stessa condotta della diagnostica qui sotto.
     if (sez === 'phone' && telStato === null) void store.api.phone().then(x => { telStato = x })
-    if (sez === 'cloud' && cloud === null) void store.api.cloudStatus().then(x => { cloud = x })
+    // Anche da Usage, non solo da Cloud: lì l'interruttore della sincronizzazione resta
+    // spento con la ragione scritta finché non si è loggati, e per saperlo serve questo.
+    if ((sez === 'cloud' || sez === 'usage') && cloud === null) {
+      void store.api.cloudStatus().then(x => { cloud = x })
+    }
   })
 
   async function faiLogin(): Promise<void> {
@@ -986,6 +1068,30 @@
       <!-- ─── Usage — v11 ─────────────────────────────────────────────── -->
       {:else if sez === 'usage'}
         <div class="sec">
+          <div class="sec-h"><span class="t">Across your devices</span><span class="line"></span>
+            {#if store.settings?.usageSync}
+              <span class="act"><button class="btn" disabled={sincronizzando} onclick={() => void sincronizzaOra()}>{sincronizzando ? 'Sending…' : 'Sync now'}</button></span>
+            {/if}
+          </div>
+          <div class="orow">
+            <span class="o-body"><span class="o-t">Sync usage to cloud</span>
+              <span class="o-sub">journals don’t sync between machines, so this page only ever shows the device you’re on</span></span>
+            <button class="sw" class:on={store.settings?.usageSync} aria-label="Sync usage to cloud"
+              disabled={!cloud?.email}
+              onclick={() => void setUsageSync(!store.settings?.usageSync)}><span class="kn"></span></button>
+          </div>
+          {#if !cloud?.email}
+            <!-- Spenta con la ragione scritta, mai nascosta: una voce che sparisce fa
+                 credere che non esista. -->
+            <div class="note info"><Icon name="i-warn" /><p>Sign in under <b>Cloud</b> first — the numbers go to your account, so there has to be one.</p></div>
+          {:else}
+            <div class="note neutral"><Icon name="i-bell" /><p>What leaves this machine: day, project name, agent, model, counts, tokens, and session ids. <b>Never</b> prompt text, output, or file paths. Only you can read them.</p></div>
+          {/if}
+          {#if esitoSync}
+            <div class="note err"><Icon name="i-warn" /><p>{esitoSync}</p></div>
+          {/if}
+        </div>
+        <div class="sec">
           <div class="sec-h"><span class="t">Period</span><span class="line"></span></div>
           <div class="tabs">
             {#each PERIODI as p (p.id)}
@@ -1005,6 +1111,11 @@
               <div class="card"><span class="c-n">{migliaia(uso.totale.conversations)}</span><span class="c-l">conversations</span></div>
               <div class="card spend"><span class="c-n">{durata(uso.totale.agentMs)}</span><span class="c-l">agent working</span></div>
             </div>
+            {#if ricaduta}
+              <div class="note info"><Icon name="i-warn" /><p>Showing <b>this device only</b> — {ricaduta}. The numbers below are computed locally, so they’re correct for this machine.</p></div>
+            {:else if dispositivi.length > 0}
+              <div class="note neutral"><Icon name="i-cloud" /><p>Summed across <b>{dispositivi.length} devices</b>.</p></div>
+            {/if}
             <div class="note neutral"><Icon name="i-bell" /><p>“Agent working” is the time the agent spent on your turns — not the time you spent in STARK.</p></div>
           </div>
           <div class="sec">
@@ -1030,11 +1141,26 @@
               </div>
             </div>
           {/if}
+          {#if dispositivi.length > 0}
+            <div class="sec">
+              <div class="sec-h"><span class="t">By device</span><span class="line"></span></div>
+              {#each dispositivi as d (d.key)}
+                <div class="brow">
+                  <span class="b-body"><span class="b-name">{d.label}</span><span class="b-meta">{migliaia(d.c.prompts)} prompts · last seen {daAllora(d.lastSeen)}</span></span>
+                  <span class="b-time">{migliaia(d.c.chars)} ch</span><span class="b-cost">{durata(d.c.agentMs)}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
           <div class="sec">
             <div class="sec-h"><span class="t">By project</span><span class="line"></span></div>
             {#each uso.perProgetto as r (r.key)}
               <div class="brow">
-                <span class="b-body"><span class="b-name">{r.key==='unknown'?'no folder':projectName(r.key, store.settings?.projects)}</span><span class="b-meta">{migliaia(r.c.prompts)} prompts · {durata(r.c.agentMs)}</span></span>
+                <!-- Dal cloud la chiave è un origin git e il nome l'ha già risolto il
+                     daemon; in locale è un percorso, e a dargli un nome è la tabella dei
+                     progetti di **questa** macchina. Tradurre un origin con quella
+                     tabella non troverebbe niente e mostrerebbe l'url intero. -->
+                <span class="b-body"><span class="b-name">{r.key==='unknown'?'no folder':(dispositivi.length>0 ? r.label : projectName(r.key, store.settings?.projects))}</span><span class="b-meta">{migliaia(r.c.prompts)} prompts · {durata(r.c.agentMs)}</span></span>
                 <span class="b-time">{migliaia(r.c.chars)} ch</span><span class="b-cost">{durata(r.c.agentMs)}</span>
               </div>
             {/each}

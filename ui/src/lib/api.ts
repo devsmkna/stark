@@ -134,6 +134,25 @@ export type Settings = {
   historyArrowUp: boolean
   /** Esc mentre l'agent lavora: interrompe il turno in corso. */
   interruptEscape: boolean
+  /** Se le statistiche di questa macchina salgono al cloud, per unirsi a quelle degli
+   *  altri dispositivi. Spenta di default: è la seconda cosa che esce dalla macchina
+   *  dopo il Web Push, e il login al cloud non è un consenso a mandare anche l'uso. */
+  usageSync: boolean
+}
+
+/** Una ripartizione dell'uso unito: per progetto, per agent, per modello, per
+ *  dispositivo. Stessa forma di `Ripartizione` in `core/stats.ts`, perché la
+ *  schermata non deve imparare un secondo formato quando i numeri arrivano da fuori. */
+export type UsoRipartizione = { key: string; label: string; c: Stats['totale'] }
+
+/** L'uso unito fra i dispositivi, dal cloud. */
+export type UsoUnito = {
+  totale: Stats['totale']
+  perGiorno: { day: string; c: Stats['totale'] }[]
+  perProgetto: UsoRipartizione[]
+  perAgent: UsoRipartizione[]
+  perModello: UsoRipartizione[]
+  perDevice: (UsoRipartizione & { lastSeen: string })[]
 }
 
 /** Cos'è successo al file di memoria dell'agent all'ultimo salvataggio. */
@@ -623,6 +642,32 @@ export class Api {
     if (p.to !== undefined) q.set('to', String(p.to))
     const r = await this.json<{ stats: Stats }>(`/api/stats?${q}`)
     return r.stats
+  }
+
+  /**
+   * L'uso **unito** fra i dispositivi, dal cloud. `null` è un esito previsto, non un
+   * guasto: sincronizzazione spenta, non loggati, o cloud irraggiungibile. Chi chiama
+   * ricade sul locale dicendolo — che è meglio di una schermata vuota quando il dato
+   * di questa macchina c'è ed è calcolabile all'istante.
+   *
+   * Gli estremi restano in millisecondi come in `stats()`: a tagliarli in giornate è
+   * il daemon, nel fuso della macchina che ha lavorato.
+   */
+  async uso(p: Periodo): Promise<{ uso: UsoUnito | null; motivo?: string }> {
+    const q = new URLSearchParams()
+    if (p.from !== undefined) q.set('from', String(p.from))
+    if (p.to !== undefined) q.set('to', String(p.to))
+    try {
+      return await this.json<{ uso: UsoUnito | null; motivo?: string }>(`/api/usage?${q}`)
+    } catch (e) {
+      return { uso: null, motivo: String((e as Error).message ?? e) }
+    }
+  }
+
+  /** «Manda adesso»: per chi ha appena acceso l'interruttore e vuole vedere se
+   *  funziona, invece di aspettare la fine del prossimo turno. */
+  sincronizzaUso(): Promise<{ ok: boolean; rows?: number; motivo?: string }> {
+    return this.json('/api/usage/sync', { method: 'POST' })
   }
 
   importable(): Promise<{ sessions: ImportableRow[] }> {
