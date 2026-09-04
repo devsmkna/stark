@@ -33,6 +33,12 @@ export const AZIONI: Azione[] = [
     hint: 'Collapse or expand the sidebar.',
     default: 'mod+b',
   },
+  {
+    id: 'density',
+    label: 'Toggle no-noise mode',
+    hint: 'Shrink the header, status bar and sidebar rows.',
+    default: 'mod+shift+m',
+  },
 ]
 
 /** La combinazione in vigore per ogni azione: quella scelta, o quella di partenza. */

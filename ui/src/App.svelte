@@ -54,6 +54,7 @@ import Login from './components/Login.svelte'
   function esegui(id: string): void {
     if (id === 'board') { store.toggleBoard(); return }
     if (id === 'sidebar') { store.toggleSidebar(); return }
+    if (id === 'density') { store.density.toggle(); return }
     if (id !== 'palette') return
     // Premerla di nuovo mentre è aperta la chiude: è la stessa combinazione, e
     // riaprirla sopra sé stessa non vuol dire niente.
