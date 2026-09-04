@@ -26,7 +26,7 @@
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
   } from '$core/allegati.ts'
 import { getLobeIconUrl, getProviderForModel, providerLabelFor, inputTypesOf } from '../lib/lobe.ts'
-import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '../lib/view.ts'
+import { MODE_BLURB, MODE_ICON, project, projectName, stamp, until, fmtTok, fmtCosto } from '../lib/view.ts'
   import type { GitInfo } from '../lib/api.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
@@ -1098,7 +1098,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
                 </div>
               {/if}
               <div class="u-foot hover-foot">
-                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                <span class="g"><Icon name="i-folder" />{projectName(snap.cwd, store.settings?.projects)}</span>
                 {#if git?.branch}
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
@@ -1117,7 +1117,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
                 </div>
               {/if}
               <div class="u-foot repo-branch-foot">
-                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                <span class="g"><Icon name="i-folder" />{projectName(snap.cwd, store.settings?.projects)}</span>
                 {#if git?.branch}
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
@@ -1136,7 +1136,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
             </div>
           {/if}
           <div class="u-foot hover-foot" style="padding:4px 9px 8px">
-            <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+            <span class="g"><Icon name="i-folder" />{projectName(snap.cwd, store.settings?.projects)}</span>
             {#if git?.branch}
               <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                 <Icon name="i-branch" />{git.branch}
