@@ -28,6 +28,7 @@ import { fromPath, go, goView } from './route.ts'
 import { Viste } from './viste.svelte.ts'
 import { decisione, foglieVere } from './viste-regola.ts'
 import { Themer } from './theme.svelte.ts'
+import { Densifier } from './density.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
 import { Collapser } from './collapse.svelte.ts'
 import { Orderer } from './order.svelte.ts'
@@ -97,6 +98,8 @@ export class Store {
   readonly push = new PushPhone(() => this.api.authHeaders)
   /** Il tema, che è del dispositivo e non della macchina. Vedi `theme.svelte.ts`. */
   readonly theme = new Themer()
+  /** La densità, che è del dispositivo come il tema. Vedi `density.svelte.ts`. */
+  readonly density = new Densifier()
   /** La dimensione del testo, stesso motivo del tema. Vedi `textsize.svelte.ts`. */
   readonly textSize = new Sizer()
   /** La famiglia del font, stesso motivo. Vedi `fontfamily.svelte.ts`. */
