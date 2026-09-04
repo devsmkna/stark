@@ -1252,6 +1252,15 @@ export class Store {
     if (!esito.ok) this.refused = esito.error ?? 'could not open the file manager'
   }
 
+  /** Il nome del progetto nel menu del dock: apre la sua cartella **come cartella**,
+   *  non selezionata in quella sopra — `reveal()` fa apposta l'altra cosa (vedi lì).
+   *  Stessa ragione per non passare da `send()`: vale anche su una chat che dorme. */
+  async openFolder(path: string): Promise<void> {
+    this.refused = null
+    const esito = await this.api.openFolder(path)
+    if (!esito.ok) this.refused = esito.error ?? 'could not open the folder'
+  }
+
   /** F1: apre un link riconosciuto (Notion, …) con la sua app. Anche questo vale
    *  su una chat che dorme: non è un comando sulla sessione, è un'azione sulla
    *  macchina — la stessa ragione per cui `reveal` non passa da `send()`. */

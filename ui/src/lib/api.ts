@@ -541,6 +541,19 @@ export class Api {
     catch { return { ok: false, error: `HTTP ${res.status}` } }
   }
 
+  /** Il nome del progetto nel menu del dock: apre `path` come cartella, dentro se
+   *  stessa — non selezionata in quella sopra, che è cosa diversa e sta in
+   *  `reveal()`. `path` arriva già assoluto (il `cwd` della chat). */
+  async openFolder(path: string): Promise<Ack> {
+    const res = await fetch('/api/open-folder', {
+      method: 'POST',
+      headers: { ...this.auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    try { return await res.json() as Ack }
+    catch { return { ok: false, error: `HTTP ${res.status}` } }
+  }
+
   /**
    * Quali fra questi percorsi esistono davvero, nella cartella di questa chat.
    *

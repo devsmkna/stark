@@ -51,6 +51,43 @@ export function risolviPercorso(path: string, base?: string): string {
   return base ? resolve(base, path) : resolve(path)
 }
 
+/**
+ * Apre `path` **come cartella**, non selezionata dentro il suo genitore: è la
+ * cartella del progetto (dal menu del dock, sul nome del progetto), dove
+ * l'aspettativa è finire dentro quella cartella, non vederla evidenziata in
+ * quella sopra — la differenza che `reveal()` sceglie apposta di non fare.
+ * Stessa risoluzione del percorso, stessa tolleranza sul fallimento silenzioso
+ * di `explorer.exe` (vedi sopra): qui cambia solo l'argomento passato ai
+ * comandi di sistema, mai il gestore né il modo in cui si legge l'esito.
+ */
+export async function apriCartella(path: string, base?: string): Promise<RevealResult> {
+  const p = risolviPercorso(path, base)
+  if (!existsSync(p)) return { ok: false, error: 'file not found on this machine' }
+
+  try {
+    if (WIN) {
+      await esegui('explorer.exe', [p]).catch(() => { /* vedi reveal() sopra */ })
+      return { ok: true }
+    }
+    if (WSL) {
+      const { stdout } = await esegui('wslpath', ['-w', p])
+      const win = stdout.trim()
+      await esegui('explorer.exe', [win]).catch(() => { /* vedi reveal() sopra */ })
+      return { ok: true }
+    }
+    if (process.platform === 'darwin') {
+      await esegui('open', [p])
+      return { ok: true }
+    }
+    // Linux nativo: qui non serve nemmeno il tentativo con Nautilus di `reveal()` —
+    // `xdg-open` su una cartella la apre col gestore predefinito, sempre.
+    await esegui('xdg-open', [p])
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message ?? e) }
+  }
+}
+
 export async function reveal(path: string, base?: string): Promise<RevealResult> {
   const p = risolviPercorso(path, base)
   if (!existsSync(p)) return { ok: false, error: 'file not found on this machine' }
