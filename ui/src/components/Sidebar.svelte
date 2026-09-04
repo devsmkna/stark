@@ -807,6 +807,24 @@
   .newchat :global(svg.ic) { width: 12px; height: 12px; }
   .newchat:hover { filter: brightness(1.06); }
 
+  /* Sotto la soglia stretta la sidebar è tutto lo schermo (§8 di ui-schermate.md):
+     «New Chat» lunga in fondo alla barra ci starebbe, ma è il gesto che si ripete
+     più spesso su un dito solo — un tondo che galleggia sopra l'elenco, sempre
+     raggiungibile senza scorrere fino in fondo, come un FAB. Il testo sparisce:
+     l'icona da sola basta quando il bottone non è più in riga con altro. */
+  @media (max-width: 860px) {
+    .newchat {
+      position: fixed;
+      right: calc(env(safe-area-inset-right) + 16px);
+      bottom: calc(env(safe-area-inset-bottom) + 16px);
+      flex: none; width: 52px; height: 52px; padding: 0; border-radius: 50%;
+      box-shadow: 0 6px 18px rgba(16,20,32,.28);
+      z-index: 5;
+    }
+    .newchat span { display: none; }
+    .newchat :global(svg.ic) { width: 20px; height: 20px; }
+  }
+
   /* Menu … — fedele allo screenshot 2: card scura con bordi arrotondati, voci con icone a sinistra
      e spunta a destra, separator sottili. Segue il tema (surface/line) quindi "Segui sistema". */
   .more-scrim { position: fixed; inset: 0; z-index: 9; }
