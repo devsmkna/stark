@@ -11,7 +11,7 @@
   import Icon from './Icon.svelte'
   import type { Store } from '../lib/store.svelte.ts'
   import type { Todos, TodoTask, TodoList } from '../lib/api.ts'
-  import { project } from '../lib/view.ts'
+  import { projectName } from '../lib/view.ts'
 
   const { store }: { store: Store } = $props()
 
@@ -77,7 +77,7 @@
 <aside class="todocol">
   <div class="th">
     <span class="tt">Todo</span>
-    {#if store.todoScope === 'project' && dati?.cwd}<span class="pj">{project(dati.cwd)}</span>{/if}
+    {#if store.todoScope === 'project' && dati?.cwd}<span class="pj">{projectName(dati.cwd, store.settings?.projects)}</span>{/if}
     <button class="x" aria-label="Close todo" onclick={() => store.toggleTodo()}>
       <Icon name="i-x" />
     </button>
@@ -110,7 +110,7 @@
             <!-- Il nome della cartella, col percorso nel `title`: due progetti possono
                  chiamarsi uguale, e in «All» stanno uno sotto l'altro. -->
             <div class="gh" title={p.cwd}>
-              <span class="gn">{project(p.cwd)}</span>
+              <span class="gn">{projectName(p.cwd, store.settings?.projects)}</span>
               {#if restano(p) > 0}<span class="gc">{restano(p)} left</span>{/if}
             </div>
             {#if p.motivo}<div class="warn"><Icon name="i-warn" /><span>{p.motivo}</span></div>{/if}
