@@ -15,6 +15,7 @@
     "viste:check": "tsc -p tools/tsconfig.json --noEmit && node tools/viste-check.ts",
     "percorsi:check": "node tools/prova-percorsi.ts --check",
     "shortcuts:check": "tsc -p tools/tsconfig.json --noEmit && node tools/shortcuts-check.ts",
+    "usage:check": "tsc -p tools/tsconfig.json --noEmit && node tools/usage-check.ts",
     "slice": "node src/cli/vertical-slice.ts",
     "build": "tsc -p tsconfig.json",
     "resume": "node src/cli/resume-check.ts",

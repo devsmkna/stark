@@ -12,6 +12,13 @@
 // per lui (YAGNI): la purezza è una conseguenza di dove sta la regola, non un
 // investimento su un futuro.
 //
+// **Quel giorno è arrivato** (4 settembre 2026), e la premessa ha retto: `righeUso()`
+// qui in fondo manda al cloud venti numeri per riga invece dei journal, ed è pura
+// come questa. Quello che non era stato previsto è che a cambiare non fosse il
+// *quanto* si manda ma la *forma*: il server vuole righe sulla tupla piena
+// (giorno × progetto × agent × modello), non quattro ripartizioni separate, perché
+// con quelle un `GROUP BY` non può più ritagliare niente.
+//
 // Cosa NON c'è, di proposito: il costo in dollari. `Cost.nominalUsd` è un prezzo di
 // listino API, non una spesa — l'utente è su abbonamento a quota fissa. In una
 // schermata di statistiche un numero in dollari si legge come denaro uscito, e
@@ -166,6 +173,128 @@ export function statsFrom(iter: Iterable<SessionSnapshot>, p: Periodo = {}): Sta
     perProgetto: progetti.righe(k => k),
     perAgent: agenti.righe(k => k),
     perModello: modelli.righe(k => k),
+  }
+}
+
+// ─── le righe da mandare in cloud ────────────────────────────────────────────
+//
+// `statsFrom()` produce ripartizioni **separate** — per progetto, per agent, per
+// modello — non la loro combinazione. Per una tabella servono invece righe sulla
+// tupla piena, così che il server possa ritagliare qualunque di quelle viste con un
+// `GROUP BY` invece di riceverne quattro già fatte.
+//
+// È facile perché uno snapshot ha **un** cwd, **un** agent, **un** modello: a
+// spezzarsi sono solo i giorni dei turni. E resta pura come tutto il resto del file:
+// la chiave di progetto (l'origin git, che vale fra macchine diverse mentre un
+// percorso no) entra come funzione passata da chi chiama, così `stats.ts` non impara
+// a lanciare `git`.
+
+export type RigaUso = {
+  day: string
+  projectKey: string
+  projectLabel: string
+  agent: string
+  model: string
+  c: Conteggi
+}
+
+/**
+ * Quale conversazione era viva in quale giorno.
+ *
+ * Serve a contare le conversazioni **distinte** su un periodo senza gonfiarle: una
+ * chat aperta lunedì e ripresa mercoledì è una riga per lunedì e una per mercoledì
+ * in `RigaUso`, e sommare quelle direbbe «due conversazioni» di una sola. Con questi
+ * la somma diventa un `COUNT(DISTINCT session_id)`, che è la stessa cosa che fa
+ * `ricontaGiorni()` qui sopra con un `Set`.
+ *
+ * Progetto, agent e modello viaggiano con la riga anche se sembrano ridondanti: una
+ * sessione ne ha uno solo di ciascuno, quindi dipendono dal `sessionId` — ma senza
+ * di loro il conteggio distinto si potrebbe fare **solo** sul totale, e «quante
+ * conversazioni su questo progetto» tornerebbe a essere gonfiabile.
+ */
+export type SessionDay = {
+  day: string
+  sessionId: string
+  projectKey: string
+  agent: string
+  model: string
+}
+
+export type RigheUso = { righe: RigaUso[]; sessionDays: SessionDay[] }
+
+/** Come si chiama un progetto fra macchine diverse. Il chiamante risolve l'origin git. */
+export type ChiaveProgetto = (s: SessionSnapshot) => { key: string; label: string }
+
+export function righeUso(
+  iter: Iterable<SessionSnapshot>, p: Periodo, chiave: ChiaveProgetto,
+): RigheUso {
+  // Materializzato per la stessa ragione di `statsFrom`: spesso arriva un iteratore
+  // a perdere, e qui lo si scorre una volta sola ma non è una garanzia da lasciare
+  // implicita in un file dove l'altra funzione lo scorre due.
+  const snaps = [...iter]
+  const righe = new Map<string, RigaUso>()
+  // Le conversazioni distinte per riga: un `Set` per chiave, come in `ricontaGiorni`.
+  const vistiPerRiga = new Map<string, Set<string>>()
+  // Le coppie (giorno, sessione) senza doppioni. La chiave porta anche il giorno
+  // perché la stessa sessione in due giorni sono due righe, ed è tutto il punto.
+  const sessionDays = new Map<string, SessionDay>()
+
+  for (const s of snaps) {
+    const { key: projectKey, label: projectLabel } = chiave(s)
+    const agent = s.agent ?? IGNOTO
+    const model = s.model ?? IGNOTO
+    const kRiga = (day: string): string => `${day} ${projectKey} ${agent} ${model}`
+
+    const riga = (day: string): RigaUso => {
+      const k = kRiga(day)
+      let r = righe.get(k)
+      if (!r) {
+        r = { day, projectKey, projectLabel, agent, model, c: vuoti() }
+        righe.set(k, r)
+      } else {
+        // L'ultima etichetta vince: due macchine possono chiamare lo stesso origin
+        // in due modi, e il nome è una cosa da mostrare, non una chiave.
+        r.projectLabel = projectLabel
+      }
+      return r
+    }
+    /** Quel giorno questa conversazione era viva. Idempotente: è un insieme. */
+    const viva = (day: string): void => {
+      sessionDays.set(`${day} ${s.sessionId}`,
+        { day, sessionId: s.sessionId, projectKey, agent, model })
+      let set = vistiPerRiga.get(kRiga(day))
+      if (!set) { set = new Set(); vistiPerRiga.set(kRiga(day), set) }
+      set.add(s.sessionId)
+    }
+
+    for (const t of s.turns) {
+      if (!dentro(t.startedAt, p)) continue
+      const d = giorno(t.startedAt)
+      turno(riga(d).c, t)
+      viva(d)
+    }
+    // Gli effetti nel giorno **loro**, non in quello del turno: stessa regola di
+    // `statsFrom`, e per la stessa ragione — un comando lanciato dopo mezzanotte
+    // appartiene alla notte in cui è girato.
+    for (const f of s.files) {
+      if (!dentro(f.ts, p)) continue
+      const d = giorno(f.ts)
+      riga(d).c.files += 1
+      viva(d)
+    }
+    for (const c of s.shell) {
+      if (!dentro(c.ts, p)) continue
+      const d = giorno(c.ts)
+      riga(d).c.commands += 1
+      viva(d)
+    }
+  }
+
+  for (const [k, r] of righe) r.c.conversations = vistiPerRiga.get(k)?.size ?? 0
+
+  return {
+    righe: [...righe.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    sessionDays: [...sessionDays.values()],
   }
 }
 
