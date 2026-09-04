@@ -1,4 +1,5 @@
-// Il server cloud di STARK: oggi autenticazione, domani sincronizzazione della board.
+// Il server cloud di STARK: autenticazione, board sincronizzata, e l'uso unito fra i
+// dispositivi di una persona.
 //
 // Gira sul VPS dietro Traefik (vedi cloud/docker-compose.yml). Il daemon locale è
 // l'unico client: il browser non parla con questo server direttamente.
@@ -8,6 +9,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { registra, login, revoca, chi } from './auth.ts'
 import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
+import { registraUso, leggiUso, type Invio } from './usage.ts'
 import { sql } from './db/client.ts'
 
 const PORTA = Number(process.env['PORT'] ?? 8787)
@@ -17,12 +19,21 @@ function send(res: ServerResponse, code: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
-async function readJson<T>(req: IncomingMessage): Promise<T | null> {
+/**
+ * Il corpo JSON di una richiesta, con un tetto.
+ *
+ * Il tetto è 64 KB per tutto — un task della board, delle credenziali — tranne per
+ * l'invio dell'usage, che è l'unica rotta che manda **molte righe insieme**: al primo
+ * invio di una macchina è tutto lo storico, spezzato in finestre. Il limite lì è
+ * dichiarato dal chiamante invece di essere alzato per tutti, così una rotta nuova non
+ * eredita per sbaglio un permesso pensato per un'altra.
+ */
+async function readJson<T>(req: IncomingMessage, maxBytes = 64 * 1024): Promise<T | null> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const c of req) {
     size += (c as Buffer).length
-    if (size > 64 * 1024) throw new Error('corpo troppo grande')
+    if (size > maxBytes) throw new Error('corpo troppo grande')
     chunks.push(c as Buffer)
   }
   if (chunks.length === 0) return null
@@ -90,6 +101,34 @@ export async function startCloud(): Promise<void> {
         const email = await chi(bearer(req))
         if (!email) return send(res, 401, { error: 'non autenticato' })
         return send(res, 200, { email })
+      }
+
+      // ─── l'uso unito fra i dispositivi (dietro auth Bearer) ────────────────
+      //
+      // Niente `origin` in query, a differenza della board: qui la chiave è
+      // l'utente, e sta già nel token. Un utente vede solo i propri numeri —
+      // non c'è nessuna rotta che ne mostri di altri, ed è una scelta.
+      if (path === '/api/usage') {
+        const email = await chi(bearer(req))
+        if (!email) return send(res, 401, { error: 'non autenticato' })
+
+        if (method === 'POST') {
+          const body = await readJson<Invio>(req, 2 * 1024 * 1024)
+          if (!body) return send(res, 400, { error: 'corpo mancante o non JSON' })
+          const esito = await registraUso(email, body)
+          return send(res, esito.ok ? 200 : 400, esito)
+        }
+        if (method === 'GET') {
+          // `from` e `to` sono giorni (`YYYY-MM-DD`), non millisecondi: il taglio in
+          // giornate lo ha già fatto il daemon nel fuso della macchina che ha
+          // lavorato, e rifarlo qui col fuso del VPS darebbe una seconda verità.
+          const uso = await leggiUso(email, {
+            from: url.searchParams.get('from') ?? undefined,
+            to: url.searchParams.get('to') ?? undefined,
+          })
+          if (!uso) return send(res, 404, { error: 'utente sconosciuto' })
+          return send(res, 200, uso)
+        }
       }
 
       // ─── la board (dietro auth Bearer) ─────────────────────────────────────
