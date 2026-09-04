@@ -10,6 +10,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "node src/cli/offline-check.ts",
+    "ombra:check": "node src/cli/ombra-check.ts",
     "layout:check": "tsc -p tools/tsconfig.json --noEmit && node tools/layout-check.ts",
     "gruppi:check": "tsc -p tools/tsconfig.json --noEmit && node tools/gruppi-check.ts",
     "viste:check": "tsc -p tools/tsconfig.json --noEmit && node tools/viste-check.ts",
@@ -22,6 +23,7 @@
     "import": "node src/cli/import-check.ts",
     "queue": "node src/cli/queue-check.ts",
     "stark": "node src/cli/stark.ts",
+    "proxy": "node src/proxy/main.ts",
     "stark:start": "node src/cli/stark.ts start",
     "stark:status": "node src/cli/stark.ts status",
     "stark:stop": "node src/cli/stark.ts stop",

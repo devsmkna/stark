@@ -30,9 +30,14 @@
 > l'**àncora** regge su un **secondo modello** (Haiku, oltre a Sonnet), col caso limite in
 > cui il modello traduce la parola-tipo ma conserva il codice. Restano solo residui
 > circoscritti (§9.14 il limite della pausa, §12bis le cinque decisioni di forma).
-> **Le misure sono finite; ora si scrive.**
-> Nessuna riga della funzione è scritta, per scelta esplicita dell'utente: in `spike/` ci
-> sono solo le otto sonde.
+> **Le misure sono finite, e il 4 settembre la prima riga è scritta**: il proxy in
+> **modalità ombra** esiste (`src/proxy/`, §12bis) — processo separato, fail-closed
+> sulle sessioni non registrate, registro intero per richiesta (D39), analisi delle
+> cinque regioni con le forme note — con la sua prova a costo zero (`npm run
+> ombra:check`, 20 verifiche). Le decisioni di forma del §12bis sono chiuse
+> (D38 semina obbligatoria, D39 registro intero, scrittore unico, costanti della
+> pausa in §9.14). Manca l'aggancio a `stark start` e alle sessioni vere, poi
+> l'ombra comincia a contare.
 >
 > **Com'è fatto il traffico su cui tutto questo va applicato — endpoint, campo per campo,
 > nei due versi — sta in `docs/anonimizzazione-flusso.md`.** Quello è riferimento
@@ -44,7 +49,7 @@
 
 Chi arriva a freddo per **validare** non deve leggere tutto in ordine. Tre strade:
 
-- **Il verdetto in due minuti** → §10 (37 decisioni) e §11 (15 ipotesi scartate, con la
+- **Il verdetto in due minuti** → §10 (39 decisioni) e §11 (15 ipotesi scartate, con la
   ragione). Se una scelta sembra sbagliata, la riga dice su quale premessa era stata presa.
 - **L'architettura** → §3 (i due livelli), §3.1 (perché il proxy è bidirezionale), §4bis
   (l'infrastruttura). Il resto sono conseguenze di quelle tre.
@@ -1059,13 +1064,14 @@ cos'è») lì non si trasferisce: nessuno sa cosa c'è in venti `tool_result` ac
     dell'AI SDK sotto OpenCode, non del singolo loader. **Resta grigio solo l'OAuth**
     (Anthropic lo vieta, plugin rimossi dalla 1.3.0): è comunque una via che un progetto
     protetto può **rifiutare** (D17 per provider), non una che deve coprire.
-14. **Il limite della pausa e l'idempotenza del retry** (aperta da §4.7, ed è tutto ciò
-    che resta della meccanica del fail-closed). Misurato: il client regge ~311 s per
-    tentativo e ritenta col corpo identico. Da decidere: (a) dopo quanti secondi il proxy
-    smette di trattenere e chiude con un errore distinguibile — un valore **ben dentro i
-    ~5 minuti**, così la scadenza è la nostra; (b) come deduplicare i retry, dato che il
-    corpo è byte-per-byte lo stesso — una chiave sul corpo, o sul primo `POST` di un turno
-    di sessione. Non muove l'impianto: muove due costanti e un `Map`.
+14. ~~Il limite della pausa e l'idempotenza del retry~~ → **chiusa il 4 settembre 2026
+    con i valori v1**, dichiarati da tarare coi numeri dell'ombra: (a) il proxy trattiene
+    fino a **240 secondi** — ben dentro i ~311 misurati, così la scadenza è la nostra e
+    non quella del client; oltre, chiude con un errore distinguibile e la decisione
+    dell'utente resta in attesa per il retry; (b) la chiave di deduplica è **l'hash
+    SHA-256 del corpo** dentro la stessa sessione — il retry misurato è byte-per-byte
+    identico (§4.7), quindi l'hash lo riconosce senza inventare un protocollo. Due
+    costanti e una `Map`, come previsto.
 
 ---
 
@@ -1110,6 +1116,8 @@ cos'è») lì non si trasferisce: nessuno sa cosa c'è in venti `tool_result` ac
 | D35 | Riconoscitore **a due passi, entrambi deterministici**: esatto + normalizzato sull'insieme chiuso degli aghi emessi | L'esatto è il percorso veloce e l'unico che riconverte; il normalizzato ritrova i derivati. Niente fuzzy: `…-01` e `…-02` distano un carattere, e fonderli è il difetto invisibile del §6.3 (S15) |
 | D36 | Derivato riconosciuto: **riconverti** in stringhe/percorsi/prosa, **riconosci-lascia-dichiara** negli identificatori | Il valore vero in un identificatore non ci sta, e in forma derivata sarebbe da rimascherare come sottostringa al giro dopo — instabile e pieno di falsi positivi. Il derivato è il punto fisso; con l'àncora non è più silenzioso: marcatore + registro (§6.7) |
 | D37 | Il punto d'aggancio del proxy è **dell'adapter**; il motore (dizionario, filtro, registro) è **uno e condiviso** | Ogni agent ha la sua leva ufficiale, misurata: Claude Code l'`env` del processo (§4), OpenCode la config del server per provider (§4.5). Una cosa «più in basso» non sarebbe una superficie ufficiale — e per OpenCode la copertura si promette **per provider misurato**, §9.13 |
+| D38 | **Semina obbligatoria**: la protezione si accende solo a semina del dizionario confermata | §3.2: non esiste il ritiro, quindi un dizionario vuoto rende la promessa falsa il primo giorno. La scoperta assistita passa dal proponitore (§11bis), le proposte si confermano o rimuovono (§12bis.2) |
+| D39 | Il registro v1 salva **ogni richiesta intera** | Massima fedeltà probatoria e la scrittura più semplice per l'ombra; il costo (~MB a turno) è dichiarato e rende urgente la rotazione (§9.6). Si stringe dopo, coi numeri dell'ombra (§12bis.4) |
 
 ## 11. Ipotesi scartate
 
@@ -1236,27 +1244,30 @@ codice**, quindi vengono prima del codice.
    decisione tarda troppo, chiudere con un errore distinguibile e rimandare. Il residuo è
    ora piccolo e circoscritto (§9.14): quanto vale «troppo», e come rendere idempotente il
    retry.
-2. **La partenza a freddo del dizionario.** Un progetto appena protetto ha il dizionario
-   vuoto: il primo `Read` di un file del cliente passa in chiaro, e per §3.2 non esiste
-   il ritiro — la promessa del §7 è **falsa il primo giorno**. Serve la **semina**: una
-   passata del proponitore (§11bis) sul repo *prima* della prima sessione, con conferma
-   delle proposte, e la protezione che si accende solo a semina fatta. È un flusso di
-   onboarding da disegnare, non un dettaglio.
+2. ~~La partenza a freddo del dizionario~~ → **decisa il 4 settembre 2026 (D38): semina
+   obbligatoria.** Attivando la protezione parte una passata di scoperta sul repo
+   (proponitore + forme note), l'utente conferma o rimuove le proposte, e **solo a semina
+   confermata** il progetto è protetto. La ragione è §3.2: il primo `Read` del primo
+   giorno passerebbe in chiaro e non esiste il ritiro — la promessa sarebbe falsa il
+   primo giorno. Il flusso di onboarding resta da disegnare (schermata), ma la forma è
+   fissata.
 3. **Cosa conta come «dubbio», operativamente.** Le forme note sono deterministiche; il
    proponitore no. Ogni sua proposta **ferma** l'invio o **si accoda** senza fermare?
    Serve la regola scritta: cosa blocca (forme note violate, alias mai emessi, file
    git-ignored non parsabili) e cosa propone e basta. Il tasso di falsi positivi è la
    scommessa n. 2 delle «nove cose», e decide da solo se la funzione vive o viene spenta
-   (S6 elevato a rischio di prodotto).
-4. **Il registro, politica di taglia v1.** D10 vuole il payload, ma il flusso misura
-   ~420 KB × 4 andate per un prompt: salvarlo intero è ~MB a turno, e la rotazione
-   (§9.6) smette di essere rimandabile alla prima riga del registro. Va scelta una
-   politica anche brutale (es. l'ultima andata intera per turno, le precedenti come
-   delta) **prima**, perché cambia il formato del file.
-5. **Chi scrive il dizionario.** Lo scrivono in due — il pannello via daemon, e le
-   conferme delle proposte — e D20 lo fa rileggere a caldo dal proxy. Serve lo scrittore
-   unico (il daemon, col proxy solo lettore) o un lock: è la lezione di D23 dentro la
-   stessa macchina.
+   (S6 elevato a rischio di prodotto). **È esattamente ciò che la modalità ombra misura**:
+   la regola si scrive con quei numeri davanti, non prima.
+4. ~~Il registro, politica di taglia v1~~ → **decisa il 4 settembre 2026 (D39): tutto
+   intero.** Ogni richiesta salvata per intera: massima fedeltà probatoria e la scrittura
+   più semplice per la modalità ombra. Costo accettato e dichiarato: ~MB a turno, quindi
+   la **rotazione (§9.6) diventa urgente subito** — è il prezzo di non inventare un
+   formato delta prima di sapere cosa serve davvero. Si stringe dopo, coi numeri
+   dell'ombra in mano.
+5. ~~Chi scrive il dizionario~~ → **chiusa, ed era già scritta in D20/D23**: lo scrittore
+   unico è il **daemon** (pannello e conferme passano tutti da lì), il proxy è **solo
+   lettore** a caldo. Nessun lock: un solo scrittore non ne ha bisogno, ed è la lezione
+   di D23 applicata dentro la stessa macchina.
 
 ### Da decidere presto, non prima di iniziare
 
@@ -1277,7 +1288,7 @@ codice**, quindi vengono prima del codice.
   byte-per-byte;
 - la **prassi `.env`** resta il punto operativamente più debole, e §5.1 lo dice già.
 
-### Il primo passo dell'implementazione: la modalità ombra
+### Il primo passo dell'implementazione: la modalità ombra — **scritta il 4 settembre 2026**
 
 Tutto l'impianto tecnico è misurato; la scommessa rimasta è **umana** — se il filtro ferma
 troppo, l'utente lo spegne. Quindi il primo codice utile è il proxy **in osservazione**:
@@ -1285,6 +1296,30 @@ in mezzo, trasparente, che registra cosa *avrebbe* mascherato e cosa *avrebbe* f
 su sessioni vere, per qualche giorno. Misura il tasso di falsi positivi prima che il
 blocco esista — si misura, poi si sceglie, come tutto il resto qui — e produce comunque
 il primo pezzo vero: il proxy trasparente con la cattura, che serve in ogni caso.
+
+**Com'è fatta** (`src/proxy/`, provata da `npm run ombra:check` — 20 verifiche, costo
+zero, upstream finto locale):
+
+- `ombra.ts` — l'occhio, **puro**: le cinque regioni di D25 camminate come nel flusso
+  (comprese le due forme di `content`), `tools[]` saltato ma **pesato** (così il rapporto
+  88-90% resta misurato dal vivo), `thinking`/`signature` mai toccati, e le forme note di
+  §5.3b coi loro nomi leggibili. È il modulo che domani diventa il filtro vero: ombra e
+  mascheramento devono guardare con lo stesso occhio, o l'ombra misura una cosa e il
+  filtro ne fa un'altra.
+- `server.ts` — il processo: registrazione via `/control/*` **col token del daemon**
+  (registrare è un potere: chi può registrare può instradare), traffico solo su
+  `/s/<id>` registrati (fail-closed §4.3: niente relay aperto), inoltro identico con
+  **tutte** le intestazioni (una lista di ammesse sarebbe il posto dove la promessa
+  sulle `ratelimit-*` si romperebbe in silenzio), registro JSONL per sessione in
+  `~/.stark/ombra/` con la richiesta **intera** (D39) più l'analisi.
+- `main.ts` — l'ingresso come processo (`npm run proxy`), separato perché il server è
+  una funzione che anche le prove avviano con casa e porta loro (la lezione di
+  `daemon-check` sullo `STARK_HOME` risolto troppo presto).
+
+**Cosa manca perché l'ombra conti davvero**: l'aggancio — `stark start` che alza il
+proxy accanto al daemon (D19, col pattern di sopravvivenza di `stark.ts`), l'adapter che
+registra la sessione e punta `ANTHROPIC_BASE_URL` / `options.baseURL` al prefisso, e la
+deregistrazione alla chiusura. Poi qualche giorno di sessioni vere, e i numeri.
 
 ### Il giudizio, per chi valida
 

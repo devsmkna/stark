@@ -3,7 +3,15 @@
 // Le quattro invarianti della specifica sono qui, e sono vincoli di codice, non buone
 // intenzioni: non si riscrive mai una riga; rileggere il file deve produrre lo stesso
 // stato che la UI mostrava; nel journal non entra nulla di nativo; ed è il punto unico
-// da cui passa tutto, cioè dove si aggancerà l'anonimizzazione.
+// da cui passano gli eventi canonici.
+//
+// NON è il punto di intercetto dell'anonimizzazione, e per mesi questa riga ha detto il
+// contrario. Il journal vede ciò che STARK manda e ciò che l'agent risponde — non ciò
+// che l'agent legge da solo (Read, Bash, @file espanso dal CLI, la compattazione): di un
+// tool_result qui arriva il riassunto, non il testo, ed è proprio il testo ad
+// attraversare il confine. Misurato, non dedotto: docs/anonimizzazione.md §2, D3.
+// L'anonimizzazione si aggancia al proxy sulla base URL, l'unico posto dove tutto è già
+// diventato traffico.
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
