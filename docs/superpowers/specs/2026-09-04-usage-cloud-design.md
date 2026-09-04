@@ -144,6 +144,15 @@ export const usageSessionDays = pgTable('usage_session_days', {
   machineId: uuid('machine_id').notNull().references(() => machines.id, { onDelete: 'cascade' }),
   day:       date('day', { mode: 'string' }).notNull(),
   sessionId: text('session_id').notNull(),
+  // Aggiunte scrivendo il codice, non previste qui sopra: progetto, agent e modello
+  // sono ridondanti rispetto al `session_id` (una sessione ne ha uno solo di
+  // ciascuno) e servono lo stesso. Senza, il conteggio distinto si potrebbe fare
+  // **solo sul totale**, e «quante conversazioni su questo progetto» tornerebbe a
+  // essere gonfiabile — cioè metà del problema resterebbe aperta. Non costano righe:
+  // sono colonne su righe che esistono comunque.
+  projectKey: text('project_key').notNull(),
+  agent:      text('agent').notNull(),
+  model:      text('model').notNull(),
 }, t => [primaryKey({ columns: [t.userId, t.machineId, t.day, t.sessionId] })])
 ```
 
@@ -206,25 +215,39 @@ POST /api/usage
 ```
 
 Il server risolve (o crea) la macchina da `machine.key`, aggiorna `label`/`lastSeen`, poi
-UPSERT riga per riga, **in una transazione**.
+riscrive la finestra **in una transazione**.
 
 `window` è necessario e non decorativo: senza, una riga che *sparisce* dal calcolo locale
 (l'ultima chat di quel progetto cancellata) resterebbe in cloud per sempre. Con la finestra
 dichiarata, il server cancella dentro quegli estremi ciò che l'invio non nomina — per quella
 macchina soltanto.
 
+*Scritto il codice, la forma si è semplificata da sé*: non «UPSERT più potatura di ciò che
+non è stato nominato», ma **`DELETE` della finestra e `INSERT` delle righe**, dentro la
+stessa transazione. Fa la stessa cosa in un passo invece che in due, e toglie la domanda
+«cosa succede se la potatura fallisce a metà». Le righe fuori dalla finestra dichiarata si
+**rifiutano**: sopravvivrebbero alla cancellazione e nessun invio le toccherebbe più.
+
 ```
-GET /api/usage?from=<ms>&to=<ms>
+GET /api/usage?from=<YYYY-MM-DD>&to=<YYYY-MM-DD>   ← estremi inclusi
   → { totale, perGiorno[], perProgetto[], perAgent[], perModello[], perDevice[] }
 ```
+
+*Correzione alla spec*: qui sopra era scritto `from=<ms>`. Sono **giorni**, e non è un
+dettaglio di formato: il `day` di una riga è nel fuso della macchina che ha lavorato, e chi
+ha fatto quel taglio è il daemon. Rifarlo sul VPS vorrebbe dire avere due verità su cosa sia
+«oggi», e la seconda sarebbe quella sbagliata. La UI e il daemon continuano a parlarsi in
+millisecondi; la conversione avviene una volta sola, sul daemon.
 
 Stessa forma di `Stats` più `perDevice`, così la UI non impara un secondo formato.
 `conversations` esce da `COUNT(DISTINCT session_id)` su `usage_session_days`; tutto il resto da
 `SUM()` su `usage_daily`.
 
-Limiti dichiarati: il `readJson` del server si ferma già a 64 KB, e il `POST` accetta al
-massimo **90 giorni** per invio. Oltre, il daemon spezza in più invii — ognuno indipendente e
-idempotente, quindi non serve nessuna transazione fra invii.
+Limiti dichiarati: il daemon manda al massimo **90 giorni** per invio, e il server accetta al
+massimo 5000 righe. Il `readJson` del server si fermava a 64 KB per tutto: adesso il tetto è
+un **parametro**, 64 KB restano il default e solo questa rotta dichiara 2 MB — è l'unica che
+manda molte righe insieme, e una rotta nuova non deve ereditare per sbaglio un permesso
+pensato per un'altra.
 
 ## Il daemon
 
@@ -245,6 +268,22 @@ File nuovo `src/daemon/usage-sync.ts`. Espone `notificaTurnoFinito()` e non sa d
 - **Spento di default:** `usageSync: boolean` in `Settings` (`src/daemon/settings.ts`). Se è
   `false`, o se non c'è token cloud, `notificaTurnoFinito()` ritorna subito.
 - **`machine-id`:** un uuid generato al primo bisogno in `~/.stark/machine-id`, `0600`.
+
+### Due difetti trovati scrivendolo, e la regola che li ha prodotti
+
+Sono la stessa famiglia, e vale la pena tenerli scritti: **la finestra dichiarata è fatta di
+giorni e li include entrambi, il taglio di `righeUso()` è in millisecondi con l'estremo destro
+escluso.** Due convenzioni che sembrano la stessa cosa.
+
+1. La finestra partiva da «adesso meno due giorni», cioè da mezzogiorno, ma dichiarava il
+   giorno intero. Siccome un invio è una sostituzione, il server avrebbe cancellato la mattina
+   del giorno più vecchio senza riscriverla.
+2. I pezzi finivano a **mezzanotte** dell'ultimo giorno, quindi quel giorno saliva vuoto pur
+   essendo dentro la finestra cancellata — cioè spariva dal cloud a ogni sincronizzazione.
+
+Entrambi sarebbero stati invisibili: i numeri restano plausibili, solo più bassi. L'aritmetica
+sta ora in due funzioni sole (`mezzanotte`, `piuGiorni`) e va per **giorni di calendario**, non
+sommando 86.400.000 ms — nella notte del cambio d'ora un giorno dura 23 ore o 25.
 
 ## La UI
 
@@ -270,7 +309,23 @@ File nuovo `src/daemon/usage-sync.ts`. Espone `notificaTurnoFinito()` e non sa d
   tre giorni resta **1** conversazione; una riga sparita dal calcolo locale sparisce anche in
   cloud dentro la finestra dichiarata.
 - Daemon: con `usageSync: false` non parte nessuna richiesta.
-- Una sonda `tools/usage-check.ts` come le altre, con un Postgres effimero.
+Realizzate in **due** sonde e non una, perché hanno bisogni diversi:
+
+- `tools/usage-check.ts` (27 verifiche) — `righeUso()` su snapshot finti e il lato daemon con
+  un `fetch` sostituito. Costo zero, nessun servizio esterno: gira in `npm run usage:check`.
+- `cloud/src/usage-check.ts` (12 verifiche) — le rotte contro un **Postgres vero ed effimero**
+  in Docker, su una porta chiesta al sistema. Qui il comportamento che conta non sta nel
+  TypeScript ma in ciò che succede al database.
+
+Una nota metodologica che vale più delle verifiche stesse: i check sulla finestra sono stati
+visti **fallire** reintroducendo il difetto, non solo passare. Un check che non ha mai visto
+il rosso non è una prova che qualcosa funziona — è una riga che dice «ok».
+
+E una trappola incontrata scrivendo la sonda cloud, che vale per chiunque provi Postgres in
+Docker: **`pg_isready` mente**. Parla sul socket unix *dentro* il container e risponde ok
+mentre da fuori si prende ancora `57P03 the database system is starting up` — l'immagine
+ufficiale avvia un server temporaneo per `initdb` e poi lo riavvia. Si aspetta una query vera
+dall'host.
 
 ## Cosa resta fuori, e perché
 
