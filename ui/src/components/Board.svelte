@@ -9,7 +9,7 @@
   import Icon from './Icon.svelte'
   import type { Store } from '../lib/store.svelte.ts'
   import type { Board, BoardTask } from '../lib/api.ts'
-  import { project } from '../lib/view.ts'
+  import { projectName } from '../lib/view.ts'
 
   const { store }: { store: Store } = $props()
 
@@ -97,7 +97,7 @@
          è una domanda che si pone ogni volta. Default = la chat a fuoco. -->
     <select class="bp" aria-label="Project" bind:value={cwd}>
       {#each progetti as p (p.cwd)}
-        <option value={p.cwd}>{project(p.cwd)}</option>
+        <option value={p.cwd}>{projectName(p.cwd, store.settings?.projects)}</option>
       {/each}
     </select>
 
