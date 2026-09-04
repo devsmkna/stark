@@ -6,7 +6,7 @@
   import type { Store } from '../lib/store.svelte.ts'
   import type { AgentModels } from '../lib/api.ts'
   import type { PartView, TurnView } from '$core/reduce.ts'
-  import { promptText, type TodoItem } from '$core/events.ts'
+  import { promptText, type SessionOption, type TodoItem } from '$core/events.ts'
 
   let { store }: { store: Store } = $props()
 
@@ -114,6 +114,29 @@
     menu = false
     await store.scegliHelper(agent, model)
   }
+
+  // ─── reasoning ed effort (ADR-014) ────────────────────────────────────────
+  // Le stesse due opzioni del dock della conversazione grande (Dock.svelte), ma
+  // qui i default sono l'opposto: l'helper e' per una domanda veloce, non per un
+  // lavoro profondo, quindi nasce con thinking spento ed effort al minimo (vedi
+  // `POST /api/helper` in server.ts). Chi vuole di piu' lo sceglie qui.
+  // Dove l'agent non dichiara la scelta (OpenCode, un modello senza livelli di
+  // effort) la voce non compare — stessa regola del dock, niente di nostro.
+  const opts = $derived<SessionOption[]>(snap?.options ?? [])
+  const reasoningOpt = $derived(opts.find(o => o.id === 'reasoning'))
+  const effortOpt = $derived(opts.find(o => o.id === 'effort'))
+  let effortMenu = $state(false)
+  async function toggleReasoning(): Promise<void> {
+    const id = store.helper?.chatId
+    if (!id || !reasoningOpt) return
+    await store.setOption('reasoning', reasoningOpt.value === 'on' ? 'off' : 'on', id)
+  }
+  async function scegliEffort(v: string): Promise<void> {
+    effortMenu = false
+    const id = store.helper?.chatId
+    if (!id) return
+    await store.setOption('effort', v, id)
+  }
   /** Cambiare agent fa ripartire la conversazione: si dice prima, sulla voce. */
   function riparte(agent: string): boolean {
     const ora = store.helperPick?.agent ?? snap?.agent
@@ -127,9 +150,11 @@
    *  chiude la status bar (misurato: tools/prova-pannello-agente.mjs). */
   function chiudiMenu(e: PointerEvent): void {
     if (!(e.target as HTMLElement).closest('.ap-pop, .ap-tune')) menu = false
+    if (!(e.target as HTMLElement).closest('.ap-eff-pop, .ap-eff')) effortMenu = false
   }
   function esc(e: KeyboardEvent): void {
     if (e.key === 'Escape' && menu) { e.stopPropagation(); menu = false }
+    if (e.key === 'Escape' && effortMenu) { e.stopPropagation(); effortMenu = false }
   }
 </script>
 
@@ -239,6 +264,34 @@
         <button class="ap-send" aria-label="Send" onclick={() => void manda()} disabled={!testo.trim() || lavora || store.helperBusy}><Icon name="i-send" /></button>
       </div>
       <div class="ap-status">
+        {#if reasoningOpt}
+          <button class="ap-eff" class:on={reasoningOpt.value === 'on'}
+            title={reasoningOpt.value === 'on' ? 'Reasoning: on — click to turn off' : 'Reasoning: off — click to turn on'}
+            aria-label="Reasoning: {reasoningOpt.value}"
+            onclick={() => void toggleReasoning()}>
+            <Icon name="i-brain" />
+          </button>
+        {/if}
+        {#if effortOpt}
+          <span class="ap-eff-pop">
+            <button class="ap-eff" class:on={effortOpt.value !== effortOpt.choices[0]?.value}
+              title="Effort: {effortOpt.value}" aria-label="Effort: {effortOpt.value}"
+              onclick={() => { effortMenu = !effortMenu }}>
+              <Icon name="i-bolt" /><span class="ap-eff-v">{effortOpt.value}</span>
+            </button>
+            {#if effortMenu}
+              <div class="ap-eff-menu">
+                {#each effortOpt.choices as c (c.value)}
+                  <button class="ap-eff-item" class:on={c.value === effortOpt.value}
+                    onclick={() => void scegliEffort(c.value)}>
+                    <span>{c.label ?? c.value}</span>
+                    {#if c.value === effortOpt.value}<Icon name="i-check" />{/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </span>
+        {/if}
         <!-- Lo stesso chip della status bar della conversazione grande: icona del
              modello, nome, chevron. Solo i colori sono quelli del pannello. -->
         <span class="ap-tune-pop" onmouseenter={() => { hovered = true; if (!store.catalogo) void store.caricaCatalogo() }} onmouseleave={() => hovered = false}>
@@ -340,7 +393,33 @@
   /* La status bar sotto la casella: stesso passo di `.status` (padding e altezza
      del chip compresi) e il chip del modello appoggiato a destra, come la parte
      destra della barra della conversazione grande (`.status .r .tune`). */
-  .ap-status{display:flex; align-items:center; justify-content:flex-end; gap:9px; padding:5px 12px 7px}
+  .ap-status{display:flex; align-items:center; justify-content:flex-end; gap:7px; padding:5px 12px 7px}
+
+  /* Reasoning ed effort: due chip piccoli a sinistra del modello, stesso family
+     del `.ap-tune` ma piu' compatti — non devono competere col nome del modello
+     per lo spazio stretto del pannello. */
+  .ap-eff{
+    display:inline-flex; align-items:center; gap:3px; border:0; background:none; padding:3px 5px;
+    border-radius:6px; color:var(--muted); font:inherit; font-size:10px; cursor:pointer;
+  }
+  .ap-eff:hover{background:var(--surface-2); color:var(--ink)}
+  .ap-eff.on{color:var(--accent)}
+  .ap-eff :global(svg.ic){width:11px; height:11px}
+  .ap-eff-v{text-transform:capitalize}
+  .ap-eff-pop{position:relative; display:inline-flex; margin-right:auto}
+  .ap-eff-menu{
+    position:absolute; bottom:calc(100% + 6px); left:0; min-width:120px;
+    background:var(--surface); border:1px solid var(--line-2); border-radius:8px;
+    box-shadow:0 8px 28px rgba(16,20,32,.16); padding:4px; z-index:7;
+  }
+  .ap-eff-item{
+    display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;
+    padding:6px 8px; border:0; border-radius:6px; background:none; color:var(--ink);
+    font:inherit; font-size:11px; text-transform:capitalize; cursor:pointer;
+  }
+  .ap-eff-item:hover{background:var(--surface-2)}
+  .ap-eff-item.on{color:var(--accent)}
+  .ap-eff-item :global(svg.ic){width:11px; height:11px; color:var(--accent)}
   .ap-tune{
     display:inline-flex; align-items:center; gap:4px; border:0; background:none; padding:0;
     min-height:calc(1.45em + 4px); color:var(--ink); font:inherit; font-size:10px; cursor:pointer;

@@ -13,7 +13,7 @@
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
   import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
-  import { colours, hhmm, project, since, toolIcon, turnStatus } from '../lib/view.ts'
+  import { colours, dayBanner, hhmm, project, since, timeOnly, toolIcon, turnStatus } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { osservaPercorsi, pezziConCitazioni } from '../lib/percorsi.ts'
   import { decoraColoriTesto } from '../lib/colori.ts'
@@ -114,6 +114,27 @@
   /** Quanti turni ci sono dentro, escluso il `/clear` che li ha chiusi: quello è il
    *  taglio, non uno degli scambi che si stanno riponendo. */
   const chapterTurns = (ch: Chapter): number => Math.max(0, ch.items.length - 1)
+
+  /** Il turno che apre una giornata nuova, con l'etichetta da mostrare sopra di lui —
+   *  come WhatsApp: il giorno si dice una volta sola, non su ogni riga. Calcolato
+   *  sull'ordine con cui i capitoli si disegnano davvero, non su `snap.turns`: un
+   *  capitolo chiuso non mostra le sue righe, e il primo giorno visibile deve restare
+   *  quello del primo turno che si vede, non quello del primo turno in assoluto. */
+  const dayBanners = $derived.by(() => {
+    const m = new Map<string, string>()
+    let lastDay: string | undefined
+    for (const ch of chapters) {
+      for (const { turn } of ch.items) {
+        if (!turn.startedAt) continue
+        const day = new Date(turn.startedAt).toDateString()
+        if (day !== lastDay) {
+          m.set(turn.turnId, dayBanner(turn.startedAt))
+          lastDay = day
+        }
+      }
+    }
+    return m
+  })
 
   // ─── i singoli blocchi: reasoning e tool si aprono a loro volta ────────────
   // Chiusi di default per lo stesso motivo per cui lo è il turno: tredici scambi
@@ -561,15 +582,11 @@
       <Icon name={debugCopiato ? 'i-check' : 'i-copy'} />
     </button>
 
-    <button class="iconb" title="Put to sleep — frees memory, not quota"
-      style="margin-left:auto" disabled={!live}
-      onclick={() => void store.sleep(id)}><Icon name="i-moon" /></button>
-
     <!-- Il conteggio in parole non ci sta su uno schermo stretto: sotto la soglia
          resta solo l'icona, stesso bottone, stessa destinazione — non è nascosta,
          è un'etichetta che qui non c'è spazio a scrivere per intero (Principio 5:
          quello che sparisce è il testo, non la funzione). -->
-    <button class="effbtn" style="margin-left:0" onclick={() => setView('effects')}
+    <button class="effbtn" style="margin-left:auto" onclick={() => setView('effects')}
       title="{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} · {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}">
       {#if !store.narrow}
         <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
@@ -577,6 +594,10 @@
       {/if}
       <Icon name="i-bars" />
     </button>
+
+    <button class="iconb" title="Put to sleep — frees memory, not quota"
+      style="margin-left:0" disabled={!live}
+      onclick={() => void store.sleep(id)}><Icon name="i-moon" /></button>
 
     <button class="iconb" title="Toggle agent panel" aria-label="Toggle agent panel"
       aria-pressed={store.todoOpen || store.helperOn}
@@ -793,6 +814,11 @@
       {@const groups = groupParts(turn.parts)}
       {@const opLive = livePart(groups)}
       {@const doneTail = lastDoneKey(groups)}
+      {#if dayBanners.has(turn.turnId)}
+        <div class="daysep" role="separator" aria-label={dayBanners.get(turn.turnId)}>
+          <span>{dayBanners.get(turn.turnId)}</span>
+        </div>
+      {/if}
       {#if i === snap.turns.length - 1 && snap.turns.length > 1}
         <!-- Un filo sottile prima dell'ULTIMO turno: gli ultimi due messaggi si
              confondevano, e la domanda che torna è «quale dei due è quello nuovo».
@@ -825,7 +851,7 @@
               <Icon name="i-x" style="width:10px;height:10px" />
             </button>
           {/if}
-          <span class="tm">{hhmm(turn.startedAt)}</span>
+          <span class="tm">{timeOnly(turn.startedAt)}</span>
           <button class="thacc" aria-label="Toggle turn" onclick={() => toggle(turn, i)}>
             <span class="cx chev" class:open={open}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
           </button>
@@ -1241,6 +1267,11 @@
      senza risalire a mano tutto il blocco. L'offset è l'altezza dell'header
      misurata dall'azione `misuraTh` (`--th-h`, in unità locali del root zoomato):
      a mano sarebbe stato un numero che cade alla prima modifica dei suoi 33px.
+     Diviso per `--conv-body-zoom` perché questa pill vive dentro `.tb`, che ha un
+     secondo zoom — quello di «Chat text» in Settings — che l'header non ha: un
+     `top` in unità locali di `.tb` rende `× zoomRoot × conv-body-zoom` pixel veri,
+     e l'header ne vale solo `× zoomRoot`. Senza la divisione la pill scivolerebbe
+     sempre più giù dell'header a ogni scatto di «Chat text» sopra 100%.
      Vale solo da aperto: da chiuso la pill è una riga sola al suo posto, e non
      c'è nulla da richiudere. Il fondo opaco copre il contenuto che le scorre
      dietro — ed è lo stesso colore che le sta dietro anche da ferma, quindi
@@ -1248,7 +1279,7 @@
      alla stessa quota: l'ultimo disegnato copre il primo, ed è il compromesso
      accettato — il caso comune è un gruppo aperto per turno. */
   .row.ops.pin {
-    position: sticky; top: var(--th-h, 34px); z-index: 1;
+    position: sticky; top: calc(var(--th-h, 34px) / var(--conv-body-zoom, 1)); z-index: 1;
     background: var(--surface);
   }
   .opgroup {
@@ -1366,6 +1397,14 @@
      tutto. Spazio uguale sopra e sotto: sta a metà fra i due messaggi, non attaccata
      a nessuno dei due. */
   .turnsep { height: 1px; background: var(--line); margin: 6px 8px; flex: none; }
+
+  /* Il bannerino di giornata, come WhatsApp: al centro, sopra il primo messaggio del
+     giorno. Sostituisce la data ripetuta su ogni riga (`.tm` mostra solo l'orario). */
+  .daysep { display: flex; justify-content: center; margin: 10px 0 6px; }
+  .daysep span {
+    font-size: 10px; font-weight: 600; color: var(--muted);
+    background: var(--surface-2); border-radius: 999px; padding: 3px 10px;
+  }
 
   /* `.conv` è una colonna flex con `gap: 8px`: il capitolo la interrompe, quindi se la
      rifà uguale dentro di sé — senza, i turni si incollerebbero fra loro. */

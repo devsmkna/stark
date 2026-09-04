@@ -26,11 +26,11 @@ import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
-import { agentiDisponibili, backendFor, catalogoCompleto, scaldaCatalogo } from '../adapters/index.ts'
+import { agentiDisponibili, agentIds, backendFor, catalogoCompleto, scaldaCatalogo } from '../adapters/index.ts'
 import { logPath, readToken } from './identity.ts'
 import { avviaRicambio, RADICE } from './riavvio.ts'
 import {
-  aggiornamentoNoto, alberoSporco, controllaAllAvvio, versioneInstallata,
+  aggiornamentoNoto, alberoSporco, controlla, controllaAllAvvio, notaAggiornamento, versioneInstallata,
 } from './aggiornamenti.ts'
 import { eseguiHandoff, type ViaBriefing } from './handoff.ts'
 import type { Command } from '../core/events.ts'
@@ -560,6 +560,12 @@ async function route(
           hosts: guard.perimetro.ammessi.map(a => ({ host: a.host, source: a.fonte })),
         },
         agent: await backendFor().diagnostics?.(configDir),
+        // La diagnostica di **tutti** gli agent installati, chiave = id agent: la
+        // pagina System dice la versione di ciascuno, e chiederla solo all'agent di
+        // default lasciava OpenCode senza numero. `null` per chi non sa rispondere.
+        diagnosticaAgenti: Object.fromEntries(await Promise.all(
+          agentIds().map(async id => [id, (await backendFor(id).diagnostics?.()) ?? null])
+        )) as Record<string, unknown>,
         nativeFolderPicker: await nativeFolderPickerAvailable(),
         // Quali agent questa macchina sa guidare. La UI ne fa una scelta **solo se ce
         // n'è più di uno**: una tendina con una voce sola è un ostacolo, non una scelta
@@ -596,6 +602,18 @@ async function route(
       return send(res, 200, aggiornamentoNoto() ?? {
         installata: versioneInstallata(RADICE), ultima: null, tag: null, disponibile: false,
       })
+    }
+
+    /**
+     * Rifà il controllo **adesso**, invece di rileggere quello dell'avvio. È il
+     * «Check for updates» della pagina System: un giro di rete che chiede i tag al
+     * remoto, e la risposta vale come una letta all'accensione — stessa forma, stesso
+     * posto. Si aspetta: chi ha premuto vuole la risposta, non un «forse più tardi».
+     */
+    if (method === 'POST' && path === '/api/update/check') {
+      const stato = await controlla(RADICE)
+      notaAggiornamento(stato)
+      return send(res, 200, stato)
     }
 
     /**
@@ -726,6 +744,12 @@ async function route(
           // non c'e' posto per una card di permesso, e un permesso che chiede senza
           // avere dove rispondere non e' cauto — e' una chat piantata.
           deny: ['shell', 'edit', 'net', 'agents', 'external'],
+          // L'helper e' per domande veloci, non per un lavoro profondo: a differenza
+          // della chat grande (thinking on, effort high — i default del CLI), qui si
+          // parte spenti e al minimo. Chi vuole di piu' lo sceglie dal pannello
+          // (AgentPanel.svelte); un agent che non conosce queste due opzioni le ignora
+          // (vedi extraOptions in core/adapter.ts).
+          extraOptions: { reasoning: 'off', effort: 'low' },
         })
         return send(res, 201, { id, snapshot: registry.snapshot(id) })
       } catch (e) {

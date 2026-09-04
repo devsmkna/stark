@@ -24,7 +24,9 @@ import { allegabiliDi, OpenCodeAdapter } from '../adapters/opencode/adapter.ts'
 import { askToolsFor } from '../adapters/claude-code/permissions.ts'
 import { backendFor, DEFAULT_AGENT } from '../adapters/index.ts'
 import { modelloDa, motivoDa, OpenCodeTranslator } from '../adapters/opencode/translate.ts'
-import { passeggero } from '../adapters/opencode/adapter.ts'
+import {
+  livelliEffortDi, opzioniOpenCode, ordinaLivelliEffort, passeggero, refModello,
+} from '../adapters/opencode/adapter.ts'
 import { consentiSempre, percorsoRegole } from '../adapters/claude-code/regole.ts'
 import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
@@ -638,6 +640,71 @@ check('§options: session.options rimpiazza, non fonde',
     return s.options.length === 1 && s.options[0]?.value === 'low'
       && s.options[0]?.choices.length === 1
   })())
+
+// §effort-oc: l'equivalente OpenCode di `opzioniClaude`, corretto il 3 settembre 2026
+// dopo aver misurato che il vecchio commento («OpenCode non ha niente da dichiarare»)
+// era dedotto dai tipi installati e non dall'handshake vero. Le forme qui sotto sono
+// quelle catturate da `GET /config/providers` di un server 1.18.26 in esecuzione
+// (`opencode serve`, zero quota — providers autenticati), una per famiglia di
+// provider: Claude passa `effort` dentro `thinking`, GPT passa `reasoningEffort`
+// nudo, Gemini `thinkingConfig.thinkingLevel`. Il numero di chiavi e' quanto conta
+// qui — quale sotto-campo il provider usa per attuarle non e' cosa di STARK.
+check('§effort-oc: le chiavi di `variants` diventano `effortLevels`, in ordine',
+  livelliEffortDi({
+    capabilities: { reasoning: true },
+    variants: {
+      xhigh: { thinking: { type: 'adaptive' }, effort: 'xhigh' },
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      medium: { thinking: { type: 'adaptive' }, effort: 'medium' },
+      high: { thinking: { type: 'adaptive' }, effort: 'high' },
+    },
+  }).join(',') === 'low,medium,high,xhigh')
+check('§effort-oc: `none`/`minimal` vanno davanti (vocabolario GPT)',
+  livelliEffortDi({
+    capabilities: { reasoning: true },
+    variants: {
+      high: { reasoningEffort: 'high' }, none: { reasoningEffort: 'none' },
+      medium: { reasoningEffort: 'medium' }, low: { reasoningEffort: 'low' },
+    },
+  }).join(',') === 'none,low,medium,high')
+check('§effort-oc: un modello che ragiona ma senza `variants` non ha livelli (glm-5, kimi-k2.5)',
+  livelliEffortDi({ capabilities: { reasoning: true }, variants: {} }).length === 0)
+check('§effort-oc: un provider con voci mai viste finisce in coda, alfabetico',
+  livelliEffortDi({ variants: { turbo: {}, low: {} } }).join(',') === 'low,turbo')
+check('§effort-oc: opzioniOpenCode dichiara `effort` solo sul modello che li ha',
+  (() => {
+    const modelli = [
+      { id: 'opencode/muse-spark-1.2', autoMode: false, contextWindow: 128_000,
+        reasoning: true, effortLevels: ordinaLivelliEffort(['minimal', 'xhigh', 'low', 'medium', 'high']) },
+      { id: 'opencode/glm-5', autoMode: false, contextWindow: 128_000, reasoning: true },
+    ]
+    const conLivelli = opzioniOpenCode(modelli, 'opencode/muse-spark-1.2', undefined)
+    const senza = opzioniOpenCode(modelli, 'opencode/glm-5', undefined)
+    const e = conLivelli.find(o => o.id === 'effort')
+    return !!e && e.value === 'default'
+      && e.choices.map(c => c.value).join(',') === 'default,minimal,low,medium,high,xhigh'
+      && senza.find(o => o.id === 'effort') === undefined
+      // Niente voce 'reasoning': non e' un interruttore indipendente su OpenCode
+      // (misurato — vedi il commento su `ModelChoice.reasoning` in core/events.ts).
+      && conLivelli.find(o => o.id === 'reasoning') === undefined
+  })())
+check("§effort-oc: un `variant` scelto e' il valore corrente, non \"default\"",
+  opzioniOpenCode(
+    [{ id: 'm', autoMode: false, contextWindow: 0, reasoning: true, effortLevels: ['low', 'high'] }],
+    'm', 'high',
+  ).find(o => o.id === 'effort')?.value === 'high')
+// `refModello`: la forma che il server accetta per `ModelRef` — `variant` **assente**
+// per «default», non la stringa `'default'` (misurato: `additionalProperties: false`
+// sullo schema live rifiuterebbe un valore fuori dai `variants` dichiarati, e la prova
+// diretta — creare una sessione senza chiederne uno — torna `variant: "default"` da
+// sola, quel valore non lo manda mai nessuno).
+check('§effort-oc: refModello non manda `variant` per "default"',
+  (() => {
+    const r = refModello('opencode/muse-spark-1.2', 'default')
+    return !!r && r.id === 'muse-spark-1.2' && r.providerID === 'opencode' && !('variant' in r)
+  })())
+check('§effort-oc: refModello manda `variant` per un livello esplicito',
+  refModello('opencode/muse-spark-1.2', 'xhigh')?.variant === 'xhigh')
 
 check('§7: chiudere il turno in corso non chiude quello che aspetta il suo giro',
   FILA.turns[0]?.ended === true && FILA.turns[1]?.ended === false,

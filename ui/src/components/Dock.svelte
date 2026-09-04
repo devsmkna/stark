@@ -20,6 +20,7 @@
   import ModelPicker from './ModelPicker.svelte'
   import type { SessionSnapshot } from '$core/reduce.ts'
   import type { SessionOption, Attachment, SlashCommand } from '$core/events.ts'
+  import { promptText } from '$core/events.ts'
   import { optionsFrom } from '$core/adapter.ts'
   import {
     filtroFile, modelloInUso, nomiBrevi, parteDi, tipiAccettati, tipoDi,
@@ -111,6 +112,64 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
     // esplicito il prompt sarebbe partito per l'altra chat.
     const ok = await store.prompt(draft, addosso, id)
     if (!ok) { text = draft; allegati = addosso; await regrow() }
+    // Un prompt nuovo è la fine di qualunque sfoglio: la prossima freccia su deve
+    // ripartire da lui, non da dove ci si era fermati la volta scorsa.
+    storicoAt = -1
+  }
+
+  // ─── freccia su: la history di una shell ───────────────────────────────────
+  //
+  // Solo i prompt mandati **in questa chat** (`snap.turns`), nell'ordine in cui sono
+  // partiti — non è una history globale, esattamente come il terminale non mescola
+  // le sessioni. Gli allegati non tornano indietro: si richiama il testo, non il file.
+
+  const storico = $derived(
+    snap.turns.map(t => promptText(t.prompt).trim()).filter(t => t.length > 0),
+  )
+  /** -1: non si sta sfogliando, `text` è il proprio. 0: l'ultimo mandato, 1: quello
+   *  prima, e così via risalendo `storico` dalla coda. */
+  let storicoAt = $state(-1)
+  /** Cosa si stava scrivendo prima di premere freccia su la prima volta: è quello a
+   *  cui si torna scendendo oltre l'ultimo mandato. */
+  let storicoBozza = ''
+
+  async function posizionaCursore(): Promise<void> {
+    await regrow()
+    box?.setSelectionRange(text.length, text.length)
+  }
+
+  function storicoSu(): void {
+    const h = storico
+    if (h.length === 0) return
+    if (storicoAt === -1) storicoBozza = text
+    const next = Math.min(storicoAt + 1, h.length - 1)
+    if (next === storicoAt) return
+    storicoAt = next
+    text = h[h.length - 1 - storicoAt]!
+    void posizionaCursore()
+  }
+
+  function storicoGiu(): void {
+    if (storicoAt === -1) return
+    if (storicoAt === 0) { storicoAt = -1; text = storicoBozza }
+    else { storicoAt -= 1; text = storico[storico.length - 1 - storicoAt]! }
+    void posizionaCursore()
+  }
+
+  // ─── Esc: interrompe, e se non c'era altro in coda restituisce il prompt ───
+  //
+  // Copre chi ha premuto Invio per sbaglio o con un refuso: interrompendo subito,
+  // non deve riscrivere quello che aveva appena mandato. Vale solo **senza** coda —
+  // con più prompt in volo (§7) non è chiaro quale dei due si vorrebbe indietro, e si
+  // lascia la coda continuare per conto suo.
+  async function interrompi(): Promise<void> {
+    const inCorso = snap.turns.filter(t => !t.ended)
+    const daSolo = inCorso.length === 1 ? inCorso[0] : undefined
+    const ok = await store.stop(id)
+    if (ok && daSolo && text.trim() === '') {
+      text = promptText(daSolo.prompt)
+      await regrow()
+    }
   }
 
   // ─── allegati ─────────────────────────────────────────────────────────────
@@ -230,6 +289,23 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
         completa(comandi[scelto]!)
         return
       }
+    }
+    // Freccia su: come nel terminale, richiama l'ultimo prompt mandato. Scatta solo
+    // a inizio riga (o già mentre si sfoglia) — altrove è normale muovere il cursore
+    // in un testo di più righe, e prendersela lì romperebbe quello che si sta scrivendo.
+    if (e.key === 'ArrowUp' && store.settings?.historyArrowUp !== false) {
+      const el = e.currentTarget as HTMLTextAreaElement
+      if (storicoAt !== -1 || (el.selectionStart === 0 && el.selectionEnd === 0)) {
+        e.preventDefault(); storicoSu(); return
+      }
+    }
+    if (e.key === 'ArrowDown' && storicoAt !== -1) { e.preventDefault(); storicoGiu(); return }
+    // Esc mentre l'agent lavora: interrompe. Fuori da questo `if` non fa niente qui —
+    // resta il gancio globale che chiude menu e dialog (App.svelte).
+    if (e.key === 'Escape' && busy && store.settings?.interruptEscape !== false) {
+      e.preventDefault()
+      void interrompi()
+      return
     }
     // Invio manda, Maiusc+Invio va a capo. È la convenzione di ogni casella di
     // messaggio, e qui vale a maggior ragione: si scrivono richieste di una riga.
@@ -575,8 +651,13 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   const modelOpt = $derived(opts.find(o => o.kind === 'model'))
   // Le due scelte nuove (chieste dall'utente, 1º settembre 2026): si cercano per
   // `id`, non per `kind` — sono opzioni 'other' e il vocabolario lo dichiara
-  // l'agent (ADR-014). Dove non ci sono (OpenCode, journal vecchi) le voci non
-  // compaiono: stessa regola delle finestre di quota.
+  // l'agent (ADR-014). 'effort' compare anche su OpenCode dal 3 settembre 2026
+  // (`opzioniOpenCode` in adapters/opencode/adapter.ts, solo sui modelli che
+  // dichiarano `variants`); 'reasoning' resta solo di Claude Code, perche' OpenCode
+  // non ha un interruttore indipendente dal livello di effort (misurato — vedi il
+  // commento su `ModelChoice.reasoning` in core/events.ts). Dove una voce non c'e'
+  // (journal vecchi, un modello senza quella capacita') non compare: stessa regola
+  // delle finestre di quota.
   const reasoningOpt = $derived(opts.find(o => o.id === 'reasoning'))
   const effortOpt = $derived(opts.find(o => o.id === 'effort'))
 
@@ -1009,38 +1090,54 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
               {/if}
             {/each}
             {#if hover}
-              <!-- Hover: sotto l'utilizzo solo repo e branch, niente numeri flat -->
+              <!-- Hover: reset times + repo/branch su riga dedicata -->
+              {#if sessionWin?.resetsAt || weeklyWin?.resetsAt}
+                <div class="u-foot reset-foot">
+                  {#if sessionWin?.resetsAt}<span>Session resets {until(clock, sessionWin.resetsAt)}</span>{/if}
+                  {#if weeklyWin?.resetsAt}<span>Weekly {stamp(weeklyWin.resetsAt)}</span>{/if}
+                </div>
+              {/if}
               <div class="u-foot hover-foot">
                 <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
                 {#if git?.branch}
-                  <span class="sep"></span>
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
                   </span>
                 {/if}
               </div>
-            {:else if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
-              <div class="u-foot">
-                <span class="g-foot">
-                  <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
-                  {#if git?.branch}
-                    <span class="sep"></span>
-                    <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
-                      <Icon name="i-branch" />{git.branch}
-                    </span>
-                  {/if}
-                </span>
-                {#if contextWindow}<span>{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+            {:else}
+              {#if sessionWin?.resetsAt || weeklyWin?.resetsAt || contextWindow}
+                <div class="u-foot reset-flat-foot">
+                  <span class="reset-info">
+                    {#if sessionWin?.resetsAt}Session resets {until(clock, sessionWin.resetsAt)}{/if}
+                    {#if sessionWin?.resetsAt && weeklyWin?.resetsAt} · {/if}
+                    {#if weeklyWin?.resetsAt}Weekly {stamp(weeklyWin.resetsAt)}{/if}
+                  </span>
+                  {#if contextWindow}<span class="flat">{fmt(totalNow)} / {fmt(contextWindow)}</span>{/if}
+                </div>
+              {/if}
+              <div class="u-foot repo-branch-foot">
+                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                {#if git?.branch}
+                  <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
+                    <Icon name="i-branch" />{git.branch}
+                  </span>
+                {/if}
               </div>
             {/if}
           </div>
         {/if}
         {#if hover && !contextWindow && !haFinestre}
-          <!-- Hover senza barre: mostra comunque repo/branch in fondo -->
+          <!-- Hover senza barre: reset + repo/branch comunque -->
+          {#if sessionWin?.resetsAt || weeklyWin?.resetsAt}
+            <div class="u-foot reset-foot" style="padding:4px 9px 4px">
+              {#if sessionWin?.resetsAt}<span>Session resets {until(clock, sessionWin.resetsAt)}</span>{/if}
+              {#if weeklyWin?.resetsAt}<span>Weekly {stamp(weeklyWin.resetsAt)}</span>{/if}
+            </div>
+          {/if}
           <div class="u-foot hover-foot" style="padding:4px 9px 8px">
             <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
             {#if git?.branch}
-              <span class="sep"></span>
               <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                 <Icon name="i-branch" />{git.branch}
               </span>
@@ -1326,7 +1423,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
             onpaste={incolla}
             bind:this={box}
             bind:value={text}
-            oninput={e => { chiuso = false; chiusoAt = false; segnaCaret(e); grow() }}
+            oninput={e => { chiuso = false; chiusoAt = false; storicoAt = -1; segnaCaret(e); grow() }}
             onkeydown={key}
             onkeyup={segnaCaret}
             onclick={segnaCaret}
@@ -1445,7 +1542,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
      la casella scriveva in JetBrains Mono, e l'utente l'ha vista subito. */
   .field {
     flex: 1; position: relative; min-height: 34px; display: flex; align-items: center;
-    padding: 4px 18px; border: 1px solid var(--line-2); border-radius: 20px;
+    padding: 6px 16px; border: 1px solid var(--line-2); border-radius: 20px;
     background: var(--surface-2); overflow: hidden; font-family: var(--sans);
   }
   .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -1465,7 +1562,7 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
        dall'utente. La misura in grow() arrotonda alla riga intera successiva. */
     font: inherit; font-family: var(--sans); font-size: 12px; line-height: 17.5px;
     background: transparent; color: var(--ink); max-height: 140px;
-    border: none; outline: none; padding: 0;
+    border: none; border-radius: 0; outline: none; padding: 0;
   }
   textarea.input::placeholder { color: var(--muted); }
 
@@ -1644,8 +1741,11 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   .preview .pk-meta .ctx-val { font-family:var(--sans); font-size:10px; color:var(--ink); }
   /* Hover: un solo separatore, da bordo a bordo (il popup ha padding 4px) */
   .preview .pk-rule { margin:8px -4px 0; }
-  /* Footer hover con repo/branch, e footer espanso con repo/branch + flat a destra */
-  .u-foot.hover-foot { justify-content:flex-start; }
+  /* Footer: hover repo/branch separati, espanso reset+flat + repo/branch */
+  .u-foot.hover-foot, .u-foot.repo-branch-foot { justify-content:space-between; }
+  .u-foot.reset-foot, .u-foot.reset-flat-foot { justify-content:space-between; }
+  .u-foot.reset-foot span, .u-foot.reset-flat-foot .reset-info { font-size:8.5px; }
+  .u-foot .flat { font-size:8.5px; }
   .u-foot .g-foot, .u-foot.hover-foot { display:flex; align-items:center; gap:7px; }
   .u-foot .g { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:8.5px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .u-foot .g :global(svg.ic) { width:12px; height:12px; color:var(--muted); flex:none; }

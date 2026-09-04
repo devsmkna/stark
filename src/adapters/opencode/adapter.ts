@@ -17,7 +17,8 @@ import {
   type AdapterHooks, type AgentSession, type PromptFile, type SessionSpec,
 } from '../../core/adapter.ts'
 import type {
-  Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SlashCommand,
+  Capabilities, ModelChoice, ModeChoice, Payload, PermissionMode, PromptPart, SessionOption,
+  SlashCommand,
 } from '../../core/events.ts'
 import { IMMAGINI, parteDi } from '../../core/allegati.ts'
 import { EMPTY_USAGE } from '../../core/events.ts'
@@ -101,13 +102,26 @@ export function passeggero(motivo: string): boolean {
   // questa funzione dice di voler evitare. I codici qui sopra sono specifici e bastano.
 }
 
-/** Il modello nella forma che OpenCode vuole: `providerID/id`, o solo `id`. */
-function refModello(model: string): { providerID: string; id: string } | undefined {
+/**
+ * Il modello nella forma che OpenCode vuole: `providerID/id`, o solo `id` — piu' il
+ * livello di effort (`variant`, §effort qui sotto), quando c'e'.
+ *
+ * `variant` e' **`undefined`** e non la stringa `'default'`: `additionalProperties:
+ * false` sul `ModelRef` del server (misurato sull'OpenAPI live) non lascia passare
+ * un valore che non sia uno di quelli dichiarati dal modello — mandare `'default'`
+ * per dire «lascialo decidere a te» lo farebbe rifiutare. L'assenza del campo e' il
+ * modo con cui il server la esprime davvero (visto in `Session.model.variant` di una
+ * sessione appena creata senza chiederne uno).
+ */
+export function refModello(
+  model: string, variant?: string,
+): { providerID: string; id: string; variant?: string } | undefined {
   if (!model || model === 'default') return undefined
   const i = model.indexOf('/')
-  return i > 0
+  const base = i > 0
     ? { providerID: model.slice(0, i), id: model.slice(i + 1) }
     : { providerID: 'opencode', id: model }
+  return variant && variant !== 'default' ? { ...base, variant } : base
 }
 
 /**
@@ -151,6 +165,10 @@ export class OpenCodeAdapter implements AgentSession {
   private sessionId = ''
   private modello: string
   private modelli: ModelChoice[] = []
+  /** Il livello di effort in uso — `undefined` vuol dire «default», cioe' nessuna
+   *  `variant` scelta esplicitamente. Vedi `opzioniOpenCode` per il perche' non c'e'
+   *  un campo gemello per il reasoning. */
+  private impegno: string | undefined
   private modo: PermissionMode
   private ac = new AbortController()
   private flusso: Promise<void> | null = null
@@ -209,15 +227,38 @@ export class OpenCodeAdapter implements AgentSession {
       if (suo) this.modello = suo
     }
 
+    // Il livello di effort che il registro rilegge dal journal (`extraOptions` in
+    // `SessionSpec`, stessa strada di `reasoning`/`effort` per Claude Code) — solo se
+    // il modello **in uso** lo supporta davvero: un giornale scritto su un modello con
+    // la scala low..max non deve imporre 'low' a uno che ha solo high/max (visto:
+    // `claude-sonnet-4` via OpenCode). Un valore che non torna resta ignorato, non e'
+    // un errore da segnalare — e' lo stesso «no-op onesto» del reasoning su un modello
+    // che non pensa.
+    const extraEffort = this.spec.extraOptions?.['effort']
+    if (extraEffort) {
+      const dichiarato = this.modelli.find(m => m.id === this.modello || m.resolved === this.modello)
+      if (extraEffort === 'default' || dichiarato?.effortLevels?.includes(extraEffort)) {
+        this.impegno = extraEffort === 'default' ? undefined : extraEffort
+      }
+    }
+
     // Riprendere non ricostruisce niente: la conversazione e' una riga nel database di
     // OpenCode, e il server e' gia' in piedi. E' la differenza con `--resume` di Claude
     // Code, ed e' anche il motivo per cui la premessa di ADR-005 («risvegliare costa
-    // quota») e' vera di quell'agent e non del dominio.
+    // quota») e' vera di quell'agent e non del dominio. Il livello di effort ci resta
+    // dentro **lui**: se il journal ne chiede uno esplicito lo si riafferma lo stesso
+    // (difensivo — corregge un'eventuale sessione OpenCode ripartita da sola), ma senza
+    // aspettare l'esito: e' una correzione, non una condizione per continuare.
+    const rifModello = refModello(this.modello, this.impegno)
     if (this.spec.resume?.ref) {
       this.sessionId = this.spec.resume.ref
+      if (extraEffort && rifModello) {
+        void c.v2.session.switchModel({ sessionID: this.sessionId, model: rifModello })
+          .catch(() => { /* la sessione dira' lei, al prossimo turno, se qualcosa non torna */ })
+      }
     } else {
       const r = await c.v2.session.create({
-        ...(refModello(this.modello) ? { model: refModello(this.modello) } : {}),
+        ...(rifModello ? { model: rifModello } : {}),
           ...(this.modo ? { agent: this.modo } : {}),
         location: { directory: this.spec.cwd },
       })
@@ -248,7 +289,10 @@ export class OpenCodeAdapter implements AgentSession {
       // il default dichiarato da OpenCode Zen su questa macchina e' `big-pickle`, che
       // e' giu' a monte da giorni.
       models: this.modelli,
-      options: optionsFrom({ mode: this.modo, modes: modi, model: this.modello, models: this.modelli }),
+      options: [
+        ...optionsFrom({ mode: this.modo, modes: modi, model: this.modello, models: this.modelli }),
+        ...opzioniOpenCode(this.modelli, this.modello, this.impegno),
+      ],
     })
     // Non si dichiara la modalita' **chiesta** ma quella in cui si e' davvero.
     // `elencoModi` qui sopra dichiara `auto`, `acceptEdits`, `dontAsk` e
@@ -947,6 +991,7 @@ export class OpenCodeAdapter implements AgentSession {
   async setOption(id: string, value: string): Promise<void> {
     if (id === 'mode') return this.setMode(value)
     if (id === 'model') return this.setModel(value)
+    if (id === 'effort') return this.setEffort(value)
     this.emit({ k: 'notice', level: 'warn', text: `opzione sconosciuta: ${id}` })
   }
 
@@ -954,6 +999,13 @@ export class OpenCodeAdapter implements AgentSession {
     // Chi comanda e' `this.modello`: il modello viaggia **con ogni prompt**
     // (`mandaAlRunner`), quindi la scelta e' gia' efficace appena assegnata qui.
     this.modello = model
+    // I livelli di effort dipendono dal modello (§opzioniOpenCode): quello scelto sul
+    // modello di prima puo' non esistere su questo (visto: `low` su Sonnet, assente su
+    // `claude-sonnet-4` che ha solo high/max). Si riparte da 'default' — lo stesso
+    // «l'elenco delle scelte si rimpiazza» di Claude Code, ma li' il CLI retrocede da
+    // solo un livello troppo alto; qui non c'e' nessuno che lo faccia per noi, quindi
+    // si azzera invece di rischiare una `variant` che il modello nuovo rifiuta.
+    this.impegno = undefined
     const ref = refModello(model)
     // Lo si dice anche a `/v2`, cosi' la sessione ricorda la scelta per chi la
     // riaprisse da li' — ma **senza farne dipendere l'esito**: quel registro conosce
@@ -965,6 +1017,45 @@ export class OpenCodeAdapter implements AgentSession {
         .catch(() => { /* non lo conosce: il prompt lo porta comunque */ })
     }
     this.emit({ k: 'session.option', id: 'model', value: model })
+    // Stessa ragione di Claude Code (`opzioniAdesso`): l'elenco degli 'effort'
+    // disponibili e' del modello, quindi cambiato lui si rimpiazza — qui puo' anche
+    // sparire del tutto (un modello senza `variants`) o comparire (uno che le ha).
+    this.emit({ k: 'session.options', options: opzioniOpenCode(this.modelli, model, this.impegno) })
+  }
+
+  /**
+   * Il livello di effort. **Non** un interruttore reasoning: vedi il commento su
+   * `opzioniOpenCode` per perche' OpenCode non ne ha uno indipendente.
+   *
+   * Il canale e' lo stesso di `setModel` (`v2.session.switchModel`), stesso `id` e
+   * `providerID` di adesso — cambia solo `variant`. Misurato dal vivo (turno vero, non
+   * solo l'OpenAPI): la corsa **legacy** che esegue il prompt (`mandaAlRunner`) non
+   * porta un campo per questo, eppure lo eredita — la sessione lo ricorda lei.
+   *
+   * A differenza di `setModel`, qui un fallimento **non** si inghiotte: il modello
+   * viaggia anche col prompt (`refLegacy` in `mandaAlRunner`), quindi uno `switchModel`
+   * caduto si autocorregge al turno dopo. L'effort non ha quella seconda strada —
+   * `mandaAlRunner` non porta un campo per lui, misurato sui tipi legacy — quindi se
+   * `switchModel` non arriva a destinazione la scelta resta silenziosamente quella di
+   * prima finche' nessuno lo dice.
+   */
+  async setEffort(value: string): Promise<void> {
+    const corrente = this.modelli.find(m => m.id === this.modello || m.resolved === this.modello)
+    if (value !== 'default' && !corrente?.effortLevels?.includes(value)) {
+      this.emit({ k: 'notice', level: 'warn', text: `«${this.modello}» non ha un livello di effort «${value}»` })
+      return
+    }
+    const ref = refModello(this.modello, value === 'default' ? undefined : value)
+    if (ref) {
+      try {
+        await this.client?.v2.session.switchModel({ sessionID: this.sessionId, model: ref })
+      } catch (e) {
+        this.emit({ k: 'notice', level: 'warn', text: `effort non cambiato: ${(e as Error)?.message ?? String(e)}` })
+        return
+      }
+    }
+    this.impegno = value === 'default' ? undefined : value
+    this.emit({ k: 'session.option', id: 'effort', value })
   }
 
   /** La modalita' **e'** l'agent: si cambia agent e basta. */
@@ -1127,6 +1218,34 @@ export function allegabiliDi(m: Record<string, unknown>): string[] {
 }
 
 /**
+ * I livelli di effort che **questo modello** dichiara, **corretto il 3 settembre
+ * 2026**: qui c'era scritto che OpenCode non avesse niente da dichiarare, dedotto dai
+ * tipi del client installato — che di questo campo non parlavano affatto. Misurato
+ * invece sull'OpenAPI **live** del server (`GET /doc`, versione 1.18.26, piu' recente
+ * di quella con cui il client era stato generato): ogni modello porta `variants`, una
+ * mappa effort → parametri del provider sotto (`{low:{effort:'low',thinking:{...}}}`
+ * su Claude, `{low:{reasoningEffort:'low',...}}` su GPT, `{minimal:{thinkingLevel:
+ * 'minimal'}}` su Gemini) — stesso vocabolario di `supportedEffortLevels` in Claude
+ * Code, chiavi diverse a seconda del provider a monte. Non tutti i modelli con
+ * `reasoning: true` ne hanno (dieci su questa macchina, es. `glm-5`, `kimi-k2.5`:
+ * dichiarano di ragionare ma senza un livello da scegliere — la voce 'effort'
+ * semplicemente non compare per loro).
+ *
+ * Confermato **facendo girare un turno vero** (non solo leggendo lo schema): stesso
+ * prompt sullo stesso modello gratuito, `variant` diverso → `tokens.reasoning`
+ * diverso (125 su 'minimal', 166 senza variant scelto — il "default" del provider,
+ * ne' spento ne' al minimo — 224 su 'xhigh'). Il canale e' `v2.session.switchModel`
+ * (vedi `setEffort` sulla classe): non e' documentato nei tipi del client
+ * (`ModelRef.variant` c'e' solo nell'OpenAPI live), ma la sessione lo ricorda e la
+ * corsa **legacy** che esegue davvero il turno lo eredita da li', pur non avendo lei
+ * stessa un campo per chiederlo.
+ */
+export function livelliEffortDi(m: Record<string, unknown>): string[] {
+  const varianti = (m['variants'] ?? {}) as Record<string, unknown>
+  return ordinaLivelliEffort(Object.keys(varianti))
+}
+
+/**
  * I modelli fra cui questa sessione puo' scegliere.
  *
  * Si leggono dai **provider autenticati** (`config.providers`), non dal catalogo
@@ -1146,10 +1265,9 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
         const cost = (m['cost'] ?? {}) as Record<string, unknown>
         // Il fatto che il modello ragiona: capabilities.reasoning dell'SDK
         // (misurato 1º settembre 2026: vero su tutti e 105 i modelli di questa
-        // macchina). È un fatto da leggere, NON un interruttore — il prompt di
-        // sessione OpenCode non accetta opzioni per giro, quindi qui non nasce
-        // nessuna voce 'reasoning' nel menu: il dato viaggia, la scelta no.
+        // macchina). I livelli di effort: vedi `livelliEffortDi`.
         const caps = (m['capabilities'] ?? {}) as Record<string, unknown>
+        const livelliEffort = livelliEffortDi(m)
         out.push({
           id: `${p.id}/${mid}`,
           ...(typeof m['name'] === 'string' ? { label: String(m['name']) } : {}),
@@ -1166,6 +1284,7 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
           ...(typeof p.name === 'string' ? { providerName: String(p.name) } : {}),
           ...(typeof m['family'] === 'string' ? { family: String(m['family']) } : {}),
           ...(caps['reasoning'] === true ? { reasoning: true } : {}),
+          ...(livelliEffort.length ? { effortLevels: livelliEffort } : {}),
           ...(typeof cost['input'] === 'number' && typeof cost['output'] === 'number'
             ? { cost: { input: cost['input'], output: cost['output'] } } : {}),
         })
@@ -1173,6 +1292,52 @@ async function elencoModelli(c: Client): Promise<ModelChoice[]> {
     }
     return out
   } catch { return [] }
+}
+
+/**
+ * L'ordine dei livelli: dal piu' leggero al piu' pesante, stesso vocabolario di
+ * `supportedEffortLevels` di Claude Code dove i nomi coincidono (`low`…`max`), con
+ * `none`/`minimal` davanti per i provider che li usano (GPT, Gemini). Una chiave che
+ * non e' in questo elenco (visto: nessuna finora, ma un provider nuovo puo' averne)
+ * finisce in coda, in ordine alfabetico invece di sparire.
+ */
+const ORDINE_EFFORT = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+export function ordinaLivelliEffort(chiavi: string[]): string[] {
+  return [...chiavi].sort((a, b) => {
+    const ia = ORDINE_EFFORT.indexOf(a), ib = ORDINE_EFFORT.indexOf(b)
+    if (ia === -1 && ib === -1) return a.localeCompare(b)
+    if (ia === -1) return 1
+    if (ib === -1) return -1
+    return ia - ib
+  })
+}
+
+/**
+ * La voce 'effort' del menu, quando il modello **in uso** ne ha (§elencoModelli).
+ * Stesso `id` di Claude Code (`opzioniClaude` in adapters/claude-code/adapter.ts):
+ * e' la stessa forma generale — ADR-014 — quindi la UI (Dock, AgentPanel) la disegna
+ * senza sapere quale agent gliel'ha data.
+ *
+ * Niente voce 'reasoning': su OpenCode **non esiste un interruttore indipendente**
+ * dall'effort (misurato: nessun campo del genere in `SessionPromptData` ne' in
+ * `ModelRef`, e la sessione di prova senza `variant` scelto non ragionava zero — vedi
+ * `livelliEffortDi`). Dichiararne uno finto sarebbe una voce che sembra fare una cosa
+ * e non la fa: peggio di non mostrarla.
+ *
+ * `'default'` e' sempre la prima scelta, anche quando il valore attuale e' esplicito:
+ * e' la via per tornare a «lascialo decidere il provider», che altrimenti non
+ * avrebbe un posto nel menu una volta scelto un livello.
+ */
+export function opzioniOpenCode(modelli: ModelChoice[], model: string, impegno: string | undefined): SessionOption[] {
+  const corrente = modelli.find(m => m.id === model || m.resolved === model)
+  if (!corrente?.effortLevels?.length) return []
+  return [{
+    id: 'effort', label: 'Effort', value: impegno ?? 'default',
+    choices: [
+      { value: 'default', available: true, label: 'default', note: 'whatever level the provider picks on its own' },
+      ...corrente.effortLevels.map(v => ({ value: v, available: true, label: v })),
+    ],
+  }]
 }
 
 /** Quale modello userebbe OpenCode se non gliene si dice nessuno. */

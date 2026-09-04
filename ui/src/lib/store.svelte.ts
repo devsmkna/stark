@@ -29,10 +29,10 @@ import { Viste } from './viste.svelte.ts'
 import { decisione, foglieVere } from './viste-regola.ts'
 import { Themer } from './theme.svelte.ts'
 import { Sizer } from './textsize.svelte.ts'
-import { Grouper } from './grouping.svelte.ts'
 import { Collapser } from './collapse.svelte.ts'
 import { Orderer } from './order.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
+import { Lettura } from './lettura.svelte.ts'
 import { activityText, project } from './view.ts'
 
 // `callFor` e `CALL_HEAD` stavano qui, e da qui sono passati in `$core/calls.ts`: la
@@ -101,9 +101,9 @@ export class Store {
   readonly textSize = new Sizer()
   /** La famiglia del font, stesso motivo. Vedi `fontfamily.svelte.ts`. */
   readonly font = new Fonter()
-  /** Come si raggruppa l'elenco — per stato o per progetto. Stesso motivo del tema:
-   *  è una preferenza di questo schermo. Vedi `grouping.svelte.ts`. */
-  readonly grouping = new Grouper()
+  /** Larghezza della conversazione e riduzione delle animazioni, stesso motivo del
+   *  tema: è del dispositivo. Vedi `lettura.svelte.ts`. */
+  readonly lettura = new Lettura()
   /** Quali progetti sono chiusi nell'elenco. Stesso motivo del tema. Vedi
    *  `collapse.svelte.ts`. */
   readonly collapse = new Collapser()

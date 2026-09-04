@@ -221,13 +221,19 @@ function titleOf(s: SessionSnapshot): string {
  * Lo stato di una sessione che **non ha un processo dietro**.
  *
  * Un journal che finisce a metà di un turno senza `session.slept` è una sessione che
- * il daemon stava seguendo quando è stato fermato. Ripeterne l'ultimo stato scritto la
- * lascerebbe in *Working* per sempre, e l'interfaccia direbbe che qualcosa sta girando
- * mentre non gira niente — la bugia peggiore, perché è quella su cui si aspetta.
- * Dormiente invece è uno stato vero e va rispettato: è stato scelto.
+ * il daemon stava seguendo quando è stato fermato — al riavvio, o perché il processo
+ * è morto durante il funzionamento. Ripeterne l'ultimo stato scritto la lascerebbe in
+ * *Working* per sempre, e l'interfaccia direbbe che qualcosa sta girando mentre non
+ * gira niente — la bugia peggiore, perché è quella su cui si aspetta.
+ *
+ * Diventa *Sleeping*, non *Stopped*: le due situazioni si aprono allo stesso modo,
+ * con un `wake()` che rilegge il journal e riparte con `--resume` — la stessa via
+ * di una sessione messa a dormire a mano. Dire «stopped» prometterebbe un errore da
+ * indagare che qui non c'è: è solo un processo che non c'è più dietro, esattamente
+ * come dopo un Sleep esplicito.
  */
 function settled(state: string): string {
-  return state === 'busy' || state === 'starting' || state === 'awaiting' ? 'closed' : state
+  return state === 'busy' || state === 'starting' || state === 'awaiting' ? 'sleeping' : state
 }
 
 export const STARK_HOME = process.env['STARK_HOME'] ?? resolve(homedir(), '.stark')
@@ -1392,11 +1398,22 @@ export class Registry {
     this.bump()
   }
 
+  /**
+   * Il daemon che si ferma non è un errore di nessuna sessione: è la stessa cosa di
+   * uno Sleep esplicito, fatto per tutte insieme. Prima chiamava `close()`, che scrive
+   * solo `session.state: closed` — un fatto vero (il processo finisce) ma letto da
+   * solo dice «si è fermata», non «l'ho fermata io e torna con un reopen». Stessa cura
+   * di `session.sleep` sopra: si interrompe un turno in corso prima di addormentarsi,
+   * per non perdere lavoro in volo.
+   */
   async shutdown(): Promise<void> {
     await Promise.all([...this.live.keys()].map(async id => {
       const l = this.live.get(id)
       if (!l) return
-      try { await l.adapter.close() } catch { /* il processo è già andato */ }
+      try {
+        if (l.snapshot.state === 'busy') await l.adapter.interrupt()
+        await l.adapter.sleep()
+      } catch { /* il processo è già andato */ }
       this.retire(id)
     }))
   }

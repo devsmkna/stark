@@ -29,6 +29,7 @@ import {
   elencoConversazioni, importaConversazione, isRecent as recenteOpenCode,
   trovaConversazione,
 } from './opencode/import.ts'
+import { diagnosticsOpencode, warmDiagnosticsOpencode } from './opencode/diagnostica.ts'
 
 export const claudeCode: AgentBackend = {
   id: 'claude-code',
@@ -75,6 +76,8 @@ export const openCode: AgentBackend = {
   isRecent: recenteOpenCode,
   importConversation: importaConversazione,
   locateConversation: (sessionId) => trovaConversazione(sessionId),
+  diagnostics: diagnosticsOpencode,
+  warmDiagnostics: warmDiagnosticsOpencode,
 }
 
 let ocPresente: boolean | null = null

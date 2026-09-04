@@ -17,9 +17,11 @@
   // conversazione. Compare **solo** quando serve davvero: la macchina ha più di un
   // profilo E questa cartella non ne ha già uno deciso (docs/ui-schermate.md §Projects).
   import Icon from './Icon.svelte'
+  import ModelPicker from './ModelPicker.svelte'
   import { colours, hhmm, project } from '../lib/view.ts'
+  import { getLobeIconUrl } from '../lib/lobe.ts'
   import type { Store } from '../lib/store.svelte.ts'
-  import type { SystemInfo } from '../lib/api.ts'
+  import type { SystemInfo, AgentModels } from '../lib/api.ts'
 
   let { store }: { store: Store } = $props()
 
@@ -55,7 +57,11 @@
   // voce sola è un ostacolo, non una scelta. Chi non ha OpenCode non vede niente di
   // nuovo, ed è il comportamento giusto — non c'è niente da spiegargli.
   let agents = $state<NonNullable<SystemInfo['agents']> | null>(null)
-  let agentPick = $state<string | null>(null)
+  /** Cosa ha scelto l'utente nel picker (agent + modello, o `null` per il modello di
+   *  default dell'agent). Assente finché non tocca il picker: prima di allora vale
+   *  `defaultPick`, così la voce nasce già con dentro qualcosa e non vuota. */
+  let modelChosen = $state<{ agent: string; model: string | null } | null>(null)
+  let modelDdOpen = $state(false)
 
   // Il Finder nativo: parte `false` finché `/api/system` non risponde, quindi il
   // bottone nasce disabilitato — coerente col resto di STARK, che non mostra mai una
@@ -64,7 +70,9 @@
   let nativeBusy = $state(false)
 
   // Un solo effetto per una sola domanda: profili, agent e Finder arrivano tutti
-  // dalla stessa risposta di `/api/system`.
+  // dalla stessa risposta di `/api/system`. Il catalogo dei modelli è una richiesta
+  // a parte (`caricaCatalogo`, condivisa con Dock/Helper/AgentPanel/Settings): la
+  // voce «Model» qui sotto nasce già con l'icona e il nome veri, non solo l'id.
   $effect(() => {
     if (store.tab === 'new' && profiles === null) {
       void store.api.system().then(
@@ -75,6 +83,7 @@
         },
         () => { profiles = []; agents = []; nativePicker = false },
       )
+      void store.caricaCatalogo()
     }
   })
 
@@ -92,12 +101,48 @@
     }
   }
 
-  const showAgents = $derived((agents?.length ?? 0) > 1)
-  const effectiveAgent = $derived(agentPick ?? agents?.[0]?.id ?? null)
   const AGENT_NOMI: Record<string, string> = {
     'claude-code': 'Claude Code',
     opencode: 'OpenCode',
   }
+
+  /** Il punto di partenza prima che l'utente tocchi il picker: il modello preferito
+   *  (Settings → New chats start with → Model) se la sua casa è installata su questa
+   *  macchina; altrimenti il primo agent disponibile, senza un modello preciso —
+   *  «lascia decidere lui», come già faceva `start()` prima di questa voce. */
+  const defaultPick = $derived.by(() => {
+    const pref = store.settings?.preferredModel
+    const disponibili = new Set((agents ?? []).map(a => a.id))
+    if (pref && disponibili.has(pref.agent)) return { agent: pref.agent, model: pref.model as string | null }
+    const primo = agents?.[0]?.id
+    return primo ? { agent: primo, model: null } : null
+  })
+  const pick = $derived(modelChosen ?? defaultPick)
+  const effectiveAgent = $derived(pick?.agent ?? null)
+
+  /** L'agent e il modello del catalogo dietro `pick`, per il nome e l'icona vere
+   *  nella riga chiusa — senza, la voce direbbe solo l'id fino al primo click. */
+  const pickEntry = $derived.by(() => {
+    const cat = store.catalogo
+    if (!cat || !pick) return null
+    const ag = cat.find(a => a.id === pick.agent)
+    if (!ag) return null
+    const modello = pick.model
+      ? ag.models.find(m => m.id === pick.model || (m as any).resolved === pick.model)
+      : null
+    return { agent: ag, model: modello ?? ag.models[0] ?? null }
+  })
+  const pickIcon = $derived(pickEntry?.model
+    ? getLobeIconUrl((pickEntry.model as any).resolved ?? pickEntry.model.id) : null)
+  const pickLabel = $derived.by(() => {
+    if (pickEntry?.model) {
+      const label = pickEntry.model.label ?? pickEntry.model.id
+      const mm = /^(.*?)\s*\((.+)\)\s*$/.exec(label)
+      return mm ? mm[1]! : label
+    }
+    return pick ? (AGENT_NOMI[pick.agent] ?? pick.agent) : '—'
+  })
+  const pickAgentLabel = $derived(pickEntry?.agent.label ?? (pick ? (AGENT_NOMI[pick.agent] ?? pick.agent) : ''))
   // Assente vuol dire «non ancora deciso per questa cartella»: se STARK la conosce
   // già e ha un profilo salvato, non si chiede di nuovo — è deciso.
   const savedProfile = $derived(store.project(cwd.trim()).profile)
@@ -174,24 +219,15 @@
 
   function start(): void {
     if (ready) {
-      // Il modello preferito (chiesto dall'utente, 1º settembre 2026): le chat nuove
-      // partono con lui, **tranne** quelle del menu contestuale, che portano il
-      // modello della chat da cui si è premuto — quella regola la fa App.svelte,
-      // non qui. La coppia è vincolata all'agent: se qui si è scelto un agent
-      // diverso da quello della preferenza, il modello preferito non esiste in
-      // quella casa e non si impone — parte il default dell'agent scelto. E se
-      // l'agent della preferenza non è più installato, la preferenza non si applica:
-      // un modello di una casa assente sarebbe una chat che non parte.
-      const pref = store.settings?.preferredModel
-      const disponibili = new Set((agents ?? []).map(a => a.id))
-      const agente = pref && disponibili.has(pref.agent) && (agentPick === null || agentPick === pref.agent)
-        ? pref.agent
-        : effectiveAgent
-      const modello = pref && agente === pref.agent ? pref.model : undefined
+      // Il modello preferito (chiesto dall'utente, 1º settembre 2026) è ormai il
+      // punto di partenza del picker stesso (`defaultPick`), quindi qui basta
+      // mandare cosa il picker mostra — `pick` — senza rimerge: la voce
+      // «tranne il menu contestuale» resta vera perché quella strada non passa
+      // da questo dialogo (la fa App.svelte).
       void store.newChat(cwd.trim(), {
         ...(showProfiles && effectiveProfile ? { profile: effectiveProfile } : {}),
-        ...(agente ? { agent: agente } : {}),
-        ...(modello ? { model: modello } : {}),
+        ...(pick?.agent ? { agent: pick.agent } : {}),
+        ...(pick?.model ? { model: pick.model } : {}),
         ...(showContinue && continua ? { continue: true } : {}),
       })
     }
@@ -261,21 +297,29 @@
   {#if store.tab === 'new'}
     <div class="dlgb">
       <div class="fgroup">
-        <div class="flabel">Agent</div>
-        {#if showAgents}
-          {#each agents ?? [] as a (a.id)}
-            <button type="button" class="inst instbtn" class:on={effectiveAgent === a.id}
-              onclick={() => { agentPick = a.id }}>
-              <span class="rd"></span>
-              <span class="nm">{AGENT_NOMI[a.id] ?? a.id}</span>
-            </button>
-          {/each}
-        {:else}
-          <!-- Un agent solo non è una scelta: si dice qual è e basta. È lo stesso posto
-               in cui, fino ad ADR-012, c'era scritto «un solo adapter nell'MVP». -->
-          <div class="inst on"><span class="rd"></span>
-            <span class="nm">{AGENT_NOMI[agents?.[0]?.id ?? ''] ?? 'Claude Code'}</span>
-            <span class="where"><Icon name="i-monitor" /> this machine</span></div>
+        <div class="flabel">Model</div>
+        <!-- Sostituisce la scelta «Claude Code o OpenCode»: un modello implica la sua
+             casa, quindi sceglierlo qui sceglie anche l'agent — non due domande, una.
+             Nasce già con dentro il modello preferito (Settings → Agent → «New chats
+             start with»), o il primo modello dell'unico agent installato; un click la
+             riapre sul picker vero, ricerca compresa. -->
+        <button type="button" class="inst instbtn modelbtn" class:on={modelDdOpen}
+          onclick={() => { modelDdOpen = !modelDdOpen; if (modelDdOpen) void store.caricaCatalogo() }}>
+          {#if pickIcon}
+            <img class="mico" src={pickIcon} alt="" width="16" height="16" loading="lazy"
+              onerror={(e) => { const t = e.currentTarget as HTMLImageElement; t.style.display = 'none' }} />
+          {:else}
+            <span class="rd"></span>
+          {/if}
+          <span class="nm">{pickLabel}</span>
+          <span class="where">{pickAgentLabel}<Icon name={modelDdOpen ? 'i-back' : 'i-fwd'} /></span>
+        </button>
+        {#if modelDdOpen}
+          <div class="dd moddd">
+            <ModelPicker catalogo={store.catalogo} corrente={pick?.model ?? pickEntry?.model?.id ?? ''}
+              agenteCorrente={effectiveAgent ?? undefined}
+              onScegli={(agent, model) => { modelChosen = { agent, model }; modelDdOpen = false }} />
+          </div>
         {/if}
       </div>
 
@@ -500,6 +544,17 @@
   .instbtn { width: 100%; text-align: left; font: inherit; cursor: pointer; margin-bottom: 5px; }
   .instbtn:last-of-type { margin-bottom: 0; }
   .instbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* La voce «Model»: stesso vestito di `.inst`, ma apre il picker invece di
+     scegliersi da sola. L'icona del modello sostituisce il pallino `.rd` quando
+     c'è; il chevron dentro `.where` segna aperto/chiuso, come nelle tendine di
+     Settings. */
+  .modelbtn .mico { width: 16px; height: 16px; flex: none; border-radius: 4px; filter: var(--icon-f); }
+  .modelbtn .where :global(svg.ic) { width: 11px; height: 11px; }
+  /* La tendina del picker: stesso box `.dd`/`.moddd` di Settings — quel componente
+     gestisce da solo ricerca, livelli e scelta, qui serve solo il contenitore. */
+  .dd { margin: 2px 0 0; padding: 5px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 12px; }
+  .moddd { padding: 4px; }
   input.field { width: 100%; }
   .pathrow { display: flex; gap: 6px; }
   .pathrow .field { flex: 1; }
