@@ -16,14 +16,19 @@
 // Il server lo avvia l'SDK ufficiale (`createOpencodeServer`), non uno `spawn` nostro:
 // stessa ragione di ADR-009/ADR-013.
 
+import { randomUUID } from 'node:crypto'
 import { createOpencodeServer } from '@opencode-ai/sdk/v2/server'
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { createOpencodeClient as createLegacyClient } from '@opencode-ai/sdk'
+import { deregistraSessione, registraSessione } from '../../proxy/client.ts'
 
 type Server = { url: string; close(): void }
 
 let acceso: Promise<Server> | null = null
 let quante = 0
+/** L'id con cui QUESTO avvio del server condiviso è noto al proxy — non uno per
+ *  conversazione. Vedi la nota su D40 dentro `server()`. */
+let proxyId: string | null = null
 /**
  * Il server **fuori** dalla promessa, e non e' un doppione.
  *
@@ -78,8 +83,35 @@ async function server(): Promise<Server> {
   if (!acceso) {
     agganciaUscita()
     ac = new AbortController()
-    acceso = createOpencodeServer({ hostname: '127.0.0.1', port: 0, signal: ac.signal })
-      .then(s => { vivo = s; return s })
+    // Catturato subito, non riletto dentro il `.then()` qui sotto: quel callback gira
+    // DOPO l'`await` implicito di `registraSessione`, e nel frattempo `ac` potrebbe
+    // essere già stato riassegnato da un `lascia()` concorrente. `signal` è la stessa
+    // guardia di sempre, presa nell'istante giusto.
+    const signal = ac.signal
+    // Modalità ombra su OpenCode — D40, e la ragione per cui questa sessione col
+    // proxy NON è per conversazione come su Claude Code: il server è condiviso da
+    // TUTTE le conversazioni OpenCode della macchina (commento in testa al file), e
+    // `options.baseURL` si inietta una volta sola, alla nascita del processo. Un
+    // proxy-id per conversazione non avrebbe dove attaccarsi: si registra un id per
+    // il ciclo di vita del server, chiuso da `lascia()`.
+    //
+    // Scoperto misurando (docs/anonimizzazione.md §4.6): la leva instrada TUTTI i
+    // provider, non solo `anthropic`. Ma qui si aggancia **solo `anthropic`**, perché
+    // è l'unico di cui conosciamo il vero upstream (misurato,
+    // `https://api.anthropic.com`) — per gli altri (Zen, Baseten, Merge Gateway…)
+    // instradarli attraverso il proxy vorrebbe dire indovinare il loro host reale, e
+    // sbagliarlo romperebbe conversazioni vere su provider che oggi funzionano.
+    //
+    // Best-effort e con un tetto: se il proxy non risponde in tempo (`client.ts`),
+    // il server nasce SENZA la config — esattamente come nasceva prima di oggi. Un
+    // proxy lento o giù non deve poter rompere OpenCode per l'intera macchina.
+    const idProva = randomUUID()
+    acceso = registraSessione(idProva, 'https://api.anthropic.com')
+      .then(base => createOpencodeServer({
+        hostname: '127.0.0.1', port: 0, signal,
+        ...(base ? { config: { provider: { anthropic: { options: { baseURL: base } } } } } : {}),
+      }))
+      .then(s => { vivo = s; proxyId = idProva; return s })
       .catch(e => {
         // Un avvio fallito non deve restare memorizzato: la prossima apertura
         // ritenterebbe leggendo una promessa gia' rotta e fallirebbe per sempre.
@@ -137,6 +169,11 @@ export function lascia(): void {
   // **nascendo** (`createOpencodeServer` non ha ancora risolto) non c'e' nessun
   // `close()` da chiamare, e senza questo il figlio resterebbe su.
   ac?.abort(); ac = null
+  if (proxyId) {
+    const id = proxyId
+    proxyId = null
+    void deregistraSessione(id)
+  }
   void s?.then(x => { try { x.close() } catch { /* stava gia' morendo */ } })
     .catch(() => { /* non era mai partito */ })
 }

@@ -29,6 +29,7 @@ import {
 } from './sdk-options.ts'
 import type { SlashCommand } from '../../core/events.ts'
 import { parteDi } from '../../core/allegati.ts'
+import { deregistraSessione, registraSessione } from '../../proxy/client.ts'
 
 /** Un blocco di contenuto come lo vuole l'SDK. Non e' esportato da li': si ricava dal
  *  messaggio utente, che e' l'unico posto in cui STARK ne costruisce. */
@@ -88,12 +89,33 @@ export class ClaudeCodeAdapter implements AgentSession {
   /** Chi aspetta la fine del turno (`settled`). Una lista, non un resolver solo: due
    *  waiter in fila si sovrascrivevano, e il primo non si svegliava più. */
   private turnEnd: Array<() => void> = []
+  /** L'id con cui questa sessione è nota al proxy dell'anonimizzazione (docs/
+   *  anonimizzazione.md), o `null` se non si è registrata — proxy giù, senza token,
+   *  o semplicemente non ancora acceso su questa macchina. `null` non degrada niente:
+   *  la sessione parte lo stesso, senza osservazione questa volta (§4bis, client.ts). */
+  private proxyId: string | null = null
 
   constructor(opts: AdapterOptions) { this.opts = opts }
 
   async start(): Promise<void> {
     this.emit({ k: 'session.state', state: 'starting' })
     const options: Options = { ...buildOptions(this.opts), canUseTool: this.canUseTool }
+    // Modalità ombra, sempre in mezzo (D16): ogni sessione si registra presso il proxy
+    // e, se risponde, riceve la sua base URL — `http://127.0.0.1:<porta>/s/<id>`. Il
+    // filo dell'agent verso Anthropic passa da lì, il proxy oggi inoltra identico e si
+    // limita a registrare cosa avrebbe trovato (`src/proxy/ombra.ts`). L'upstream è
+    // fisso: STARK non espone ancora una base URL personalizzata da preservare.
+    this.proxyId = randomUUID()
+    const base = await registraSessione(this.proxyId, 'https://api.anthropic.com')
+    if (base) {
+      // Merge, non sostituzione: `buildOptions` può aver già messo `env` per
+      // `CLAUDE_CONFIG_DIR` (profilo), e l'assenza di `env` vuol dire «eredita tutto
+      // da `process.env`» — sostituirlo con un oggetto che ha solo la base URL
+      // toglierebbe PATH, HOME e il resto al processo figlio.
+      options.env = { ...(options.env ?? process.env), ANTHROPIC_BASE_URL: base }
+    } else {
+      this.proxyId = null
+    }
     // I toggle dei permessi NON possono passare da `canUseTool`: in `auto` mode il
     // classificatore risolve prima, e la callback non viene mai chiamata (misurato).
     // L'unico punto che gira su OGNI chiamata è l'hook PreToolUse, ed è documentato
@@ -785,6 +807,13 @@ export class ClaudeCodeAdapter implements AgentSession {
     this.svuota()
     this.input.close()
     await this.loop
+    if (this.proxyId) {
+      const id = this.proxyId
+      this.proxyId = null
+      // Non si aspetta: la chiusura della sessione non deve allungarsi per una
+      // chiamata di igiene al proxy, che è comunque silenziosa sui suoi errori.
+      void deregistraSessione(id)
+    }
   }
 
   // ─── interno ──────────────────────────────────────────────────────────────

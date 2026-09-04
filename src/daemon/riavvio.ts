@@ -145,7 +145,7 @@ export function ambienteSystemd(home?: string): string[] {
   // dimenticarle non rompe niente in primo piano e **richiude il perimetro in
   // silenzio** dopo un riavvio, con il telefono che si becca un 403 che sembra un
   // problema di token. È già successo con Tailscale, in un'altra forma.
-  for (const k of ['STARK_HOME', 'STARK_PORT', 'STARK_MODEL', 'STARK_TOKEN',
+  for (const k of ['STARK_HOME', 'STARK_PORT', 'STARK_PROXY_PORT', 'STARK_MODEL', 'STARK_TOKEN',
     'STARK_PUBLIC_HOST', 'STARK_VAPID_SUBJECT',
     'CLAUDE_CONFIG_DIR', 'PATH', 'HOME']) {
     const v = k === 'STARK_HOME' ? (home ?? process.env[k]) : process.env[k]

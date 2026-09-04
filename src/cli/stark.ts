@@ -38,6 +38,7 @@ import {
 } from '../daemon/identity.ts'
 import { controlla, passaAllaRelease, riallinea } from '../daemon/aggiornamenti.ts'
 import { ambienteSystemd } from '../daemon/riavvio.ts'
+import { PORTA_PROXY } from '../proxy/server.ts'
 
 /** La radice del repo: questo file sta in `src/cli/`, due livelli sotto. */
 const RADICE = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -343,10 +344,33 @@ function npm(args: string[]): ReturnType<typeof spawnSync> {
  * Il log resta `daemon.log` e non il journal: `stark status` manda a leggere lì, e
  * spostarlo vorrebbe dire cambiare la risposta a «perché non è partito».
  */
-function avviaConSystemd(): boolean {
+/**
+ * Cosa serve per staccare UN processo: il suo nome (pid/log/unità systemd), lo script
+ * da rilanciare, i suoi argomenti, e come si fa a sapere che è vivo.
+ *
+ * Nato per il daemon, riusato per il proxy dell'anonimizzazione (D19: «si risorveglia,
+ * come il daemon») — stessa macchina, non una copia. La trappola che questo file
+ * documenta da mesi («detached non fa uscire dal cgroup di systemd») vale per
+ * QUALUNQUE processo staccato da questo terminale, non solo per il daemon: chi ha
+ * bisogno di sopravvivere alla chiusura della finestra passa da qui.
+ */
+type Lancio = { nome: string; script: string; argv: string[]; attendi: () => Promise<boolean> }
+
+/**
+ * Prova ad accendere `l` come unità transiente, staccata dal cgroup della sessione di
+ * login. `true` se `systemd-run` ha accettato — non se il processo è già vivo, quello
+ * lo dice `l.attendi`.
+ *
+ * Il nome dell'unità porta un'impronta di `STARK_HOME` **e** `l.nome`: due daemon su
+ * case diverse — quello vero e uno di prova — devono poter convivere, come già fa
+ * `process.title`; e daemon e proxy sulla STESSA casa non devono contendersi la stessa
+ * unità. Il log resta `<nome>.log` e non il journal: `stark status` manda a leggere lì,
+ * e spostarlo vorrebbe dire cambiare la risposta a «perché non è partito».
+ */
+function avviaConSystemd(l: Lancio): boolean {
   if (WIN) return false // systemd non esiste: su Windows si va di `spawn(detached)`
   const impronta = createHash('sha1').update(STARK_HOME).digest('hex').slice(0, 8)
-  const log = logPath(STARK_HOME)
+  const log = logPath(STARK_HOME, l.nome)
 
   // Da root il manager di sistema; da utente normale il **proprio**.
   //
@@ -363,8 +387,8 @@ function avviaConSystemd(): boolean {
   const utente = process.getuid?.() !== 0
   const r = spawnSync('systemd-run', [
     ...(utente ? ['--user'] : []),
-    '--unit', `stark-${impronta}`,
-    '--description', `STARK — ${STARK_HOME}`,
+    '--unit', `stark-${impronta}-${l.nome}`,
+    '--description', `STARK ${l.nome} — ${STARK_HOME}`,
     '--collect', '--quiet',
     // Senza, l'unità parte con la `WorkingDirectory` di default di systemd (la radice,
     // non il checkout): i percorsi relativi che leggono la versione dell'SDK
@@ -376,30 +400,30 @@ function avviaConSystemd(): boolean {
     `--property=StandardOutput=append:${log}`,
     `--property=StandardError=append:${log}`,
     ...ambienteSystemd(),
-    process.execPath, fileURLToPath(import.meta.url), 'run',
+    process.execPath, l.script, ...l.argv,
   ], { stdio: 'ignore' })
   return r.status === 0
 }
 
 /**
- * Accende il daemon staccato e aspetta che risponda. Restituisce il pid, o `null` se non
- * ha risposto in tempo. Non controlla se ne gira già uno: quella domanda ha risposte
+ * Accende `l` staccato e aspetta che risponda. Restituisce il pid, o `null` se non ha
+ * risposto in tempo. Non controlla se ne gira già uno: quella domanda ha risposte
  * diverse per `start` (è un errore) e per `up` (è la normalità), quindi resta a chi chiama.
  */
-async function avviaStaccato(): Promise<number | null> {
+async function avviaStaccato(l: Lancio): Promise<number | null> {
   ensureHome(STARK_HOME)
 
   // Prima la via che sopravvive davvero alla chiusura del terminale. Se systemd non
   // c'è, o non siamo root, o la chiamata fallisce per qualunque motivo, si ripiega su
   // `spawn(detached)`: è quello che c'era prima, e su una macchina senza systemd non
   // c'è nessuno scope da cui scappare — quindi lì funzionava ed è ancora giusto.
-  if (avviaConSystemd()) {
-    if (!await finche(risponde, true)) return null
-    return runningPid(STARK_HOME) ?? 0
+  if (avviaConSystemd(l)) {
+    if (!await finche(l.attendi, true)) return null
+    return runningPid(STARK_HOME, l.nome) ?? 0
   }
 
-  const log = openSync(logPath(STARK_HOME), 'a')
-  const figlio = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run'], {
+  const log = openSync(logPath(STARK_HOME, l.nome), 'a')
+  const figlio = spawn(process.execPath, [l.script, ...l.argv], {
     // Su Windows `detached` non è `setsid()` ma il flag `DETACHED_PROCESS`: il figlio
     // **non eredita la console** del terminale, quindi non riceve il `CTRL_CLOSE_EVENT`
     // che il sistema manda a tutti i processi attaccati a una finestra che si chiude.
@@ -413,8 +437,49 @@ async function avviaStaccato(): Promise<number | null> {
   // `unref` toglie il figlio dalla contabilità di questo processo, che altrimenti
   // resterebbe vivo ad aspettarlo — cioè non si staccherebbe niente.
   figlio.unref()
-  if (!await finche(risponde, true)) return null
+  if (!await finche(l.attendi, true)) return null
   return figlio.pid ?? 0
+}
+
+/** Il lancio del daemon, nella forma generica: script = questo stesso file con `run`. */
+const lancioDaemon: Lancio = {
+  nome: 'daemon', script: fileURLToPath(import.meta.url), argv: ['run'], attendi: risponde,
+}
+
+/** Il lancio del proxy dell'anonimizzazione: script separato (D15), niente argomenti —
+ *  `main.ts` non ha comandi, fa solo quello. */
+const scriptProxy = resolve(RADICE, 'src/proxy/main.ts')
+const lancioProxy: Lancio = {
+  nome: 'proxy', script: scriptProxy, argv: [], attendi: proxyVivo,
+}
+
+/**
+ * Il proxy è su e risponde? A differenza di `risponde()` non serve il token: la rotta
+ * `/control/vivo` è l'unica che non lo chiede (server.ts), perché sapere che il
+ * processo esiste non è un potere.
+ */
+async function proxyVivo(): Promise<boolean> {
+  try {
+    const porta = Number(process.env['STARK_PROXY_PORT'] ?? PORTA_PROXY)
+    const res = await fetch(`http://127.0.0.1:${porta}/control/vivo`, { signal: AbortSignal.timeout(2000) })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Assicura che il proxy sia su, accendendolo se serve. Non fa parte del percorso
+ * critico di `start`/`up`: se il proxy non parte la modalità ombra semplicemente non
+ * osserva questo giro (§4bis, client.ts — best-effort anche qui), quindi un fallimento
+ * qui **non fa fallire** il comando che l'ha chiamata. L'errore si stampa e basta.
+ */
+async function assicuraProxy(): Promise<void> {
+  if (await proxyVivo()) return
+  const pid = await avviaStaccato(lancioProxy)
+  if (pid === null) {
+    console.error(`(la modalità ombra non è partita: vedi ${logPath(STARK_HOME, 'proxy')})`)
+  }
 }
 
 // ─── in primo piano ─────────────────────────────────────────────────────────
@@ -442,6 +507,16 @@ if (comando === 'run') {
     ...(process.env['STARK_MODEL'] ? { model: process.env['STARK_MODEL'] } : {}),
   })
   writePid(STARK_HOME, process.pid)
+  // Il proxy NON si accende qui, e la ragione è stata misurata prima di scriverla:
+  // `avviaStaccato` per il daemon rilancia QUESTO STESSO file con `run` come figlio
+  // staccato — cioè `stark start` esegue `run` come CHILD. Se `run` chiamasse
+  // `assicuraProxy()`, sia il padre (`start`, più sotto) sia il figlio (questo ramo)
+  // la chiamerebbero in parallelo: osservato dal vivo, due tentativi di
+  // `avviaStaccato(lancioProxy)` quasi simultanei, uno dei due si arrende trovando il
+  // pid già scritto dall'altro — innocuo ma rumoroso, ed è il sintomo di una race
+  // scritta per distrazione. Il proxy si accende dai comandi ESTERNI (`start`, `up`),
+  // mai da `run`: chi lancia `npm run stark` in primo piano per debug non ha ancora
+  // la modalità ombra, ed è uno scope onestamente più piccolo, non un buco taciuto.
   indirizzo(daemon.token)
   console.log(`\njournal in ${STARK_HOME}/sessioni`)
   console.log(`\ntoken: ${daemon.token}`)
@@ -473,11 +548,13 @@ if (comando === 'run') {
     indirizzo(readToken(STARK_HOME))
     process.exit(0)
   }
-  const pid = await avviaStaccato()
+  const pid = await avviaStaccato(lancioDaemon)
   if (pid === null) {
     console.error(`STARK non ha risposto entro ${ATTESA_MS / 1000}s. Il perché sta in ${logPath(STARK_HOME)}`)
     process.exit(1)
   }
+  // D19: «stark start alza entrambi». Come sopra, best-effort — non fa fallire `start`.
+  await assicuraProxy()
   console.log(`STARK è partito staccato (pid ${pid}). Sopravvive a questo terminale.`)
   indirizzo(readToken(STARK_HOME))
   console.log(`log in ${logPath(STARK_HOME)} · "npm run stark:stop" per fermarlo`)
@@ -505,13 +582,16 @@ if (comando === 'run') {
   if (gia !== null) {
     console.log(`STARK è già acceso (pid ${gia}).`)
   } else {
-    const pid = await avviaStaccato()
+    const pid = await avviaStaccato(lancioDaemon)
     if (pid === null) {
       console.error(`STARK non ha risposto entro ${ATTESA_MS / 1000}s. Il perché sta in ${logPath(STARK_HOME)}`)
       process.exit(1)
     }
     console.log(`STARK acceso (pid ${pid}). Sopravvive a questo terminale.`)
   }
+  // D19: idempotente come tutto `up` — se il proxy è già su non fa niente, se non lo
+  // è lo accende. Best-effort: non blocca l'apertura del browser.
+  await assicuraProxy()
 
   const token = readToken(STARK_HOME)
   const completo = `${url}/?token=${token}`
@@ -542,8 +622,18 @@ if (comando === 'run') {
 } else if (comando === 'status') {
   const pid = runningPid(STARK_HOME)
   const vivo = await risponde()
+  // Il proxy PRIMA del primo `process.exit`: sono processi separati con vite
+  // separate (D15), e il caso che conta di più è proprio «il daemon è fermo, il
+  // proxy no» (`stop` lo lascia acceso apposta) — un `exit(1)` sopra questo blocco
+  // direbbe «STARK non è in esecuzione» tacendo che l'ombra sta ancora scrivendo.
+  const pidProxy = runningPid(STARK_HOME, 'proxy')
+  const vivoProxy = await proxyVivo()
   if (pid === null && !vivo) {
     console.log('STARK non è in esecuzione.')
+    if (pidProxy !== null || vivoProxy) {
+      console.log(`modalità ombra: ${vivoProxy ? 'attiva' : 'NON risponde'}`
+        + (pidProxy !== null ? ` (pid ${pidProxy})` : ' (nessun pid — avviata a mano?)'))
+    }
     process.exit(1)
   }
   if (pid === null && vivo) {
@@ -570,6 +660,15 @@ if (comando === 'run') {
       console.log('raggiungibile solo da questa macchina')
     }
     indirizzo(readToken(STARK_HOME))
+  }
+  // D19: «stark status mostra entrambi» — la seconda metà, per il caso normale in cui
+  // il daemon risponde. Il proxy ha il suo pid e il suo ping propri (`nome: 'proxy'`,
+  // `/control/vivo` senza token): non dipende dal daemon per dire se è su.
+  if (pidProxy === null && !vivoProxy) {
+    console.log('modalità ombra: spenta.')
+  } else {
+    console.log(`modalità ombra: ${vivoProxy ? 'attiva' : 'NON risponde'}`
+      + (pidProxy !== null ? ` (pid ${pidProxy})` : ' (nessun pid — avviata a mano?)'))
   }
   process.exit(vivo ? 0 : 1)
 
@@ -608,6 +707,16 @@ if (comando === 'run') {
     process.exit(1)
   }
   console.log(`STARK fermato (pid ${pid}). Le conversazioni restano su disco.`)
+  // Il proxy NON si ferma qui, e non per dimenticanza: `update` richiama `stop` e poi
+  // `start` sullo stesso processo CLI per far ripartire il daemon col codice nuovo
+  // (vedi sotto), ed è esattamente il caso che D15 vuole proteggere — un riavvio del
+  // daemon non deve interrompere richieste in volo attraverso il proxy. Fermarlo qui
+  // vorrebbe dire tagliarle a ogni aggiornamento. Chi vuole spegnere anche l'ombra lo fa
+  // a mano (`kill` sul pid di `proxy.pid`, o `POST /control/spegni` col token) — non
+  // c'è ancora un verbo dedicato, ed è onesto lasciarlo assente invece di improvvisarlo.
+  if (runningPid(STARK_HOME, 'proxy') !== null) {
+    console.log('(la modalità ombra resta accesa: sopravvive ai riavvii del daemon di proposito)')
+  }
   process.exit(0)
 
 // ─── aggiorna ───────────────────────────────────────────────────────────────

@@ -79,10 +79,24 @@ export function avviaProxy(opts: OpzioniProxy = {}): Promise<Proxy> {
   }
 
   function controllo(req: IncomingMessage, res: ServerResponse, url: string): void {
+    // L'unica rotta senza token: sapere che il processo risponde non è un potere — è
+    // la stessa cosa che un `HEAD /api/hello` dice del CLI. Serve a `stark status` e
+    // al ping che `stark start` fa per sapere quando il proxy è su.
+    if (req.method === 'GET' && url === '/control/vivo') { res.writeHead(200).end('ombra'); return }
     if (!tokenValido(req)) { res.writeHead(403).end('token mancante o errato'); return }
     if (req.method === 'GET' && url === '/control/stato') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ porta, ombra: true, sessioni: [...registrate.keys()] }))
+      return
+    }
+    if (req.method === 'POST' && url === '/control/spegni') {
+      // Stessa forma di `/api/shutdown` sul daemon: risponde PRIMA di emettere il
+      // segnale, o chi ha chiesto lo spegnimento legge un errore di rete su una
+      // richiesta che in realtà è andata a buon fine. Serve perché su Windows
+      // `SIGTERM` non esiste per un `process.kill` esterno — qui il processo se lo
+      // manda da solo, dopo aver ricevuto l'HTTP.
+      res.writeHead(200).end('ok')
+      setTimeout(() => { process.emit('SIGTERM' as NodeJS.Signals, 'SIGTERM' as NodeJS.Signals) }, 50)
       return
     }
     if (req.method === 'POST' && url === '/control/sessioni') {

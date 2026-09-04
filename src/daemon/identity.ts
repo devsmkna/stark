@@ -26,8 +26,13 @@ export function ensureHome(home: string): void {
 }
 
 export const tokenPath = (home: string): string => resolve(home, 'token')
-export const pidPath = (home: string): string => resolve(home, 'daemon.pid')
-export const logPath = (home: string): string => resolve(home, 'daemon.log')
+
+// `nome` esiste da quando il proxy dell'anonimizzazione (D15: processo separato) ha
+// bisogno del suo pid e del suo log accanto a quelli del daemon, senza sovrascriverli:
+// `daemon.pid`/`daemon.log` restano il default per non toccare nessun chiamante
+// esistente, e `nome: 'proxy'` produce `proxy.pid`/`proxy.log`.
+export const pidPath = (home: string, nome = 'daemon'): string => resolve(home, `${nome}.pid`)
+export const logPath = (home: string, nome = 'daemon'): string => resolve(home, `${nome}.log`)
 
 /**
  * Il token di questo daemon. `STARK_TOKEN` vince su tutto: chi lo imposta sa cosa sta
@@ -62,9 +67,9 @@ export function writeToken(home: string): string {
   return token
 }
 
-/** Il pid del daemon che risulta in piedi, o `null` se non ce n'è uno. */
-export function runningPid(home: string): number | null {
-  const path = pidPath(home)
+/** Il pid del processo (`nome`) che risulta in piedi, o `null` se non ce n'è uno. */
+export function runningPid(home: string, nome = 'daemon'): number | null {
+  const path = pidPath(home, nome)
   if (!existsSync(path)) return null
   const pid = Number(readFileSync(path, 'utf8').trim())
   if (!Number.isInteger(pid) || pid <= 0) return null
@@ -80,11 +85,11 @@ export function runningPid(home: string): number | null {
   }
 }
 
-export function writePid(home: string, pid: number): void {
+export function writePid(home: string, pid: number, nome = 'daemon'): void {
   mkdirSync(home, { recursive: true })
-  writeFileSync(pidPath(home), `${pid}\n`)
+  writeFileSync(pidPath(home, nome), `${pid}\n`)
 }
 
-export function clearPid(home: string): void {
-  rmSync(pidPath(home), { force: true })
+export function clearPid(home: string, nome = 'daemon'): void {
+  rmSync(pidPath(home, nome), { force: true })
 }

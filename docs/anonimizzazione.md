@@ -30,14 +30,18 @@
 > l'**àncora** regge su un **secondo modello** (Haiku, oltre a Sonnet), col caso limite in
 > cui il modello traduce la parola-tipo ma conserva il codice. Restano solo residui
 > circoscritti (§9.14 il limite della pausa, §12bis le cinque decisioni di forma).
-> **Le misure sono finite, e il 4 settembre la prima riga è scritta**: il proxy in
-> **modalità ombra** esiste (`src/proxy/`, §12bis) — processo separato, fail-closed
-> sulle sessioni non registrate, registro intero per richiesta (D39), analisi delle
-> cinque regioni con le forme note — con la sua prova a costo zero (`npm run
-> ombra:check`, 20 verifiche). Le decisioni di forma del §12bis sono chiuse
-> (D38 semina obbligatoria, D39 registro intero, scrittore unico, costanti della
-> pausa in §9.14). Manca l'aggancio a `stark start` e alle sessioni vere, poi
-> l'ombra comincia a contare.
+> **Le misure sono finite, e il 4 settembre la modalità ombra è agganciata alle
+> sessioni vere.** Il proxy esiste (`src/proxy/`, §12bis) — processo separato,
+> fail-closed sulle sessioni non registrate, registro intero per richiesta (D39),
+> analisi delle cinque regioni con le forme note — con la sua prova a costo zero
+> (`npm run ombra:check`, 20 verifiche). `stark start`/`up` lo alzano accanto al
+> daemon (D19, `stark.ts` reso generico), `stop` lo lascia acceso di proposito (D15),
+> ed **entrambi gli adapter** — Claude Code per sessione, OpenCode per ciclo di vita
+> del server condiviso (D40, solo `anthropic` per ora — D41) — si registrano da soli,
+> sempre, best-effort. Provato end-to-end su una casa scratch, non solo a unità:
+> un solo avvio del proxy, `status` mostra entrambi anche a daemon fermo,
+> `/control/spegni` chiude pulito. `npm run check` resta 338/338.
+> Ora servono giorni di sessioni vere, e i numeri che ne escono.
 >
 > **Com'è fatto il traffico su cui tutto questo va applicato — endpoint, campo per campo,
 > nei due versi — sta in `docs/anonimizzazione-flusso.md`.** Quello è riferimento
@@ -49,7 +53,7 @@
 
 Chi arriva a freddo per **validare** non deve leggere tutto in ordine. Tre strade:
 
-- **Il verdetto in due minuti** → §10 (39 decisioni) e §11 (15 ipotesi scartate, con la
+- **Il verdetto in due minuti** → §10 (41 decisioni) e §11 (15 ipotesi scartate, con la
   ragione). Se una scelta sembra sbagliata, la riga dice su quale premessa era stata presa.
 - **L'architettura** → §3 (i due livelli), §3.1 (perché il proxy è bidirezionale), §4bis
   (l'infrastruttura). Il resto sono conseguenze di quelle tre.
@@ -1118,6 +1122,8 @@ cos'è») lì non si trasferisce: nessuno sa cosa c'è in venti `tool_result` ac
 | D37 | Il punto d'aggancio del proxy è **dell'adapter**; il motore (dizionario, filtro, registro) è **uno e condiviso** | Ogni agent ha la sua leva ufficiale, misurata: Claude Code l'`env` del processo (§4), OpenCode la config del server per provider (§4.5). Una cosa «più in basso» non sarebbe una superficie ufficiale — e per OpenCode la copertura si promette **per provider misurato**, §9.13 |
 | D38 | **Semina obbligatoria**: la protezione si accende solo a semina del dizionario confermata | §3.2: non esiste il ritiro, quindi un dizionario vuoto rende la promessa falsa il primo giorno. La scoperta assistita passa dal proponitore (§11bis), le proposte si confermano o rimuovono (§12bis.2) |
 | D39 | Il registro v1 salva **ogni richiesta intera** | Massima fedeltà probatoria e la scrittura più semplice per l'ombra; il costo (~MB a turno) è dichiarato e rende urgente la rotazione (§9.6). Si stringe dopo, coi numeri dell'ombra (§12bis.4) |
+| D40 | Su OpenCode il proxy-id è **per ciclo di vita del server condiviso**, non per conversazione | Il server nasce una volta per macchina e `options.baseURL` si inietta una volta sola, alla nascita: un id per conversazione non avrebbe dove attaccarsi. Registrato quando `server()` avvia, deregistrato in `lascia()` |
+| D41 | L'aggancio OpenCode copre **solo il provider `anthropic`**, anche se D37/§4.6 dicono che la leva instrada tutti i provider | `anthropic` è l'unico di cui conosciamo il vero upstream (misurato). Instradare Zen/Baseten/Merge Gateway vorrebbe dire indovinare il loro host reale — sbagliarlo romperebbe conversazioni vere. Si allarga quando si misura, non prima |
 
 ## 11. Ipotesi scartate
 
@@ -1218,8 +1224,12 @@ riconosciuta come problema aperto anche lì: la B-bis, nel suo piccolo, è più 
 7. Chiudere ciò che resta del §9 — la 4 (OpenCode) si chiude con la misura A-ter; la 5
    (journal in chiaro) e la 6 (rotazione) sono di perimetro più largo del filtro; la 7
    aspetta solo il vaglio della bozza in §1.2.
-8. **L'implementazione parte da §12bis**: prima le cinque decisioni che cambiano la forma
-   del codice, poi la **modalità ombra** come primo pezzo scritto.
+8. ~~**L'implementazione parte da §12bis**~~ → **fatta il 4 settembre 2026**: le cinque
+   decisioni di forma sono chiuse (D38/D39 e i residui tecnici), la modalità ombra è
+   scritta e **agganciata** alle sessioni vere di entrambi gli adapter (D40/D41),
+   provata end-to-end. **Prossimo passo: lasciarla girare qualche giorno su sessioni
+   vere e leggere i numeri** — sono loro a scrivere la regola del §12bis.3 («cosa conta
+   come dubbio»), non il contrario.
 
 **Prima di tutto questo, la validazione.** Il documento va passato a un lettore che non ha
 partecipato alle scelte, con in mano l'elenco «Le nove cose che vale la pena contestare» in
@@ -1320,6 +1330,68 @@ zero, upstream finto locale):
 proxy accanto al daemon (D19, col pattern di sopravvivenza di `stark.ts`), l'adapter che
 registra la sessione e punta `ANTHROPIC_BASE_URL` / `options.baseURL` al prefisso, e la
 deregistrazione alla chiusura. Poi qualche giorno di sessioni vere, e i numeri.
+
+**L'aggancio è scritto, lo stesso 4 settembre 2026** (D40, D41 qui sotto), dopo due
+scelte confermate con l'utente: **sempre attiva** per ogni sessione (D16 preso alla
+lettera, non solo per il progetto protetto che ancora non esiste) e **entrambi gli
+adapter nello stesso giro**.
+
+- **`stark.ts`**: `avviaConSystemd`/`avviaStaccato` diventano **generici** — un `Lancio`
+  (nome, script, argv, condizione di vita) invece di essere cablati sul daemon — e il
+  daemon ne resta un caso, non una copia. `pidPath`/`logPath`/`runningPid`/`writePid`/
+  `clearPid` prendono un `nome` opzionale (default `'daemon'`, retrocompatibile al
+  100%: nessun chiamante esistente passava un secondo argomento). `start`/`up`
+  chiamano `assicuraProxy()` **best-effort**: se il proxy non parte, il comando non
+  fallisce — l'ombra è osservazione, non ancora la garanzia di §4bis. `status` mostra
+  entrambi (D19), e lo mostra **anche quando il daemon è fermo**: è il caso che conta
+  di più, perché `stop` lascia il proxy acceso di proposito. Il proxy ha una rotta di
+  spegnimento propria (`POST /control/spegni`, col token) per lo stesso motivo per cui
+  il daemon ce l'ha: `SIGTERM` non esiste su Windows.
+- **`stop` NON ferma il proxy**, e non per dimenticanza: `update` richiama `stop` poi
+  `start` sullo stesso processo per far ripartire il daemon col codice nuovo, ed è
+  **esattamente** il caso che D15 vuole proteggere — un riavvio del daemon non deve
+  interrompere richieste in volo attraverso il proxy. Fermarlo a ogni `stop` vorrebbe
+  dire tagliarle a ogni aggiornamento. Non c'è ancora un verbo per spegnere anche
+  l'ombra: onestamente assente, non improvvisato.
+- **L'adapter Claude Code** (`adapter.ts`): a ogni `start()`, un `randomUUID()` si
+  registra presso il proxy (`proxy/client.ts`) con l'upstream fisso
+  `https://api.anthropic.com`; se risponde, `options.env.ANTHROPIC_BASE_URL` punta al
+  prefisso — **in merge**, non in sostituzione, perché `buildOptions` può aver già
+  messo `env` per `CLAUDE_CONFIG_DIR` e l'assenza di `env` vuol dire «eredita
+  `process.env`»: sovrascriverlo toglierebbe `PATH` e `HOME` al processo figlio. Se il
+  proxy non risponde entro 800 ms, la sessione parte **senza** osservazione — mai
+  bloccata da un proxy lento o giù. `close()` deregistra, senza aspettare la risposta.
+- **L'adapter OpenCode** (`host.ts`) — **D40**: un proxy-id per **il ciclo di vita del
+  server condiviso**, non per conversazione. La ragione è strutturale, non una scelta:
+  il server nasce una volta per macchina (commento in testa al file) e
+  `options.baseURL` si inietta una volta sola, alla nascita — un id per conversazione
+  non avrebbe dove attaccarsi. E **D41**: si aggancia **solo il provider `anthropic`**,
+  anche se la misura del 4.6 dice che la leva instrada tutti e cinque i provider di
+  questa macchina. La ragione: `anthropic` è l'unico di cui conosciamo il vero
+  upstream (misurato). Instradare Zen/Baseten/Merge Gateway attraverso il proxy
+  vorrebbe dire indovinare il loro host reale — sbagliarlo romperebbe conversazioni
+  vere su provider che oggi funzionano, un rischio che nessuna misura giustifica
+  ancora. Stessa cautela di `stark.ts`: se il proxy non risponde in tempo, il server
+  OpenCode nasce **senza** la config, esattamente come nasceva ieri — un proxy lento o
+  giù non deve poter rompere OpenCode per l'intera macchina condivisa.
+- **La lezione pagata provando dal vivo**, perché vale più della riga che corregge:
+  la prima versione chiamava `assicuraProxy()` anche dentro il ramo `run` di
+  `stark.ts`. Sembrava innocuo — «se qualcuno lancia `npm run stark` in foreground,
+  vuole l'ombra anche lui» — ma `avviaStaccato(lancioDaemon)` **rilancia lo stesso
+  file con `run`** come figlio staccato: `stark start` esegue `run` come *child*.
+  Risultato, osservato in una prova end-to-end reale e non dedotto: due chiamate a
+  `avviaStaccato(lancioProxy)` in parallelo, in due processi diversi (il padre `start`
+  e il figlio `run`), che si contendevano lo stesso pid file. Il guard «già in
+  esecuzione» ha retto — nessun danno — ma è il sintomo di una race scritta per
+  distrazione, non una da lasciare lì confidando nella rete di sicurezza. Tolta da
+  `run`: il proxy si accende solo dai comandi ESTERNI (`start`, `up`). Chi lancia
+  `npm run stark` per debug in primo piano non ha ancora l'ombra — uno scope più
+  piccolo dichiarato, non un buco taciuto.
+- **Provato end-to-end**, non solo a unità: `stark start`/`status`/`stop` su una
+  `STARK_HOME` scratch, porte non di default — un solo avvio del proxy (non due),
+  `status` mostra entrambi i processi vivi, `stop` lascia l'ombra accesa,
+  `POST /control/spegni` la ferma pulita (pid file tolto, nessun processo residuo).
+  `npm run ombra:check` (20/20) e `npm run check` (338/338) restano verdi.
 
 ### Il giudizio, per chi valida
 
