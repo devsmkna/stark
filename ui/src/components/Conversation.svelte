@@ -577,7 +577,7 @@
       <button class="t" ondblclick={startRename} title="{title} — double-click to rename">{title}</button>
     {/if}
 
-    <button class="iconb" title={debugCopiato ? 'Copied' : 'Copy debug info'}
+    <button class="iconb debugbtn" title={debugCopiato ? 'Copied' : 'Copy debug info'}
       onclick={() => void copiaDebug()}>
       <Icon name={debugCopiato ? 'i-check' : 'i-copy'} />
     </button>
@@ -588,7 +588,7 @@
          quello che sparisce è il testo, non la funzione). -->
     <button class="effbtn" style="margin-left:auto" onclick={() => setView('effects')}
       title="{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} · {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}">
-      {#if !store.narrow}
+      {#if !store.narrow && !store.density.compact}
         <b>{snap.files.length} {snap.files.length === 1 ? 'file' : 'files'} ·
           {snap.shell.length} {snap.shell.length === 1 ? 'command' : 'commands'}</b>
       {/if}

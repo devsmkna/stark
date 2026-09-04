@@ -323,6 +323,10 @@ svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-wid
    non scende sotto la larghezza del proprio contenuto finché non glielo si permette, e
    senza di quello `text-overflow` non ha mai occasione di entrare in gioco. */
 .bar .t{font-weight:600;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Modalità compatta (no-noise, mod+shift+m): vedi density.svelte.ts. .bar è globale,
+   quindi la stringe ovunque sia usata — non solo nella conversazione. */
+html[data-density='compact'] .bar{padding:5px 12px}
+html[data-density='compact'] .debugbtn{display:none}
 /* `flex:none` per la stessa ragione per cui ce l'ha `.iconb`: questo bottone è grande
    quanto il suo contenuto e non ha niente da cedere. Senza, il titolo qui sopra lo
    comprimeva finché il padding destro non spariva — l'icona finiva a 2px dal bordo
