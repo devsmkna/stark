@@ -1888,4 +1888,16 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
     }
     .leadbox :global(.pk-list) { max-height: 200px; }
   }
+
+  /* Modalità compatta (no-noise, mod+shift+m): vedi density.svelte.ts. Solo il badge
+     sempre visibile (.model-top), non l'anteprima a comparsa (.preview) — quella si
+     apre apposta per vedere il dettaglio. */
+  :global(html[data-density='compact']) .composer { padding: 4px 12px; }
+  :global(html[data-density='compact']) .model-top .pk-meta .cash,
+  :global(html[data-density='compact']) .model-top .pk-meta .price,
+  :global(html[data-density='compact']) .model-top .pk-meta .unit,
+  :global(html[data-density='compact']) .model-top .pk-meta .ctx-lbl,
+  :global(html[data-density='compact']) .model-top .pk-meta .ctx-val {
+    display: none;
+  }
 </style>
