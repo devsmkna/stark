@@ -15,7 +15,7 @@ import { collega, pubblica, statoTailscale } from './tailscale.ts'
 import { paginaAccoppiamento } from './pagina-pair.ts'
 import { serveUi, UI_DIR } from './static.ts'
 import { Registry, STARK_HOME, isDir, type OpenSpec } from './registry.ts'
-import { reveal } from './reveal.ts'
+import { apriCartella, reveal } from './reveal.ts'
 import { ramoDi } from './git.ts'
 import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.ts'
 import { Push, type Subscription } from './push.ts'
@@ -523,6 +523,17 @@ async function route(
       // `resolve` con una base ignora la base quando il percorso è già assoluto.
       const base = body.sessionId ? registry.snapshot(body.sessionId)?.cwd : undefined
       const esito = await reveal(body.path, base)
+      return send(res, esito.ok ? 200 : 404, esito)
+    }
+    // Il nome del progetto nel menu del dock: apre la cartella del progetto **come
+    // cartella**, non selezionata in quella sopra — è la differenza fra questa rotta
+    // e `/api/reveal`, non un secondo modo di fare la stessa cosa. `path` arriva già
+    // assoluto (il `cwd` della sessione), quindi non serve un `sessionId` per una
+    // base relativa come sopra.
+    if (method === 'POST' && path === '/api/open-folder') {
+      const body = await readJson<{ path?: string }>(req)
+      if (!body?.path) return send(res, 400, { error: 'path required' })
+      const esito = await apriCartella(body.path)
       return send(res, esito.ok ? 200 : 404, esito)
     }
     // Apre un link con l'app dedicata invece che nel browser (F1). Il perimetro non

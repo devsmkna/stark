@@ -1111,7 +1111,10 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
                 </div>
               {/if}
               <div class="u-foot hover-foot">
-                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                <button type="button" class="g gfolder" title="Open project folder"
+                  aria-label="Open project folder"
+                  onclick={() => { if (snap.cwd) void store.openFolder(snap.cwd) }}>
+                  <Icon name="i-folder" />{project(snap.cwd)}</button>
                 {#if git?.branch}
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
@@ -1130,7 +1133,10 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
                 </div>
               {/if}
               <div class="u-foot repo-branch-foot">
-                <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+                <button type="button" class="g gfolder" title="Open project folder"
+                  aria-label="Open project folder"
+                  onclick={() => { if (snap.cwd) void store.openFolder(snap.cwd) }}>
+                  <Icon name="i-folder" />{project(snap.cwd)}</button>
                 {#if git?.branch}
                   <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                     <Icon name="i-branch" />{git.branch}
@@ -1149,7 +1155,10 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
             </div>
           {/if}
           <div class="u-foot hover-foot" style="padding:4px 9px 8px">
-            <span class="g"><Icon name="i-folder" />{project(snap.cwd)}</span>
+            <button type="button" class="g gfolder" title="Open project folder"
+              aria-label="Open project folder"
+              onclick={() => { if (snap.cwd) void store.openFolder(snap.cwd) }}>
+              <Icon name="i-folder" />{project(snap.cwd)}</button>
             {#if git?.branch}
               <span class="g" title={git.detached ? `Detached HEAD at ${git.branch}` : `On branch ${git.branch}`}>
                 <Icon name="i-branch" />{git.branch}
@@ -1762,6 +1771,12 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   .u-foot .g-foot, .u-foot.hover-foot { display:flex; align-items:center; gap:7px; }
   .u-foot .g { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:8.5px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .u-foot .g :global(svg.ic) { width:12px; height:12px; color:var(--muted); flex:none; }
+  /* Il nome del progetto apre la sua cartella: resta uguale allo span del ramo
+     accanto, un `<button>` non deve sembrare un bottone finché non lo tocchi. */
+  .u-foot button.g { border:0; background:none; padding:0; font:inherit; cursor:pointer; }
+  .u-foot button.gfolder:hover, .u-foot button.gfolder:focus-visible { color:var(--ink); }
+  .u-foot button.gfolder:hover :global(svg.ic), .u-foot button.gfolder:focus-visible :global(svg.ic) { color:var(--ink); }
+  .u-foot button.gfolder:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .u-foot .sep { width:1px; height:11px; background:var(--line-2); flex:none; }
   /* Seconda riga del blocco modello nell'espanso: stesso stile dell'hover ma senza .preview */
   .model-top .pk-meta { display:flex; align-items:center; gap:7px; padding:6px 0 0; font-family:var(--sans); }
