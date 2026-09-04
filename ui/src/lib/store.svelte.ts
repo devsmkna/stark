@@ -10,6 +10,7 @@
 // del risultato, e §18 dice che del risultato non c'è niente da fare — ciò che accade
 // torna dal flusso. Concentrarli qui rende quella regola visibile invece che sperata.
 
+import { SvelteMap } from 'svelte/reactivity'
 import type { SessionSnapshot } from '$core/reduce.ts'
 import type { Attachment, Command, PermissionMode } from '$core/events.ts'
 import {
@@ -110,6 +111,12 @@ export class Store {
   /** L'ordine manuale dei progetti nell'elenco. Stesso motivo del tema. Vedi
    *  `order.svelte.ts`. */
   readonly order = new Orderer()
+  /** Il prompt non ancora inviato, per chat: cambiare riga nell'elenco non deve
+   *  farlo sparire, né farlo comparire nella chat sbagliata (vedi `Dock.svelte`, che
+   *  lo salva qui appena smette di rappresentare quella chat). A differenza di tema
+   *  o font non sopravvive al ricaricamento: è legato a questa scheda del browser,
+   *  non al dispositivo, quindi vive solo in memoria. */
+  readonly drafts = new SvelteMap<string, string>()
 
   /**
    * Le impostazioni della macchina. `null` finché non sono arrivate: prima di allora
@@ -305,7 +312,7 @@ export class Store {
    * La barra laterale è collassata? È una preferenza del dispositivo, non del progetto:
    * sta nel browser e non sul daemon, come `boardOpen`. Si apre con la scorciatoia.
    */
-  sidebarCollapsed = $state(leggiPreferenza('stark.sidebar') === '1')
+  sidebarCollapsed = $state(leggiPreferenza('stark.sidebar'))
 
   toggleSidebar(): void {
     this.sidebarCollapsed = !this.sidebarCollapsed
