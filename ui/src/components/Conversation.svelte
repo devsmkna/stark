@@ -1277,11 +1277,12 @@
   .oprow .reveal:hover { color: var(--ink); background: var(--surface-2); }
   .oprow .reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* Il gruppo di operazioni finite: una pill arrotondata con bordo sottile,
-     non più una riga a tutta larghezza. Testo "X ops · Y notes · MMm SSs"
-     separato da dot, con chevron per aprire/chiudere. Allineata a sinistra
-     nel corpo del turno (22px) e rientrata rispetto al prompt (12px). */
-  .row.ops { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-2); border-radius: 20px; padding: 5px 12px; margin: 0; color: var(--muted); font-size: 11px; background: none; align-self: flex-start; }
+  /* Il gruppo di operazioni finite: non più una pill arrotondata, un filo sotto
+     — come un'intestazione da sottolineare, non un chip da isolare dal resto.
+     Testo "X ops · Y notes · MMm SSs" separato da dot, con chevron per
+     aprire/chiudere. Allineata a sinistra nel corpo del turno (22px) e
+     rientrata rispetto al prompt (12px). */
+  .row.ops { display: inline-flex; align-items: center; gap: 8px; border: 0; border-bottom: 1px solid var(--line-2); border-radius: 0; padding: 5px 12px; margin: 0; color: var(--muted); font-size: 11px; background: none; align-self: flex-start; }
   .row.ops .ops-meta { display: flex; align-items: center; gap: 6px; justify-content: flex-start; }
   .row.ops .ops-meta .m { flex: none; text-align: left; font-weight: 400; font-size: 11px; color: var(--muted); }
   .row.ops .ops-meta .dot { flex: none; color: var(--muted); opacity: .5; font-size: 11px; line-height: 1; }
