@@ -35,7 +35,7 @@ import { Collapser } from './collapse.svelte.ts'
 import { Orderer } from './order.svelte.ts'
 import { Fonter } from './fontfamily.svelte.ts'
 import { Lettura } from './lettura.svelte.ts'
-import { activityText, project } from './view.ts'
+import { activityText, project, projectName } from './view.ts'
 
 // `callFor` e `CALL_HEAD` stavano qui, e da qui sono passati in `$core/calls.ts`: la
 // stessa domanda ora se la pone anche il daemon, per mandare il push al telefono quando
@@ -592,7 +592,7 @@ export class Store {
       // sentire, e due corti che invece sì.
       if (this.project(r.cwd).muted) continue
       this.calls.call(kind, {
-        title: `${CALL_HEAD[kind]} · ${project(r.cwd)}`,
+        title: `${CALL_HEAD[kind]} · ${projectName(r.cwd, this.settings?.projects)}`,
         // Il titolo dice *quale* lavoro, l'operazione dice *cosa* voleva fare: senza la
         // seconda riga «Needs you» costringe comunque ad aprire per sapere cosa vuole.
         body: r.doing ? `${r.title}\n${activityText(r.doing)}` : r.title,
@@ -675,11 +675,11 @@ export class Store {
   }
 
   /** Il colore, il silenzio e il profilo Claude di un progetto, per cartella. */
-  project(cwd: string | undefined): { colour?: number; muted?: boolean; profile?: string } {
+  project(cwd: string | undefined): { colour?: number; muted?: boolean; profile?: string; name?: string } {
     return (cwd ? this.settings?.projects[cwd] : undefined) ?? {}
   }
 
-  async setProject(cwd: string, patch: { colour?: number; muted?: boolean; profile?: string }): Promise<void> {
+  async setProject(cwd: string, patch: { colour?: number; muted?: boolean; profile?: string; name?: string }): Promise<void> {
     const s = this.settings
     if (!s) return
     await this.saveSettings({

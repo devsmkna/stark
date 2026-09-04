@@ -32,6 +32,12 @@ export type ProjectSettings = {
    * dire «quello di default del daemon», com'era prima che esistesse questo campo.
    */
   profile?: string
+  /**
+   * Il nome mostrato al posto della cartella. Assente: si legge il nome della
+   * cartella, come prima che esistesse questo campo — l'identità del progetto resta
+   * sempre la cartella, questo cambia solo cosa si legge.
+   */
+  name?: string
 }
 
 export type Settings = {
@@ -266,10 +272,12 @@ function saneProjects(raw: unknown): Record<string, ProjectSettings> {
     const colour = typeof p['colour'] === 'number' ? Math.floor(p['colour']) : undefined
     const muted = p['muted'] === true
     const profile = typeof p['profile'] === 'string' && p['profile'] ? p['profile'] : undefined
+    const name = typeof p['name'] === 'string' && p['name'].trim() ? p['name'].trim() : undefined
     out[cwd] = {
       ...(colour !== undefined && colour >= 0 && colour < 7 ? { colour } : {}),
       ...(muted ? { muted } : {}),
       ...(profile ? { profile } : {}),
+      ...(name ? { name } : {}),
     }
   }
   return out

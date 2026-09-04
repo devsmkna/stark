@@ -13,7 +13,7 @@
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
   import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
-  import { colours, dayBanner, hhmm, project, since, timeOnly, toolIcon, turnStatus } from '../lib/view.ts'
+  import { colours, dayBanner, hhmm, project, projectName, since, timeOnly, toolIcon, turnStatus } from '../lib/view.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { osservaPercorsi, pezziConCitazioni } from '../lib/percorsi.ts'
   import { decoraColoriTesto } from '../lib/colori.ts'
@@ -435,7 +435,7 @@
   // sempre il primo colore — e lo stesso progetto avrebbe due colori diversi nelle
   // due metà dello schermo, che è esattamente ciò che il colore serve a evitare.
   const colour = $derived(colours(store.rows, store.settings?.projects ?? {}).get(project(snap.cwd)) ?? 0)
-  const title = $derived(row?.title ?? project(snap.cwd))
+  const title = $derived(row?.title ?? projectName(snap.cwd, store.settings?.projects))
 
   /** Info utili per un bug report, in un blocco solo: id, titolo, agent, modello,
    *  stato, cwd. Presa dallo snapshot — nessun dato nuovo, solo raccolto in un posto. */

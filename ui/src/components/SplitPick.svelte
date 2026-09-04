@@ -3,7 +3,7 @@
   // chi ci sta. È un invito, non una conversazione — per questo vive in una foglia
   // propria (`SPLIT_PICK`) senza `Pane`, senza fuoco e senza indirizzo.
   import type { Store } from '../lib/store.svelte.ts'
-  import { label, project } from '../lib/view.ts'
+  import { label, projectName } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
   import Icon from './Icon.svelte'
 
@@ -38,7 +38,7 @@
         {/if}
         <span class="tx">
           <span class="ttl">{r.title}</span>
-          <span class="sub">{project(r.cwd)} · {label(r.state)}</span>
+          <span class="sub">{projectName(r.cwd, store.settings?.projects)} · {label(r.state)}</span>
         </span>
         {#if store.panes.has(r.id)}<span class="open">open</span>{/if}
       </button>

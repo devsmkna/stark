@@ -18,7 +18,7 @@
   // profilo E questa cartella non ne ha già uno deciso (docs/ui-schermate.md §Projects).
   import Icon from './Icon.svelte'
   import ModelPicker from './ModelPicker.svelte'
-  import { colours, hhmm, project } from '../lib/view.ts'
+  import { colours, hhmm, project, projectName } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
   import type { Store } from '../lib/store.svelte.ts'
   import type { SystemInfo, AgentModels } from '../lib/api.ts'
@@ -369,7 +369,7 @@
             <div class="recents">
               {#each recents as r (r)}
                 <button class="rec" onclick={() => { cwd = r }} title={r}>
-                  <i class="dotk p{palette.get(project(r)) ?? 0}"></i> {project(r)}
+                  <i class="dotk p{palette.get(project(r)) ?? 0}"></i> {projectName(r, store.settings?.projects)}
                 </button>
               {/each}
             </div>
@@ -480,7 +480,7 @@
                   {:else}
                     <i class="dotk new" title="Not in STARK yet"></i>
                   {/if}
-                  {project(r.cwd)}{#if r.branch}{' · '}{r.branch}{/if}
+                  {projectName(r.cwd, store.settings?.projects)}{#if r.branch}{' · '}{r.branch}{/if}
                 </span>
                 <!-- L'id accorciato come un hash di git: otto cifre bastano a
                      riconoscerlo in un log o in un terminale, e l'intero sta nel

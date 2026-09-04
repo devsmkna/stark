@@ -7,7 +7,7 @@
   // nella casella dell'elenco, che è dove si va quando non si sa più come si chiama.
   import { tick } from 'svelte'
   import Icon from './Icon.svelte'
-  import { project, colours } from '../lib/view.ts'
+  import { project, projectName, colours } from '../lib/view.ts'
   import type { Store } from '../lib/store.svelte.ts'
 
   let { store }: { store: Store } = $props()
@@ -26,7 +26,7 @@
     const t = q.trim().toLowerCase()
     if (!t) return store.rows
     return store.rows.filter(r =>
-      r.title.toLowerCase().includes(t) || project(r.cwd).toLowerCase().includes(t))
+      r.title.toLowerCase().includes(t) || projectName(r.cwd, store.settings?.projects).toLowerCase().includes(t))
   })
 
   // La riga scelta non deve restare dov'era quando l'elenco cambia sotto: dopo aver
@@ -83,7 +83,7 @@
         onmousemove={() => { scelta = i }} onclick={() => apri(i)}>
         <i class="dotk p{palette.get(project(r.cwd)) ?? 0}"></i>
         <span class="pt">{r.title}</span>
-        <span class="pp">{project(r.cwd)}</span>
+        <span class="pp">{projectName(r.cwd, store.settings?.projects)}</span>
         <span class="ps" class:livep={r.live}>{r.state}</span>
       </button>
     {/each}
