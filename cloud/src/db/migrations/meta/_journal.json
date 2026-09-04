@@ -15,6 +15,13 @@
       "when": 1788351041089,
       "tag": "0001_cold_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788537373332,
+      "tag": "0002_heavy_angel",
+      "breakpoints": true
     }
   ]
 }

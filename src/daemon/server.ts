@@ -23,6 +23,7 @@ import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
 import { boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
+import { creaUsageSync, type UsageSync } from './usage-sync.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -124,6 +125,20 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     profile: opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? undefined,
   })
 
+  // Le statistiche d'uso che salgono al cloud, per unirle a quelle degli altri
+  // dispositivi della stessa persona. Spente finché non le si accende (`usageSync`):
+  // dopo il Web Push, è la seconda cosa che esce dalla macchina.
+  //
+  // `accesa` rilegge le impostazioni a ogni giro invece di catturare il valore adesso:
+  // l'interruttore si può spegnere mentre il daemon è acceso, e uno che lo spegne si
+  // aspetta che smetta di mandare — non alla prossima riaccensione.
+  const usage = creaUsageSync({
+    home: STARK_HOME,
+    snapshots: () => registry.tuttiGliSnapshot().values(),
+    accesa: () => registry.settings().usageSync,
+  })
+  registry.onTurnEnded = () => usage.turnoFinito()
+
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
   backendFor().warmDiagnostics?.()
@@ -167,7 +182,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   vigila(registry, [push])
 
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telefono)
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telefono, usage)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -194,6 +209,7 @@ async function route(
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
   port: () => number, configDir?: string, push?: Push, telefono?: Telefono,
+  usage?: UsageSync,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -340,6 +356,34 @@ async function route(
       if (from !== undefined) p.from = from
       if (to !== undefined) p.to = to
       return send(res, 200, { stats: registry.stats(p) })
+    }
+
+    // L'uso **unito** fra i dispositivi, dal cloud. Una rotta a parte e non un
+    // parametro di `/api/stats` di proposito: quella è una lettura locale che non può
+    // fallire e non tocca la rete, e mescolarle vorrebbe dire che la schermata delle
+    // statistiche smette di funzionare quando cade il server. Qui invece un `null` è
+    // un esito previsto — sync spenta, non loggati, cloud giù — e la UI ricade sul
+    // locale dicendolo, invece di mostrare una schermata vuota.
+    if (method === 'GET' && path === '/api/usage') {
+      if (!usage || !registry.settings().usageSync) {
+        return send(res, 200, { uso: null, motivo: 'sincronizzazione spenta' })
+      }
+      const ms = (k: string): number | undefined => {
+        const n = Number(url.searchParams.get(k))
+        return Number.isFinite(n) && n > 0 ? n : undefined
+      }
+      const uso = await usage.leggi({ from: ms('from'), to: ms('to') })
+      return send(res, 200, uso
+        ? { uso }
+        : { uso: null, motivo: 'cloud non raggiungibile o non loggato' })
+    }
+
+    // «Manda adesso», per chi ha appena acceso l'interruttore e non vuole aspettare la
+    // fine del prossimo turno per vedere se funziona. Qui l'esito **si dice**, al
+    // contrario dell'invio automatico: questo l'utente l'ha chiesto.
+    if (method === 'POST' && path === '/api/usage/sync') {
+      if (!usage) return send(res, 200, { ok: false, motivo: 'sincronizzazione non disponibile' })
+      return send(res, 200, await usage.sincronizza())
     }
 
     if (method === 'GET' && path === '/api/search') {

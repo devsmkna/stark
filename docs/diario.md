@@ -2046,3 +2046,64 @@ chat a fuoco invece di quella del pannello (quota spesa per un lavoro mai chiest
 il passaggio a un altro agent avrebbe sostituito il pannello sbagliato (`replacePane`
 con `da` preso da `selected`). 8/8 con modello gratuito; sul codice di prima la stessa
 sonda dà i tre fallimenti che documentano il difetto.
+
+**L'uso si somma fra i dispositivi** (4 settembre 2026). `Settings → Usage` nasce da
+`statsFrom()`, che legge gli snapshot in RAM di **quella** macchina: i journal non si
+sincronizzano fra fisso, portatile e MacBook, quindi il numero mostrato era corretto per
+ciò che misurava e misurava un terzo di quel che sembrava — senza nessun modo locale di
+accorgersene. Adesso salgono al cloud (tre tabelle su Postgres, `POST/GET /api/usage`),
+**per utente e solo per lui**: la classifica fra account era stata esplorata e scartata
+nella stessa conversazione, e sta scritta nello schema perché `usage_daily` è già quasi
+tutto ciò che servirebbe e l'assenza non sembri una svista.
+
+La domanda che ha deciso l'architettura è arrivata da un'obiezione dell'utente — «la
+macchina non mi interessa come dimensione» — che confliggeva con la scelta fatta un minuto
+prima, l'UPSERT idempotente su `(giorno, progetto, agent, modello)`: senza la macchina
+nella chiave, tre macchine scrivono la stessa riga e **l'ultima che parla sovrascrive le
+altre due**, cioè il totale diventa il contrario di ciò che si voleva. Le uniche due uscite
+erano la macchina nella chiave o i delta sommanti — e i delta chiedono un registro locale di
+«cosa ho già mandato» più una dedup lato server, cioè **stato in più che può divergere dalla
+realtà**, che al primo ritentativo dopo una risposta persa sbaglia in silenzio. Vince
+l'invio idempotente perché `statsFrom()` calcola già da zero: il daemon **dichiara ciò che
+vede** invece di ricordare ciò che ha fatto. (Poi l'utente ha cambiato idea da sé — vuole
+vedere da quali dispositivi ha lavorato — e la colonna è diventata anche una sezione «By
+device», ma la ragione per cui c'è resta quella.)
+
+Due cose che nella spec non c'erano e sono uscite scrivendo il codice. La prima: `window`
+sull'invio, cioè dichiarare gli estremi della finestra riscritta. Senza, una riga che
+*sparisce* dal calcolo locale — l'ultima chat di quel progetto cancellata — resterebbe in
+cloud per sempre, perché nessun invio la nominerebbe più; e la forma si è poi semplificata
+da sé in `DELETE` della finestra più `INSERT`, che fa la stessa cosa in un passo invece di
+due. La seconda: `usage_session_days`, una tabella per **un numero solo**. Tutte le colonne
+si sommano tranne `conversations` — una chat aperta lunedì e ripresa mercoledì è una
+conversazione ma sono due righe, e la somma direbbe due, sulla scheda grande, cioè dove si
+guarda.
+
+I due difetti veri li ha prodotti la stessa regola, e vale la pena tenerla scritta: **la
+finestra dichiarata è fatta di giorni e li include entrambi, il taglio di `righeUso()` è in
+millisecondi con l'estremo destro escluso.** Due convenzioni che sembrano la stessa cosa. La
+finestra partiva da «adesso meno due giorni», cioè da mezzogiorno, e dichiarava il giorno
+intero: il server avrebbe cancellato la mattina del giorno più vecchio senza riscriverla. E
+i pezzi finivano a mezzanotte dell'ultimo giorno, quindi quel giorno saliva vuoto pur
+essendo dentro la finestra cancellata — spariva dal cloud a ogni sincronizzazione. Entrambi
+invisibili: i numeri restano plausibili, solo più bassi. L'aritmetica sta ora in due
+funzioni sole e va per **giorni di calendario**, non sommando 86.400.000 ms, perché nella
+notte del cambio d'ora un giorno dura 23 ore o 25.
+
+Due sonde, 39 verifiche: `tools/usage-check.ts` a costo zero (righe pure, e il lato daemon
+con un `fetch` sostituito — spento non manda, tre turni ravvicinati fanno un invio solo,
+offline fallisce dicendolo senza accodare), e `cloud/src/usage-check.ts` contro un Postgres
+vero ed effimero in Docker, perché lì il comportamento che conta non sta nel TypeScript ma
+in ciò che succede al database. I check sulla finestra sono stati visti **fallire**
+reintroducendo il difetto, non solo passare. Trappola incontrata scrivendo la sonda cloud, e
+che vale in generale: **`pg_isready` mente** — parla sul socket unix dentro il container e
+risponde ok mentre da fuori si prende ancora `57P03 the database system is starting up`,
+perché l'immagine ufficiale avvia un server temporaneo per `initdb` e poi lo riavvia. Si
+aspetta una query vera dall'host.
+
+Spenta di default (`usageSync`), e non per prudenza generica: fino a qui l'unica cosa che
+usciva dalla macchina era il Web Push, e ADR-011 lo aveva reso una scelta detta dove la si
+fa. Questa è la seconda, e il login al cloud — che uno può aver fatto per la board — non è
+un consenso a mandare anche l'uso. In `readSettings` si legge con `=== true` e non con
+`!== false` come le voci vicine: un file scritto prima che questa esistesse non deve
+mettersi a mandare dati fuori per **come si legge un campo assente**.

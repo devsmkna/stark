@@ -122,11 +122,29 @@ export type Settings = {
    * significato che Esc ha già.
    */
   interruptEscape: boolean
+  /**
+   * Se le statistiche d'uso di questa macchina salgono al server cloud, per unirsi a
+   * quelle degli altri dispositivi della stessa persona.
+   *
+   * **Spenta di default**, e non è prudenza generica: fino a qui l'unica cosa che
+   * usciva dalla macchina era il Web Push, e ADR-011 lo ha reso una scelta esplicita
+   * detta dove la si fa. Questa è la seconda, e il login al cloud — che uno può aver
+   * fatto per la board — non è un consenso a mandare anche l'uso.
+   *
+   * Sta nelle impostazioni della **macchina** e non del browser perché è la macchina
+   * a mandarli, e perché «questo portatile contribuisce al conto» è un fatto suo:
+   * accenderla altrove non lo renderebbe vero qui.
+   *
+   * Cosa sale, per intero: giorno, chiave e nome del progetto, agent, modello,
+   * conteggi, token, e gli id di sessione (uuid) coi giorni in cui erano vive. Mai il
+   * testo di un prompt, mai un output, mai un percorso di file.
+   */
+  usageSync: boolean
 }
 
 export const DEFAULTS: Settings = {
   permissions: { ...CATEGORY_DEFAULTS }, projects: {}, toolDescriptions: true,
-  defaultMode: 'auto', historyArrowUp: true, interruptEscape: true,
+  defaultMode: 'auto', historyArrowUp: true, interruptEscape: true, usageSync: false,
 }
 
 /**
@@ -214,6 +232,11 @@ export function readSettings(home: string): Settings {
       defaultMode: saneMode(raw.defaultMode),
       historyArrowUp: raw.historyArrowUp !== false,
       interruptEscape: raw.interruptEscape !== false,
+      // `=== true` e non `!== false`, al contrario delle voci qui sopra: quelle sono
+      // accese di default, questa no. Un file scritto prima che esistesse non deve
+      // ritrovarsi a mandare dati fuori dalla macchina per il modo in cui si legge un
+      // campo assente.
+      usageSync: raw.usageSync === true,
       ...(sanePerAgent(raw['defaultModes'])),
       ...(saneShortcuts(raw['shortcuts'])),
       ...(sanePreferred(raw['preferredModel']) ? { preferredModel: sanePreferred(raw['preferredModel']) } : {}),
@@ -232,6 +255,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     defaultMode: saneMode(s.defaultMode),
     historyArrowUp: s.historyArrowUp !== false,
     interruptEscape: s.interruptEscape !== false,
+    usageSync: s.usageSync === true,
     ...(sanePerAgent(s.defaultModes)),
     ...(saneShortcuts(s.shortcuts)),
     ...(sanePreferred(s.preferredModel) ? { preferredModel: sanePreferred(s.preferredModel) } : {}),
