@@ -42,6 +42,17 @@
   const row = $derived(store.rows.find(r => r.id === id))
   const live = $derived(row?.live ?? false)
 
+  /** L'orologio della pill «ops · notes»: avanza un secondo alla volta, ma solo
+   *  finché c'è un processo dietro. Su una chat ferma nessun turno è ancora senza
+   *  `endedAt`, quindi `now` non verrebbe mai letto — l'intervallo si spegne da solo
+   *  invece di girare a vuoto su una conversazione riletta dal journal. */
+  let now = $state(Date.now())
+  $effect(() => {
+    if (!live) return
+    const t = setInterval(() => { now = Date.now() }, 1000)
+    return () => clearInterval(t)
+  })
+
   // Di default è aperto il turno **attivo** — quello che l'agent sta davvero facendo,
   // che non è sempre l'ultimo: se mandi un messaggio mentre lavora ancora al
   // precedente, quello nuovo si accoda e non ha ancora un blocco. Aprire «l'ultimo»
@@ -423,7 +434,7 @@
   // alfabetico fra TUTTI i progetti, quindi calcolarla su un elenco di uno darebbe
   // sempre il primo colore — e lo stesso progetto avrebbe due colori diversi nelle
   // due metà dello schermo, che è esattamente ciò che il colore serve a evitare.
-  const colour = $derived(colours(store.rows).get(project(snap.cwd)) ?? 0)
+  const colour = $derived(colours(store.rows, store.settings?.projects ?? {}).get(project(snap.cwd)) ?? 0)
   const title = $derived(row?.title ?? project(snap.cwd))
 
   /** Info utili per un bug report, in un blocco solo: id, titolo, agent, modello,
@@ -466,6 +477,17 @@
    */
   const subject = (part: Extract<PartView, { kind: 'tool' }>): string =>
     part.summary ?? part.inputRaw.slice(0, 120)
+
+  /** Cinquanta caratteri, non di più: la pill è una riga sola fra i contatori e
+   *  l'orologio, non il posto per leggere un comando per intero — quello sta nel
+   *  dettaglio, quando il gruppo si apre. */
+  const truncate = (s: string, n: number): string =>
+    s.length > n ? `${s.slice(0, n - 1)}…` : s
+
+  /** Il tempo del turno: fermo su `endedAt` quando c'è, altrimenti l'orologio che
+   *  avanza (`now`) — è così che «sempre, incrementale» smette di essere un'attesa
+   *  muta («…») e diventa un numero che sale. */
+  const elapsed = (t: TurnView): string => since(t.startedAt, t.endedAt ?? now)
 
   /** L'operazione ancora in corso, se c'è: al più una per turno. Non ha un blocco suo
    *  — sta in testa alla pill del gruppo («ops · notes · duration»), perché è la stessa
@@ -765,7 +787,7 @@
       <span class="m live">Thinking</span>
     {:else}
       <Icon name={toolIcon(part.name)} />
-      <span class="m live">{part.intent ?? subject(part)}</span>
+      <span class="m live">{truncate(part.intent ?? subject(part), 50)}</span>
     {/if}
   {/snippet}
 
@@ -1031,15 +1053,19 @@
                 {@const nNote = c.note}
                 <button class="row clickable ops" class:pin={gopen} onclick={() => toggleBlock(gkey)}>
                   <span class="ops-meta">
-                    {#if g.key === doneTail && opLive}
-                      {@render liveTag(opLive)}
+                    <span class="m">{elapsed(turn)}</span>
+                    {#if nOps > 0}
                       <span class="dot">·</span>
+                      <span class="m">{nOps} ops</span>
                     {/if}
-                    <span class="m">{nOps} ops</span>
-                    <span class="dot">·</span>
-                    <span class="m">{nNote} notes</span>
-                    <span class="dot">·</span>
-                    <span class="m">{#if turn.endedAt}{since(turn.startedAt, turn.endedAt)}{:else}…{/if}</span>
+                    {#if nNote > 0}
+                      <span class="dot">·</span>
+                      <span class="m">{nNote} notes</span>
+                    {/if}
+                    {#if g.key === doneTail && opLive}
+                      <span class="dot">·</span>
+                      {@render liveTag(opLive)}
+                    {/if}
                   </span>
                   <span class="end chev" class:open={gopen}><Icon name="i-fwd" style="width:9px;height:9px" /></span>
                 </button>
@@ -1077,7 +1103,11 @@
                    finito: l'operazione in corso sta da sola, nella stessa pill che
                    altrimenti riassumerebbe «ops · notes · duration». -->
               <div class="row ops">
-                <span class="ops-meta">{@render liveTag(opLive)}</span>
+                <span class="ops-meta">
+                  <span class="m">{elapsed(turn)}</span>
+                  <span class="dot">·</span>
+                  {@render liveTag(opLive)}
+                </span>
               </div>
             {/if}
           </div>
