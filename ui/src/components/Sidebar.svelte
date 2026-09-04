@@ -8,7 +8,7 @@
   import Logo from './Logo.svelte'
   import type { Match, SessionMatches, SessionRow } from '../lib/api.ts'
   import {
-    ORDER, colours, group, hhmm, label, needsYou, project, stamp,
+    ORDER, colours, group, hhmm, label, needsYou, project, projectName, stamp,
   } from '../lib/view.ts'
   import { getLobeIconUrl } from '../lib/lobe.ts'
   import { leafIds } from '../lib/layout.ts'
@@ -88,6 +88,7 @@
   type Blocco = {
     key: string
     proj: string
+    cwd: string | undefined
     rows: SessionRow[]
   }
 
@@ -130,6 +131,9 @@
     return perProgetto(recenti).map(([name, rows]) => ({
       key: `p:${name}`,
       proj: name,
+      // Preso da `rows` (non ancora svuotate): un progetto chiuso non deve perdere
+      // la propria cwd solo perché le righe sotto sono nascoste.
+      cwd: rows[0]?.cwd,
       // Chiuso: l'intestazione resta, le righe no.
       rows: store.collapse.isClosed(name) ? [] : [...rows].sort((a, b) => peso(a) - peso(b)),
     }))
@@ -444,7 +448,7 @@
               <div class="meta">
                 {hhmm(row.lastTs)}
                 <span class="sst {label(row.state)}">{label(row.state)}</span>
-                <i class="dotk p{palette.get(project(row.cwd)) ?? 0}"></i> {project(row.cwd)}
+                <i class="dotk p{palette.get(project(row.cwd)) ?? 0}"></i> {projectName(row.cwd, store.settings?.projects)}
               </div>
             </div>
           </button>
@@ -555,7 +559,7 @@
         ondrop={e => dropProject(e, section.proj)}
         ondragend={dragProjectEnd}>
         <i class="dotk p{palette.get(section.proj) ?? 0}"></i>
-        <span class="ghead">{section.proj}</span>
+        <span class="ghead">{projectName(section.cwd, store.settings?.projects)}</span>
         <!-- Compresso, il pallino di ogni riga sparisce con lei: il conto lo
              rimpiazza, se no chiudere un progetto nasconderebbe anche il fatto che
              qualcosa lì dentro ti aspetta. -->
