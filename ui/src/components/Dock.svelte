@@ -14,7 +14,7 @@
   // sezioni né conteggi di tool (il dato non esiste nello snapshot), sweep al posto
   // della riga «cosa sta facendo» — stanno nei commenti, dove potranno essere
   // rimesse in discussione con le loro premesse.
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import Ask from './Ask.svelte'
   import ModelPicker from './ModelPicker.svelte'
@@ -39,9 +39,22 @@ import { MODE_BLURB, MODE_ICON, project, stamp, until, fmtTok, fmtCosto } from '
   let { store, snap, live, id }:
     { store: Store; snap: SessionSnapshot; live: boolean; id: string } = $props()
 
-  let text = $state('')
+  let text = $state(store.drafts.get(id) ?? '')
   let box = $state<HTMLTextAreaElement | null>(null)
   let fileInput = $state<HTMLInputElement | null>(null)
+
+  // Questo componente resta montato quando si cambia chat dall'elenco (`id` è solo
+  // una prop che cambia, non c'è `{#key}` sopra): senza questo effetto `text`
+  // resterebbe quello scritto per la chat precedente, e comparirebbe nella casella
+  // sbagliata. Al cambio di `id` si salva il testo per la chat che si sta lasciando
+  // e si carica quello — se c'è — della chat che si apre.
+  let draftId = id
+  $effect(() => {
+    if (id === draftId) return
+    const nuovo = store.drafts.get(id) ?? ''
+    untrack(() => { store.drafts.set(draftId, text); text = nuovo })
+    draftId = id
+  })
 
   // Tutto ciò che è «in corso» è vero solo se dietro c'è un processo. Il journal di
   // una sessione fermata dal riavvio del daemon finisce a metà di un turno, e ripeterlo
