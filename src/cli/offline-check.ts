@@ -1300,13 +1300,19 @@ const salvate = writeSettings(casa, {
   permissions: { shell: 'ask', edit: 'allow', read: 'allow', net: 'allow', agents: 'allow', external: 'allow' },
   // Roba che arriva da una richiesta e che non deve entrare: una categoria inventata,
   // un valore che non è né allow né ask, un colore fuori scala.
-  projects: { '/x': { colour: 99 }, '/y': { muted: true } },
+  projects: { '/x': { colour: 99 }, '/y': { muted: true }, '/z': { name: '  Mio progetto  ' }, '/w': { name: '   ' } },
 } as never)
 check('§16.5: si salva ciò che si riconosce, e si butta il resto',
   salvate.permissions.shell === 'ask'
   && salvate.projects['/x']?.colour === undefined
   && salvate.projects['/y']?.muted === true,
   JSON.stringify(salvate))
+check('§16.9: un nome scelto a mano si salva già ripulito degli spazi',
+  salvate.projects['/z']?.name === 'Mio progetto',
+  JSON.stringify(salvate.projects['/z']))
+check('§16.9: un nome fatto solo di spazi non si salva — resta «assente», non stringa vuota',
+  salvate.projects['/w']?.name === undefined,
+  JSON.stringify(salvate.projects['/w']))
 check('§16.5: le categorie da chiedere si rileggono da disco',
   askCategories(readSettings(casa)).join(',') === 'shell')
 
