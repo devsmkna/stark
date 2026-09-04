@@ -40,6 +40,7 @@
   let swpopOpen: string | null = $state(null)
   let renamingProj = $state<string | null>(null)
   let projDraft = $state('')
+  let projCtxMenu = $state<string | null>(null)
   let projectFilter = $state('')
   let agentDdOpen: string | null = $state(null)
 
@@ -410,13 +411,18 @@
   async function faiLogin(): Promise<void> {
     cloudLavoro = true
     cloudErrore = ''
-    const esito = await store.api.cloudLogin(cloudEmail.trim(), cloudPassword)
-    cloudLavoro = false
-    if (esito.ok) {
-      cloudPassword = ''
-      cloud = { url: cloud?.url ?? null, email: esito.email ?? null, server: 'ok' }
-    } else {
-      cloudErrore = esito.motivo ?? 'login fallito'
+    try {
+      const esito = await store.api.cloudLogin(cloudEmail.trim(), cloudPassword)
+      if (esito.ok) {
+        cloudPassword = ''
+        cloud = { url: cloud?.url ?? null, email: esito.email ?? null, server: 'ok' }
+      } else {
+        cloudErrore = esito.motivo ?? 'login fallito'
+      }
+    } catch (e) {
+      cloudErrore = e instanceof Error ? e.message : String(e)
+    } finally {
+      cloudLavoro = false
     }
   }
 
@@ -783,7 +789,8 @@
                     }} />
                 {:else}
                   <button class="o-t pj-name" ondblclick={() => startRenameProj(cwd, nome)}
-                    title="{nome} — double-click to rename">{nome}</button>
+                    oncontextmenu={e => { e.preventDefault(); projCtxMenu = projCtxMenu === cwd ? null : cwd }}
+                    title="{nome} — double-click or right-click to rename">{nome}</button>
                 {/if}
                 <span class="o-sub mono">{cwd}</span>
               </span>
@@ -801,6 +808,13 @@
                 {#each [0,1,2,3,4,5,6] as c (c)}
                   <span class="sw-c" class:on={col === c} style="--c:var(--p{c+1})" onclick={() => { void store.setProject(cwd, { colour: c }); swpopOpen = null }}></span>
                 {/each}
+              </div>
+            {/if}
+            {#if projCtxMenu === cwd}
+              <div class="pj-ctxpop">
+                <button class="mi" onclick={() => { startRenameProj(cwd, nome); projCtxMenu = null }}>
+                  <Icon name="i-pencil" /> Rename
+                </button>
               </div>
             {/if}
           {/each}
@@ -1428,6 +1442,8 @@
     border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px;
     background: var(--surface); color: var(--ink); outline: none;
   }
+  .pj-ctxpop { display:flex; margin:0 0 10px 26px; width:max-content; background:var(--surface-2); border:1px solid var(--line-2); border-radius:9px; padding:4px; }
+  .pj-ctxpop .mi { font-size:11px; }
   .pj-dot { flex:none; width:14px; height:14px; border-radius:5px; background:var(--c); cursor:pointer; box-shadow:0 0 0 0 rgba(255,255,255,0); transition:.15s; }
   .segbig { display:inline-flex; gap:6px; }
   .segbig button { display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 16px; border:1px solid var(--line-2); background:var(--surface-2); color:var(--muted); font-family:inherit; font-size:13px; border-radius:8px; cursor:pointer; transition:.15s; }
