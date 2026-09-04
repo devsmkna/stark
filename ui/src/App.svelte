@@ -20,6 +20,7 @@ import Login from './components/Login.svelte'
   import { AZIONI, combos } from './lib/actions.ts'
   import { matches, parse } from './lib/shortcuts.ts'
   import { zoomRoot } from './lib/zoom.ts'
+  import { projectName } from './lib/view.ts'
 
   const store = new Store()
 
@@ -95,13 +96,20 @@ import Login from './components/Login.svelte'
   })
 
   const menuRow = $derived(
-    store.menu && store.menu.kind !== 'view' ? store.rows.find(r => r.id === store.menu?.id) : undefined,
+    store.menu && store.menu.kind !== 'view' && store.menu.kind !== 'project'
+      ? store.rows.find(r => r.id === store.menu?.id) : undefined,
   )
   /** Il menu di una **vista**. Stesso `store.menu`, quindi stessa correzione di
    *  posizione qui sotto: due stati separati avrebbero voluto dire due copie di quel
    *  calcolo, e prima o poi una delle due che esce dallo schermo. */
   const menuVista = $derived(
     store.menu?.kind === 'view' ? store.viste.trova(store.menu.id) : undefined,
+  )
+  /** Il menu di un **progetto** (l'intestazione di gruppo in sidebar). `id` è la
+   *  cwd, non un id di riga o di vista — stessa correzione di posizione, stesso
+   *  `store.menu`. */
+  const menuProject = $derived(
+    store.menu?.kind === 'project' ? store.menu.id : undefined,
   )
 
   /** La voce «Environment» del menu contestuale si apre in una seconda pagina dentro
@@ -156,9 +164,14 @@ import Login from './components/Login.svelte'
   async function faiLogin(email: string, password: string): Promise<void> {
     loginLavorando = true
     loginErrore = ''
-    const esito = await store.loginCloud(email, password)
-    loginLavorando = false
-    if (!esito.ok) loginErrore = esito.motivo ?? 'login fallito'
+    try {
+      const esito = await store.loginCloud(email, password)
+      if (!esito.ok) loginErrore = esito.motivo ?? 'login fallito'
+    } catch (e) {
+      loginErrore = e instanceof Error ? e.message : String(e)
+    } finally {
+      loginLavorando = false
+    }
   }
 </script>
 
@@ -453,6 +466,29 @@ import Login from './components/Login.svelte'
       <Icon name="i-trash" /> Delete view
     </button>
   {/snippet}
+
+  {#snippet vociProgetto(cwd: string)}
+    <button class="mi" onclick={() => { store.renamingProject = cwd; store.menu = null }}>
+      <Icon name="i-pencil" /> Rename
+    </button>
+  {/snippet}
+
+  {#if store.menu && menuProject}
+    {#if store.narrow}
+      <div class="sheet" role="menu">
+        <div class="grab" role="presentation"></div>
+        <div class="shead">{projectName(menuProject, store.settings?.projects)}</div>
+        {@render vociProgetto(menuProject)}
+      </div>
+    {:else}
+      <div class="ctx-menu" bind:this={menuEl}
+        style="left:{(menuPos?.x ?? store.menu.x / zoomRoot())}px;top:{(menuPos?.y ?? store.menu.y / zoomRoot())}px">
+        {@render vociProgetto(menuProject)}
+      </div>
+    {/if}
+    <div class="catch" role="presentation" onclick={() => { store.menu = null }}
+      oncontextmenu={e => { e.preventDefault(); store.menu = null }}></div>
+  {/if}
 
   {#if store.menu && menuVista}
     {#if store.narrow}

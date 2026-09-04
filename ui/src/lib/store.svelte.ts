@@ -74,7 +74,7 @@ export type NewTab = 'new' | 'import'
  *  della posizione (il menu che non deve sfondare il bordo, `App.svelte`) è la parte
  *  che costa, e duplicarla vorrebbe dire che un giorno una delle due esce dallo
  *  schermo e l'altra no. `chat` è il default per non toccare i chiamanti di prima. */
-export type ContextMenu = { id: string; x: number; y: number; kind?: 'chat' | 'view' } | null
+export type ContextMenu = { id: string; x: number; y: number; kind?: 'chat' | 'view' | 'project' } | null
 
 /**
  * La foglia del layout che mostra il selettore «quale chat in questo pannello».
@@ -285,6 +285,10 @@ export class Store {
 
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
   renaming = $state<string | null>(null)
+  /** La cartella (cwd) del progetto il cui nome è diventato scrivibile. Campo a parte
+   *  da `renaming`: quello è l'id di una riga o di una vista, questo è un percorso —
+   *  tenerli distinti evita di dover indovinare cosa rappresenta l'id in giro. */
+  renamingProject = $state<string | null>(null)
   /** L'ultimo comando rifiutato. Non è un guasto: è il daemon che spiega perché no. */
   refused = $state<string | null>(null)
   /**

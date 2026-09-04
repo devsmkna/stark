@@ -218,6 +218,32 @@
     apriMenu(row, e.clientX, e.clientY)
   }
 
+  // ─── rinominare un progetto ───────────────────────────────────────────────
+  //
+  // Stato a parte da `draft`/`store.renaming`: quelli sono per una riga o una vista,
+  // qui l'id è una cwd. Il menu che apre la modifica vive in App.svelte (stesso
+  // `store.menu` del tasto destro sulle chat) — questa riga sa solo mostrare il
+  // campo quando `store.renamingProject` punta a lei.
+  let projectDraft = $state('')
+  $effect(() => {
+    const cwd = store.renamingProject
+    if (cwd) projectDraft = projectName(cwd, store.settings?.projects)
+  })
+  async function commitProjectRename(cwd: string): Promise<void> {
+    const raw = project(cwd)
+    const value = projectDraft.trim()
+    store.renamingProject = null
+    if (value === raw) { await store.setProject(cwd, { name: undefined }); return }
+    if (value && value !== (store.project(cwd).name ?? raw)) await store.setProject(cwd, { name: value })
+  }
+
+  function openMenuProject(e: MouseEvent, cwd: string | undefined): void {
+    if (!cwd) return
+    e.preventDefault()
+    if (longPressAppenaFatto()) return
+    store.menu = { id: cwd, x: e.clientX, y: e.clientY, kind: 'project' }
+  }
+
   // ─── riordinare i progetti ────────────────────────────────────────────────
   //
   // Trascinare un progetto su un altro lo sposta alla sua posizione. Il bersaglio è
@@ -494,7 +520,8 @@
         ondragover={e => dragProjectOver(e, section.proj)}
         ondragleave={() => { if (dropTarget === section.proj) dropTarget = null }}
         ondrop={e => dropProject(e, section.proj)}
-        ondragend={dragProjectEnd}>
+        ondragend={dragProjectEnd}
+        oncontextmenu={e => openMenuProject(e, section.cwd)}>
         <i class="dotk p{palette.get(section.proj) ?? 0}"></i>
         <span class="ghead">{projectName(section.cwd, store.settings?.projects)}</span>
         <!-- Compresso, il pallino di ogni riga sparisce con lei: il conto lo
@@ -503,6 +530,17 @@
         {#if closed && n > 0}<span class="gcount">{n}</span>{/if}
         <Icon name="i-down" class="chev" />
       </button>
+      {#if section.cwd && store.renamingProject === section.cwd}
+        <div class="pj-rn-row">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="rn" autofocus bind:value={projectDraft}
+            onblur={() => void commitProjectRename(section.cwd ?? '')}
+            onkeydown={e => {
+              if (e.key === 'Enter') void commitProjectRename(section.cwd ?? '')
+              if (e.key === 'Escape') store.renamingProject = null
+            }} />
+        </div>
+      {/if}
       {#each section.rows as row (row.id)}
           {#if store.renaming === row.id}
             <!-- Rinominare non apre una schermata: il titolo diventa scrivibile dov'è.
@@ -859,6 +897,7 @@
     border: 1px solid var(--accent); border-radius: 10px; padding: 4px 8px;
     background: var(--surface); color: var(--ink); outline: none;
   }
+  .pj-rn-row { padding: 0 10px 4px; }
   /* L'icona del modello a sinistra della riga. Il placeholder vuoto (`span.micon`)
      occupa lo stesso spazio dell'immagine, così le righe senza modello — o con un
      modello che non ha icona — restano allineate con le altre. */
