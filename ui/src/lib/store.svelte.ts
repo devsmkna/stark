@@ -313,10 +313,12 @@ export class Store {
   taskSheet = $state<{ id: number; sessione: string } | null>(null)
 
   openBoardTask(id: number, sessione?: string): void {
-    // Su schermo stretto la Board intera è un'impalcatura scomoda: il chip apre il
-    // solo dettaglio. Serve la sessione per risolvere la board; senza (chiamanti
-    // futuri che non ce l'hanno) si ripiega sulla Board, che non ne ha bisogno.
-    if (this.narrow && sessione) {
+    // Il chip apre OVUNQUE il solo dettaglio (card #36): foglio a tutto schermo su
+    // mobile, modale centrata su desktop — la differenza la fa il CSS di TaskSheet,
+    // non un ramo qui. La Board col pannello laterale resta per chi la apre dal suo
+    // bottone. Serve la sessione per risolvere la board; senza (chiamanti futuri che
+    // non ce l'hanno) si ripiega sulla Board, che non ne ha bisogno.
+    if (sessione) {
       this.taskSheet = { id, sessione }
       return
     }

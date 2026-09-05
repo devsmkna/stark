@@ -1,11 +1,12 @@
 <script lang="ts">
-  // Il foglio del task su schermo stretto (card #35).
+  // Il dettaglio del task aperto da un chip `#NNN` (card #35, poi #36).
   //
-  // Su mobile il click su un chip `#NNN` non deve trascinare dentro la vista Board
-  // intera — colonne larghe, dettaglio in-panel, tutto pensato per un monitor. Qui si
-  // apre SOLO il dettaglio, a tutto schermo, e la X riporta in chat. Lo scrive
-  // `store.openBoardTask` quando `store.narrow` è vero; su desktop quel metodo
-  // continua ad aprire la Board come prima.
+  // Il click su un chip non deve trascinare dentro la vista Board intera — colonne
+  // larghe, dettaglio in-panel, un'impalcatura che qui non serve. Si apre SOLO il
+  // dettaglio: foglio a tutto schermo su telefono, modale centrata da 860px in su
+  // (la differenza è nel CSS in fondo, non nel codice). Lo scrive
+  // `store.openBoardTask`; la Board col pannello laterale resta per chi la apre dal
+  // suo bottone.
   //
   // I dati si chiedono con un fetch singolo, non col flusso SSE della Board: il
   // foglio vive pochi secondi, e lo stato che mostra è quello del momento del click —
@@ -74,12 +75,25 @@
 {/if}
 
 <style>
-  /* A tutto schermo sotto la barra di sistema: su un telefono un "pannello a lato"
-     non esiste, e un dialog piccolo renderebbe illeggibile proprio il corpo.
+  /* Il default è la modale centrata con la veste di `.dlg` (card #36); sotto la
+     soglia diventa un foglio a tutto schermo, perché su telefono un dialog piccolo
+     renderebbe illeggibile proprio il corpo. L'override usa LO STESSO media query di
+     `store.narrow` in App.svelte — `(max-width: 860px)`, inclusivo — così al pixel
+     esatto della soglia le due metà dell'app non possono dirsi cose diverse (un
+     `min-width: 860px` qui sopra si sovrapponeva a 860 spaccato).
      z-index 9 = la scala dei dialog dell'app (scrim 8, dlg 9, Splash/Login 12):
      un numero fuori scala finirebbe SOPRA lo Splash, che deve coprire tutto. */
-  .tsheet { position: fixed; inset: 0; z-index: 9; background: var(--surface);
-            display: flex; flex-direction: column; }
+  .tsheet { position: fixed; z-index: 9; background: var(--surface);
+            display: flex; flex-direction: column;
+            left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: min(520px, calc(100vw - 80px));
+            max-height: min(640px, calc(100vh - 80px));
+            border: 1px solid var(--line-2); border-radius: 12px;
+            box-shadow: 0 24px 60px rgba(16, 20, 32, .32); overflow: hidden; }
+  @media (max-width: 860px) {
+    .tsheet { inset: 0; transform: none; width: auto; max-height: none;
+              border: 0; border-radius: 0; box-shadow: none; }
+  }
   .err { padding: 10px 14px; font-size: 11px; color: var(--stop); background: var(--stop-bg);
          border-top: 1px solid var(--line); }
   .vuoto { padding: 24px 16px; color: var(--muted); font-size: 12px; display: flex;
