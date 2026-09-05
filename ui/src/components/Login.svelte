@@ -8,20 +8,26 @@
     server = 'ok',
     errore = '',
     lavorando = false,
+    mfa = false,
     onLogin,
   }: {
     server: 'ok' | 'giu' | 'non-configurato'
     errore?: string
     lavorando?: boolean
-    onLogin: (email: string, password: string) => void
+    /** L'account ha il TOTP: si mostra il campo del codice, e senza codice non si
+     *  parte (il server lo rifiuterebbe comunque, ma qui si evita il giro). */
+    mfa?: boolean
+    onLogin: (email: string, password: string, code?: string) => void
   } = $props()
 
   let email = $state('')
   let password = $state('')
+  let code = $state('')
 
   function invia(): void {
     if (!email.trim() || !password || lavorando) return
-    onLogin(email.trim(), password)
+    if (mfa && !code.trim()) return
+    onLogin(email.trim(), password, code.trim() || undefined)
   }
 </script>
 
@@ -58,11 +64,24 @@
         />
       </label>
 
+      {#if mfa}
+        <label>
+          <span>Codice authenticator</span>
+          <input
+            inputmode="text"
+            autocomplete="one-time-code"
+            placeholder="6 cifre, o un codice di recupero"
+            bind:value={code}
+            disabled={lavorando}
+          />
+        </label>
+      {/if}
+
       {#if errore}
         <p class="lg-err">{errore}</p>
       {/if}
 
-      <button type="submit" class="lg-btn" disabled={lavorando || !email.trim() || !password}>
+      <button type="submit" class="lg-btn" disabled={lavorando || !email.trim() || !password || (mfa && !code.trim())}>
         {lavorando ? 'Accesso…' : 'Accedi'}
       </button>
     </form>

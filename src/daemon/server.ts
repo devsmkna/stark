@@ -21,7 +21,7 @@ import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.t
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
-import { cambiaPasswordCloud, boardCloud, boardInitCloud, boardImportCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
+import { proxyTotp, cambiaPasswordCloud, boardCloud, boardInitCloud, boardImportCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
 import { leggiBoardLocale } from './board.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { creaUsageSync, type UsageSync } from './usage-sync.ts'
@@ -482,9 +482,9 @@ async function route(
       return send(res, 200, await cloudStatus(STARK_HOME))
     }
     if (method === 'POST' && path === '/api/cloud/login') {
-      const body = await readJson<{ email?: string; password?: string }>(req)
+      const body = await readJson<{ email?: string; password?: string; code?: string }>(req)
       if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
-      const esito = await loginCloud(STARK_HOME, body.email, body.password)
+      const esito = await loginCloud(STARK_HOME, body.email, body.password, body.code)
       return send(res, esito.ok ? 200 : 401, esito)
     }
     if (method === 'POST' && path === '/api/cloud/logout') {
@@ -496,6 +496,32 @@ async function route(
       if (!body?.current || !body.new) return send(res, 400, { ok: false, error: 'current e new obbligatorie' })
       const esito = await cambiaPasswordCloud(STARK_HOME, body.current, body.new)
       return send(res, esito.ok ? 200 : 400, esito)
+    }
+    // MFA (TOTP): la UI di Settings gestisce il proprio secondo fattore passando dal
+    // daemon, che ci mette il Bearer del cloud. Il browser non parla mai col cloud.
+    if (method === 'GET' && path === '/api/cloud/totp') {
+      const r = await proxyTotp(STARK_HOME, '/api/totp')
+      return send(res, r.status || 200, r.body)
+    }
+    if (method === 'POST' && path === '/api/cloud/totp/setup') {
+      const r = await proxyTotp(STARK_HOME, '/api/totp/setup', { method: 'POST' })
+      return send(res, r.status || 200, r.body)
+    }
+    if (method === 'POST' && path === '/api/cloud/totp/enable') {
+      const body = await readJson<{ code?: string }>(req)
+      const r = await proxyTotp(STARK_HOME, '/api/totp/enable', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: body?.code ?? '' }),
+      })
+      return send(res, r.status || 200, r.body)
+    }
+    if (method === 'POST' && path === '/api/cloud/totp/disable') {
+      const body = await readJson<{ password?: string }>(req)
+      const r = await proxyTotp(STARK_HOME, '/api/totp/disable', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: body?.password ?? '' }),
+      })
+      return send(res, r.status || 200, r.body)
     }
     // Su quale ramo sta la cartella di una chat. Sta qui e non nel journal perché è un
     // fatto del filesystem, non dell'agent: chi fa `git checkout` in un terminale

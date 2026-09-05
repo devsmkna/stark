@@ -488,6 +488,11 @@
     if ((sez === 'cloud' || sez === 'usage') && cloud === null) {
       void store.api.cloudStatus().then(x => { cloud = x })
     }
+    // Lo stato MFA si legge quando si apre Cloud e si è loggati: prima non c'è account
+    // a cui chiederlo, e chiederlo da Usage sarebbe rumore.
+    if (sez === 'cloud' && cloud?.email && mfa === null) {
+      void caricaMfa()
+    }
   })
 
   async function faiLogin(): Promise<void> {
@@ -546,6 +551,60 @@
     } finally {
       pwLavoro = false
     }
+  }
+
+  // ─── MFA (TOTP) ─────────────────────────────────────────────────────────────
+  let mfa = $state<{ enabled: boolean; recoveryLeft?: number } | null>(null)
+  let mfaEnrol = $state(false)          // enrolment in corso (QR mostrato)
+  let mfaSecret = $state('')            // la chiave in chiaro, per chi non scansiona
+  let mfaQr = $state<string | null>(null)
+  let mfaCode = $state('')
+  let mfaPw = $state('')
+  let mfaRecovery = $state<string[] | null>(null)  // i codici, mostrati una volta sola
+  let mfaLavoro = $state(false)
+  let mfaErrore = $state('')
+
+  async function caricaMfa(): Promise<void> {
+    try {
+      const r = await store.api.totpStato()
+      mfa = r.ok ? { enabled: !!r.enabled, recoveryLeft: r.recoveryLeft } : { enabled: false }
+    } catch { mfa = { enabled: false } }
+  }
+
+  async function mfaInizia(): Promise<void> {
+    mfaLavoro = true; mfaErrore = ''
+    try {
+      const r = await store.api.totpSetup()
+      if (r.ok && r.secret && r.uri) {
+        mfaSecret = r.secret
+        mfaQr = await QRCode.toDataURL(r.uri, { margin: 1, width: 200 }).catch(() => null)
+        mfaCode = ''; mfaEnrol = true
+      } else { mfaErrore = r.error ?? 'setup fallito' }
+    } catch (e) { mfaErrore = e instanceof Error ? e.message : String(e) }
+    finally { mfaLavoro = false }
+  }
+
+  async function mfaAbilita(): Promise<void> {
+    mfaLavoro = true; mfaErrore = ''
+    try {
+      const r = await store.api.totpEnable(mfaCode.trim())
+      if (r.ok) {
+        mfaEnrol = false; mfaCode = ''; mfaSecret = ''; mfaQr = null
+        mfaRecovery = r.recovery ?? []
+        await caricaMfa()
+      } else { mfaErrore = r.error ?? 'codice sbagliato' }
+    } catch (e) { mfaErrore = e instanceof Error ? e.message : String(e) }
+    finally { mfaLavoro = false }
+  }
+
+  async function mfaDisabilita(): Promise<void> {
+    mfaLavoro = true; mfaErrore = ''
+    try {
+      const r = await store.api.totpDisable(mfaPw)
+      if (r.ok) { mfaPw = ''; await caricaMfa() }
+      else { mfaErrore = r.error ?? 'non riuscito' }
+    } catch (e) { mfaErrore = e instanceof Error ? e.message : String(e) }
+    finally { mfaLavoro = false }
   }
 
   const mb = (n: number): string =>
@@ -1139,6 +1198,55 @@
                 </button>
               </div>
               <div class="hint">Changing your password signs out every other device — this one stays. You’ll need the current password even while signed in.</div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-h"><span class="t">Two-factor (MFA)</span><span class="line"></span>
+                {#if mfa?.enabled}<span class="pill on">on</span>{:else}<span class="pill">off</span>{/if}</div>
+
+              {#if mfa === null}
+                <div class="hint">Reading…</div>
+              {:else if mfaEnrol}
+                <!-- Enrolment in corso: QR + verifica di un codice prima di accendere. -->
+                <p class="lead">Scan this with your authenticator app, then type the 6-digit code to turn it on.</p>
+                {#if mfaQr}<div class="qrwrap"><img src={mfaQr} alt="TOTP QR" width="200" height="200" /></div>{/if}
+                {#if mfaSecret}<div class="sub mid">Can’t scan? Enter this key: <code>{mfaSecret}</code></div>{/if}
+                <div class="pwform" style="margin-top:10px">
+                  <input inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"
+                    bind:value={mfaCode} disabled={mfaLavoro}
+                    onkeydown={(e) => { if (e.key === 'Enter' && mfaCode.trim()) void mfaAbilita() }} />
+                  {#if mfaErrore}<div class="pwnote bad"><Icon name="i-warn" /><span>{mfaErrore}</span></div>{/if}
+                  <div style="display:flex; gap:8px">
+                    <button class="btn pri" disabled={!mfaCode.trim() || mfaLavoro} onclick={() => void mfaAbilita()}>
+                      {mfaLavoro ? 'Turning on…' : 'Turn on MFA'}
+                    </button>
+                    <button class="btn" disabled={mfaLavoro} onclick={() => { mfaEnrol = false; mfaErrore = '' }}>Cancel</button>
+                  </div>
+                </div>
+              {:else if mfaRecovery}
+                <!-- Appena accesa: i codici di recupero, l'unica volta che si vedono. -->
+                <div class="pwnote ok"><Icon name="i-check" /><span>MFA is on. Save these recovery codes somewhere safe — each works once, and this is the only time they’re shown.</span></div>
+                <div class="recbox">{#each mfaRecovery as c (c)}<code>{c}</code>{/each}</div>
+                <button class="btn pri" onclick={() => { mfaRecovery = null }}>I’ve saved them</button>
+              {:else if mfa.enabled}
+                <div class="sysrow"><span class="k">Status</span><span class="v">On</span>
+                  <span class="m ok">{mfa.recoveryLeft ?? 0} recovery codes left</span></div>
+                <div class="pwform">
+                  {#if mfaErrore}<div class="pwnote bad"><Icon name="i-warn" /><span>{mfaErrore}</span></div>{/if}
+                  <input type="password" autocomplete="current-password" placeholder="Password, to turn MFA off"
+                    bind:value={mfaPw} disabled={mfaLavoro} />
+                  <button class="btn" disabled={!mfaPw || mfaLavoro} onclick={() => void mfaDisabilita()}>
+                    {mfaLavoro ? 'Turning off…' : 'Turn off MFA'}
+                  </button>
+                </div>
+                <div class="hint">With MFA on, signing in through the tunnel from a new device asks for a code from your authenticator, on top of your password.</div>
+              {:else}
+                <p class="lead">Add an authenticator code on top of your password when reaching STARK from a new device through the tunnel.</p>
+                {#if mfaErrore}<div class="pwnote bad"><Icon name="i-warn" /><span>{mfaErrore}</span></div>{/if}
+                <button class="btn pri" disabled={mfaLavoro} onclick={() => void mfaInizia()}>
+                  {mfaLavoro ? 'Preparing…' : 'Set up MFA'}
+                </button>
+              {/if}
             </div>
           {/if}
         {/if}
@@ -1778,6 +1886,15 @@
   .pwnote :global(svg.ic) { width:13px; height:13px; flex:none; }
   .pwnote.bad { color:var(--stop); }
   .pwnote.ok { color:var(--done); }
+
+  /* Il pill «on» della sezione MFA: lo stesso pill grigio delle altre sezioni, ma
+     verde quando la protezione è accesa. */
+  .pill.on { background:var(--done-bg); color:var(--done); }
+
+  /* I codici di recupero: griglia mono, mostrati una volta sola. */
+  .recbox { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; margin:10px 0;
+    padding:12px; border-radius:9px; border:1px solid var(--line-2); background:var(--surface-2); }
+  .recbox code { font-family:var(--mono); font-size:13px; letter-spacing:.02em; }
 
   /* La riga di stato di System. Niente fondo, niente bordo: è un elenco chiave-valore,
      non un blocco dentro la conversazione. */

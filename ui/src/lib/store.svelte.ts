@@ -558,13 +558,13 @@ export class Store {
    * Login cloud dal gate d'accesso. `true` se è andato: aggiorna `cloudGate` e la UI
    * passa all'app. `false` con `motivo` se fallisce (il gate lo mostra).
    */
-  async loginCloud(email: string, password: string): Promise<{ ok: boolean; motivo?: string }> {
-    const esito = await this.api.cloudLogin(email, password)
+  async loginCloud(email: string, password: string, code?: string): Promise<{ ok: boolean; motivo?: string; mfa?: boolean }> {
+    const esito = await this.api.cloudLogin(email, password, code)
     if (esito.ok) {
       this.cloudGate = { email: esito.email ?? null, server: 'ok' }
       return { ok: true }
     }
-    return { ok: false, motivo: esito.motivo }
+    return { ok: false, motivo: esito.motivo, ...(esito.mfa ? { mfa: true } : {}) }
   }
 
   /** Logout cloud: torna alla schermata di login. */

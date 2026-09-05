@@ -81,8 +81,14 @@ const porta2 = (daemon2.address() as { port: number }).port
 // ── l'hub, con l'auth iniettata: due utenti veri, un impostore ───────────────
 const hub = new TunnelHub(
   async t => (t === 'tok-buono' ? { id: 'utente-1' } : t === 'tok-secondo' ? { id: 'utente-2' } : null),
-  // Il login della pagina senza QR, iniettato come l'auth: una coppia buona per utente.
-  async (email, pw) => (email === 'uno@test' && pw === 'giusta' ? { id: 'utente-1' } : null),
+  // Il login della pagina senza QR, ora con MFA: utente-1 ha il TOTP e pretende '424242',
+  // utente-2 non ce l'ha. Iniettato come l'auth vera.
+  async (email, pw, code) => {
+    if (email === 'uno@test' && pw === 'giusta') return code === '424242' ? { id: 'utente-1' } : null
+    if (email === 'due@test' && pw === 'giusta') return { id: 'utente-2' }
+    return null
+  },
+  async (email) => email === 'uno@test',
 )
 const fronte = createServer((req, res) => {
   if (!hub.handleRequest(req, res)) {
@@ -198,18 +204,54 @@ ok(slug1 !== chiaveMacchina, 'il QR non espone più il machine-id')
   const sbagliato = await fetch(`${base}/accedi`, {
     method: 'POST', redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: 'email=uno%40test&password=sbagliata',
+    body: 'email=due%40test&password=sbagliata',
   })
   ok(sbagliato.status === 303 && (sbagliato.headers.get('location') ?? '').includes('e=credenziali'),
     'credenziali sbagliate → redirect con errore (mai un render del POST)')
 
-  const giusto = await fetch(`${base}/accedi`, {
+  // utente-2 non ha MFA e non possiede la macchina collegata: password giusta, niente
+  // codice richiesto (200 con la pagina 'nessuna macchina') — prova che il ramo
+  // senza-MFA non pretende un codice.
+  const senzaMfa = await fetch(`${base}/accedi`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=due%40test&password=giusta',
+  })
+  const senzaMfaHtml = senzaMfa.status === 200 ? await senzaMfa.text() : ''
+  ok(senzaMfa.status === 200 && senzaMfaHtml.includes('No machine of yours'),
+    'senza MFA: password giusta, nessun codice richiesto', String(senzaMfa.status))
+
+  // utente-1 HA il TOTP: password giusta ma niente codice → si chiede il codice (mfa=1),
+  // NON si entra e non si dice se la password era giusta.
+  const senzaCodice = await fetch(`${base}/accedi`, {
     method: 'POST', redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: 'email=uno%40test&password=giusta',
   })
-  ok(giusto.status === 303 && giusto.headers.get('location') === `/pair?m=${slug1}`,
-    'una macchina sola → dritti su /pair con lo slug giusto', giusto.headers.get('location') ?? '')
+  ok(senzaCodice.status === 303 && senzaCodice.headers.get('location') === '/?mfa=1',
+    'con MFA: password giusta ma niente codice → si chiede il codice (mfa=1)', senzaCodice.headers.get('location') ?? '')
+
+  // codice sbagliato → errore MFA, campo codice ancora mostrato.
+  const codiceNo = await fetch(`${base}/accedi`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=uno%40test&password=giusta&code=000000',
+  })
+  ok(codiceNo.status === 303 && (codiceNo.headers.get('location') ?? '').includes('e=mfa'),
+    'con MFA: codice sbagliato → errore mfa', codiceNo.headers.get('location') ?? '')
+
+  // password + codice giusti → dentro.
+  const conCodice = await fetch(`${base}/accedi`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=uno%40test&password=giusta&code=424242',
+  })
+  ok(conCodice.status === 303 && conCodice.headers.get('location') === `/pair?m=${slug1}`,
+    'con MFA: password + codice giusti → /pair', conCodice.headers.get('location') ?? '')
+
+  // la pagina di login di un account con MFA mostra il campo del codice quando serve.
+  const pagina = await (await fetch(`${base}/?mfa=1`)).text()
+  ok(pagina.includes('name="code"'), 'la pagina di login mostra il campo del codice su mfa=1')
 }
 
 // 8b. i casi senza strada

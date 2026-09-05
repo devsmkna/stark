@@ -7,7 +7,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { registra, login, revoca, chi, chiId, cambiaPassword, spazzaSessioni } from './auth.ts'
+import {
+  registra, login, revoca, chi, chiId, cambiaPassword, spazzaSessioni,
+  haTotp, loginMfa, verificaAccesso, preparaTotp, abilitaTotp, disabilitaTotp, statoTotp,
+} from './auth.ts'
 import { leggiBoard, initBoard, creaTask, modificaTask, importaBoard, type TaskImport } from './board.ts'
 import { registraUso, leggiUso, type Invio } from './usage.ts'
 import { sql } from './db/client.ts'
@@ -81,13 +84,14 @@ export async function startCloud(): Promise<void> {
   // Il secondo argomento è il login della pagina senza QR: verifica e butta subito
   // la sessione appena creata — al browser va solo il cookie d'instradamento, e una
   // sessione che nessuno terrà mai in mano non deve restare nel database.
-  const tunnel = new TunnelHub(chiId, async (email, password) => {
-    const s = await login(email, password)
-    if (!s) return null
-    const u = await chiId(s.token)
-    await revoca(s.token)
-    return u ? { id: u.id } : null
-  })
+  const tunnel = new TunnelHub(
+    chiId,
+    // Il login della pagina senza QR, ora con MFA: `verificaAccesso` verifica
+    // password + eventuale TOTP/codice di recupero e non lascia sessioni in giro.
+    (email, password, code) => verificaAccesso(email, password, code),
+    // Se l'account ha il TOTP: decide se la pagina mostra il campo del codice.
+    (email) => haTotp(email),
+  )
   const suTunnel = (req: IncomingMessage): boolean =>
     (req.headers.host ?? '').split(':')[0]?.toLowerCase().startsWith('tunnel.') ?? false
 
@@ -130,12 +134,34 @@ export async function startCloud(): Promise<void> {
         const esito = await cambiaPassword(bearer(req), body.current, body.new)
         return send(res, esito.ok ? 200 : 400, esito)
       }
+      // ─── MFA (TOTP) ────────────────────────────────────────────────────────
+      if (method === 'GET' && path === '/api/totp') {
+        return send(res, 200, await statoTotp(bearer(req)))
+      }
+      if (method === 'POST' && path === '/api/totp/setup') {
+        // Genera il segreto e l'URI per il QR — senza accendere niente.
+        return send(res, 200, await preparaTotp(bearer(req)))
+      }
+      if (method === 'POST' && path === '/api/totp/enable') {
+        const body = await readJson<{ code?: string }>(req)
+        const esito = await abilitaTotp(bearer(req), (body?.code ?? '').trim())
+        return send(res, esito.ok ? 200 : 400, esito)
+      }
+      if (method === 'POST' && path === '/api/totp/disable') {
+        const body = await readJson<{ password?: string }>(req)
+        if (!body?.password) return send(res, 400, { ok: false, error: 'password obbligatoria' })
+        const esito = await disabilitaTotp(bearer(req), body.password)
+        return send(res, esito.ok ? 200 : 400, esito)
+      }
       if (method === 'POST' && path === '/api/login') {
-        const body = await readJson<{ email?: string; password?: string }>(req)
+        const body = await readJson<{ email?: string; password?: string; code?: string }>(req)
         if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
-        const sessione = await login(body.email, body.password)
-        if (!sessione) return send(res, 401, { error: 'email o password sbagliate' })
-        return send(res, 200, { token: sessione.token, email: sessione.email })
+        const esito = await loginMfa(body.email, body.password, body.code)
+        if (esito.ok) return send(res, 200, { token: esito.token, email: esito.email })
+        // `mfa: true` dice al client (daemon, poi UI) di chiedere il codice invece di
+        // ripetere «password sbagliata»: sono due rimedi diversi.
+        if (esito.motivo === 'mfa') return send(res, 401, { error: 'serve il codice MFA', mfa: true })
+        return send(res, 401, { error: 'email o password sbagliate' })
       }
       if (method === 'POST' && path === '/api/logout') {
         await revoca(bearer(req))

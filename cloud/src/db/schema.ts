@@ -15,6 +15,23 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // MFA (TOTP), opzionale. Il segreto sta qui in chiaro — è la natura del TOTP, il
+  // server DEVE poterlo ricalcolare; la difesa è che il DB è sul VPS nella TCB.
+  // `totpEnabled` separa «segreto generato durante l'enrolment» da «attivo»: si accende
+  // solo dopo che l'utente ha verificato un codice, mai prima.
+  totpSecret: text('totp_secret'),
+  totpEnabled: timestamp('totp_enabled', { withTimezone: true }),
+})
+
+/** Un codice di recupero MFA: hashato (scrypt), monouso. La via d'uscita se perdi
+ *  l'authenticator, e per il tunnel anche l'autoautorizzazione di un device nuovo
+ *  quando sei remoto senza niente di fidato in mano. */
+export const recoveryCodes = pgTable('recovery_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 /** Una sessione: il token opaco e a chi appartiene. */
@@ -202,6 +219,7 @@ export const usageSessionDays = pgTable('usage_session_days', {
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
+export type RecoveryCode = typeof recoveryCodes.$inferSelect
 export type Session = typeof sessions.$inferSelect
 export type NewSession = typeof sessions.$inferInsert
 export type Project = typeof projects.$inferSelect
