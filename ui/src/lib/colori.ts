@@ -66,7 +66,11 @@ export function decoraColoriDom(doc: Document): void {
     // mostrare col quadrato: i `code` inline con un solo hex sono già stati
     // sostituiti qui sopra, e negli altri (un blocco evidenziato, un frammento
     // con dell'altro testo) decorare l'hex ricreerebbe il `code` annidato.
-    if (t.parentElement?.closest('code, pre')) continue
+    // `.taskchip`/`.taskcard` (card #31): `decoraTaskDom` gira PRIMA di questo
+    // decoratore e mette l'id (`#12`) e il titolo dentro quei bottoni — un id a tre
+    // cifre matcha anche `HEX_RE`, e senza questa esclusione il decoratore dei colori
+    // rientrerebbe nel chip appena creato e ne mangerebbe l'etichetta.
+    if (t.parentElement?.closest('code, pre, .taskchip, .taskcard')) continue
     if (HEX_RE.test(t.data)) nodes.push(t)
     // reset lastIndex per test globale
     HEX_RE.lastIndex = 0

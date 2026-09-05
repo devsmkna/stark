@@ -83,8 +83,13 @@ export function renderMarkdown(
   addCopyButtons(doc)
   addAppLinks(doc)
   markPaths(doc)
-  decoraColoriDom(doc)
+  // I chip task PRIMA dei colori: un id di board vince su un colore esadecimale a tre
+  // cifre (`#123` matcha sia un `TaskRef` sia `HEX_RE` in `colori.ts`), e i chip appena
+  // creati vanno protetti — `decoraColoriDom` salta `.taskchip`/`.taskcard` per questo.
+  // Farlo nell'ordine opposto (colore prima) avvolgerebbe l'id in un `<code>` prima che
+  // `decoraTaskDom` possa vederlo, e quel decoratore salta i `code`: zero chip (C1).
   if (opts.tasks?.size) decoraTaskDom(doc, opts.tasks, { carta: opts.taskCarta })
+  decoraColoriDom(doc)
   if (opts.asked) markAsked(doc)
   return doc.body.innerHTML
 }

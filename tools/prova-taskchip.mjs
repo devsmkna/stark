@@ -33,13 +33,17 @@ const ev = (payload, dt = 0) => {
   righe.push(JSON.stringify({ v: 1, seq, ts: t0 + dt, sessionId: id, payload }))
 }
 
-// I tre casi della spec, in un solo testo: citazione valida, ripetizione + id
-// inesistente, e la stessa cifra dentro un fence — dove `#NNN` è contenuto, non
-// citazione, e deve restare testo puro anche se la board lo conosce.
+// I quattro casi della spec, in un solo testo: citazione valida, ripetizione + id
+// inesistente, la stessa cifra dentro un fence — dove `#NNN` è contenuto, non
+// citazione, e deve restare testo puro anche se la board lo conosce — e un id a TRE
+// cifre (C1): `#123` matcha anche `HEX_RE` in `colori.ts` (un hex a 3 cifre), quindi è
+// il caso che aveva fatto sparire il chip prima che `decoraTaskDom` girasse per primo.
 const TESTO = [
   'Questa richiesta corrisponde a #12, lo prendo in carico.',
   '',
   "C'entra anche #12 di nuovo, e #999 che non esiste.",
+  '',
+  'E anche #123, che è un id a tre cifre.',
   '',
   '```bash',
   'grep "#12" file.txt',
@@ -78,6 +82,10 @@ const BOARD = {
     { status: 'in-progress', tasks: [
       { id: 12, title: 'Card permesso orfane', status: 'in-progress', priority: 'high', claimed_by: 'claude' },
     ] },
+    // Id a tre cifre (C1): `#123` è ANCHE un hex valido per `HEX_RE` in `colori.ts`.
+    { status: 'todo', tasks: [
+      { id: 123, title: 'Task a tre cifre', status: 'todo' },
+    ] },
   ],
 }
 
@@ -107,7 +115,7 @@ await page.waitForTimeout(1200)
 await page.waitForSelector('.prose .taskchip', { timeout: 10_000 }).catch(() => {})
 
 const chipCount = await page.locator('.taskchip').count()
-assert('due chip per #12, non tre', chipCount === 2)
+assert('tre chip: due per #12, uno per #123', chipCount === 3)
 
 const primoTitolo = await page.locator('.taskchip .ttl').first().textContent()
 assert('il chip porta il titolo dalla board', primoTitolo === 'Card permesso orfane')
@@ -115,9 +123,25 @@ assert('il chip porta il titolo dalla board', primoTitolo === 'Card permesso orf
 const cardCount = await page.locator('.taskcard').count()
 assert('una sola card blocco, alla prima citazione', cardCount === 1)
 
-const nessunNoveNoveNove = await page.locator('[data-task="999"]').count() === 0
-const proseHaNoveNoveNove = (await page.locator('.prose').first().innerText()).includes('#999')
-assert('#999 resta testo', nessunNoveNoveNove && proseHaNoveNoveNove)
+// C1: `#123` è un id a tre cifre della board E un hex valido a tre cifre per
+// `colori.ts`. Deve produrre un chip col titolo giusto, e NON uno swatch colore — la
+// prova che `decoraTaskDom` gira prima di `decoraColoriDom` e che quest'ultimo salta
+// `.taskchip` invece di rientrarci e mangiare l'etichetta (vedi markdown.ts, colori.ts).
+const chip123 = page.locator('[data-task="123"]')
+const chip123Count = await chip123.count()
+const chip123Titolo = chip123Count > 0 ? await chip123.locator('.ttl').textContent() : null
+assert('#123 diventa un chip col titolo giusto', chip123Count === 1 && chip123Titolo === 'Task a tre cifre')
+const nessunoSwatchPer123 = await page.locator('[data-task="123"] .colore, [data-task="123"].colore').count() === 0
+assert('#123 non è (anche) uno swatch colore', nessunoSwatchPer123)
+
+// #999 non è in board: `decoraTaskDom` lo lascia testo, e poi `decoraColoriDom` — che
+// gira dopo — lo legge come hex a tre cifre valido e lo trasforma in uno swatch.
+// Comportamento pre-esistente dei colori, accettato: qui si verifica che accada
+// DAVVERO questo (niente chip, sì swatch), non genericamente «resta testo».
+const nessunChipPer999 = await page.locator('[data-task="999"]').count() === 0
+const swatchPer999 = await page.locator('.colore:has(code)').filter({ hasText: '#999' }).count() >= 1
+assert('#999 niente chip, sì swatch colore (comportamento colori pre-esistente)',
+  nessunChipPer999 && swatchPer999)
 
 const chipNelFence = await page.locator('pre .taskchip').count()
 assert('dentro il fence #12 resta testo', chipNelFence === 0)
