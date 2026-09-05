@@ -32,7 +32,7 @@ import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
-import { allineaContestoBoard, boardDir } from '../daemon/board.ts'
+import { allineaContestoBoard, boardDir, leggiBoardLocale } from '../daemon/board.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
 import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
@@ -377,6 +377,44 @@ check('§7: un messaggio assistant vero resta ignorato, non duplica lo streaming
     !existsSync(resolve(casa2, 'AGENTS.md')))
   rmSync(casa2, { recursive: true, force: true })
 
+  rmSync(casa, { recursive: true, force: true })
+}
+
+// La lettura di una board locale (kanban-md) per la migrazione al cloud: frontmatter
+// con le virgolette YAML raddoppiate, corpo dopo il secondo `---`, file malformati
+// saltati senza rompere il resto. Il formato è quello che kanban-md scrive davvero
+// (copiato da una card reale), non uno inventato per far passare la prova.
+{
+  const casa = mkdtempSync(resolve(tmpdir(), 'stark-board-locale-'))
+  const tasksDir = resolve(boardDir(casa), 'tasks')
+  mkdirSync(tasksDir, { recursive: true })
+  writeFileSync(resolve(boardDir(casa), 'config.yml'),
+    'version: 10\nboard:\n    name: stark\ntasks_dir: tasks\n')
+  writeFileSync(resolve(tasksDir, '016-esempio.md'),
+    "---\nid: 16\ntitle: 'macOS: quel che l''avvio non rileva'\nstatus: backlog\n"
+    + 'priority: high\ncreated: 2026-09-02T10:48:17.346526+02:00\n'
+    + 'updated: 2026-09-02T10:48:17.346526+02:00\nclaimed_by: veenz\nclass: standard\n---\n\n'
+    + 'Il corpo della card, su due righe.\nSeconda riga.\n')
+  writeFileSync(resolve(tasksDir, 'rotto.md'), 'niente frontmatter qui\n')
+
+  const board = leggiBoardLocale(casa)
+  check('board-locale: il nome della board arriva dal config.yml', board?.name === 'stark')
+  check('board-locale: il file malformato si salta, la card buona resta',
+    board?.tasks.length === 1)
+  const t = board?.tasks[0]
+  check('board-locale: id, stato e priorità letti dal frontmatter',
+    t?.id === 16 && t?.status === 'backlog' && t?.priority === 'high')
+  check('board-locale: le virgolette YAML raddoppiate si sciolgono',
+    t?.title === "macOS: quel che l'avvio non rileva")
+  check('board-locale: il corpo è quello dopo il secondo ---',
+    t?.body === 'Il corpo della card, su due righe.\nSeconda riga.')
+  check('board-locale: il claim locale viaggia come stringa',
+    t?.claimed_by === 'veenz' && t?.created === '2026-09-02T10:48:17.346526+02:00')
+
+  // Senza cartella tasks non c'è niente da migrare: null, non un import vuoto.
+  const vuota = mkdtempSync(resolve(tmpdir(), 'stark-board-locale-'))
+  check('board-locale: senza board locale la lettura dice null', leggiBoardLocale(vuota) === null)
+  rmSync(vuota, { recursive: true, force: true })
   rmSync(casa, { recursive: true, force: true })
 }
 

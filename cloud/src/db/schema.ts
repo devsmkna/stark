@@ -40,9 +40,17 @@ export const projects = pgTable('projects', {
 
 /** Una card della board: un task del progetto. */
 export const tasks = pgTable('tasks', {
-  // `serial` e non uuid: la UI usa l'id come **numero** (lo passa a `/board/task/<n>/edit`),
-  // e il proxy non deve mappare uuid↔numero. Stessa scelta di kanban-md.
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  // Un numero e non un uuid: la UI usa l'id come **numero** (lo passa a
+  // `/board/task/<n>/edit`), e il proxy non deve mappare uuid↔numero.
+  //
+  // Ed è un numero **per progetto**, non per tabella (PK composita qui sotto): è la
+  // semantica di kanban-md, dove ogni board conta da 1 — e serve alla migrazione, che
+  // deve preservare i numeri delle card locali («#18» sta scritto nei commit e nei
+  // doc: se importandola diventasse #43, tutta quella storia punterebbe nel vuoto).
+  // Con un identity globale due progetti importati collidono sull'id 1.
+  // Lo assegna il server dentro una transazione che blocca la riga del progetto
+  // (`FOR UPDATE`): max+1 senza corse.
+  id: integer('id').notNull(),
   projectId: uuid('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
@@ -62,7 +70,7 @@ export const tasks = pgTable('tasks', {
   position: integer('position').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, t => [primaryKey({ columns: [t.projectId, t.id] })])
 
 /** La config della board di un progetto: colonne, priorità, limiti, classi. */
 export const boardConfig = pgTable('board_config', {

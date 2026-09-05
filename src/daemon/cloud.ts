@@ -233,12 +233,33 @@ export async function boardTaskCloud(
   return r.body
 }
 
-/** Modifica una card nella board cloud (stato, titolo, priorità, claim, posizione). */
+/** Modifica una card nella board cloud (stato, titolo, priorità, claim, blocco, corpo, posizione). */
 export async function boardEditCloud(
   home: string, origin: string, id: number,
-  input: { status?: string; title?: string; priority?: string; claimed_by?: string; position?: number },
+  input: {
+    status?: string; title?: string; priority?: string; claimed_by?: string
+    blocked?: string; body?: string; assignee?: string; position?: number
+  },
 ): Promise<unknown> {
   const r = await proxyBoard(home, origin, `/api/board/task/${id}/edit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return r.body
+}
+
+/**
+ * Importa una board locale (kanban-md) nella board cloud del progetto. Le card
+ * arrivano già lette dai file (`leggiBoardLocale` in `./board.ts`): qui si inoltra
+ * e basta, perché ogni decisione — board non vuota, id doppi — sta sul server, che
+ * è l'unico a vedere lo stato vero.
+ */
+export async function boardImportCloud(
+  home: string, origin: string,
+  input: { name?: string; tasks: unknown[] },
+): Promise<unknown> {
+  const r = await proxyBoard(home, origin, '/api/board/import', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),

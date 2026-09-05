@@ -21,7 +21,8 @@ import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.t
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
-import { cambiaPasswordCloud, boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
+import { cambiaPasswordCloud, boardCloud, boardInitCloud, boardImportCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
+import { leggiBoardLocale } from './board.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { creaUsageSync, type UsageSync } from './usage-sync.ts'
 import { creaTunnel, type TunnelClient } from './tunnel.ts'
@@ -991,51 +992,27 @@ async function route(
     // delle sessioni, che accetta un solo segmento di lettere.
     const bm = /^\/api\/sessions\/([0-9a-f-]{8,})\/board(.*)$/.exec(path)
     if (bm) {
-      const bid = bm[1]!
-      const resto = bm[2] ?? ''
-      const cwd = registry.snapshot(bid)?.cwd
-      const senzaCwd = (): boolean => {
-        if (cwd) return false
-        send(res, 404, { error: 'questa conversazione non ha una cartella' })
-        return true
+      const cwd = registry.snapshot(bm[1]!)?.cwd
+      if (!cwd) return send(res, 404, { error: 'questa conversazione non ha una cartella' })
+      // `boardstream` cattura `stream` senza slash: si normalizza alla forma con lo
+      // slash, che è quella delle rotte agent qui sotto.
+      const resto = bm[2] === 'stream' ? '/stream' : (bm[2] ?? '')
+      return rotteBoard(req, res, method, resto, cwd)
+    }
+
+    // Le stesse rotte con la cartella in query: la superficie degli **agent**. Un
+    // agent che lavora in un progetto non ha un id di sessione in mano — ha la sua
+    // cartella. Il percorso arriva da chi ha il token, cioè da chi può già aprire
+    // una sessione su qualunque cartella: non è un permesso in più, è lo stesso
+    // permesso senza il giro. (Il divieto «mai un percorso dal browser» resta per la
+    // UI, che infatti continua a passare dall'id.)
+    const am = /^\/api\/board(\/.*)?$/.exec(path)
+    if (am) {
+      const cwd = url.searchParams.get('cwd')?.trim() ?? ''
+      if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory()) {
+        return send(res, 400, { error: 'cwd mancante o inesistente' })
       }
-      if (method === 'GET' && resto === '') {
-        if (senzaCwd()) return
-        // La board è cloud: il daemon risale l'origin della repo e inoltra.
-        const origin = await originRepo(cwd!)
-        if (!origin) return send(res, 200, { origin: null, columns: [], assente: true, motivo: 'nessun origin git' })
-        return send(res, 200, await boardCloud(STARK_HOME, origin))
-      }
-      if (method === 'GET' && resto === 'stream') {
-        if (senzaCwd()) return
-        const origin = await originRepo(cwd!)
-        if (!origin) return send(res, 404, { error: 'nessun origin git' })
-        return boardStream(req, res, origin)
-      }
-      if (method === 'POST' && resto === '/init') {
-        if (senzaCwd()) return
-        const origin = await originRepo(cwd!)
-        if (!origin) return send(res, 400, { error: 'nessun origin git' })
-        return send(res, 200, await boardInitCloud(STARK_HOME, origin))
-      }
-      if (method === 'POST' && resto === '/task') {
-        if (senzaCwd()) return
-        const origin = await originRepo(cwd!)
-        if (!origin) return send(res, 400, { error: 'nessun origin git' })
-        const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
-        if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
-        return send(res, 200, await boardTaskCloud(STARK_HOME, origin, {
-          title: body.title.slice(0, 500), priority: body.priority, body: body.body,
-        }))
-      }
-      const em = /^\/task\/(\d+)\/edit$/.exec(resto)
-      if (method === 'POST' && em) {
-        if (senzaCwd()) return
-        const origin = await originRepo(cwd!)
-        if (!origin) return send(res, 400, { error: 'nessun origin git' })
-        const body = await readJson<{ status?: string; title?: string; priority?: string; claimed_by?: string; position?: number }>(req)
-        return send(res, 200, await boardEditCloud(STARK_HOME, origin, Number(em[1]), body ?? {}))
-      }
+      return rotteBoard(req, res, method, am[1] ?? '', cwd)
     }
 
     // Il manifest si compone qui invece di essere servito com'è, e la ragione è una
@@ -1192,6 +1169,61 @@ function todoStream(req: IncomingMessage, res: ServerResponse, cwd: string): voi
 /** Le cartelle distinte delle conversazioni che il registro conosce. */
 function cartelleNote(registry: Registry): string[] {
   return [...new Set(registry.list().flatMap(r => (r.cwd ? [r.cwd] : [])))]
+}
+
+/**
+ * Le rotte board, condivise fra le due superfici: la UI (che arriva con l'id di
+ * sessione, e il `cwd` glielo risolve il registry) e gli agent (che arrivano con il
+ * `cwd` in query). Da qui in poi la strada è una sola: `cwd` → origin git → cloud.
+ *
+ * `sub` è la coda della rotta: `''` (leggi), `/stream`, `/init`, `/task`,
+ * `/task/<n>/edit`.
+ */
+async function rotteBoard(
+  req: IncomingMessage, res: ServerResponse, method: string, sub: string, cwd: string,
+): Promise<void> {
+  // La board è cloud: il daemon risale l'origin della repo e inoltra.
+  const origin = await originRepo(cwd)
+  if (!origin) {
+    if (method === 'GET' && sub === '') {
+      return send(res, 200, { origin: null, columns: [], assente: true, motivo: 'nessun origin git' })
+    }
+    return send(res, sub === '/stream' ? 404 : 400, { error: 'nessun origin git' })
+  }
+  if (method === 'GET' && sub === '') {
+    return send(res, 200, await boardCloud(STARK_HOME, origin))
+  }
+  if (method === 'GET' && sub === '/stream') {
+    return boardStream(req, res, origin)
+  }
+  if (method === 'POST' && sub === '/init') {
+    // L'init è anche la **migrazione**: se il progetto ha una board locale (kanban-md)
+    // e quella cloud non esiste ancora, le card salgono tutte — numeri compresi. Non
+    // è una rotta a parte perché il gesto dell'utente è lo stesso («questa board deve
+    // stare sul cloud»), e la UI ha già il bottone.
+    const b = await boardCloud(STARK_HOME, origin) as { assente?: boolean } | null
+    if (b?.assente === true) {
+      const locale = leggiBoardLocale(cwd)
+      if (locale) return send(res, 200, await boardImportCloud(STARK_HOME, origin, locale))
+    }
+    return send(res, 200, await boardInitCloud(STARK_HOME, origin))
+  }
+  if (method === 'POST' && sub === '/task') {
+    const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
+    if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
+    return send(res, 200, await boardTaskCloud(STARK_HOME, origin, {
+      title: body.title.slice(0, 500), priority: body.priority, body: body.body,
+    }))
+  }
+  const em = /^\/task\/(\d+)\/edit$/.exec(sub)
+  if (method === 'POST' && em) {
+    const body = await readJson<{
+      status?: string; title?: string; priority?: string; claimed_by?: string
+      blocked?: string; body?: string; assignee?: string; position?: number
+    }>(req)
+    return send(res, 200, await boardEditCloud(STARK_HOME, origin, Number(em[1]), body ?? {}))
+  }
+  send(res, 404, { error: 'non trovato' })
 }
 
 /**
