@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { registra, login, revoca, chi, chiId, cambiaPassword, spazzaSessioni } from './auth.ts'
-import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
+import { leggiBoard, initBoard, creaTask, modificaTask, importaBoard, type TaskImport } from './board.ts'
 import { registraUso, leggiUso, type Invio } from './usage.ts'
 import { sql } from './db/client.ts'
 import { TunnelHub } from './tunnel.ts'
@@ -200,6 +200,16 @@ export async function startCloud(): Promise<void> {
           if (esito.ok) notifica(origin, await leggiBoard(origin))
           return send(res, esito.ok ? 200 : 400, esito)
         }
+        if (method === 'POST' && path === '/api/board/import') {
+          // La migrazione da kanban-md: tutte le card di una board locale in un colpo.
+          // 1 MB dichiarato qui e non alzato per tutti (stessa disciplina di /usage):
+          // una board da decine di card con i corpi lunghi supera i 64 KB di default.
+          const body = await readJson<{ name?: string; tasks?: TaskImport[] }>(req, 1024 * 1024)
+          if (!Array.isArray(body?.tasks)) return send(res, 400, { error: 'tasks mancanti' })
+          const esito = await importaBoard(origin, email, { name: body.name, tasks: body.tasks })
+          if (esito.ok) notifica(origin, await leggiBoard(origin))
+          return send(res, esito.ok ? 200 : 400, esito)
+        }
         if (method === 'POST' && path === '/api/board/task') {
           const body = await readJson<{ title?: string; priority?: string; body?: string }>(req)
           if (!body?.title) return send(res, 400, { error: 'titolo obbligatorio' })
@@ -212,7 +222,8 @@ export async function startCloud(): Promise<void> {
         const em = /^\/api\/board\/task\/(\d+)\/edit$/.exec(path)
         if (method === 'POST' && em) {
           const body = await readJson<{
-            status?: string; title?: string; priority?: string; claimed_by?: string; position?: number
+            status?: string; title?: string; priority?: string; claimed_by?: string
+            blocked?: string; body?: string; assignee?: string; position?: number
           }>(req)
           const esito = await modificaTask(origin, email, Number(em[1]), body ?? {})
           if (esito.ok) notifica(origin, await leggiBoard(origin))
