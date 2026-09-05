@@ -2,10 +2,12 @@
 
 Fino al 5 settembre 2026 `install.sh`/`install.ps1` clonavano `github.com/devsmkna/stark`
 e compilavano in locale (`npm install`, poi `npm run ui:build`) — e `stark update` faceva
-lo stesso con `git fetch`/`checkout --detach`. Da quel giorno il repo GitHub è **privato**
-(sviluppo, issue, storia completa) e chi installa non lo tocca più: scarica un **bundle
-già pronto** — codice, `node_modules` e interfaccia già compilata — da `starkapp.dev`,
-un server che STARK possiede e controlla per intero.
+lo stesso con `git fetch`/`checkout --detach`. Da quel giorno chi installa non tocca più
+GitHub: scarica un **bundle già pronto** — codice, `node_modules` e interfaccia già
+compilata — da `starkapp.dev`, un server che STARK possiede e controlla per intero. È il
+passo che rende possibile rendere **privato** il repo GitHub (sviluppo, issue, storia
+completa) senza rompere l'installer: quando succederà, a leggere il repo resterà solo la
+CI, con le sue credenziali — non più chi installa.
 
 Perché non uno specchio git pubblico del repo privato (la prima idea, scartata): un
 utente che scarica un bundle già pronto salta interamente `npm install` e
@@ -60,53 +62,65 @@ deve combaciare con quella su cui gira poi il bundle).
 
 ## Il server (45.77.53.112 → starkapp.dev)
 
-Un webserver e basta — non un server git, non più: `nginx` + `certbot` (Let's Encrypt).
+Non un webserver dedicato: **lo stesso VPS che già ospita `stark-cloud`** (l'account, il
+login, la board condivisa, il tunnel — `/opt/stark-cloud/docker-compose.dev.yml`). Sul
+45.77.53.112 gira già Traefik come reverse proxy davanti a Docker, con TLS via Let's
+Encrypt gestito **da Traefik stesso** (`certresolver=letsencrypt`, sfida HTTP-01
+sull'entrypoint `web`), e `starkapp.dev` è già instradato — via un router Traefik
+attaccato per `Host()` — al container `home` (`nginx:alpine`), che serve staticamente
+`/opt/stark-cloud/www` (bind mount in sola lettura dentro il container, lettura/scrittura
+sull'host). Non serve installare niente, non serve toccare Traefik, non serve un
+certificato in più: quel container **già risponde** su `starkapp.dev`, e i file che
+`install.sh`/`stark update` scaricano sono file dentro quella stessa cartella.
 
-Un utente di sistema a bassi privilegi, `deploy`, la cui chiave SSH è ristretta con
-**`rrsync`** — lo script "rsync ristretto" incluso ufficialmente nel pacchetto `rsync`
-(`/usr/share/doc/rsync/scripts/rrsync` su Debian/Ubuntu), non uno strumento nostro:
+Un utente di sistema a bassi privilegi, `deploy`, sull'**host** (non dentro un
+container: Docker non serve a questo passo, `rsync` scrive su un bind mount che il
+container legge), la cui chiave SSH è ristretta con **`rrsync`** — lo script "rsync
+ristretto" incluso ufficialmente nel pacchetto `rsync` (`/usr/share/doc/rsync/scripts/rrsync`
+su Debian/Ubuntu), non uno strumento nostro:
 
 ```
 # /home/deploy/.ssh/authorized_keys
-command="rrsync -wo /var/www/starkapp.dev/" ssh-ed25519 AAAA... github-actions-deploy
+command="/usr/local/bin/rrsync -wo /opt/stark-cloud/www/",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions-deploy
 ```
 
-La radice è `/var/www/starkapp.dev/` intera — non solo `releases/`: sotto ci stanno sia
-`releases/` (i bundle) sia `install.sh`/`install.ps1` alla radice, e la stessa chiave
-pubblica un po' l'una un po' l'altri a seconda del workflow. Il costo accettato, e vale
-la pena dirlo esplicitamente: chi avesse quella chiave privata potrebbe riscrivere
-l'installer o un bundle di release — cioè trojanizzare ogni installazione futura. È
-per questo che la chiave vive **solo** come secret di GitHub Actions (`STARK_DEPLOY_SSH_KEY`),
-mai su una macchina di sviluppo, e `STARK_DEPLOY_HOST_KEY` (l'host key del VPS,
-verificata **a mano** confrontando l'impronta con quella del pannello del provider, non
-un `ssh-keyscan` alla cieca in CI) protegge dal lato opposto — che il push non finisca
+La radice è `/opt/stark-cloud/www/` intera — non solo `releases/`: sotto ci stanno sia
+`releases/` (i bundle) sia `install.sh`/`install.ps1` alla radice, accanto a qualunque
+`index.html` segnaposto ci sia già per l'apex. Il costo accettato, e vale la pena dirlo
+esplicitamente: chi avesse quella chiave privata potrebbe riscrivere l'installer o un
+bundle di release — cioè trojanizzare ogni installazione futura — ma **non** toccare
+`stark-cloud` stesso: `rrsync -wo` con quella radice non vede `data/`, `pgdata/` né
+`letsencrypt/`, che sono cartelle sorelle di `www/`, non sue. È per questo che la
+chiave vive **solo** come secret di GitHub Actions (`STARK_DEPLOY_SSH_KEY`), mai su una
+macchina di sviluppo, e `STARK_DEPLOY_HOST_KEY` (l'host key del VPS, verificata **a
+mano** confrontando l'impronta con quella del pannello del provider, non un
+`ssh-keyscan` alla cieca in CI) protegge dal lato opposto — che il push non finisca
 altrove per un DNS o un routing compromesso.
 
-nginx serve `/install.sh`, `/install.ps1` e `/releases/...` come file statici — niente
-CGI, niente backend, niente stato lato server oltre al filesystem. TLS via `certbot
---nginx -d starkapp.dev`, rinnovo automatico (il pacchetto Debian/Ubuntu installa già il
-timer systemd: `systemctl list-timers | grep certbot` per verificarlo). Funziona anche
-col DNS proxato: la sfida HTTP-01 di certbot passa da Cloudflare all'origine su
-`/.well-known/acme-challenge/` senza bisogno di disattivare il proxy. Nel pannello
-Cloudflare va impostato **Full (strict)** come modo SSL/TLS — non *Flexible*, che
-lascerebbe in chiaro il tratto Cloudflare→VPS anche con un certificato vero sull'origine.
-
-`ufw`: 22 (SSH — verificata **prima** di attivare il firewall, per non restare tagliati
-fuori), 80, 443. Nient'altro in ascolto verso l'esterno.
+Niente `nginx`/`certbot` da installare, niente `ufw` da toccare: le porte 80/443 sono
+già di Traefik (pubblicate dal suo container, `0.0.0.0:80->80`, `0.0.0.0:443->443`), e
+il traffico esterno le raggiunge comunque le regole del firewall dell'host — Docker
+gestisce le sue `iptables` per le porte che pubblica. `/releases/...` non ha bisogno di
+`autoindex` esplicito: `nginx:alpine` lo tiene spento di default. Content-type di
+`.sh`/`.ps1`: `nginx:alpine` di base non li conosce e li serve come
+`application/octet-stream` — funziona lo stesso con `curl | sh`/`irm | iex`, e se un
+giorno servisse un content-type più pulito basta un `default.conf` in più montato nel
+container `home`, non toccato qui perché non è un requisito, solo un miglioramento.
 
 ## DNS
 
-Un record `A` per `starkapp.dev` → `45.77.53.112`, su Cloudflare **proxato** (nuvola
-arancione) — al contrario di `docs/fuori-casa.md`, e di proposito: quella pagina parla
-del **daemon**, che è privato, non bufferizzabile (SSE) e termina il TLS con mTLS suo.
-Qui non c'è niente di riservato — un installer e dei bundle sono pensati per essere
-pubblici — quindi il proxy è un vantaggio netto: CDN gratuito sui bundle (anche 350+ MB
-l'uno) e protezione da bot/DDoS su un endpoint `curl | sh`, che è un bersaglio naturale.
+**Già fatto**, prima ancora di iniziare questo lavoro: `starkapp.dev` è un record `A`
+su Cloudflare **proxato** (nuvola arancione), impostato quando è nato `stark-cloud`
+(vedi il commento in cima a `docker-compose.dev.yml`). Non è in contraddizione con
+`docs/fuori-casa.md`, che consiglia DNS-only: quella pagina parla del **daemon**
+locale di ogni utente — privato, non bufferizzabile (SSE), con mTLS suo — mentre qui
+non c'è niente di riservato: un installer e dei bundle sono pensati per essere
+pubblici, quindi il proxy è un vantaggio netto (CDN gratuito sui bundle, anche 350+ MB
+l'uno, e protezione da bot/DDoS su un endpoint `curl | sh`, bersaglio naturale).
 
 L'unica cosa che il proxy **non** inoltra è SSH: per questo il deploy da CI
 (`.github/workflows/`) punta all'**IP diretto** (`45.77.53.112`), non all'hostname — le
-due cose sono disaccoppiate apposta, e restano tali anche se in futuro l'IP del VPS
-cambia (in quel caso si aggiorna il workflow, non il DNS pubblico, o viceversa).
+due cose restano disaccoppiate anche se un giorno l'IP del VPS cambia.
 
 ## Cosa non è cambiato
 

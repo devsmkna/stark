@@ -75,12 +75,14 @@ jobs:
       # Due copie: `releases/<tag>/` per chi vuole un bundle preciso (a mano, o un
       # giorno per una lista di versioni), `releases/latest/` per install.sh e
       # `stark update`, che non sanno né devono sapere quale sia il tag più recente
-      # prima di chiederlo. La chiave di deploy è ristretta con `rrsync` a
-      # `/var/www/starkapp.dev/` e basta — vedi docs/distribuzione.md.
-      # L'IP diretto e non l'hostname: se `starkapp.dev` è dietro Cloudflare proxato
-      # (utile per il CDN sui bundle, vedi docs/distribuzione.md), l'SSH su quell'
-      # hostname non arriva da nessuna parte — Cloudflare inoltra solo HTTP(S).
+      # prima di chiederlo. `/opt/stark-cloud/www` è la cartella che il container
+      # `home` (nginx, dietro Traefik) serve già su `starkapp.dev` — non un webserver
+      # nuovo, vedi docs/distribuzione.md. La chiave di deploy è ristretta con
+      # `rrsync` a quella cartella e basta.
+      # L'IP diretto e non l'hostname: `starkapp.dev` è dietro Cloudflare proxato
+      # (utile per il CDN sui bundle), e l'SSH su quell'hostname non arriva da
+      # nessuna parte — Cloudflare inoltra solo HTTP(S).
       - name: Pubblica su starkapp.dev
         run: |
-          rsync -av --delete bundles/ "deploy@45.77.53.112:/var/www/starkapp.dev/releases/$GITHUB_REF_NAME/"
-          rsync -av --delete bundles/ "deploy@45.77.53.112:/var/www/starkapp.dev/releases/latest/"
+          rsync -av --delete bundles/ "deploy@45.77.53.112:/opt/stark-cloud/www/releases/$GITHUB_REF_NAME/"
+          rsync -av --delete bundles/ "deploy@45.77.53.112:/opt/stark-cloud/www/releases/latest/"

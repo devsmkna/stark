@@ -27,6 +27,8 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.STARK_DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-      # L'IP diretto, non l'hostname — stessa ragione di publish-release.yml.
+      # /opt/stark-cloud/www è la cartella che il container `home` serve già su
+      # starkapp.dev (vedi docs/distribuzione.md) — non un webserver nuovo. L'IP
+      # diretto e non l'hostname: stessa ragione di publish-release.yml.
       - name: Pubblica su starkapp.dev
-        run: rsync -av install.sh install.ps1 "deploy@45.77.53.112:/var/www/starkapp.dev/"
+        run: rsync -av install.sh install.ps1 "deploy@45.77.53.112:/opt/stark-cloud/www/"
