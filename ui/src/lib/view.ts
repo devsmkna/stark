@@ -157,13 +157,20 @@ export function toolIcon(name: string): string {
   return 'i-doc'
 }
 
-/** `00:00:03`, `01:12:07`. Sempre le tre unità, mai i decimi: nessuno decide niente
- *  sui decimi, e un turno che dura ore non deve cambiare formato a metà. */
+/** `10s`, `1m 59s`, `1h 4s`, `1h 10m`, `2h`, `3h 10m 48s`. Solo le unità
+ *  effettivamente usate: uno zero non porta nessuna informazione («1h 0m 4s»
+ *  non dice niente che «1h 4s» non dica già), e alle 60 non si cambia formato —
+ *  restano ore, minuti e secondi, mai i decimi. */
 export function since(from: number, to: number): string {
   const s = Math.max(0, Math.round((to - from) / 1000))
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+  const parti = [
+    h > 0 ? `${h}h` : '',
+    m > 0 ? `${m}m` : '',
+    s % 60 > 0 ? `${s % 60}s` : '',
+  ].filter(Boolean)
+  return parti.length > 0 ? parti.join(' ') : '0s'
 }
 
 /**
