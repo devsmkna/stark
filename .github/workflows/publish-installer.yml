@@ -1,12 +1,18 @@
 name: Pubblica installer
 
 # install.sh/install.ps1 sono la porta d'ingresso — https://starkapp.dev/install.sh —
-# e cambiano raramente, indipendentemente dalle release: seguono ogni push su `main`
-# che li tocca, non i tag. È la stessa distinzione che il progetto fa altrove fra
-# «cosa segue ogni push» e «cosa segue solo una release» (docs/rilascio.md).
+# e cambiano raramente, indipendentemente dalle release: seguono ogni push che li
+# tocca, non i tag. È la stessa distinzione che il progetto fa altrove fra «cosa segue
+# ogni push» e «cosa segue solo una release» (docs/rilascio.md).
+#
+# `deploy-starkapp` e non `main`, per ora: main locale ha altro lavoro non ancora
+# pushato, e agganciare il trigger lì costringerebbe a spingerlo tutto solo per
+# provare questa pipeline. Il branch è la superficie di collaudo finché il VPS e il
+# DNS non sono pronti — vedi docs/distribuzione.md. Va spostato su `main` (o
+# aggiunto accanto) una volta che l'infrastruttura è verificata dal vivo.
 on:
   push:
-    branches: [main]
+    branches: [deploy-starkapp]
     paths: ['install.sh', 'install.ps1']
 
 jobs:
