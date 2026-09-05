@@ -6,10 +6,12 @@
   // Quasi tutto è chiuso: tredici scambi di lavoro vero fanno circa quattrocento
   // blocchi, e l'unico modo di reggerli è mostrare i titoli. L'eccezione è la risposta
   // a parole, che non si richiude mai — è l'unica cosa scritta *per* l'utente.
+  import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import FileBlock from './FileBlock.svelte'
   import Dock from './Dock.svelte'
   import type { LinkStatus } from '../lib/api.ts'
+  import { mappaTask, citaTask, type TaskRef } from '../lib/boardref.ts'
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
   import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
@@ -186,6 +188,78 @@
     return !!ultimo && ultimo.partId === part.partId && /\?\s*$/.test(part.text.trim())
   }
 
+  // ─── i task della board, per risolvere i `#NNN` nel testo ──────────────────
+  // Stato locale del componente: una `Conversation` = un pannello = una sessione.
+  // `undefined` = mai chiesti · `null` = il progetto non ha una board (o il daemon è
+  // troppo vecchio per saperlo dire).
+  let taskRefs = $state<Map<number, TaskRef> | null | undefined>(undefined)
+
+  async function caricaBoard(): Promise<void> {
+    try { taskRefs = mappaTask(await store.api.board(snap.sessionId)) }
+    catch { taskRefs = null /* daemon vecchio o board irraggiungibile: si degrada a testo */ }
+  }
+
+  // Si chiede la board la prima volta che nel testo compare un possibile `#NNN`, e la
+  // si RIchiede quando l'agent finisce un turno: il claim e i move cambiano lo stato
+  // mentre lavora, e un chip che mostra uno stato vecchio è una board che mente nel
+  // punto più visibile.
+  //
+  // `taskRefs` NON va letto in modo reattivo dentro questi effect: `mappaTask()`
+  // alloca una `Map` nuova a ogni chiamata, e `$state` la confronta per riferimento —
+  // leggerla come dipendenza vorrebbe dire che ogni refetch riuscito (con board
+  // presente) conta come «è cambiato qualcosa» e rilancia l'effect da solo, un `GET
+  // /board` dietro l'altro senza che nulla di vero sia cambiato. `untrack()` toglie
+  // `taskRefs` dalle dipendenze; la guardia lo legge comunque, solo non ci si
+  // riabbona.
+  $effect(() => {
+    const ceUnRiferimento = snap.turns.some(t =>
+      t.parts.some(p => p.kind === 'text' && /#\d{1,4}(?!\d)/.test(p.text)))
+    if (ceUnRiferimento && untrack(() => taskRefs === undefined)) void caricaBoard()
+  })
+  // Il refetch a turno chiuso scatta sul FRONTE della transizione (`busy` → non
+  // `busy`), non sul valore di `snap.state` letto a ogni giro: la sola dipendenza
+  // reattiva è `snap.state`, e `statoPrec` — variabile normale, non `$state` — ricorda
+  // com'era un istante prima. Leggere `taskRefs` per decidere se rifare la richiesta
+  // avrebbe lo stesso difetto del loop qui sopra: con una board presente, il refetch
+  // stesso lo renderebbe vero un'altra volta.
+  let statoPrec = snap.state
+  $effect(() => {
+    const prec = statoPrec
+    statoPrec = snap.state
+    if (prec === 'busy' && snap.state !== 'busy' && untrack(() => taskRefs !== undefined)) {
+      void caricaBoard()
+    }
+  })
+
+  // Il partId della prima parte testuale del turno che cita un task risolvibile: è
+  // quella — e solo quella — che porta la card blocco (spec §4). Un partId e non un
+  // indice in `turn.parts`: il testo di un turno si disegna da due punti diversi più
+  // sotto (la risposta finale «solo» e le narrazioni dentro un blocco «done»), e un
+  // indice nel ciclo sbagliato avrebbe confrontato cose diverse.
+  //
+  // Prende `groups` già calcolati (N1, perf): il chiamante nel template li ha già
+  // fatti con `groupParts(turn.parts)` per disegnare i gruppi, ed erano `{@const
+  // groups}`. Questa funzione veniva invocata di nuovo per OGNI parte testuale resa
+  // (due punti nel template, uno per ogni testo di ogni gruppo aperto), e ricalcolava
+  // `groupParts` da capo ogni volta — O(parti²) con relative allocazioni, sul percorso
+  // che gira a ogni token in streaming. Il chiamante ora la invoca una volta per
+  // turno e riusa il risultato.
+  function primaCheCita(groups: Grp[]): string | undefined {
+    if (taskRefs == null) return undefined
+    // La card blocco deve stare su una superficie VISIBILE. Scegliere «la prima parte
+    // testuale nell'ordine grezzo» (come faceva prima) guarda dentro le narrazioni di
+    // servizio, che finiscono quasi sempre nel gruppo `done` — chiuso di default (vedi
+    // `gruppi.ts`: «dentro un turno il lavoro sta in un blocco solo»). Il risultato era
+    // una card che quasi non si vedeva mai. Qui si limita la scelta alle parti che
+    // `groupParts` rende FUORI da quel blocco: i gruppi `solo` (recap, testo che
+    // introduce una domanda/permesso, tagli del flusso).
+    for (const g of groups) {
+      if (g.kind === 'solo' && g.part.kind === 'text' && citaTask(g.part.text, taskRefs))
+        return g.part.partId
+    }
+    return undefined
+  }
+
   /**
    * Il bottone «Copy» sopra un blocco di codice non è mai un elemento Svelte: nasce
    * come stringa HTML dentro `renderMarkdown` (vedi `markdown.ts`), quindi non c'è
@@ -227,6 +301,16 @@
     }
     const rv = target.closest<HTMLElement>('[data-reveal-path]')
     if (rv) { await store.reveal(rv.getAttribute('data-reveal-path') ?? '', snap.sessionId); return }
+
+    // Il chip `#NNN` (o la card blocco, stesso `data-task`) generato da
+    // `decoraTaskDom`: apre quel task nella Board, invece di lasciare che il click
+    // cada nel vuoto o segua un eventuale link.
+    const chipEl = target.closest<HTMLElement>('[data-task]')
+    if (chipEl) {
+      e.preventDefault()
+      store.openBoardTask(Number(chipEl.dataset['task']))
+      return
+    }
 
     const btn = target.closest<HTMLElement>('[data-copy]')
     const pre = btn?.closest('.codeblock')?.querySelector('pre')
@@ -836,6 +920,7 @@
       {@const groups = groupParts(turn.parts)}
       {@const opLive = livePart(groups)}
       {@const doneTail = lastDoneKey(groups)}
+      {@const cartaSu = primaCheCita(groups)}
       {#if dayBanners.has(turn.turnId)}
         <div class="daysep" role="separator" aria-label={dayBanners.get(turn.turnId)}>
           <span>{dayBanners.get(turn.turnId)}</span>
@@ -944,7 +1029,11 @@
                        non su tutto il blocco (bug B1): `renderMarkdown` la mette
                        sull'ultimo elemento del testo reso, non sul contenitore. -->
                   <div class="prose"
-                    onclick={onProseClick}>{@html renderMarkdown(part.text, { asked: isOpenQuestion(i, part) })}</div>
+                    onclick={onProseClick}>{@html renderMarkdown(part.text, {
+                    asked: isOpenQuestion(i, part),
+                    tasks: taskRefs ?? null,
+                    taskCarta: taskRefs != null && part.partId === cartaSu,
+                  })}</div>
 
                 {:else if part.kind === 'compact'}
                   <!-- Una riga che taglia il flusso, perché è esattamente quello che è
@@ -1081,7 +1170,10 @@
                         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text)}</div>
+                        <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text, {
+                          tasks: taskRefs ?? null,
+                          taskCarta: taskRefs != null && part.partId === cartaSu,
+                        })}</div>
                       {:else if part.kind === 'tool' || part.kind === 'reasoning'}
                         {@render opRow(part)}
                       {/if}

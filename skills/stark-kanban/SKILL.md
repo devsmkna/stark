@@ -28,6 +28,13 @@ momento stesso in cui prendi in carico il task**, non alla fine.
 
 Questa regola vale **sempre** quando c'è una board, anche per un task piccolo.
 
+## REGOLA — cita la card in chat come `#NNN`
+
+Quando lavori su una card (presa o appena creata), **citala nella risposta nella forma
+`#NNN`** (es. `#12`): STARK riconosce la forma, la rende cliccabile e mostra la card
+nel flusso della conversazione. Solo l'id con il cancelletto — niente titolo incollato,
+niente link: il titolo e lo stato li mette la UI leggendo la board vera.
+
 ## Setup: one block you paste once per shell
 
 All commands go through the daemon on `127.0.0.1:4571`, authenticated with the local

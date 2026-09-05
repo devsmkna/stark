@@ -489,7 +489,25 @@ in `app.css` non ne ha.
 che deve srotolarsi). La pagina System restava lì a «sto leggendo». Ora la risposta si tiene per
 tutta la vita del daemon e si **scalda all'avvio**, mentre nessuno la aspetta.
 
-### 5.12 Cosa resta
+### 5.12 Chip task nella conversazione
+
+Un `#NNN` nel testo della risposta si trasforma in un chip cliccabile che apre il dettaglio del task
+sulla board — se il task esiste. La logica sta in `ui/src/lib/boardref.ts`, che traduce il numero nel
+task della board locale. I chip entrano nel flusso da `renderMarkdown` (opzione `tasks`), PRIMA di
+`decoraColoriDom`: un id a tre cifre (`#123`) è anche un hex valido, e senza quest'ordine il
+decoratore dei colori se lo mangiava prima che i chip nascessero. Il click
+passa da `onProseClick` → `store.openBoardTask`. Come si prova senza spendere quota: `npm run taskchip:check`,
+che apre una sessione fittizia e verifica il rendering, il click e il dettaglio.
+
+Alla **prima citazione del turno** compare anche la card blocco (riquadro con titolo, stato,
+priorità e claim), inserita subito dopo il paragrafo che cita. «Prima» è calcolato solo sulle
+superfici **visibili**: `Conversation.svelte` (`primaCheCita`) guarda i gruppi `groupParts` di
+tipo `solo` — non le narrazioni di servizio, che finiscono nel blocco `done` chiuso di default
+(la regola è «dentro un turno il lavoro sta in un blocco solo», vedi `gruppi.ts`). Il refetch
+della board avviene sul **fronte di chiusura del turno** (`busy` → non `busy`), non a ogni
+render, per non rifare la richiesta a ogni giro reattivo.
+
+### 5.13 Cosa resta
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 

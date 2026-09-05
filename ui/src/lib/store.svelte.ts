@@ -304,6 +304,15 @@ export class Store {
     try { localStorage.setItem('stark.board', this.boardOpen ? '1' : '0') } catch { /* modalità privata */ }
   }
 
+  /** Il task da mostrare aperto quando la Board compare: lo scrive un click su un
+   *  chip `#NNN` in chat, lo consuma (e azzera) Board.svelte. */
+  boardTask = $state<number | null>(null)
+
+  openBoardTask(id: number): void {
+    this.boardTask = id
+    if (!this.boardOpen) this.toggleBoard()
+  }
+
   /** L'id della riga il cui titolo è diventato scrivibile. Rinominare non apre niente. */
   renaming = $state<string | null>(null)
   /** La cartella (cwd) del progetto il cui nome è diventato scrivibile. Campo a parte

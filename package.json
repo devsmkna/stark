@@ -16,6 +16,7 @@
     "percorsi:check": "node tools/prova-percorsi.ts --check",
     "shortcuts:check": "tsc -p tools/tsconfig.json --noEmit && node tools/shortcuts-check.ts",
     "usage:check": "tsc -p tools/tsconfig.json --noEmit && node tools/usage-check.ts",
+    "taskchip:check": "node tools/prova-taskchip.mjs",
     "slice": "node src/cli/vertical-slice.ts",
     "build": "tsc -p tsconfig.json",
     "resume": "node src/cli/resume-check.ts",

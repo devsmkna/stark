@@ -55,6 +55,16 @@
 
   const sessione = $derived(cwd ? store.rows.find(r => r.cwd === cwd)?.id : undefined)
 
+  // Un click su un chip in chat arriva qui: si apre quel task, sempre — anche se la
+  // Board era già aperta su un altro (regola del link prevedibile, come /chat/<id>).
+  $effect(() => {
+    const cerca = store.boardTask
+    if (cerca == null || !dati || dati.assente) return
+    const t = dati.columns.flatMap(c => c.tasks).find(t => t.id === cerca)
+    if (t) { aperta = t; crea = false }
+    store.boardTask = null
+  })
+
   async function inizializza(): Promise<void> {
     if (!sessione) return
     occupato = true
