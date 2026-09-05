@@ -53,7 +53,11 @@ export type TunnelAuth = (token: string) => Promise<{ id: string } | null>
  * la implementa deve verificare e NON lasciare una sessione in giro — il browser del
  * desktop riceve solo il cookie d'instradamento, mai un token cloud.
  */
-export type TunnelAccedi = (email: string, password: string) => Promise<{ id: string } | null>
+export type TunnelAccedi = (email: string, password: string, code?: string) => Promise<{ id: string } | null>
+
+/** Se un account ha il TOTP acceso: la pagina di login lo chiede prima di sapere se
+ *  mostrare il campo del codice. Iniettabile per la prova. */
+export type TunnelHaTotp = (email: string) => Promise<boolean>
 
 /** Cosa il server manda al daemon. `benvenuto` arriva una volta, subito dopo
  *  l'handshake, e porta lo slug d'instradamento: il daemon non può calcolarselo da
@@ -126,6 +130,7 @@ type Collegata = { ws: WebSocket; viva: boolean; userId: string; label: string; 
 export class TunnelHub {
   #auth: TunnelAuth
   #accedi: TunnelAccedi | null
+  #haTotp: TunnelHaTotp | null
   #macchine = new Map<string, Collegata>()
   #pendenti = new Map<WebSocket, Map<number, ServerResponse>>()
   #prossimoId = 1
@@ -134,9 +139,10 @@ export class TunnelHub {
   #battito: ReturnType<typeof setInterval> | null = null
   #wss = new WebSocketServer({ noServer: true, handleProtocols: (ps) => ps.has('stark-tunnel') ? 'stark-tunnel' : false })
 
-  constructor(auth: TunnelAuth, accedi?: TunnelAccedi) {
+  constructor(auth: TunnelAuth, accedi?: TunnelAccedi, haTotp?: TunnelHaTotp) {
     this.#auth = auth
     this.#accedi = accedi ?? null
+    this.#haTotp = haTotp ?? null
     // Un daemon che sparisce senza chiudere (rete mobile, sospensione) lascerebbe la
     // voce nella mappa e le richieste ad aspettare: il battito lo scopre e lo chiude.
     this.#battito = setInterval(() => {
@@ -240,7 +246,7 @@ export class TunnelHub {
       // e `/accedi` la processa. Tutto il resto resta un no del chiamante.
       if (this.#accedi && req.method === 'GET' && url.pathname === '/') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(paginaLogin(url.searchParams.get('e')))
+        res.end(paginaLogin(url.searchParams.get('e'), url.searchParams.get('mfa') === '1'))
         return true
       }
       if (this.#accedi && req.method === 'POST' && url.pathname === '/accedi') {
@@ -326,11 +332,22 @@ export class TunnelHub {
     const form = new URLSearchParams(Buffer.concat(pezzi).toString('utf8'))
     const email = (form.get('email') ?? '').trim()
     const password = form.get('password') ?? ''
-    const utente = email && password ? await this.#accedi!(email, password) : null
+    const code = form.get('code') ?? ''
+    // Se l'account ha il TOTP e il codice manca, non è un errore di credenziali: si
+    // rimanda alla pagina col campo del codice mostrato (`mfa=1`), senza dire se la
+    // password era giusta — l'informazione la dà solo un login completo.
+    if (!code && this.#haTotp && email && await this.#haTotp(email)) {
+      res.writeHead(303, { location: '/?mfa=1', 'cache-control': 'no-store' })
+      res.end()
+      return
+    }
+    const utente = email && password ? await this.#accedi!(email, password, code) : null
     if (!utente) {
       // Redirect e non render diretto: un refresh della pagina d'errore non deve
-      // riproporre il POST con le credenziali dentro.
-      res.writeHead(303, { location: '/?e=credenziali', 'cache-control': 'no-store' })
+      // riproporre il POST con le credenziali dentro. `mfa=1` tiene visibile il campo
+      // del codice se l'errore può essere del secondo fattore.
+      const dest = code ? '/?e=mfa&mfa=1' : '/?e=credenziali'
+      res.writeHead(303, { location: dest, 'cache-control': 'no-store' })
       res.end()
       return
     }
@@ -438,15 +455,24 @@ function testa(): string {
 
 /** La pagina di login: la strada senza QR. Il POST va a `/accedi`, che è dell'hub —
  *  le credenziali cloud non attraversano mai nessun daemon. */
-function paginaLogin(errore: string | null): string {
+function paginaLogin(errore: string | null, mostraCodice = false): string {
   const msg = errore === 'credenziali' ? 'Wrong email or password.'
+    : errore === 'mfa' ? 'Wrong or missing authenticator code.'
     : errore === 'troppi' ? 'Too many attempts — wait a minute.' : ''
+  // Il campo del codice compare quando serve (l'account ha il TOTP) o dopo un errore
+  // MFA. Un `inputmode` numerico apre il tastierino sul telefono; accetta anche i
+  // codici di recupero (xxxx-xxxx), quindi non si vincola a sole cifre.
+  const campoCodice = mostraCodice
+    ? '<input name="code" placeholder="Authenticator or recovery code" autocomplete="one-time-code" '
+      + 'inputmode="text" autofocus>'
+    : ''
   return testa()
     + '<div><p><b>S T A R K</b><br><br>Sign in with your STARK cloud account to reach '
     + 'one of your machines. You will need the pairing code from STARK afterwards.</p>'
     + '<form method="post" action="/accedi">'
     + '<input type="email" name="email" placeholder="Email" autocomplete="username" required>'
     + '<input type="password" name="password" placeholder="Password" autocomplete="current-password" required>'
+    + campoCodice
     + '<button>Sign in</button></form>'
     + (msg ? `<div class="err">${msg}</div>` : '')
     + '</div>'

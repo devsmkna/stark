@@ -444,6 +444,24 @@ export class Api {
     })
   }
 
+  // ─── MFA (TOTP), sempre via daemon ────────────────────────────────────────
+  totpStato(): Promise<{ ok: boolean; enabled?: boolean; recoveryLeft?: number; error?: string }> {
+    return this.json('/api/cloud/totp')
+  }
+  totpSetup(): Promise<{ ok: boolean; secret?: string; uri?: string; error?: string }> {
+    return this.json('/api/cloud/totp/setup', { method: 'POST' })
+  }
+  totpEnable(code: string): Promise<{ ok: boolean; recovery?: string[]; error?: string }> {
+    return this.json('/api/cloud/totp/enable', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }),
+    })
+  }
+  totpDisable(password: string): Promise<{ ok: boolean; error?: string }> {
+    return this.json('/api/cloud/totp/disable', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }),
+    })
+  }
+
   /**
    * Tutti i modelli guidabili su questa macchina, per agent (§17).
    *

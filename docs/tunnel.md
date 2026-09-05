@@ -71,6 +71,39 @@ render del POST (un refresh non deve riproporre la password); freno dedicato da
 **10 tentativi/min per IP**. La password da sola non apre niente: scopre la
 porta, e la porta chiede comunque il codice.
 
+## MFA (TOTP) e device fidati (5 settembre 2026)
+
+Opzionale, spento di default, opt-in sull'account. Tre strati distinti:
+
+- **Account** (chi): password + TOTP (RFC 6238, `cloud/src/totp.ts`, `node:crypto`;
+  provato sui vettori dell'appendice B in `tools/totp-check.ts`). Enrolment in due
+  passi — genera il segreto, mostra il QR, e accende **solo** dopo che l'utente prova
+  di leggerlo — così un segreto scritto ma non verificato non chiude fuori nessuno.
+  All'accensione: dieci **codici di recupero** monouso, mostrati una volta sola,
+  salvati hashati (scrypt).
+- **Device** (quale browser/iPhone): un device nuovo, dopo login+MFA, si autorizza
+  col **codice di pairing** — che è la prova di accesso alla macchina o a un device
+  già fidato. Una volta autorizzato ha il token del device e non chiede più niente.
+  I codici di recupero valgono anche qui: la via d'uscita quando sei remoto senza
+  niente di fidato in mano.
+- **Macchina** (il guard): invariato — a rilasciare il token del device resta il
+  daemon. L'hub verifica identità + MFA e instrada; non conia mai token del daemon.
+
+Al login del tunnel: se l'account ha il TOTP, la pagina chiede il codice (o un codice
+di recupero) dopo la password, con `mfa=1` nell'URL — mai `m`, che è il parametro
+della macchina. Un codice mancante non dice se la password era giusta. Il freno
+dedicato sul login (10/min per IP) copre il brute-force del secondo fattore.
+
+Gestione da **Settings → Cloud → Two-factor**: accendere (QR + verifica), i codici di
+recupero, spegnere (chiede la password — un device rubato con la sessione aperta non
+deve poter togliere la seconda difesa). Tutto passa dal daemon: il browser non parla
+mai col cloud.
+
+**Follow-up dichiarato**: l'approvazione «con un tap da un altro device fidato» senza
+scrivere il codice. Il canale del codice copre già «dalla macchina o da un device
+fidato»; il tap è comodità in più (frame di controllo hub→daemon, coda di richieste,
+una superficie nell'app principale), da fare quando serve.
+
 ## La sicurezza, detta intera
 
 - Il daemon **non cambia di un byte** le sue difese: la richiesta rigiocata da

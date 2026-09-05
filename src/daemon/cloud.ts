@@ -209,6 +209,23 @@ async function proxyBoard(
   })
 }
 
+/**
+ * Inoltra al cloud una richiesta MFA col Bearer del daemon. Il daemon fa da solo
+ * tramite: la UI di Settings gestisce il proprio TOTP senza che il browser parli col
+ * cloud. `status` torna alla UI, che distingue 400 (codice sbagliato) da 200.
+ */
+export async function proxyTotp(
+  home: string, pathCloud: string, init?: RequestInit,
+): Promise<{ ok: boolean; status: number; body: unknown }> {
+  const url = cloudUrl()
+  const t = leggiToken(home)
+  if (!url || !t) return { ok: false, status: 401, body: { error: 'cloud non configurato o non loggato' } }
+  return chiama(url, pathCloud, {
+    ...init,
+    headers: { ...(init?.headers ?? {}), authorization: `Bearer ${t.token}` },
+  })
+}
+
 /** Legge la board cloud di un progetto. */
 export async function boardCloud(home: string, origin: string): Promise<unknown> {
   const r = await proxyBoard(home, origin, '/api/board')
