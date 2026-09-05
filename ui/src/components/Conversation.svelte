@@ -308,7 +308,7 @@
     const chipEl = target.closest<HTMLElement>('[data-task]')
     if (chipEl) {
       e.preventDefault()
-      store.openBoardTask(Number(chipEl.dataset['task']))
+      store.openBoardTask(Number(chipEl.dataset['task']), snap.sessionId)
       return
     }
 

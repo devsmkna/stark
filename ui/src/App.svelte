@@ -5,6 +5,7 @@ import Helper from './components/Helper.svelte'
 import Splash from './components/Splash.svelte'
 import AgentPanel from './components/AgentPanel.svelte'
 import Board from './components/Board.svelte'
+import TaskSheet from './components/TaskSheet.svelte'
 import Conversation from './components/Conversation.svelte'
 import Effects from './components/Effects.svelte'
 import NewChat from './components/NewChat.svelte'
@@ -581,6 +582,12 @@ import Login from './components/Login.svelte'
        dialog (non c'è un `kind`): è un modo che si apre e si chiude col bottone. -->
   {#if store.boardOpen}
     <Board {store} />
+  {/if}
+
+  <!-- Il foglio del task su schermo stretto (card #35): il chip #NNN apre il solo
+       dettaglio, non l'impalcatura della Board. Indipendente da `boardOpen`. -->
+  {#if store.taskSheet}
+    <TaskSheet {store} />
   {/if}
 
   <!-- L'apertura di una chat che dura (da telefono, su rete lenta) copre tutto con lo

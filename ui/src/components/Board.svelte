@@ -7,6 +7,7 @@
   // Del progetto e non della chat: il file sta accanto al codice, quindi due
   // conversazioni sulla stessa cartella vedono la stessa board.
   import Icon from './Icon.svelte'
+  import TaskDetail from './TaskDetail.svelte'
   import type { Store } from '../lib/store.svelte.ts'
   import type { Board, BoardTask } from '../lib/api.ts'
   import { projectName } from '../lib/view.ts'
@@ -211,52 +212,16 @@
 
   {#if aperta}
     <div class="det">
-      <div class="dh">
-        <span class="dt">{aperta.title}</span>
-        <button class="x" aria-label="Close details" onclick={() => { aperta = null }}>
-          <Icon name="i-x" />
-        </button>
-      </div>
-      <div class="db">
-        <div class="drow">
-          <span class="dl">Status</span>
-          <select value={aperta.status}
-            onchange={(e) => {
-              const nuovo = (e.currentTarget as HTMLSelectElement).value
-              // `originale` cattura la card com'era **prima** dell'aggiornamento
-              // ottimistico: senza, `cambiaStato` vedrebbe status già uguale e
-              // tornerebbe senza editare nulla.
-              const originale = aperta
-              aperta = { ...aperta, status: nuovo }
-              void cambiaStato(originale, nuovo)
-            }}>
-            {#each dati?.columns ?? [] as col (col.status)}
-              <option value={col.status}>{col.status}</option>
-            {/each}
-          </select>
-        </div>
-        {#if aperta.priority}
-          <div class="drow"><span class="dl">Priority</span><span>{aperta.priority}</span></div>
-        {/if}
-        {#if aperta.assignee}
-          <div class="drow"><span class="dl">Assignee</span><span>{aperta.assignee}</span></div>
-        {/if}
-        {#if aperta.claimed_by}
-          <div class="drow"><span class="dl">Claimed by</span><span>@{aperta.claimed_by}</span></div>
-        {/if}
-        {#if aperta.tags && aperta.tags.length > 0}
-          <div class="drow"><span class="dl">Tags</span><span>{aperta.tags.join(', ')}</span></div>
-        {/if}
-        {#if aperta.due}
-          <div class="drow"><span class="dl">Due</span><span>{aperta.due}</span></div>
-        {/if}
-        {#if aperta.blocked}
-          <div class="drow"><span class="dl">Blocked</span><span>{aperta.blocked}</span></div>
-        {/if}
-        {#if aperta.body}
-          <div class="dbody">{aperta.body}</div>
-        {/if}
-      </div>
+      <!-- Il dettaglio è condiviso con TaskSheet (card #35): l'aggiornamento
+           ottimistico resta qui — `originale` cattura la card com'era PRIMA, senza
+           `cambiaStato` vedrebbe status già uguale e tornerebbe senza editare nulla. -->
+      <TaskDetail task={aperta}
+        statuses={(dati?.columns ?? []).map(c => c.status)}
+        onstatus={(originale, nuovo) => {
+          aperta = { ...originale, status: nuovo }
+          void cambiaStato(originale, nuovo)
+        }}
+        onclose={() => { aperta = null }} />
     </div>
   {/if}
 </div>
@@ -316,15 +281,8 @@
   .btn { font: inherit; font-size: 11px; padding: 5px 12px; border-radius: 7px; cursor: pointer;
          background: var(--surface-2); color: var(--ink); border: 1px solid var(--line-2); }
   .btn:disabled { opacity: .5; cursor: default; }
+  /* Solo il contenitore: le righe del dettaglio stanno in TaskDetail.svelte,
+     condiviso con il foglio mobile (card #35). */
   .det { position: absolute; right: 0; top: 46px; bottom: 0; width: 320px; background: var(--surface);
          border-left: 1px solid var(--line); display: flex; flex-direction: column; }
-  .dh { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .dt { font-size: 12px; font-weight: 600; color: var(--ink); flex: 1; }
-  .db { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-  .drow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
-  .drow select { font: inherit; font-size: 11px; color: var(--ink); background: var(--surface);
-                 border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 5px; }
-  .dl { color: var(--muted); width: 90px; flex: none; }
-  .dbody { margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--ink-2);
-           white-space: pre-wrap; }
 </style>
