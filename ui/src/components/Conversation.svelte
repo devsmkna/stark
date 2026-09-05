@@ -10,6 +10,7 @@
   import FileBlock from './FileBlock.svelte'
   import Dock from './Dock.svelte'
   import type { LinkStatus } from '../lib/api.ts'
+  import { mappaTask, citaTask, type TaskRef } from '../lib/boardref.ts'
   import type { PartView, SessionSnapshot, TurnView } from '$core/reduce.ts'
   import { SvelteSet } from 'svelte/reactivity'
   import { promptText } from '$core/events.ts'
@@ -186,6 +187,42 @@
     return !!ultimo && ultimo.partId === part.partId && /\?\s*$/.test(part.text.trim())
   }
 
+  // ─── i task della board, per risolvere i `#NNN` nel testo ──────────────────
+  // Stato locale del componente: una `Conversation` = un pannello = una sessione.
+  // `undefined` = mai chiesti · `null` = il progetto non ha una board (o il daemon è
+  // troppo vecchio per saperlo dire).
+  let taskRefs = $state<Map<number, TaskRef> | null | undefined>(undefined)
+
+  async function caricaBoard(): Promise<void> {
+    try { taskRefs = mappaTask(await store.api.board(snap.sessionId)) }
+    catch { taskRefs = null /* daemon vecchio o board irraggiungibile: si degrada a testo */ }
+  }
+
+  // Si chiede la board la prima volta che nel testo compare un possibile `#NNN`, e la
+  // si RIchiede quando l'agent finisce un turno: il claim e i move cambiano lo stato
+  // mentre lavora, e un chip che mostra uno stato vecchio è una board che mente nel
+  // punto più visibile.
+  $effect(() => {
+    const ceUnRiferimento = snap.turns.some(t =>
+      t.parts.some(p => p.kind === 'text' && /#\d{1,4}(?!\d)/.test(p.text)))
+    if (ceUnRiferimento && taskRefs === undefined) void caricaBoard()
+  })
+  $effect(() => {
+    void snap.state   // il passaggio a fermo = turno chiuso
+    if (snap.state !== 'busy' && taskRefs !== undefined) void caricaBoard()
+  })
+
+  // Il partId della prima parte testuale del turno che cita un task risolvibile: è
+  // quella — e solo quella — che porta la card blocco (spec §4). Un partId e non un
+  // indice in `turn.parts`: il testo di un turno si disegna da due punti diversi più
+  // sotto (la risposta finale «solo» e le narrazioni dentro un blocco «done»), e un
+  // indice nel ciclo sbagliato avrebbe confrontato cose diverse.
+  function primaCheCita(turn: TurnView): string | undefined {
+    if (taskRefs == null) return undefined
+    return turn.parts.find((p): p is Extract<PartView, { kind: 'text' }> =>
+      p.kind === 'text' && citaTask(p.text, taskRefs!))?.partId
+  }
+
   /**
    * Il bottone «Copy» sopra un blocco di codice non è mai un elemento Svelte: nasce
    * come stringa HTML dentro `renderMarkdown` (vedi `markdown.ts`), quindi non c'è
@@ -227,6 +264,16 @@
     }
     const rv = target.closest<HTMLElement>('[data-reveal-path]')
     if (rv) { await store.reveal(rv.getAttribute('data-reveal-path') ?? '', snap.sessionId); return }
+
+    // Il chip `#NNN` (o la card blocco, stesso `data-task`) generato da
+    // `decoraTaskDom`: apre quel task nella Board, invece di lasciare che il click
+    // cada nel vuoto o segua un eventuale link.
+    const chipEl = target.closest<HTMLElement>('[data-task]')
+    if (chipEl) {
+      e.preventDefault()
+      store.openBoardTask(Number(chipEl.dataset['task']))
+      return
+    }
 
     const btn = target.closest<HTMLElement>('[data-copy]')
     const pre = btn?.closest('.codeblock')?.querySelector('pre')
@@ -944,7 +991,11 @@
                        non su tutto il blocco (bug B1): `renderMarkdown` la mette
                        sull'ultimo elemento del testo reso, non sul contenitore. -->
                   <div class="prose"
-                    onclick={onProseClick}>{@html renderMarkdown(part.text, { asked: isOpenQuestion(i, part) })}</div>
+                    onclick={onProseClick}>{@html renderMarkdown(part.text, {
+                    asked: isOpenQuestion(i, part),
+                    tasks: taskRefs ?? null,
+                    taskCarta: taskRefs != null && part.partId === primaCheCita(turn),
+                  })}</div>
 
                 {:else if part.kind === 'compact'}
                   <!-- Una riga che taglia il flusso, perché è esattamente quello che è
@@ -1081,7 +1132,10 @@
                         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text)}</div>
+                        <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text, {
+                          tasks: taskRefs ?? null,
+                          taskCarta: taskRefs != null && part.partId === primaCheCita(turn),
+                        })}</div>
                       {:else if part.kind === 'tool' || part.kind === 'reasoning'}
                         {@render opRow(part)}
                       {/if}
