@@ -35,10 +35,15 @@ jobs:
         with:
           node-version: '24.13.1'
       # `ci` e non `install`: qui la cartella è appena clonata, quindi non c'è nessun
-      # lockfile da rispettare più del solito, ed è più veloce. `--omit=dev` esclude
-      # `vite`/`svelte-check`/`playwright-core` — servono a compilare, non a girare.
-      - run: npm ci --omit=dev
+      # lockfile da rispettare più del solito, ed è più veloce. **Non** `--omit=dev`
+      # qui: `vite` — il comando che `npm run ui:build` lancia — è lui stesso una
+      # devDependency, quindi ometterla prima di compilare toglie di mezzo l'attrezzo
+      # con cui si compila (misurato: `sh: 1: vite: not found` su ogni piattaforma,
+      # run 33973387334). L'omissione arriva **dopo**, con `npm prune`, quando la UI
+      # è già compilata e serve solo alleggerire il bundle di ciò che non gira più.
+      - run: npm ci
       - run: npm run ui:build
+      - run: npm prune --omit=dev
       # Un formato solo (`tar.gz`) su ogni piattaforma, Windows compreso — `install.ps1`
       # lo estrae con lo stesso `tar` che Windows include dalla 1803 in poi, invece di
       # un secondo formato da gestire solo lì. Niente `--strip-components`: il

@@ -21,12 +21,16 @@ Un tag `vX.Y.Z` resta **la release** (`docs/rilascio.md` spiega perché un tag e
 numero scritto a mano). Cambia solo cosa succede quando esce:
 
 1. `.github/workflows/publish-release.yml` parte sul push del tag. Una build per ogni
-   piattaforma supportata (matrix), ciascuna: `npm ci --omit=dev` (non `install`: la
-   cartella è appena clonata, non c'è nessun lockfile locale da rispettare più del
-   solito) + `npm run ui:build`, impacchettati in `stark-<piattaforma>.tar.gz` — `src/`,
-   `node_modules/`, `ui/dist/`, `package.json`, `package-lock.json`. Un formato solo,
-   `tar.gz`, anche su Windows: dalla 1803 in poi Windows include `tar` (bsdtar), quindi
-   non serve un secondo formato solo per lì.
+   piattaforma supportata (matrix): `npm ci` (non `install`: la cartella è appena
+   clonata, non c'è nessun lockfile locale da rispettare più del solito) + `npm run
+   ui:build` — con **tutte** le dipendenze, `vite` compresa: è lei stessa una
+   devDependency, quindi va tenuta finché non ha finito di compilare. Solo **dopo**,
+   `npm prune --omit=dev` toglie `vite`/`svelte-check`/`playwright-core` e il resto
+   degli attrezzi di build, che il bundle non deve portarsi dietro. Il risultato va in
+   `stark-<piattaforma>.tar.gz` — `src/`, `node_modules/` (potato), `ui/dist/`,
+   `package.json`, `package-lock.json`. Un formato solo, `tar.gz`, anche su Windows:
+   dalla 1803 in poi Windows include `tar` (bsdtar), quindi non serve un secondo
+   formato solo per lì.
 2. Un job finale scarica tutti i bundle e li manda su `starkapp.dev` via `rsync`, sia
    sotto `releases/<tag>/` (un bundle preciso, per chi lo vuole) sia sotto
    `releases/latest/` — la cartella che `install.sh`/`install.ps1`/`stark update`
