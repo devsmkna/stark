@@ -2531,6 +2531,15 @@ if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'
   check('§31: con `.stark/kanban/` la board c\'è', haBoard(dir) === true)
   check('§31: l\'istruzione interna insegna la citazione `#NNN`',
     ISTRUZIONE_BOARD.includes('#NNN') && ISTRUZIONE_BOARD.includes('claim'))
+  const conBoard = buildOptions({ cwd: dir, model: 'x', mode: 'auto', sessionId: 'a-b' })
+  const sp = conBoard.systemPrompt as { type: string; preset: string; append?: string }
+  check('§31: con board, il preset resta e l\'istruzione si somma',
+    sp.type === 'preset' && sp.preset === 'claude_code' && sp.append === ISTRUZIONE_BOARD,
+    JSON.stringify(sp).slice(0, 120))
+  const senzaBoard = buildOptions({ cwd: tmpdir(), model: 'x', mode: 'auto', sessionId: 'a-b' })
+  const sp2 = senzaBoard.systemPrompt as { type: string; append?: string }
+  check('§31: senza board, nessun append — il prompt del terminale, identico a prima',
+    sp2.type === 'preset' && sp2.append === undefined)
   rmSync(dir, { recursive: true, force: true })
 }
 

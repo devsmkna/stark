@@ -10,6 +10,7 @@ import type {
   Capabilities, ModeChoice, ModelChoice, PermissionMode, SlashCommand,
 } from '../../core/events.ts'
 import type { SessionSpec } from '../../core/adapter.ts'
+import { haBoard, ISTRUZIONE_BOARD } from '../../core/board-regola.ts'
 
 /**
  * Le opzioni di lancio **sono** il contratto del §1: `SessionSpec`, senza aggiunte.
@@ -72,7 +73,13 @@ export function buildOptions(o: LaunchOptions): Options {
     // di spostare cartella di lavoro e stato git in un messaggio utente, dove pesano meno
     // sul comportamento. STARK gira su una macchina sola: pagherebbe il prezzo senza
     // incassare il vantaggio.
-    systemPrompt: { type: 'preset', preset: 'claude_code' },
+    // Quando il progetto ha una board (`.stark/kanban/`), all'istruzione del preset si
+    // SOMMA il trigger della board (card #31): `append` è la forma documentata
+    // dall'SDK («Use default prompt with appended instructions», sdk.d.ts) e il preset
+    // resta intero — mai un prompt sostitutivo, vedi sopra perché.
+    systemPrompt: haBoard(o.cwd)
+      ? { type: 'preset', preset: 'claude_code', append: ISTRUZIONE_BOARD }
+      : { type: 'preset', preset: 'claude_code' },
     // `false`, e la ragione è cambiata nel tempo: vale la pena scriverla intera.
     //
     // Era `true` perché senza, la sessione eredita tutti i server MCP della macchina:
