@@ -246,6 +246,27 @@ async function route(
       res.end()
       return
     }
+    // `/pair` fuori dalla finestra di un codice: è dove atterra il login senza QR del
+    // tunnel quando sulla macchina nessuno ha ancora chiesto un codice (trovato
+    // dall'utente il 5 settembre 2026 — login giusto, poi `{"error":"forbidden"}`
+    // nudo). Il funzionamento resta quello: la porta si apre solo con un codice vivo,
+    // lo status resta 403, e la pagina non dice niente che chi bussa non sappia già —
+    // dice solo il passo che manca, a un umano che l'ha appena fatto a metà.
+    if ((req.url ?? '/').split('?')[0] === '/pair' && (req.method ?? 'GET') === 'GET'
+        && (req.headers.accept ?? '').includes('text/html')) {
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end('<!doctype html><meta charset="utf-8">'
+        + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<title>STARK</title><style>body{margin:0;min-height:100dvh;display:flex;'
+        + 'align-items:center;justify-content:center;font:15px/1.6 system-ui,sans-serif;'
+        + 'background:#FBFBFD;color:#171A22;padding:24px;text-align:center}'
+        + '@media(prefers-color-scheme:dark){body{background:#0E1118;color:#E8EAF0}}'
+        + 'p{max-width:320px;color:#767D90}b{letter-spacing:.14em}</style>'
+        + '<div><p><b>S T A R K</b><br><br>There is no active pairing code on this '
+        + 'machine.<br>On it, open STARK → “Use STARK from your phone” → '
+        + '<b>Show me a code</b>, then refresh this page. Codes last 5 minutes.</p></div>')
+      return
+    }
     // Un telefono scollegato — o mai collegato, fuori dalla finestra di un codice —
     // atterrava su `{"error":"vietato"}` grezzo, subito dopo aver premuto «Disconnect
     // this phone». Lo status resta **403** e la superficie non si allarga di un byte:
