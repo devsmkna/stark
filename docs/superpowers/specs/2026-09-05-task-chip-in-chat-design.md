@@ -86,7 +86,7 @@ settembre 2026 in review finale — non era vero quando scritto): i messaggi
 **dell'utente** per ora NON sono decorati, perché il prompt utente passa da
 `decoraColoriTesto` (stringa), non da `renderMarkdown` (DOM) — due percorsi diversi, e
 solo il secondo chiama `decoraTaskDom`. Deciso di rimandarlo invece di farlo passare
-male: vedi la card board dedicata.
+male: vedi la card board #34.
 La risoluzione è numerica: `#012` e `#12` sono lo stesso task — i file della board
 paddano a tre cifre, ma `id` è un numero e il confronto si fa su quello.
 Post-process **sul DOM dopo** il render markdown, stesso aggancio di `decoraColoriDom`
