@@ -26,6 +26,7 @@ import yaml from 'highlight.js/lib/languages/yaml'
 import { appUrlFor, serviceFor } from '$core/services.ts'
 import { candidato } from './percorsi.ts'
 import { decoraColoriDom } from './colori.ts'
+import { decoraTaskDom, type TaskRef } from './boardref.ts'
 
 /**
  * I linguaggi che vale la pena caricare, scelti contando invece che immaginando.
@@ -72,7 +73,10 @@ DOMPurify.addHook('afterSanitizeAttributes', node => {
  * la decide chi chiama, non questo file — qui si sa solo **come** marcarlo una volta
  * deciso.
  */
-export function renderMarkdown(text: string, opts: { asked?: boolean } = {}): string {
+export function renderMarkdown(
+  text: string,
+  opts: { asked?: boolean; tasks?: Map<number, TaskRef> | null; taskCarta?: boolean } = {},
+): string {
   const html = marked.parse(text, { async: false }) as string
   const doc = new DOMParser().parseFromString(DOMPurify.sanitize(html), 'text/html')
   highlightCode(doc)
@@ -80,6 +84,7 @@ export function renderMarkdown(text: string, opts: { asked?: boolean } = {}): st
   addAppLinks(doc)
   markPaths(doc)
   decoraColoriDom(doc)
+  if (opts.tasks?.size) decoraTaskDom(doc, opts.tasks, { carta: opts.taskCarta })
   if (opts.asked) markAsked(doc)
   return doc.body.innerHTML
 }
