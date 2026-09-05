@@ -33,6 +33,30 @@ Il blocco board che STARK scrive in `CLAUDE.md`/`AGENTS.md` (`allineaContestoBoa
 Vale per tutti i progetti con board e per entrambi gli adapter: nessuna modifica
 all'SDK, è testo di contesto.
 
+## 1-bis. Trigger interno a STARK (emendamento, stessa data)
+
+Il trigger non deve dipendere **solo** dai file di progetto: un blocco in `CLAUDE.md`
+vale dove è scritto e finché nessuno lo toglie. Quando la sessione nasce o si risveglia
+in un progetto con `.stark/kanban/`, l'adapter inietta l'istruzione board **da dentro
+STARK**:
+
+- **Claude Code**: `systemPrompt: { type: 'preset', preset: 'claude_code', append: '…' }`
+  — documentato nell'SDK (`sdk.d.ts:2073`), il preset resta intero e l'istruzione si
+  somma.
+- **OpenCode**: campo `system` sulla richiesta di prompt. **Da misurare prima di usarlo**:
+  i tipi non dicono se `system` si somma o *sostituisce* il prompt dell'agent — se
+  sostituisce, sarebbe un agent istruito meno del terminale (rovescio del Principio 5).
+  Regola nota: i default dell'SDK non sono i default del CLI, e si scoprono misurando.
+
+I due canali **si sommano, non si escludono**: il blocco nei file di progetto resta,
+perché copre il CLI nel terminale e qualunque altro strumento che legga `CLAUDE.md`/
+`AGENTS.md`. Il canale interno copre ogni sessione STARK anche dove il blocco manca o è
+stato rimosso.
+
+Limite dichiarato: board creata a metà sessione → l'append entra al prossimo
+risveglio/sessione, non a caldo, perché l'append si fissa alla costruzione delle
+opzioni.
+
 ## 2. Riconoscimento UI
 
 Pattern `#NNN` (1–4 cifre) nel testo della chat, **messaggi dell'utente compresi**.
