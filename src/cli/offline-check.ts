@@ -32,6 +32,7 @@ import { opzioniClaude } from '../adapters/claude-code/adapter.ts'
 import { optionsFrom } from '../core/adapter.ts'
 import { intentOf, resourcesOf } from '../adapters/claude-code/summary.ts'
 import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.ts'
+import { haBoard, ISTRUZIONE_BOARD } from '../core/board-regola.ts'
 import { allineaContestoBoard, boardDir, leggiBoardLocale } from '../daemon/board.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
@@ -2518,6 +2519,19 @@ if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'
   rl.close()            // due volte: idempotente
   check('revisione: RawLog con fd persistente, e scrivere dopo la chiusura non lancia',
     readFileSync(resolve(dir, 'raw-prova.jsonl'), 'utf8') === '{"a":1}\n')
+}
+
+// La board si cita in chat come #NNN (card #31): l'istruzione interna esiste, dice
+// all'agent la forma esatta della citazione, e il rilevamento della board è lo stesso
+// di allineaContestoBoard — la cartella `.stark/kanban/`.
+{
+  const dir = mkdtempSync(resolve(tmpdir(), 'stark-board-'))
+  check('§31: senza `.stark/kanban/` la board non c\'è', haBoard(dir) === false)
+  mkdirSync(resolve(dir, '.stark', 'kanban'), { recursive: true })
+  check('§31: con `.stark/kanban/` la board c\'è', haBoard(dir) === true)
+  check('§31: l\'istruzione interna insegna la citazione `#NNN`',
+    ISTRUZIONE_BOARD.includes('#NNN') && ISTRUZIONE_BOARD.includes('claim'))
+  rmSync(dir, { recursive: true, force: true })
 }
 
 let failed = 0

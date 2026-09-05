@@ -42,7 +42,9 @@ progetto: ci si parla attraverso il daemon di STARK, non coi file. Prima di lavo
 creare. Segna il task come preso in carico (claim) **subito**, e aggiorna lo stato
 **nel momento** in cui cambia, mai in coda a fine lavoro.
 
-Per i comandi esatti usa la skill \`stark-kanban\`.
+Quando prendi in carico una card, **citala in chat nella forma \`#NNN\`** (es. \`#12\`):
+STARK la rende cliccabile e mostra la card nel flusso. Vale anche per una card appena
+creata: cita l'id nuovo. Per i comandi esatti usa la skill \`stark-kanban\`.
 
 *Questo blocco lo gestisce STARK: vive finché c'è \`.stark/kanban/\`. Se lo togli a
 mano, lo riscrive alla prossima sessione.*
