@@ -1,0 +1,83 @@
+name: Pubblica release
+
+# Un tag `vX.Y.Z` è una release (docs/rilascio.md) — un push su `main` non deve
+# chiamare nessuno. Per ogni piattaforma supportata, questa pipeline fa una volta sola
+# quello che prima faceva ogni singola macchina che installava: `npm ci` e
+# `npm run ui:build`. Il risultato è un bundle già pronto, pubblicato su starkapp.dev —
+# vedi docs/distribuzione.md per il perché e per come installer/`stark update` lo usano.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-x64
+            runner: macos-13
+          - target: darwin-arm64
+            runner: macos-14
+          - target: win-x64
+            runner: windows-2022
+          # win-arm64 manca: nessun runner GitHub-hosted nativo per quella
+          # combinazione. install.ps1 lo dice invece di scaricare un bundle che non
+          # esiste — vedi docs/distribuzione.md.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.1'
+      # `ci` e non `install`: qui la cartella è appena clonata, quindi non c'è nessun
+      # lockfile da rispettare più del solito, ed è più veloce. `--omit=dev` esclude
+      # `vite`/`svelte-check`/`playwright-core` — servono a compilare, non a girare.
+      - run: npm ci --omit=dev
+      - run: npm run ui:build
+      # Un formato solo (`tar.gz`) su ogni piattaforma, Windows compreso — `install.ps1`
+      # lo estrae con lo stesso `tar` che Windows include dalla 1803 in poi, invece di
+      # un secondo formato da gestire solo lì. Niente `--strip-components`: il
+      # contenuto dell'archivio è già quello che deve finire dentro `$APP`.
+      - name: Pacchetto
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -czf "dist/stark-${{ matrix.target }}.tar.gz" \
+            src ui/dist node_modules package.json package-lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: dist/*.tar.gz
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          merge-multiple: true
+      - name: version.txt — quello che install.sh/stark update confrontano
+        run: echo "$GITHUB_REF_NAME" > bundles/version.txt
+      - name: Configura SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STARK_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.STARK_DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+      # Due copie: `releases/<tag>/` per chi vuole un bundle preciso (a mano, o un
+      # giorno per una lista di versioni), `releases/latest/` per install.sh e
+      # `stark update`, che non sanno né devono sapere quale sia il tag più recente
+      # prima di chiederlo. La chiave di deploy è ristretta con `rrsync` a
+      # `/var/www/starkapp.dev/` e basta — vedi docs/distribuzione.md.
+      - name: Pubblica su starkapp.dev
+        run: |
+          rsync -av --delete bundles/ "deploy@starkapp.dev:/var/www/starkapp.dev/releases/$GITHUB_REF_NAME/"
+          rsync -av --delete bundles/ "deploy@starkapp.dev:/var/www/starkapp.dev/releases/latest/"

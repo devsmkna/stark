@@ -33,7 +33,7 @@ import { agentiDisponibili, agentIds, backendFor, catalogoCompleto, scaldaCatalo
 import { logPath, readToken } from './identity.ts'
 import { avviaRicambio, RADICE } from './riavvio.ts'
 import {
-  aggiornamentoNoto, alberoSporco, controlla, controllaAllAvvio, notaAggiornamento, versioneInstallata,
+  aggiornamentoNoto, controlla, controllaAllAvvio, notaAggiornamento, versioneInstallata,
 } from './aggiornamenti.ts'
 import { eseguiHandoff, type ViaBriefing } from './handoff.ts'
 import type { Command } from '../core/events.ts'
@@ -761,23 +761,16 @@ async function route(
      * qui invece che da un terminale — letteralmente lo stesso comando, vedi
      * `riavvio.ts`.
      *
-     * I due rifiuti prima di muovere qualcosa non sono ridondanti rispetto ai controlli
-     * che `stark update` rifà per conto suo: **lì** fallirebbero dentro un processo
-     * staccato, dopo che questo daemon è già morto, cioè in un log che nessuno sta
-     * guardando. Qui invece la risposta torna al browser, che può dirlo a chi ha
-     * premuto. Il controllo doppio è voluto: `update` deve restare corretto anche
-     * quando lo si digita a mano.
+     * Il rifiuto prima di muovere qualcosa non è ridondante rispetto al controllo che
+     * `stark update` rifà per conto suo: **lì** fallirebbe dentro un processo staccato,
+     * dopo che questo daemon è già morto, cioè in un log che nessuno sta guardando. Qui
+     * invece la risposta torna al browser, che può dirlo a chi ha premuto. Il controllo
+     * doppio è voluto: `update` deve restare corretto anche quando lo si digita a mano.
      */
     if (method === 'POST' && path === '/api/update') {
       const stato = aggiornamentoNoto()
       if (!stato?.disponibile || !stato.tag) {
         return send(res, 409, { error: 'no newer release to install' })
-      }
-      if (await alberoSporco(RADICE)) {
-        return send(res, 409, {
-          error: 'there are uncommitted changes to tracked files in ' + RADICE
-            + ': STARK will not overwrite them. Resolve them yourself, then try again.',
-        })
       }
       const esito = avviaRicambio(STARK_HOME, { aggiorna: true, log: logPath(STARK_HOME) })
       if (!esito.ok) return send(res, 500, { error: esito.error })

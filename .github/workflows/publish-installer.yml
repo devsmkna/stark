@@ -1,0 +1,25 @@
+name: Pubblica installer
+
+# install.sh/install.ps1 sono la porta d'ingresso — https://starkapp.dev/install.sh —
+# e cambiano raramente, indipendentemente dalle release: seguono ogni push su `main`
+# che li tocca, non i tag. È la stessa distinzione che il progetto fa altrove fra
+# «cosa segue ogni push» e «cosa segue solo una release» (docs/rilascio.md).
+on:
+  push:
+    branches: [main]
+    paths: ['install.sh', 'install.ps1']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configura SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STARK_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.STARK_DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+      - name: Pubblica su starkapp.dev
+        run: rsync -av install.sh install.ps1 "deploy@starkapp.dev:/var/www/starkapp.dev/"

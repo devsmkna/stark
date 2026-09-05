@@ -41,24 +41,26 @@ export function avviaRicambio(
     // è ciò che distingue un riavvio da un no-op.
     `for i in $(seq 1 60); do kill -0 ${process.pid} 2>/dev/null || break; sleep 0.25; done`,
     // Aggiornare è **lo stesso comando** che si digita da terminale, non una seconda
-    // procedura che gli somiglia: `stark update` sa già scegliere la release, portarci
-    // il repo, reinstallare le dipendenze, ricompilare la UI e riscrivere il
-    // lanciatore. Scriverne qui una copia vorrebbe dire due percorsi di aggiornamento
-    // che divergono alla prima correzione fatta su uno solo.
+    // procedura che gli somiglia: `stark update` sa già scegliere la release, scaricare
+    // il bundle giusto (codice, dipendenze e interfaccia già dentro — vedi
+    // `daemon/aggiornamenti.ts`) e riscrivere il lanciatore. Scriverne qui una copia
+    // vorrebbe dire due percorsi di aggiornamento che divergono alla prima correzione
+    // fatta su uno solo.
     //
-    // Gira **dopo** che il vecchio è morto, di proposito: un `npm install` mentre il
-    // processo di prima è ancora vivo cambierebbe `node_modules` sotto i piedi a chi lo
-    // sta usando. E lì `runningPid()` è ormai vuoto, quindi `update` non prova a
-    // riavviare niente per conto suo: a riaccendere è la riga dopo, una volta sola.
+    // Gira **dopo** che il vecchio è morto, di proposito: estrarre il bundle mentre il
+    // processo di prima è ancora vivo gli cambierebbe i file sotto i piedi. E lì
+    // `runningPid()` è ormai vuoto, quindi `update` non prova a riavviare niente per
+    // conto suo: a riaccendere è la riga dopo, una volta sola.
     //
-    // `|| true` non è distrazione: se l'aggiornamento fallisce — rete che cade, albero
-    // sporco — STARK deve **tornare acceso comunque**, sulla versione di prima. Un
-    // aggiornamento che non riesce è un fastidio; un daemon che non torna è le
-    // conversazioni chiuse e nessuna finestra da cui riaprirle.
+    // `|| true` non è distrazione: se l'aggiornamento fallisce — rete che cade, il
+    // server non risponde — STARK deve **tornare acceso comunque**, sulla versione di
+    // prima. Un aggiornamento che non riesce è un fastidio; un daemon che non torna è
+    // le conversazioni chiuse e nessuna finestra da cui riaprirle.
     ...(opts.aggiorna ? [`${nodo} ${cli} update || true`] : []),
-    // La UI è un artefatto locale: dopo un `git pull` che tocca `ui/`, senza questo il
-    // browser continuerebbe a ricevere il pacchetto vecchio e il riavvio sembrerebbe
-    // non aver fatto niente. Con `aggiorna` non serve: `update` l'ha già ricompilata.
+    // La UI è un artefatto locale: dopo modifiche a `ui/` fatte a mano (un checkout di
+    // sviluppo, non un'installazione da bundle), senza questo il browser continuerebbe
+    // a ricevere il pacchetto vecchio e il riavvio sembrerebbe non aver fatto niente.
+    // Con `aggiorna` non serve: il bundle scaricato da `update` la porta già compilata.
     ...(opts.rebuildUi === false || opts.aggiorna
       ? []
       : [`npm --prefix ${JSON.stringify(RADICE)} run ui:build || true`]),

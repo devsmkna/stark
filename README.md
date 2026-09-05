@@ -36,25 +36,25 @@ Un comando solo. Non chiede privilegi di amministratore, e non tocca il Node di 
 **Linux**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+curl -fsSL https://starkapp.dev/install.sh | sh
 ```
 
 **WSL2** — dentro la distribuzione Linux, non in PowerShell
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+curl -fsSL https://starkapp.dev/install.sh | sh
 ```
 
 **macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+curl -fsSL https://starkapp.dev/install.sh | sh
 ```
 
 **Windows** — in PowerShell, senza WSL
 
 ```powershell
-irm https://raw.githubusercontent.com/devsmkna/stark/main/install.ps1 | iex
+irm https://starkapp.dev/install.ps1 | iex
 ```
 
 Poi apri un terminale **nuovo** (il `PATH` è appena cambiato) e, da qualunque cartella:

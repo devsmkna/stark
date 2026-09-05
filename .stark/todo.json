@@ -63,5 +63,87 @@
         "state": "done"
       }
     ]
+  },
+  "86304a49-d600-4a86-b4b8-dc0d74a0b56c": {
+    "title": "Installer + repo privato: bundle precompilati su starkapp.dev",
+    "created": 1788607994360,
+    "__status": "active",
+    "tasks": [
+      {
+        "id": "t1",
+        "text": "install.sh scarica ed estrae il bundle invece di clonare",
+        "state": "done"
+      },
+      {
+        "id": "t2",
+        "text": "install.ps1: stessa modifica gemella",
+        "state": "done"
+      },
+      {
+        "id": "t3",
+        "text": "README.md: le 4 righe curl/irm puntano a starkapp.dev",
+        "state": "done"
+      },
+      {
+        "id": "t4",
+        "text": "aggiornamenti.ts: version.txt via HTTP, passaAllaRelease scarica il bundle",
+        "state": "done"
+      },
+      {
+        "id": "t5",
+        "text": "cli/release.ts: rimuovere/ridurre il verbo checkout, non serve più",
+        "state": "done"
+      },
+      {
+        "id": "t6",
+        "text": "cli/stark.ts update: via npm install/ui:build/riallinea dopo passaAllaRelease",
+        "state": "done"
+      },
+      {
+        "id": "t7",
+        "text": "workflow publish-release.yml: matrix build sui tag v*, rsync sul VPS",
+        "state": "done"
+      },
+      {
+        "id": "t8",
+        "text": "workflow: pubblica install.sh/install.ps1 su push a main",
+        "state": "done"
+      },
+      {
+        "id": "t9",
+        "text": "docs/rilascio.md: riscrivere le sezioni sul trasporto",
+        "state": "done"
+      },
+      {
+        "id": "t10",
+        "text": "nuovo docs/distribuzione.md",
+        "state": "done"
+      },
+      {
+        "id": "t11",
+        "text": "verifica end-to-end (checklist del piano)",
+        "state": "todo"
+      },
+      {
+        "id": "t12",
+        "text": "setup VPS: nginx, certbot, utente deploy con rrsync, ufw (con l'utente)",
+        "state": "todo"
+      },
+      {
+        "id": "t13",
+        "text": "DNS Cloudflare: record A starkapp.dev (utente)",
+        "state": "todo"
+      },
+      {
+        "id": "t14",
+        "text": "secret GitHub + flip repo a privato (conferma esplicita utente)",
+        "state": "todo"
+      },
+      {
+        "id": "t15",
+        "text": "testo ADR pronto da incollare su Notion",
+        "state": "todo"
+      }
+    ]
   }
 }

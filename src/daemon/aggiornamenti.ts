@@ -1,52 +1,51 @@
 // Se esiste una versione più nuova di quella installata, e come ci si passa.
 //
 // La regola su *quale* sia l'ultima release sta in `core/release.ts` e non qui: quella
-// si prova con `node` puro, questa parla con `git` e con la rete. Il confine è lo
-// stesso di `core/quota.ts` contro il pannellino che la disegna.
+// si prova con `node` puro, questa parla con la rete. Il confine è lo stesso di
+// `core/quota.ts` contro il pannellino che la disegna.
 //
-// Si passa da `esegui` di `core/platform.ts` e non da `execFile` nudo, e non è
-// pignoleria: su Windows il daemon non ha una console (nasce `DETACHED_PROCESS`),
-// quindi ogni comando lanciato senza `windowsHide` se ne prende una **nuova** — cioè
-// una finestra nera che lampeggia addosso a chi non ha chiesto niente. Questo modulo
-// lancia `git` a ogni accensione e a ogni controllo dell'albero, quindi senza il punto
-// unico sarebbe il difetto del 28 agosto daccapo.
+// Fino al 5 settembre 2026 questo file parlava con `git` (`ls-remote`, `fetch`,
+// `checkout --detach`), e la copia installata era un checkout vero. Da quel giorno
+// l'installer non clona più: scarica un **bundle già pronto** (codice, `node_modules`
+// e interfaccia già compilate) per la piattaforma esatta, pubblicato da una pipeline
+// che gira sui tag di release — vedi `docs/distribuzione.md` per il perché. Questo
+// file fa la stessa domanda di prima («qual è l'ultima release, e come ci si arriva»)
+// con un trasporto più semplice: un `fetch` HTTPS al posto di un processo `git`.
 //
-// Vale la pena saperlo: la guardia statica in `npm run check` **non** l'avrebbe preso.
-// Cerca `execFile(`, e `promisify(execFile)` non è una chiamata — una prova che guarda
-// il posto giusto con la forma sbagliata non fallisce, tace.
-//
-// Di riflesso arriva anche l'altra garanzia: gli argomenti viaggiano come array e mai
-// come stringa di shell, quindi un nome di tag strano è un argomento e non
-// un'iniezione. Stessa regola di `reveal.ts` e `git.ts`.
-//
-// Due cose che si scoprono solo provandolo, e che qui sono scritte invece che dedotte:
-//
-// **`GIT_TERMINAL_PROMPT=0`.** Su un repo privato senza credenziali in cache, `git`
-// *chiede la password* — e un daemon non ha una tastiera davanti. Senza questa riga il
-// controllo all'avvio non fallirebbe: resterebbe appeso, tenendosi un processo `git`
-// per sempre. Con essa fallisce subito, che è la risposta giusta.
-//
-// **`--depth 1` solo se il repo è già poco profondo.** L'installer clona con
-// `--depth 1`, quindi lì aggiungerlo è gratis e giusto. Su un clone intero — quello di
-// chi sviluppa — passarlo lo **renderebbe** poco profondo, cioè butterebbe via la
-// storia di qualcun altro per fare una cosa che non gliel'aveva chiesto.
+// Sparisce con quel cambio anche `alberoSporco()`/`riallinea()`: esistevano solo
+// perché `npm install`, girando in locale a ogni aggiornamento, riscriveva
+// `package-lock.json` e sporcava l'albero. Con un bundle già pronto quel passo non
+// gira più in locale, quindi non c'è più niente da rimettere a posto.
 
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { ultimaRelease, daAggiornare, tagDaLsRemote, type Release } from '../core/release.ts'
-import { esegui } from '../core/platform.ts'
-
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { WIN, esegui } from '../core/platform.ts'
+import { ultimaRelease, daAggiornare, type Release } from '../core/release.ts'
 
 /** Il controllo all'avvio non deve poter rallentare l'accensione: o risponde in fretta
- *  o non risponde. Dieci secondi sono larghi per un `ls-remote`, che scarica zero
- *  oggetti, e stretti abbastanza da non lasciare un processo appeso a lungo. */
+ *  o non risponde. Dieci secondi sono larghi per scaricare un file di poche righe, e
+ *  stretti abbastanza da non lasciare una richiesta appesa a lungo. */
 const TIMEOUT_MS = 10_000
 
-const ambiente = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+/** Da dove si pubblicano i bundle e il numero dell'ultima release. Sovrascrivibile
+ *  per la stessa ragione di `STARK_RELEASE_BASE` in `install.sh`/`install.ps1`: una
+ *  seconda copia di STARK, o una prova, senza toccare il default di produzione. */
+const baseRelease = (): string =>
+  process.env.STARK_RELEASE_BASE ?? 'https://starkapp.dev/releases/latest'
 
-const git = (radice: string, args: string[], ms = TIMEOUT_MS): Promise<string> =>
-  esegui('git', ['-C', radice, ...args], { timeout: ms, env: ambiente })
-    .then(r => r.stdout.trim())
+/** Il nome del bundle per **questa** macchina, nella stessa forma di `install.sh`
+ *  (`stark-$SO-$ARCH.tar.gz`) e `install.ps1` (`stark-win-$Arch.tar.gz`). Non riusa
+ *  `SO` di `core/platform.ts`: quello distingue WSL da Linux perché la domanda lì è
+ *  «come si raggiunge Windows», qui invece WSL vuole lo stesso bundle di Linux — è
+ *  già cosa `uname -s` risponde dentro WSL, ed è per questo che l'installer non ha
+ *  mai avuto bisogno di un caso a parte. */
+const nomeBundle = (): string => {
+  const so = WIN ? 'win' : process.platform === 'darwin' ? 'darwin' : 'linux'
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  return `stark-${so}-${arch}.tar.gz`
+}
 
 export type StatoAggiornamento = {
   /** La `version` di `package.json`. */
@@ -71,26 +70,25 @@ export function versioneInstallata(radice: string): string {
 }
 
 /**
- * L'ultima release sul remoto, chiesta senza scaricare niente.
+ * L'ultima release pubblicata, chiesta senza scaricare il bundle.
  *
- * `ls-remote` è un giro di rete e basta: nessun oggetto, nessun ref locale toccato.
- * È la ragione per cui questa domanda si può fare a ogni avvio senza che costi.
+ * `releases/latest/version.txt` contiene un solo tag (`v1.4.0`), scritto dalla stessa
+ * pipeline che pubblica i bundle — mai un push su `main`, solo un tag. Un file di testo
+ * e non un JSON: niente da fare il parsing in `install.sh`, che deve leggerlo con `sh`
+ * puro, e qui basta `fetch` + `trim`.
  */
-export async function ultimaReleaseRemota(radice: string): Promise<Release | null> {
-  return ultimaRelease(tagDaLsRemote(await git(radice, ['ls-remote', '--tags', 'origin'])))
-}
-
-/** Se ci sono modifiche a file **tracciati**. Gli untracked non contano: non li tocca
- *  nessuno e bloccare l'aggiornamento per un file di appunti sarebbe un no gratuito. */
-export async function alberoSporco(radice: string): Promise<boolean> {
-  return (await git(radice, ['status', '--porcelain', '--untracked-files=no'])).length > 0
+export async function ultimaReleaseRemota(): Promise<Release | null> {
+  const risposta = await fetch(`${baseRelease()}/version.txt`, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+  if (!risposta.ok) throw new Error(`${risposta.status} ${risposta.statusText} leggendo version.txt`)
+  const tag = (await risposta.text()).trim()
+  return ultimaRelease([tag])
 }
 
 /** Il controllo che gira all'avvio del daemon. Non lancia mai. */
 export async function controlla(radice: string): Promise<StatoAggiornamento> {
   const installata = versioneInstallata(radice)
   try {
-    const ultima = await ultimaReleaseRemota(radice)
+    const ultima = await ultimaReleaseRemota()
     return {
       installata,
       ultima: ultima?.versione ?? null,
@@ -98,8 +96,8 @@ export async function controlla(radice: string): Promise<StatoAggiornamento> {
       disponibile: daAggiornare(installata, ultima),
     }
   } catch (e) {
-    // Niente rete, repo senza `origin`, credenziali che mancano: sono tutti lo stesso
-    // fatto visto da fuori — non lo so — e nessuno di loro è un guasto di STARK.
+    // Niente rete, server irraggiungibile: sono lo stesso fatto visto da fuori — non
+    // lo so — e nessuno dei due è un guasto di STARK.
     return {
       installata, ultima: null, tag: null, disponibile: false,
       errore: (e as Error).message,
@@ -107,45 +105,31 @@ export async function controlla(radice: string): Promise<StatoAggiornamento> {
   }
 }
 
-/** I comandi che portano il repo su una release. Restituiti invece che eseguiti,
- *  perché chi aggiorna dalla UI li deve far girare **dopo** che il daemon è morto —
- *  vedi `riavvio.ts`: un `npm install` mentre il processo vecchio è ancora vivo
- *  cambierebbe `node_modules` sotto i piedi a chi lo sta usando. */
-export async function comandiPerPassare(radice: string, tag: string): Promise<string[][]> {
-  const poco = (await git(radice, ['rev-parse', '--is-shallow-repository'])) === 'true'
-  return [
-    // `+refs/tags/…` con il più: un tag omonimo già presente in locale verrebbe
-    // altrimenti rifiutato («would clobber existing tag») e l'aggiornamento si
-    // fermerebbe per un ref che stiamo comunque per sovrascrivere di proposito.
-    ['fetch', ...(poco ? ['--depth', '1'] : []), 'origin', `+refs/tags/${tag}:refs/tags/${tag}`],
-    // Testa staccata sul tag, di proposito: un'installazione **è** ferma a una
-    // versione, e `git status` che dice «HEAD detached at v1.4.0» è la verità scritta
-    // nel posto dove uno la va a cercare. `advice.detachedHead=false` toglie solo il
-    // muro di testo che git stamperebbe per spiegarlo a chi non l'ha chiesto.
-    ['-c', 'advice.detachedHead=false', 'checkout', '--detach', `refs/tags/${tag}`],
-  ]
-}
-
 /**
- * Porta il repo sulla release. Lancia se qualcosa va storto: qui l'errore va detto.
+ * Scarica il bundle dell'ultima release per questa piattaforma e lo estrae sopra
+ * `radice`, sovrascrivendo quello che c'era. Lancia se qualcosa va storto: qui
+ * l'errore va detto, non inghiottito.
  *
- * Il controllo sull'albero sporco sta **qui dentro** e non nei chiamanti, per la stessa
- * ragione per cui `isDir` è finita dentro `registry.open()`: chi chiama non deve poterlo
- * saltare. E non è una cintura di sicurezza in più su una che c'era già — **git non
- * rifiuta**. Misurato: con `f` modificato in locale e una release che tocca solo
- * `package.json`, `git checkout --detach` è **passato**, portandosi dietro la modifica
- * senza dire niente. Sembrava la difesa naturale ed è l'esatto contrario: la copia di
- * chi ha messo mano ai file finirebbe su un tag di release *quasi* uguale a quello
- * pubblicato, e nessuno saprebbe più in cosa differisce.
+ * Nessun controllo sull'albero sporco: non c'è più un albero git da sporcare. Chi
+ * mette mano ai file dentro la cartella installata li perde al prossimo
+ * aggiornamento — vale oggi come valeva ieri fra due `npm install` che toccano lo
+ * stesso file, solo senza più un `git status` a dirlo prima.
  */
-export async function passaAllaRelease(radice: string, tag: string): Promise<void> {
-  if (await alberoSporco(radice)) {
-    throw new Error(
-      'ci sono modifiche locali a file tracciati: risolvile a mano prima di aggiornare. '
-      + 'Sono il tuo lavoro, e sovrascriverlo non è una decisione che prende STARK.')
+export async function passaAllaRelease(radice: string): Promise<void> {
+  const url = `${baseRelease()}/${nomeBundle()}`
+  const risposta = await fetch(url)
+  if (!risposta.ok) {
+    throw new Error(`${risposta.status} ${risposta.statusText} scaricando ${url}`)
   }
-  for (const args of await comandiPerPassare(radice, tag)) {
-    await git(radice, args, 120_000)
+  const tmp = await mkdtemp(join(tmpdir(), 'stark-update-'))
+  try {
+    const archivio = join(tmp, 'bundle.tar.gz')
+    await writeFile(archivio, Buffer.from(await risposta.arrayBuffer()))
+    // `tar` e non una libreria: è già un requisito dell'installer (`install.sh`
+    // rifiuta di partire senza), quindi qui è già garantito che ci sia.
+    await esegui('tar', ['-xzf', archivio, '-C', radice], { timeout: 120_000 })
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
   }
 }
 
@@ -169,9 +153,9 @@ export function notaAggiornamento(s: StatoAggiornamento): void {
 }
 
 /** Ogni quanto si ripete il controllo dopo il primo, all'accensione. Un giro di rete
- *  verso il remoto del repo (zero oggetti scaricati), quindi non è il costo a porre un
- *  limite: è che una release non esce due volte in un'ora, e ricontrollare più spesso
- *  di così non farebbe comparire il banner prima, solo più chiamate a vuoto. */
+ *  minuscolo (poche righe di testo), quindi non è il costo a porre un limite: è che
+ *  una release non esce due volte in un'ora, e ricontrollare più spesso di così non
+ *  farebbe comparire il banner prima, solo più chiamate a vuoto. */
 const RICONTROLLO_MS = 3 * 60 * 60 * 1000
 
 /**
@@ -192,26 +176,4 @@ export function controllaAllAvvio(radice: string): void {
   }
   giro()
   setInterval(giro, RICONTROLLO_MS).unref()
-}
-
-/**
- * Rimette a posto i file tracciati che **l'aggiornamento stesso** ha sporcato.
- *
- * Misurato, ed è un difetto che si vede solo aggiornando due volte: `npm install`
- * riscrive `package-lock.json` (ci tiene dentro la `version`) e **anche `yarn.lock`**,
- * a ogni esecuzione, su questo repo. L'aggiornamento si chiudeva quindi la porta alle
- * spalle: finiva lasciando l'albero sporco, e il successivo si rifiutava con «ci sono
- * modifiche locali» — modifiche che non erano di nessuno, se non nostre.
- *
- * Buttarle via è sicuro per un motivo preciso, e solo per quello: `passaAllaRelease`
- * **si rifiuta di partire** su un albero sporco. Quindi quando si arriva qui la
- * partenza era pulita per costruzione, e tutto ciò che è cambiato da allora l'abbiamo
- * cambiato noi. Chiamarla in un altro momento vorrebbe dire cancellare il lavoro di
- * qualcuno, ed è la ragione per cui questa funzione non va usata altrove.
- *
- * Solo i file **tracciati**: quelli non tracciati non li ha messi lì `npm install`.
- */
-export async function riallinea(radice: string): Promise<void> {
-  await git(radice, ['checkout', '--', '.'], 60_000)
-    .catch(() => { /* niente da rimettere a posto, o non è un repo: va bene così */ })
 }

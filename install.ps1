@@ -1,6 +1,6 @@
 # Installa STARK con un comando solo, su Windows.
 #
-#   irm https://raw.githubusercontent.com/devsmkna/stark/main/install.ps1 | iex
+#   irm https://starkapp.dev/install.ps1 | iex
 #
 # Gemello di `install.sh`, con cui condivide le tre scelte che contano:
 #
@@ -32,8 +32,9 @@ $ProgressPreference = 'SilentlyContinue'
 $Base    = if ($env:STARK_DIR) { $env:STARK_DIR } else { Join-Path $env:LOCALAPPDATA 'stark' }
 $App     = Join-Path $Base 'app'
 $NodeDir = Join-Path $Base 'node'
-$Repo    = if ($env:STARK_REPO)   { $env:STARK_REPO }   else { 'https://github.com/devsmkna/stark.git' }
-$Ramo    = if ($env:STARK_BRANCH) { $env:STARK_BRANCH } else { 'main' }
+# Da dove si scarica il bundle già pronto per questa piattaforma — non un repo da
+# clonare: vedi la sezione «Codice» più sotto, e docs/distribuzione.md per il perché.
+$ReleaseBase = if ($env:STARK_RELEASE_BASE) { $env:STARK_RELEASE_BASE } else { 'https://starkapp.dev/releases/latest' }
 
 # Fissata invece di «l'ultima»: un installer che prende ogni volta una versione diversa
 # e' un installer che funziona finche' non smette, senza che nessuno abbia cambiato nulla.
@@ -129,68 +130,41 @@ if ((Test-Path $KanbanBin) -and (& $KanbanBin --version 2>$null)) {
   Verde "           kanban-md pronto"
 }
 
-$NodeBin = Split-Path $NodeExe
-$Npm = Join-Path $NodeBin 'npm.cmd'
-if (-not (Test-Path $Npm)) {
-  if (Esiste 'npm') { $Npm = (Get-Command npm).Source } else { Muori 'Trovato node ma non npm.' }
-}
-
-if (-not (Esiste 'git')) {
-  Muori "Serve git, e non lo trovo.
-Installalo con:  winget install --id Git.Git -e
-Poi apri un terminale nuovo e rilancia questo comando."
-}
-
 # ── il codice ───────────────────────────────────────────────────────────────
+# Non un `git clone`: un bundle già pronto (codice, `node_modules` e interfaccia già
+# compilata) per l'ultima **release** e per questa piattaforma esatta. Lo stesso bundle
+# lo scarica anche `stark update` (`daemon/aggiornamenti.ts`) — è la ragione per cui qui
+# non c'è compilazione né `npm install`: quel lavoro l'ha già fatto la CI una volta sola,
+# non ogni macchina che installa. Perché non più un repo da clonare, e cosa c'è dentro
+# un bundle: docs/distribuzione.md.
 Titolo 'Codice'
-if (Test-Path (Join-Path $App '.git')) {
+if (Test-Path (Join-Path $App 'package.json')) {
   Write-Host "c'e' gia': aggiorno ($App)"
 } else {
-  New-Item -ItemType Directory -Path (Split-Path $App) -Force | Out-Null
-  & git clone --quiet --branch $Ramo --depth 1 $Repo $App
-  if ($LASTEXITCODE -ne 0) { Muori "Non sono riuscito a clonare $Repo (ramo $Ramo).
-Se il repo e' privato, servono le tue credenziali git su questa macchina." }
+  New-Item -ItemType Directory -Path $App -Force | Out-Null
 }
 
-# Ci si mette sull'ultima **release**, non sulla punta del ramo: si installa una
-# versione che qualcuno ha dichiarato pronta, non l'ultima cosa scritta. Il clone qui
-# sopra prende il ramo perche' serve un punto da cui partire — la regola vera e' la riga
-# qui sotto, e se non c'e' ancora nessuna release lo dice e resta sul ramo.
-#
-# E' TypeScript e non PowerShell perche' la stessa regola serve a `stark update` e a
-# `install.sh`: tre copie in tre linguaggi sono tre modi di restare indietro. Gira
-# **prima** di `npm install`, quindi quel file non dipende da `node_modules`.
-#
-# `--ff-only` dentro: se qualcuno ha messo mano al repo, si ferma invece di
-# sovrascrivere. E' il suo lavoro, e cancellarlo non e' una decisione dell'installer.
-& $NodeExe (Join-Path $App 'src/cli/release.ts') checkout $App
-if ($LASTEXITCODE -ne 0) { Muori "Non sono riuscito a mettere $App sull'ultima release.
-Se ci hai lavorato dentro, le modifiche locali vanno risolte a mano." }
-Grigio (& git -C $App log --oneline -1)
-
-# Da qui in poi `npm` deve trovare **questo** node: npm e' uno script che invoca `node`
-# dal PATH, e senza questa riga un Node vecchio in testa rifiuterebbe i pacchetti che
-# dichiarano `engines`. Vale solo per questo processo, non per il sistema.
-$env:Path = "$NodeBin;$env:Path"
-
-Titolo 'Dipendenze'
-Write-Host "(la prima volta ci mette qualche minuto: dentro c'e' il binario di Claude Code, ~340 MB)"
-Push-Location $App
+$Bundle = "stark-win-$Arch.tar.gz"
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("stark-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 try {
-  & $Npm install --no-fund --no-audit
-  if ($LASTEXITCODE -ne 0) { Muori 'npm install e'' fallito.' }
-  # `npm install` riscrive `package-lock.json` e `yarn.lock` a ogni esecuzione
-  # (misurato). Senza questo, l'installazione lascerebbe l'albero sporco e il rilancio
-  # dell'installer — o il primo `stark update` — si rifiuterebbe per «modifiche locali»
-  # che sono nostre.
-  & $NodeExe (Join-Path $App 'src/cli/release.ts') riallinea $App
-
-  Titolo 'Interfaccia'
-  & $Npm run ui:build | Out-Null
-  if ($LASTEXITCODE -ne 0) { Muori "La compilazione della UI e' fallita.
-Rilancia a mano per vedere il perche':  cd $App ; npm run ui:build" }
-  Verde 'compilata'
-} finally { Pop-Location }
+  try {
+    Invoke-WebRequest -Uri "$ReleaseBase/$Bundle" -OutFile "$tmp\stark.tar.gz"
+  } catch {
+    Muori "Non sono riuscito a scaricare $ReleaseBase/$Bundle.
+Se questa piattaforma (win-$Arch) non e' ancora fra quelle pubblicate, dillo — si aggiunge."
+  }
+  # `tar` e' incluso in Windows dalla 1803 in poi (bsdtar) — un formato solo, lo stesso
+  # di `install.sh`, invece di un'estrazione diversa per piattaforma.
+  & tar -xzf "$tmp\stark.tar.gz" -C $App
+  if ($LASTEXITCODE -ne 0) { Muori 'Il bundle scaricato non si e'' estratto correttamente.' }
+} finally {
+  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+# Barre in avanti nel path passato a `require()`: Node le accetta anche su Windows, ed
+# evita di dover raddoppiare i backslash per non romperli dentro la stringa JS.
+$AppPerNode = $App -replace '\\', '/'
+try { Grigio "versione $(& $NodeExe -p "require('$AppPerNode/package.json').version")" } catch { }
 
 # ── il comando ──────────────────────────────────────────────────────────────
 Titolo 'Comando stark'

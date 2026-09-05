@@ -1,31 +1,22 @@
 // Qual è l'ultima versione **rilasciata**, e se quella installata è indietro.
 //
-// La domanda a cui risponde questo file è una sola e non riguarda git: date delle
+// La domanda a cui risponde questo file è una sola e non riguarda la rete: date delle
 // stringhe che qualcuno ha messo come tag, qual è la più recente, e la versione che ho
-// su disco è più vecchia? Le chiamate a `git` stanno in `daemon/aggiornamenti.ts`, i
-// bottoni nella UI: qui c'è solo la regola, e infatti si prova con `node` puro dentro
-// `npm run check` — come già fanno `layout.ts` per i pannelli e `gruppi.ts` per i turni.
+// su disco è più vecchia? Chi va a chiederlo in giro — un giro HTTP a
+// `releases/latest/version.txt` — sta in `daemon/aggiornamenti.ts`; qui c'è solo la
+// regola pura, e infatti si prova con `node` puro dentro `npm run check` — come già
+// fanno `layout.ts` per i pannelli e `gruppi.ts` per i turni.
 //
-// **Questo file non importa niente.** Non è una coincidenza da non rompere: `install.sh`
-// lo esegue **prima** di `npm install`, cioè su una cartella dove `node_modules` non
-// esiste ancora, per sapere su quale release mettere il clone appena fatto. Un import
-// di un pacchetto qui dentro romperebbe l'installazione, e lo farebbe solo sulla
-// macchina di chi installa per la prima volta — cioè dove non lo vedremmo mai.
+// **Questo file non importa niente.** Resta una proprietà voluta anche senza il motivo
+// per cui è nata (girare prima di `npm install`, quando l'installer clonava un repo:
+// oggi scarica un bundle già pronto, e non chiama più questo file): una regola pura e
+// senza dipendenze si prova più in fretta, e nessuno la rompe per sbaglio con un import.
 //
-// ── Perché i tag e non le Release di GitHub ────────────────────────────────────
-// Le Release di GitHub sono la cosa «ufficiale», e la regola del progetto dice di
-// preferire ciò che è ufficiale e già pronto. Qui però il confronto è fra due cose
-// ufficiali, non fra una ufficiale e una fatta in casa: i tag sono di **git**, e sono
-// il meccanismo che le Release di GitHub usano sotto. Sceglierli costa meno e regge di
-// più, per tre ragioni misurabili:
-//   1. `git ls-remote --tags` è **un giro di rete e zero oggetti scaricati**, e passa
-//      dalle credenziali git che la macchina ha già. L'API di GitHub, su un repo
-//      privato, vorrebbe un token in più da distribuire a ogni collega.
-//   2. non lega STARK a GitHub: chi domani sposta il repo altrove non deve riscrivere
-//      niente.
-//   3. il clone è già lì. Chiedere a `git` una cosa che `git` sa è la strada corta.
-// Restano vere le Release come *vetrina* (note di rilascio, allegati): se un giorno
-// servissero, si aggiungono **sopra** i tag senza toccare questa regola.
+// ── Perché un tag resta la release ──────────────────────────────────────────────
+// `docs/rilascio.md` lo spiega per esteso: un tag `vX.Y.Z` è ciò che la CI legge per
+// decidere quando pubblicare, non un numero scritto a mano da qualche parte. Il file
+// `version.txt` che `daemon/aggiornamenti.ts` legge contiene esattamente quel tag —
+// questo file non sa, e non deve sapere, come ci si arriva.
 
 /** Una versione rilasciata: il tag così com'è sul remoto, e i suoi numeri. */
 export type Release = {
@@ -63,25 +54,6 @@ export function confronta(a: number[], b: number[]): number {
     if (d !== 0) return d
   }
   return 0
-}
-
-/**
- * L'output di `git ls-remote --tags <remoto>` ridotto ai nomi dei tag.
- *
- * Il pezzo che non si indovina è `^{}`: un tag **annotato** compare due volte, una col
- * proprio oggetto e una — con quel suffisso — col commit a cui punta. Senza toglierlo
- * ci si ritroverebbe `v1.4.0` e `v1.4.0^{}` come se fossero due release, e la seconda
- * non sarebbe nemmeno un nome che `git checkout` accetta. È il motivo per cui questa
- * funzione esiste invece di uno `split` sul posto: è una stortura del formato, e va
- * scritta una volta sola in un punto dove si può provare.
- */
-export function tagDaLsRemote(out: string): string[] {
-  const visti = new Set<string>()
-  for (const riga of out.split('\n')) {
-    const m = /\trefs\/tags\/(.+?)(\^\{\})?$/.exec(riga.trimEnd())
-    if (m?.[1]) visti.add(m[1])
-  }
-  return [...visti]
 }
 
 /** La release più alta fra questi tag, o `null` se nessuno di loro è una release. */

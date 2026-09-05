@@ -35,7 +35,7 @@ import { allineaMemoria, INIZIO_REGOLA } from '../adapters/claude-code/memoria.t
 import { allineaContestoBoard, boardDir, leggiBoardLocale } from '../daemon/board.ts'
 import { pickFolderNative } from '../daemon/native-browse.ts'
 import { quandoRiparte, quotaFerma } from '../core/quota.ts'
-import { daAggiornare, numeriDiTag, tagDaLsRemote, ultimaRelease } from '../core/release.ts'
+import { daAggiornare, numeriDiTag, ultimaRelease } from '../core/release.ts'
 import { askCategories, readSettings, writeSettings, type Settings } from '../daemon/settings.ts'
 import { EMPTY_USAGE, MODEL_VERSION, promptText, type CanonicalEvent, type Payload } from '../core/events.ts'
 import { Journal, MemoryJournal, RawLog } from '../core/journal.ts'
@@ -2292,11 +2292,6 @@ if (casaPrima === undefined) delete process.env['HOME']; else process.env['HOME'
 {
   const tags = ['v0.1.0', 'v0.2.0', 'v0.10.0', 'v0.9.9', 'v1.0.0-rc.1',
     'backup-prima-riscrittura', 'nightly']
-
-  check('release: `^{}` di un tag annotato non diventa una seconda versione',
-    JSON.stringify(tagDaLsRemote(
-      'aaa\trefs/tags/v0.2.0\nbbb\trefs/tags/v0.2.0^{}\nccc\trefs/tags/v0.1.0\n',
-    )) === JSON.stringify(['v0.2.0', 'v0.1.0']))
 
   // Ordinare per stringa direbbe che v0.9.9 batte v0.10.0: e' il modo classico in cui
   // una release nuova non viene offerta a nessuno, e nessuno se ne accorge.

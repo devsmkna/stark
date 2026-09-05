@@ -1,12 +1,13 @@
 #!/bin/sh
 # Installa STARK con un comando solo, su Linux, WSL2 e macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/devsmkna/stark/main/install.sh | sh
+#   curl -fsSL https://starkapp.dev/install.sh | sh
 #
 # Cosa fa, in ordine, e cosa NON fa.
 #
-# Fa: mette tutto sotto ~/.local/share/stark — il repo, e un Node suo se quello di
-# sistema è troppo vecchio — e poi un lanciatore `stark` in ~/.local/bin.
+# Fa: mette tutto sotto ~/.local/share/stark — un bundle già pronto (codice, dipendenze
+# e interfaccia già compilata: niente `npm install` né build in locale), e un Node suo
+# se quello di sistema è troppo vecchio — e poi un lanciatore `stark` in ~/.local/bin.
 #
 # NON usa sudo, e non è una comodità: `sudo` servirebbe solo a *scrivere* il file del
 # lanciatore, che non ha il bit setuid — quindi non darebbe all'agent nessun permesso in
@@ -31,8 +32,9 @@ set -eu
 STARK_DIR="${STARK_DIR:-$HOME/.local/share/stark}"
 APP="$STARK_DIR/app"
 NODE_DIR="$STARK_DIR/node"
-REPO="${STARK_REPO:-https://github.com/devsmkna/stark.git}"
-RAMO="${STARK_BRANCH:-main}"
+# Da dove si scarica il bundle già pronto per questa piattaforma — non un repo da
+# clonare: vedi la sezione «Codice» più sotto, e docs/distribuzione.md per il perché.
+RELEASE_BASE="${STARK_RELEASE_BASE:-https://starkapp.dev/releases/latest}"
 
 # Il Node che si scarica quando quello della macchina non basta. Fissato invece di
 # «l'ultimo»: un installer che prende ogni volta una versione diversa è un installer che
@@ -57,7 +59,7 @@ case "$(uname -s)" in
   Darwin) SO=darwin ;;
   *) muori "Sistema non supportato da questo script: $(uname -s).
 Su Windows usa invece, in PowerShell:
-  irm https://raw.githubusercontent.com/devsmkna/stark/main/install.ps1 | iex" ;;
+  irm https://starkapp.dev/install.ps1 | iex" ;;
 esac
 
 case "$(uname -m)" in
@@ -80,10 +82,6 @@ if esiste curl;   then scarica() { curl -fsSL "$1" -o "$2"; }
 elif esiste wget; then scarica() { wget -qO "$2" "$1"; }
 else muori "Serve curl o wget, e non ne trovo nessuno dei due."
 fi
-
-esiste git || muori "Serve git, e non lo trovo.
-  Debian/Ubuntu:  sudo apt install git
-  macOS:          xcode-select --install"
 
 esiste tar || muori "Serve tar, e non lo trovo."
 
@@ -165,55 +163,29 @@ else
   verde "           kanban-md pronto"
 fi
 
-NPM="$(dirname "$NODE")/npm"
-esiste "$NPM" || [ -x "$NPM" ] || NPM="$(command -v npm)" || muori "Trovato node ma non npm."
-
 # ── il codice ───────────────────────────────────────────────────────────────
+# Non un `git clone`: un bundle già pronto (codice, `node_modules` e interfaccia già
+# compilata) per l'ultima **release** e per questa piattaforma esatta. Lo stesso bundle
+# lo scarica anche `stark update` (`daemon/aggiornamenti.ts`) — è la ragione per cui qui
+# non c'è compilazione né `npm install`: quel lavoro l'ha già fatto la CI una volta sola,
+# non ogni macchina che installa. Perché non più un repo da clonare, e cosa c'è dentro
+# un bundle: docs/distribuzione.md.
 titolo "Codice"
-if [ -d "$APP/.git" ]; then
+if [ -f "$APP/package.json" ]; then
   echo "c'è già: aggiorno ($APP)"
 else
-  mkdir -p "$(dirname "$APP")"
-  git clone --quiet --branch "$RAMO" --depth 1 "$REPO" "$APP" \
-    || muori "Non sono riuscito a clonare $REPO (ramo $RAMO).
-Se il repo è privato, servono le tue credenziali git su questa macchina."
+  mkdir -p "$APP"
 fi
 
-# Ci si mette sull'ultima **release**, non sulla punta del ramo: si installa una
-# versione che qualcuno ha dichiarato pronta, non l'ultima cosa scritta. Il clone qui
-# sopra prende `main` perché serve un punto da cui partire — la regola vera è la riga
-# qui sotto, e se non c'è ancora nessuna release lo dice e resta sul ramo.
-#
-# È TypeScript e non shell perché la stessa regola serve a `stark update`, e due copie
-# in due linguaggi sono il modo in cui una delle due resta indietro. Gira **prima** di
-# `npm install`, quindi quel file e tutto ciò che importa non devono dipendere da
-# `node_modules`: è una proprietà dichiarata in testa a `src/cli/release.ts`.
-#
-# `--ff-only` dentro: se qualcuno ha messo mano al repo, si ferma invece di
-# sovrascrivere. È il suo lavoro, e cancellarlo non è una decisione dell'installer.
-"$NODE" "$APP/src/cli/release.ts" checkout "$APP" \
-  || muori "Non sono riuscito a mettere $APP sull'ultima release.
-Se ci hai lavorato dentro, le modifiche locali vanno risolte a mano."
-grigio "$(git -C "$APP" log --oneline -1)"
-
-# Da qui in poi il `npm` che gira deve trovare **questo** node, non quello di sistema:
-# npm è uno script che invoca `node` dal PATH, e senza questa riga un Node vecchio in
-# testa al PATH rifiuterebbe pacchetti che dichiarano `engines`.
-PATH="$(dirname "$NODE"):$PATH"
-export PATH
-
-titolo "Dipendenze"
-echo "(la prima volta ci mette qualche minuto: dentro c'è il binario di Claude Code, ~340 MB)"
-( cd "$APP" && "$NPM" install --no-fund --no-audit ) || muori "npm install è fallito."
-# `npm install` riscrive `package-lock.json` e `yarn.lock` a ogni esecuzione (misurato).
-# Senza questo, l'installazione lascerebbe l'albero sporco e il rilancio dell'installer —
-# o il primo `stark update` — si rifiuterebbe per «modifiche locali» che sono nostre.
-"$NODE" "$APP/src/cli/release.ts" riallinea "$APP" || true
-
-titolo "Interfaccia"
-( cd "$APP" && "$NPM" run ui:build ) >/dev/null 2>&1 || muori "La compilazione della UI è fallita.
-Rilancia a mano per vedere il perché:  cd $APP && npm run ui:build"
-verde "compilata"
+BUNDLE="stark-$SO-$ARCH.tar.gz"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT INT TERM
+scarica "$RELEASE_BASE/$BUNDLE" "$TMP/stark.tar.gz" \
+  || muori "Non sono riuscito a scaricare $RELEASE_BASE/$BUNDLE.
+Se questa piattaforma ($SO-$ARCH) non è ancora fra quelle pubblicate, dillo — si aggiunge."
+tar -xzf "$TMP/stark.tar.gz" -C "$APP" \
+  || muori "Il bundle scaricato non si è estratto correttamente."
+grigio "versione $("$NODE" -p "require('$APP/package.json').version" 2>/dev/null || echo '?')"
 
 # ── il comando ──────────────────────────────────────────────────────────────
 titolo "Comando \`stark\`"
