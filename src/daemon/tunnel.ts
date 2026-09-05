@@ -20,6 +20,7 @@
 // di chiunque stia in mezzo.
 
 import { request as httpRequest } from 'node:http'
+import { hostname } from 'node:os'
 import { tokenCloud } from './cloud.ts'
 import { machineId } from './usage-sync.ts'
 
@@ -124,7 +125,11 @@ export function creaTunnel(opts: {
     errore = undefined
     let sock: WebSocket
     try {
-      sock = new WebSocket(wsBase, ['stark-tunnel', `tok.${token}`, `mac.${macchina}`])
+      // Il nome della macchina viaggia nell'handshake, in base64url perché un
+      // hostname può contenere caratteri che un sottoprotocollo non ammette. Serve
+      // alla pagina di login dell'hub: una lista di slug non la sceglie nessuno.
+      const nome = Buffer.from(hostname()).toString('base64url')
+      sock = new WebSocket(wsBase, ['stark-tunnel', `tok.${token}`, `mac.${macchina}`, `lab.${nome}`])
     } catch (e) {
       errore = String((e as Error).message ?? e)
       pianifica(attesa = Math.min(attesa * 2, 60_000))

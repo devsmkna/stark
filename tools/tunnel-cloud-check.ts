@@ -79,9 +79,11 @@ const porta1 = (daemon1.address() as { port: number }).port
 const porta2 = (daemon2.address() as { port: number }).port
 
 // ── l'hub, con l'auth iniettata: due utenti veri, un impostore ───────────────
-const hub = new TunnelHub(async t => (
-  t === 'tok-buono' ? { id: 'utente-1' } : t === 'tok-secondo' ? { id: 'utente-2' } : null
-))
+const hub = new TunnelHub(
+  async t => (t === 'tok-buono' ? { id: 'utente-1' } : t === 'tok-secondo' ? { id: 'utente-2' } : null),
+  // Il login della pagina senza QR, iniettato come l'auth: una coppia buona per utente.
+  async (email, pw) => (email === 'uno@test' && pw === 'giusta' ? { id: 'utente-1' } : null),
+)
 const fronte = createServer((req, res) => {
   if (!hub.handleRequest(req, res)) {
     res.writeHead(404, { 'content-type': 'application/json' })
@@ -187,10 +189,33 @@ ok(slug1 !== chiaveMacchina, 'il QR non espone più il machine-id')
   rmSync(homeDue, { recursive: true, force: true })
 }
 
-// 8. i casi senza strada
+// 8. la strada senza QR: login → macchina
 {
-  const r1 = await fetch(base)
-  ok(r1.status === 404, 'senza macchina → 404', String(r1.status))
+  const r0 = await fetch(base, { redirect: 'manual' })
+  const html = await r0.text()
+  ok(r0.status === 200 && html.includes('action="/accedi"'), 'la radice senza cookie è la pagina di login')
+
+  const sbagliato = await fetch(`${base}/accedi`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=uno%40test&password=sbagliata',
+  })
+  ok(sbagliato.status === 303 && (sbagliato.headers.get('location') ?? '').includes('e=credenziali'),
+    'credenziali sbagliate → redirect con errore (mai un render del POST)')
+
+  const giusto = await fetch(`${base}/accedi`, {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=uno%40test&password=giusta',
+  })
+  ok(giusto.status === 303 && giusto.headers.get('location') === `/pair?m=${slug1}`,
+    'una macchina sola → dritti su /pair con lo slug giusto', giusto.headers.get('location') ?? '')
+}
+
+// 8b. i casi senza strada
+{
+  const r1 = await fetch(`${base}/altro`)
+  ok(r1.status === 404, 'un percorso qualunque senza macchina → 404', String(r1.status))
   const r2 = await fetch(`${base}/eco?m=0123456789abcdef`)
   ok(r2.status === 502, 'macchina sconosciuta → 502', String(r2.status))
   const testo = await r2.text()

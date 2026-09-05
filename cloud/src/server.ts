@@ -78,7 +78,16 @@ export async function startCloud(): Promise<void> {
   // token è la stessa `chi()` sullo stesso Postgres, e due processi vorrebbero dire
   // due strade per la stessa domanda. Traefik gli instrada un hostname suo
   // (tunnel.starkapp.dev): è l'`Host` a decidere chi risponde, non il percorso.
-  const tunnel = new TunnelHub(chiId)
+  // Il secondo argomento è il login della pagina senza QR: verifica e butta subito
+  // la sessione appena creata — al browser va solo il cookie d'instradamento, e una
+  // sessione che nessuno terrà mai in mano non deve restare nel database.
+  const tunnel = new TunnelHub(chiId, async (email, password) => {
+    const s = await login(email, password)
+    if (!s) return null
+    const u = await chiId(s.token)
+    await revoca(s.token)
+    return u ? { id: u.id } : null
+  })
   const suTunnel = (req: IncomingMessage): boolean =>
     (req.headers.host ?? '').split(':')[0]?.toLowerCase().startsWith('tunnel.') ?? false
 

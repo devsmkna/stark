@@ -50,8 +50,26 @@ espone lo slug, non il machine-id — e due account sulla stessa macchina (che s
 legittimi) convivono con due slug.
 
 Limite noto: **due macchine nello stesso browser si contendono il cookie**. Si
-risolve ri-scansionando il QR dell'altra macchina; un selettore è lavoro futuro, e
-va disegnato prima che scritto.
+risolve ri-scansionando il QR dell'altra macchina, o rifacendo il giro di login
+qui sotto; un selettore persistente è lavoro futuro.
+
+## La strada senza QR (5 settembre 2026)
+
+Da un desktop senza camera il QR non si scansiona, e `tunnel.starkapp.dev` nudo
+dava un 404. Ora la radice senza cookie è una **pagina di login** dell'hub: si
+entra con l'account cloud, l'hub guarda quali macchine collegate sono tue (lo sa
+già: lo slug è derivato da `userId`), e — una sola → dritti su `/pair`; più
+d'una → lista coi nomi (il daemon manda l'hostname nell'handshake, `lab.` in
+base64url); zero → si spiega cosa accendere. Poi si batte il **codice di
+accoppiamento**, come dal QR: la pagina del codice resta del daemon, e l'hub
+continua a non sapere niente di codici e token.
+
+Dettagli che contano: il login è **usa-e-getta** (la sessione creata per
+verificare si revoca subito: al browser va solo il cookie d'instradamento, mai un
+token cloud); le credenziali sbagliate rispondono con un **redirect**, mai col
+render del POST (un refresh non deve riproporre la password); freno dedicato da
+**10 tentativi/min per IP**. La password da sola non apre niente: scopre la
+porta, e la porta chiede comunque il codice.
 
 ## La sicurezza, detta intera
 

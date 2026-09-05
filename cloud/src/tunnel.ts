@@ -47,6 +47,14 @@ import { WebSocketServer, WebSocket } from 'ws'
  *  Postgres, e il tunnel non deve pretenderne uno per essere provato. */
 export type TunnelAuth = (token: string) => Promise<{ id: string } | null>
 
+/**
+ * Da credenziali a identità, o `null` — per la pagina di login senza QR (5 settembre
+ * 2026: da un desktop senza camera il tunnel dava solo un 404). **Usa-e-getta**: chi
+ * la implementa deve verificare e NON lasciare una sessione in giro — il browser del
+ * desktop riceve solo il cookie d'instradamento, mai un token cloud.
+ */
+export type TunnelAccedi = (email: string, password: string) => Promise<{ id: string } | null>
+
 /** Cosa il server manda al daemon. `benvenuto` arriva una volta, subito dopo
  *  l'handshake, e porta lo slug d'instradamento: il daemon non può calcolarselo da
  *  solo perché non conosce il proprio userId — ed è giusto così, la chiave la
@@ -86,6 +94,7 @@ const MAX_PENDENTI = 128
 const LIMITE_GENERALE = 300      // richieste/min per IP: una UI che si carica ne fa decine
 const LIMITE_ACCOPPIAMENTO = 20  // /pair e /claim: la superficie senza credenziale
 const LIMITE_CONNECT = 30        // handshake di daemon/min per IP
+const LIMITE_LOGIN = 10          // tentativi di login/min per IP: è una casella password su Internet
 
 class Freno {
   #conta = new Map<string, { n: number; scade: number }>()
@@ -112,10 +121,11 @@ function ipDi(req: IncomingMessage): string {
   return primo || req.socket.remoteAddress || '?'
 }
 
-type Collegata = { ws: WebSocket; viva: boolean }
+type Collegata = { ws: WebSocket; viva: boolean; userId: string; label: string; slug: string }
 
 export class TunnelHub {
   #auth: TunnelAuth
+  #accedi: TunnelAccedi | null
   #macchine = new Map<string, Collegata>()
   #pendenti = new Map<WebSocket, Map<number, ServerResponse>>()
   #prossimoId = 1
@@ -124,8 +134,9 @@ export class TunnelHub {
   #battito: ReturnType<typeof setInterval> | null = null
   #wss = new WebSocketServer({ noServer: true, handleProtocols: (ps) => ps.has('stark-tunnel') ? 'stark-tunnel' : false })
 
-  constructor(auth: TunnelAuth) {
+  constructor(auth: TunnelAuth, accedi?: TunnelAccedi) {
     this.#auth = auth
+    this.#accedi = accedi ?? null
     // Un daemon che sparisce senza chiudere (rete mobile, sospensione) lascerebbe la
     // voce nella mappa e le richieste ad aspettare: il battito lo scopre e lo chiude.
     this.#battito = setInterval(() => {
@@ -164,6 +175,9 @@ export class TunnelHub {
     const protocolli = (req.headers['sec-websocket-protocol'] ?? '').split(',').map(s => s.trim())
     const token = protocolli.find(p => p.startsWith('tok.'))?.slice(4) ?? ''
     const macchina = protocolli.find(p => p.startsWith('mac.'))?.slice(4) ?? ''
+    const labelRaw = protocolli.find(p => p.startsWith('lab.'))?.slice(4) ?? ''
+    let label = ''
+    try { label = Buffer.from(labelRaw, 'base64url').toString('utf8').slice(0, 64) } catch { /* senza nome */ }
     const utente = token ? await this.#auth(token) : null
     if (!utente || !macchina) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
@@ -181,7 +195,7 @@ export class TunnelHub {
       // arriva qui con lo stesso slug È lo stesso utente sulla stessa macchina.
       const vecchia = this.#macchine.get(slug)
       if (vecchia) vecchia.ws.terminate()
-      const c: Collegata = { ws, viva: true }
+      const c: Collegata = { ws, viva: true, userId: utente.id, label, slug }
       this.#macchine.set(slug, c)
       this.#pendenti.set(ws, new Map())
       ws.send(JSON.stringify({ t: 'benvenuto', m: slug } satisfies VersoDaemon))
@@ -220,7 +234,21 @@ export class TunnelHub {
     }
     const dalQuery = url.searchParams.get('m')
     const macchina = dalQuery ?? leggiCookie(req, COOKIE_MACCHINA)
-    if (!macchina) return false
+    if (!macchina) {
+      // Nessuna macchina indicata: da un desktop senza camera è il caso NORMALE, non
+      // un errore. La radice diventa la pagina di login (se qualcuno ce l'ha data),
+      // e `/accedi` la processa. Tutto il resto resta un no del chiamante.
+      if (this.#accedi && req.method === 'GET' && url.pathname === '/') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(paginaLogin(url.searchParams.get('e')))
+        return true
+      }
+      if (this.#accedi && req.method === 'POST' && url.pathname === '/accedi') {
+        void this.#login(req, res, ip)
+        return true
+      }
+      return false
+    }
 
     const c = this.#macchine.get(macchina)
     if (!c) {
@@ -273,6 +301,52 @@ export class TunnelHub {
       res.on('close', () => { this.#pendenti.get(c.ws)?.delete(id) })
     })
     return true
+  }
+
+  /**
+   * Il login della pagina senza QR. Verifica le credenziali (usa-e-getta, vedi
+   * `TunnelAccedi`) e risponde con la strada: una macchina sola → dritti su
+   * `/pair?m=<slug>` (che pianta il cookie come farebbe il QR); più d'una → la
+   * lista con i nomi; zero → si spiega. Il **codice** resta affare del daemon:
+   * questa pagina scopre la porta, non la apre.
+   */
+  async #login(req: IncomingMessage, res: ServerResponse, ip: string): Promise<void> {
+    if (this.#freno.supera(`login:${ip}`, LIMITE_LOGIN)) {
+      res.writeHead(429, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '60' })
+      res.end(paginaLogin('troppi'))
+      return
+    }
+    const pezzi: Buffer[] = []
+    let totale = 0
+    for await (const d of req) {
+      totale += (d as Buffer).length
+      if (totale > 16 * 1024) { req.destroy(); res.destroy(); return }
+      pezzi.push(d as Buffer)
+    }
+    const form = new URLSearchParams(Buffer.concat(pezzi).toString('utf8'))
+    const email = (form.get('email') ?? '').trim()
+    const password = form.get('password') ?? ''
+    const utente = email && password ? await this.#accedi!(email, password) : null
+    if (!utente) {
+      // Redirect e non render diretto: un refresh della pagina d'errore non deve
+      // riproporre il POST con le credenziali dentro.
+      res.writeHead(303, { location: '/?e=credenziali', 'cache-control': 'no-store' })
+      res.end()
+      return
+    }
+    const mie = [...this.#macchine.values()].filter(c => c.userId === utente.id)
+    if (mie.length === 0) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(paginaNessunaMacchina())
+      return
+    }
+    if (mie.length === 1) {
+      res.writeHead(303, { location: `/pair?m=${mie[0]!.slug}`, 'cache-control': 'no-store' })
+      res.end()
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(paginaScelta(mie.map(c => ({ slug: c.slug, label: c.label }))))
   }
 
   #dalDaemon(ws: WebSocket, testo: string): void {
@@ -336,4 +410,65 @@ function paginaScollegata(): string {
     + 'p{max-width:300px;color:#767D90}b{letter-spacing:.14em}</style>'
     + '<div><p><b>S T A R K</b><br><br>This machine is not connected right now.<br>'
     + 'Turn it on (or enable the tunnel in STARK), then try again.</p></div>'
+}
+
+/** Testa comune delle pagine dell'hub: stessa palette e stessa scritta spaziata
+ *  della pagina 403 del daemon e della homepage — un prodotto solo, ovunque bussi. */
+function testa(): string {
+  return '<!doctype html><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>STARK</title><style>body{margin:0;min-height:100dvh;display:flex;'
+    + 'align-items:center;justify-content:center;font:15px/1.6 system-ui,sans-serif;'
+    + 'background:#FBFBFD;color:#171A22;padding:24px;text-align:center}'
+    + '@media(prefers-color-scheme:dark){body{background:#0E1118;color:#E8EAF0}'
+    + 'input{background:#161B26;border-color:#2A3040;color:#E8EAF0}'
+    + 'a.m{background:#161B26;border-color:#2A3040}}'
+    + 'p{max-width:320px;color:#767D90}b{letter-spacing:.14em}'
+    + 'form{display:flex;flex-direction:column;gap:8px;width:min(300px,80vw);margin:18px auto 0}'
+    + 'input{padding:10px 12px;border-radius:8px;border:1px solid #D9DCE3;'
+    + 'background:#fff;font:inherit}input:focus{outline:none;border-color:#3B5BF5}'
+    + 'button{padding:10px;border:none;border-radius:8px;background:#3B5BF5;color:#fff;'
+    + 'font:inherit;font-weight:600;cursor:pointer}'
+    + '.err{color:#D0342C;font-size:13px;margin-top:10px}'
+    + 'a.m{display:block;margin:8px auto;padding:12px;width:min(300px,80vw);'
+    + 'border:1px solid #D9DCE3;border-radius:9px;background:#fff;text-decoration:none;'
+    + 'color:inherit;font-weight:600}a.m small{display:block;font-weight:400;'
+    + 'color:#767D90;font-family:ui-monospace,monospace;font-size:11px}</style>'
+}
+
+/** La pagina di login: la strada senza QR. Il POST va a `/accedi`, che è dell'hub —
+ *  le credenziali cloud non attraversano mai nessun daemon. */
+function paginaLogin(errore: string | null): string {
+  const msg = errore === 'credenziali' ? 'Wrong email or password.'
+    : errore === 'troppi' ? 'Too many attempts — wait a minute.' : ''
+  return testa()
+    + '<div><p><b>S T A R K</b><br><br>Sign in with your STARK cloud account to reach '
+    + 'one of your machines. You will need the pairing code from STARK afterwards.</p>'
+    + '<form method="post" action="/accedi">'
+    + '<input type="email" name="email" placeholder="Email" autocomplete="username" required>'
+    + '<input type="password" name="password" placeholder="Password" autocomplete="current-password" required>'
+    + '<button>Sign in</button></form>'
+    + (msg ? `<div class="err">${msg}</div>` : '')
+    + '</div>'
+}
+
+function paginaNessunaMacchina(): string {
+  return testa()
+    + '<div><p><b>S T A R K</b><br><br>No machine of yours is connected to the tunnel '
+    + 'right now.<br>On your computer, open STARK → “Use STARK from your phone” → '
+    + 'enable the tunnel, then come back here.</p></div>'
+}
+
+/** Più macchine: si sceglie per nome. I link portano `?m=<slug>`, cioè la stessa
+ *  strada del QR: scegliere pianta il cookie e apre la pagina del codice. */
+function paginaScelta(macchine: { slug: string; label: string }[]): string {
+  const righe = macchine.map(m =>
+    `<a class="m" href="/pair?m=${m.slug}">${escapeHtml(m.label || 'unnamed machine')}`
+    + `<small>${m.slug.slice(0, 4)}…</small></a>`).join('')
+  return testa()
+    + '<div><p><b>S T A R K</b><br><br>Which machine?</p>' + righe + '</div>'
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
