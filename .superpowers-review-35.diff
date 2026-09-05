@@ -1,0 +1,358 @@
+diff --git a/tools/prova-taskchip.mjs b/tools/prova-taskchip.mjs
+index 8b457a4..397b03b 100644
+--- a/tools/prova-taskchip.mjs
++++ b/tools/prova-taskchip.mjs
+@@ -167,6 +167,41 @@ if (!boardAperta || dettaglioTitolo !== 'Card permesso orfane') {
+   console.log(await page.content())
+ }
+ 
++// ── Mobile (card #35): su schermo stretto il click NON apre la Board intera ──
++//
++// Sotto gli 860px (`store.narrow`) la vista Board è un'impalcatura scomoda: colonne
++// larghe, dettaglio in-panel. Il chip apre invece un foglio col solo dettaglio
++// (`TaskSheet`), e la Board non compare. Pagina nuova con viewport da telefono,
++// stessi stub.
++const mob = await browser.newPage({ viewport: { width: 390, height: 844 } })
++await mob.route('**/api/cloud/status', r => r.fulfill({
++  json: { url: null, email: 'prova@stark.test', server: 'ok' },
++}))
++await mob.route('**/api/sessions/*/board', r => r.fulfill({ json: BOARD }))
++await mob.route('**/api/sessions/*/boardstream', r => r.fulfill({
++  status: 200, contentType: 'text/event-stream',
++  body: `data: ${JSON.stringify(BOARD)}\n\n`,
++}))
++await mob.goto(url, { waitUntil: 'load' })
++await mob.waitForSelector('.prose .taskchip', { timeout: 10_000 }).catch(() => {})
++await mob.locator('.taskchip').first().click()
++await mob.waitForSelector('.tsheet .dt', { timeout: 10_000 }).catch(() => {})
++
++assert('mobile: il click NON apre la vista Board', await mob.locator('.dlg.board').count() === 0)
++assert('mobile: si apre il foglio col dettaglio del task',
++  (await mob.locator('.tsheet .dt').first().textContent().catch(() => null)) === 'Card permesso orfane')
++const sheetAperto = await mob.locator('.tsheet').count() === 1
++await mob.locator('.tsheet .x').first().click().catch(() => {})
++await mob.waitForTimeout(300)
++assert('mobile: la X chiude il foglio e si torna in chat',
++  sheetAperto && await mob.locator('.tsheet').count() === 0)
++
++if (falli > 0) {
++  console.log('\ncontenuto mobile dopo il click:')
++  console.log(await mob.content().then(c => c.slice(0, 4000)))
++}
++await mob.close()
++
+ console.log('-'.repeat(74))
+ console.log(falli === 0 ? `OK   tutte le asserzioni passano` : `ROTT ${falli} asserzioni fallite`)
+ 
+diff --git a/ui/src/App.svelte b/ui/src/App.svelte
+index 5a79c6c..0810c5d 100644
+--- a/ui/src/App.svelte
++++ b/ui/src/App.svelte
+@@ -5,6 +5,7 @@ import Helper from './components/Helper.svelte'
+ import Splash from './components/Splash.svelte'
+ import AgentPanel from './components/AgentPanel.svelte'
+ import Board from './components/Board.svelte'
++import TaskSheet from './components/TaskSheet.svelte'
+ import Conversation from './components/Conversation.svelte'
+ import Effects from './components/Effects.svelte'
+ import NewChat from './components/NewChat.svelte'
+@@ -583,6 +584,12 @@ import Login from './components/Login.svelte'
+     <Board {store} />
+   {/if}
+ 
++  <!-- Il foglio del task su schermo stretto (card #35): il chip #NNN apre il solo
++       dettaglio, non l'impalcatura della Board. Indipendente da `boardOpen`. -->
++  {#if store.taskSheet}
++    <TaskSheet {store} />
++  {/if}
++
+   <!-- L'apertura di una chat che dura (da telefono, su rete lenta) copre tutto con lo
+        splash: finché `aprendo` non torna a zero il riquadro non deve mostrare nulla di
+        in mezzo — la lista dietro non è ancora quella giusta. -->
+diff --git a/ui/src/components/Board.svelte b/ui/src/components/Board.svelte
+index 3509f4f..70e5d2a 100644
+--- a/ui/src/components/Board.svelte
++++ b/ui/src/components/Board.svelte
+@@ -7,6 +7,7 @@
+   // Del progetto e non della chat: il file sta accanto al codice, quindi due
+   // conversazioni sulla stessa cartella vedono la stessa board.
+   import Icon from './Icon.svelte'
++  import TaskDetail from './TaskDetail.svelte'
+   import type { Store } from '../lib/store.svelte.ts'
+   import type { Board, BoardTask } from '../lib/api.ts'
+   import { projectName } from '../lib/view.ts'
+@@ -211,52 +212,16 @@
+ 
+   {#if aperta}
+     <div class="det">
+-      <div class="dh">
+-        <span class="dt">{aperta.title}</span>
+-        <button class="x" aria-label="Close details" onclick={() => { aperta = null }}>
+-          <Icon name="i-x" />
+-        </button>
+-      </div>
+-      <div class="db">
+-        <div class="drow">
+-          <span class="dl">Status</span>
+-          <select value={aperta.status}
+-            onchange={(e) => {
+-              const nuovo = (e.currentTarget as HTMLSelectElement).value
+-              // `originale` cattura la card com'era **prima** dell'aggiornamento
+-              // ottimistico: senza, `cambiaStato` vedrebbe status già uguale e
+-              // tornerebbe senza editare nulla.
+-              const originale = aperta
+-              aperta = { ...aperta, status: nuovo }
+-              void cambiaStato(originale, nuovo)
+-            }}>
+-            {#each dati?.columns ?? [] as col (col.status)}
+-              <option value={col.status}>{col.status}</option>
+-            {/each}
+-          </select>
+-        </div>
+-        {#if aperta.priority}
+-          <div class="drow"><span class="dl">Priority</span><span>{aperta.priority}</span></div>
+-        {/if}
+-        {#if aperta.assignee}
+-          <div class="drow"><span class="dl">Assignee</span><span>{aperta.assignee}</span></div>
+-        {/if}
+-        {#if aperta.claimed_by}
+-          <div class="drow"><span class="dl">Claimed by</span><span>@{aperta.claimed_by}</span></div>
+-        {/if}
+-        {#if aperta.tags && aperta.tags.length > 0}
+-          <div class="drow"><span class="dl">Tags</span><span>{aperta.tags.join(', ')}</span></div>
+-        {/if}
+-        {#if aperta.due}
+-          <div class="drow"><span class="dl">Due</span><span>{aperta.due}</span></div>
+-        {/if}
+-        {#if aperta.blocked}
+-          <div class="drow"><span class="dl">Blocked</span><span>{aperta.blocked}</span></div>
+-        {/if}
+-        {#if aperta.body}
+-          <div class="dbody">{aperta.body}</div>
+-        {/if}
+-      </div>
++      <!-- Il dettaglio è condiviso con TaskSheet (card #35): l'aggiornamento
++           ottimistico resta qui — `originale` cattura la card com'era PRIMA, senza
++           `cambiaStato` vedrebbe status già uguale e tornerebbe senza editare nulla. -->
++      <TaskDetail task={aperta}
++        statuses={(dati?.columns ?? []).map(c => c.status)}
++        onstatus={(originale, nuovo) => {
++          aperta = { ...originale, status: nuovo }
++          void cambiaStato(originale, nuovo)
++        }}
++        onclose={() => { aperta = null }} />
+     </div>
+   {/if}
+ </div>
+@@ -316,15 +281,8 @@
+   .btn { font: inherit; font-size: 11px; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+          background: var(--surface-2); color: var(--ink); border: 1px solid var(--line-2); }
+   .btn:disabled { opacity: .5; cursor: default; }
++  /* Solo il contenitore: le righe del dettaglio stanno in TaskDetail.svelte,
++     condiviso con il foglio mobile (card #35). */
+   .det { position: absolute; right: 0; top: 46px; bottom: 0; width: 320px; background: var(--surface);
+          border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+-  .dh { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+-  .dt { font-size: 12px; font-weight: 600; color: var(--ink); flex: 1; }
+-  .db { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+-  .drow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+-  .drow select { font: inherit; font-size: 11px; color: var(--ink); background: var(--surface);
+-                 border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 5px; }
+-  .dl { color: var(--muted); width: 90px; flex: none; }
+-  .dbody { margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--ink-2);
+-           white-space: pre-wrap; }
+ </style>
+diff --git a/ui/src/components/Conversation.svelte b/ui/src/components/Conversation.svelte
+index de80117..855c5b0 100644
+--- a/ui/src/components/Conversation.svelte
++++ b/ui/src/components/Conversation.svelte
+@@ -308,7 +308,7 @@
+     const chipEl = target.closest<HTMLElement>('[data-task]')
+     if (chipEl) {
+       e.preventDefault()
+-      store.openBoardTask(Number(chipEl.dataset['task']))
++      store.openBoardTask(Number(chipEl.dataset['task']), snap.sessionId)
+       return
+     }
+ 
+diff --git a/ui/src/components/TaskDetail.svelte b/ui/src/components/TaskDetail.svelte
+new file mode 100644
+index 0000000..0853cb6
+--- /dev/null
++++ b/ui/src/components/TaskDetail.svelte
+@@ -0,0 +1,72 @@
++<script lang="ts">
++  // Il dettaglio di una card della board — le righe che erano il `.det` di
++  // `Board.svelte`, estratte perché ora vivono in DUE posti: il pannello a lato della
++  // Board (desktop) e il foglio a sé di `TaskSheet.svelte` (schermo stretto, card #35).
++  // Un componente solo, così una riga aggiunta al dettaglio compare in entrambi senza
++  // che nessuno debba ricordarsi dell'altro.
++  //
++  // L'aggiornamento ottimistico dello stato resta al genitore (`onstatus` riceve la
++  // card com'era PRIMA): è lui che possiede la copia della card e sa come sostituirla.
++  import Icon from './Icon.svelte'
++  import type { BoardTask } from '../lib/api.ts'
++
++  const { task, statuses, onstatus, onclose }: {
++    task: BoardTask
++    statuses: string[]
++    onstatus: (originale: BoardTask, nuovo: string) => void
++    onclose: () => void
++  } = $props()
++</script>
++
++<div class="dh">
++  <span class="dt">{task.title}</span>
++  <button class="x" aria-label="Close details" onclick={onclose}>
++    <Icon name="i-x" />
++  </button>
++</div>
++<div class="db">
++  <div class="drow">
++    <span class="dl">Status</span>
++    <select value={task.status}
++      onchange={(e) => onstatus(task, (e.currentTarget as HTMLSelectElement).value)}>
++      {#each statuses as s (s)}
++        <option value={s}>{s}</option>
++      {/each}
++    </select>
++  </div>
++  {#if task.priority}
++    <div class="drow"><span class="dl">Priority</span><span>{task.priority}</span></div>
++  {/if}
++  {#if task.assignee}
++    <div class="drow"><span class="dl">Assignee</span><span>{task.assignee}</span></div>
++  {/if}
++  {#if task.claimed_by}
++    <div class="drow"><span class="dl">Claimed by</span><span>@{task.claimed_by}</span></div>
++  {/if}
++  {#if task.tags && task.tags.length > 0}
++    <div class="drow"><span class="dl">Tags</span><span>{task.tags.join(', ')}</span></div>
++  {/if}
++  {#if task.due}
++    <div class="drow"><span class="dl">Due</span><span>{task.due}</span></div>
++  {/if}
++  {#if task.blocked}
++    <div class="drow"><span class="dl">Blocked</span><span>{task.blocked}</span></div>
++  {/if}
++  {#if task.body}
++    <div class="dbody">{task.body}</div>
++  {/if}
++</div>
++
++<style>
++  .dh { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
++  .dt { font-size: 12px; font-weight: 600; color: var(--ink); flex: 1; }
++  .x { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); display: flex; }
++  .x:hover { color: var(--ink); }
++  .db { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
++  .drow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
++  .drow select { font: inherit; font-size: 11px; color: var(--ink); background: var(--surface);
++                 border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 5px; }
++  .dl { color: var(--muted); width: 90px; flex: none; }
++  .dbody { margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--ink-2);
++           white-space: pre-wrap; }
++</style>
+diff --git a/ui/src/components/TaskSheet.svelte b/ui/src/components/TaskSheet.svelte
+new file mode 100644
+index 0000000..0541268
+--- /dev/null
++++ b/ui/src/components/TaskSheet.svelte
+@@ -0,0 +1,73 @@
++<script lang="ts">
++  // Il foglio del task su schermo stretto (card #35).
++  //
++  // Su mobile il click su un chip `#NNN` non deve trascinare dentro la vista Board
++  // intera — colonne larghe, dettaglio in-panel, tutto pensato per un monitor. Qui si
++  // apre SOLO il dettaglio, a tutto schermo, e la X riporta in chat. Lo scrive
++  // `store.openBoardTask` quando `store.narrow` è vero; su desktop quel metodo
++  // continua ad aprire la Board come prima.
++  //
++  // I dati si chiedono con un fetch singolo, non col flusso SSE della Board: il
++  // foglio vive pochi secondi, e lo stato che mostra è quello del momento del click —
++  // per il vivo c'è la Board. Se la board nel frattempo è sparita o il task non c'è
++  // più, si degrada a un messaggio, mai a un errore (stessa regola dei chip).
++  import TaskDetail from './TaskDetail.svelte'
++  import type { Store } from '../lib/store.svelte.ts'
++  import type { BoardTask } from '../lib/api.ts'
++
++  const { store }: { store: Store } = $props()
++
++  let task = $state<BoardTask | null>(null)
++  let statuses = $state<string[]>([])
++  let fallita = $state(false)
++
++  $effect(() => {
++    const rif = store.taskSheet
++    task = null
++    statuses = []
++    fallita = false
++    if (!rif) return
++    store.api.board(rif.sessione).then((b) => {
++      if (store.taskSheet !== rif) return // nel frattempo è cambiato o chiuso
++      statuses = b.columns.map(c => c.status)
++      task = b.columns.flatMap(c => c.tasks).find(t => t.id === rif.id) ?? null
++      if (!task) fallita = true
++    }).catch(() => { fallita = true })
++  })
++
++  function chiudi(): void { store.taskSheet = null }
++
++  async function cambiaStato(originale: BoardTask, nuovo: string): Promise<void> {
++    const rif = store.taskSheet
++    if (!rif || nuovo === originale.status) return
++    task = { ...originale, status: nuovo }
++    await store.api.boardEdit(rif.sessione, originale.id, { status: nuovo }).catch(() => {})
++  }
++</script>
++
++{#if store.taskSheet}
++  <div class="scrim" role="presentation" onclick={chiudi}></div>
++  <div class="tsheet">
++    {#if task}
++      <TaskDetail {task} {statuses}
++        onstatus={(originale, nuovo) => { void cambiaStato(originale, nuovo) }}
++        onclose={chiudi} />
++    {:else}
++      <div class="vuoto">
++        <span>{fallita ? 'This task is not on the board anymore.' : 'Reading…'}</span>
++        <button class="x" aria-label="Close" onclick={chiudi}>Close</button>
++      </div>
++    {/if}
++  </div>
++{/if}
++
++<style>
++  /* A tutto schermo sotto la barra di sistema: su un telefono un "pannello a lato"
++     non esiste, e un dialog piccolo renderebbe illeggibile proprio il corpo. */
++  .tsheet { position: fixed; inset: 0; z-index: 60; background: var(--surface);
++            display: flex; flex-direction: column; }
++  .vuoto { padding: 24px 16px; color: var(--muted); font-size: 12px; display: flex;
++           flex-direction: column; gap: 14px; align-items: flex-start; }
++  .vuoto .x { font: inherit; font-size: 11px; color: var(--ink); background: var(--surface);
++              border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 12px; cursor: pointer; }
++</style>
+diff --git a/ui/src/lib/store.svelte.ts b/ui/src/lib/store.svelte.ts
+index a6c0651..fe604ba 100644
+--- a/ui/src/lib/store.svelte.ts
++++ b/ui/src/lib/store.svelte.ts
+@@ -308,7 +308,18 @@ export class Store {
+    *  chip `#NNN` in chat, lo consuma (e azzera) Board.svelte. */
+   boardTask = $state<number | null>(null)
+ 
+-  openBoardTask(id: number): void {
++  /** Il foglio del task su schermo stretto (card #35): id + la sessione con cui il
++   *  daemon risolve la board del progetto. Lo legge TaskSheet.svelte; `null` = chiuso. */
++  taskSheet = $state<{ id: number; sessione: string } | null>(null)
++
++  openBoardTask(id: number, sessione?: string): void {
++    // Su schermo stretto la Board intera è un'impalcatura scomoda: il chip apre il
++    // solo dettaglio. Serve la sessione per risolvere la board; senza (chiamanti
++    // futuri che non ce l'hanno) si ripiega sulla Board, che non ne ha bisogno.
++    if (this.narrow && sessione) {
++      this.taskSheet = { id, sessione }
++      return
++    }
+     this.boardTask = id
+     if (!this.boardOpen) this.toggleBoard()
+   }

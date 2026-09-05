@@ -20,6 +20,7 @@
   let task = $state<BoardTask | null>(null)
   let statuses = $state<string[]>([])
   let fallita = $state(false)
+  let errore = $state('')
 
   $effect(() => {
     const rif = store.taskSheet
@@ -41,7 +42,17 @@
     const rif = store.taskSheet
     if (!rif || nuovo === originale.status) return
     task = { ...originale, status: nuovo }
-    await store.api.boardEdit(rif.sessione, originale.id, { status: nuovo }).catch(() => {})
+    errore = ''
+    // `boardEdit` risolve anche sul rifiuto logico ({ok:false, motivo}): un `.catch`
+    // da solo lo lascerebbe passare, e lo stato ottimistico resterebbe una bugia.
+    // Come in Board.svelte si mostra il motivo — e in più si torna allo stato vero,
+    // perché qui non c'è un flusso SSE che lo corregga da sé.
+    const esito = await store.api.boardEdit(rif.sessione, originale.id, { status: nuovo })
+      .catch(() => ({ ok: false, motivo: 'daemon unreachable' }))
+    if (!esito.ok) {
+      task = originale
+      errore = esito.motivo ?? 'edit refused'
+    }
   }
 </script>
 
@@ -52,6 +63,7 @@
       <TaskDetail {task} {statuses}
         onstatus={(originale, nuovo) => { void cambiaStato(originale, nuovo) }}
         onclose={chiudi} />
+      {#if errore}<div class="err">{errore}</div>{/if}
     {:else}
       <div class="vuoto">
         <span>{fallita ? 'This task is not on the board anymore.' : 'Reading…'}</span>
@@ -63,9 +75,13 @@
 
 <style>
   /* A tutto schermo sotto la barra di sistema: su un telefono un "pannello a lato"
-     non esiste, e un dialog piccolo renderebbe illeggibile proprio il corpo. */
-  .tsheet { position: fixed; inset: 0; z-index: 60; background: var(--surface);
+     non esiste, e un dialog piccolo renderebbe illeggibile proprio il corpo.
+     z-index 9 = la scala dei dialog dell'app (scrim 8, dlg 9, Splash/Login 12):
+     un numero fuori scala finirebbe SOPRA lo Splash, che deve coprire tutto. */
+  .tsheet { position: fixed; inset: 0; z-index: 9; background: var(--surface);
             display: flex; flex-direction: column; }
+  .err { padding: 10px 14px; font-size: 11px; color: var(--stop); background: var(--stop-bg);
+         border-top: 1px solid var(--line); }
   .vuoto { padding: 24px 16px; color: var(--muted); font-size: 12px; display: flex;
            flex-direction: column; gap: 14px; align-items: flex-start; }
   .vuoto .x { font: inherit; font-size: 11px; color: var(--ink); background: var(--surface);
