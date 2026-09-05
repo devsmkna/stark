@@ -160,9 +160,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   // accende STARK e STARK acceso. Il risultato lo legge `GET /api/update`.
   //
   // Va detto perché è l'unica altra cosa che esce dalla macchina oltre al Web Push: a
-  // ogni accensione parte un `git ls-remote` verso il remoto del repo. Non manda
-  // niente — chiede quali tag esistono — ed è lo stesso posto da cui STARK è stato
-  // installato, ma è traffico che prima non c'era.
+  // ogni accensione parte un `fetch` verso `starkapp.dev` — poche righe di testo, non
+  // un oggetto git — per sapere qual è l'ultima release pubblicata (`daemon/aggiornamenti.ts`).
+  // È lo stesso posto da cui STARK è stato installato, ma è traffico che prima non c'era.
   controllaAllAvvio(RADICE)
 
   // Stessa idea, stesso momento: il catalogo dei modelli costa un handshake per agent

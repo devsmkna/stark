@@ -679,8 +679,8 @@
   // ─── il controllo esplicito degli aggiornamenti ────────────────────────────
   //
   // Un bottone che non dice niente sembra rotto: qui lo stato gira **fino alla
-  // risposta**, e la risposta c'è sempre — disponibile o no. Il giro è un `ls-remote`
-  // verso il remoto del repo (zero oggetti scaricati): non è un download.
+  // risposta**, e la risposta c'è sempre — disponibile o no. Il giro è una richiesta a
+  // `starkapp.dev` di poche righe di testo: non è un download del bundle.
   let checkStato = $state<'no' | 'gira' | 'fatto'>('no')
   let checkEsito = $state('')
   let ultimoCheck = $state<string | null>(null)
