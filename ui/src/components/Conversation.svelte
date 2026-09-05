@@ -6,6 +6,7 @@
   // Quasi tutto è chiuso: tredici scambi di lavoro vero fanno circa quattrocento
   // blocchi, e l'unico modo di reggerli è mostrare i titoli. L'eccezione è la risposta
   // a parole, che non si richiude mai — è l'unica cosa scritta *per* l'utente.
+  import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import FileBlock from './FileBlock.svelte'
   import Dock from './Dock.svelte'
@@ -202,14 +203,32 @@
   // si RIchiede quando l'agent finisce un turno: il claim e i move cambiano lo stato
   // mentre lavora, e un chip che mostra uno stato vecchio è una board che mente nel
   // punto più visibile.
+  //
+  // `taskRefs` NON va letto in modo reattivo dentro questi effect: `mappaTask()`
+  // alloca una `Map` nuova a ogni chiamata, e `$state` la confronta per riferimento —
+  // leggerla come dipendenza vorrebbe dire che ogni refetch riuscito (con board
+  // presente) conta come «è cambiato qualcosa» e rilancia l'effect da solo, un `GET
+  // /board` dietro l'altro senza che nulla di vero sia cambiato. `untrack()` toglie
+  // `taskRefs` dalle dipendenze; la guardia lo legge comunque, solo non ci si
+  // riabbona.
   $effect(() => {
     const ceUnRiferimento = snap.turns.some(t =>
       t.parts.some(p => p.kind === 'text' && /#\d{1,4}(?!\d)/.test(p.text)))
-    if (ceUnRiferimento && taskRefs === undefined) void caricaBoard()
+    if (ceUnRiferimento && untrack(() => taskRefs === undefined)) void caricaBoard()
   })
+  // Il refetch a turno chiuso scatta sul FRONTE della transizione (`busy` → non
+  // `busy`), non sul valore di `snap.state` letto a ogni giro: la sola dipendenza
+  // reattiva è `snap.state`, e `statoPrec` — variabile normale, non `$state` — ricorda
+  // com'era un istante prima. Leggere `taskRefs` per decidere se rifare la richiesta
+  // avrebbe lo stesso difetto del loop qui sopra: con una board presente, il refetch
+  // stesso lo renderebbe vero un'altra volta.
+  let statoPrec = snap.state
   $effect(() => {
-    void snap.state   // il passaggio a fermo = turno chiuso
-    if (snap.state !== 'busy' && taskRefs !== undefined) void caricaBoard()
+    const prec = statoPrec
+    statoPrec = snap.state
+    if (prec === 'busy' && snap.state !== 'busy' && untrack(() => taskRefs !== undefined)) {
+      void caricaBoard()
+    }
   })
 
   // Il partId della prima parte testuale del turno che cita un task risolvibile: è
