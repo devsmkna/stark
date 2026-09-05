@@ -236,7 +236,15 @@
   // indice in `turn.parts`: il testo di un turno si disegna da due punti diversi più
   // sotto (la risposta finale «solo» e le narrazioni dentro un blocco «done»), e un
   // indice nel ciclo sbagliato avrebbe confrontato cose diverse.
-  function primaCheCita(turn: TurnView): string | undefined {
+  //
+  // Prende `groups` già calcolati (N1, perf): il chiamante nel template li ha già
+  // fatti con `groupParts(turn.parts)` per disegnare i gruppi, ed erano `{@const
+  // groups}`. Questa funzione veniva invocata di nuovo per OGNI parte testuale resa
+  // (due punti nel template, uno per ogni testo di ogni gruppo aperto), e ricalcolava
+  // `groupParts` da capo ogni volta — O(parti²) con relative allocazioni, sul percorso
+  // che gira a ogni token in streaming. Il chiamante ora la invoca una volta per
+  // turno e riusa il risultato.
+  function primaCheCita(groups: Grp[]): string | undefined {
     if (taskRefs == null) return undefined
     // La card blocco deve stare su una superficie VISIBILE. Scegliere «la prima parte
     // testuale nell'ordine grezzo» (come faceva prima) guarda dentro le narrazioni di
@@ -245,7 +253,7 @@
     // una card che quasi non si vedeva mai. Qui si limita la scelta alle parti che
     // `groupParts` rende FUORI da quel blocco: i gruppi `solo` (recap, testo che
     // introduce una domanda/permesso, tagli del flusso).
-    for (const g of groupParts(turn.parts)) {
+    for (const g of groups) {
       if (g.kind === 'solo' && g.part.kind === 'text' && citaTask(g.part.text, taskRefs))
         return g.part.partId
     }
@@ -912,6 +920,7 @@
       {@const groups = groupParts(turn.parts)}
       {@const opLive = livePart(groups)}
       {@const doneTail = lastDoneKey(groups)}
+      {@const cartaSu = primaCheCita(groups)}
       {#if dayBanners.has(turn.turnId)}
         <div class="daysep" role="separator" aria-label={dayBanners.get(turn.turnId)}>
           <span>{dayBanners.get(turn.turnId)}</span>
@@ -1023,7 +1032,7 @@
                     onclick={onProseClick}>{@html renderMarkdown(part.text, {
                     asked: isOpenQuestion(i, part),
                     tasks: taskRefs ?? null,
-                    taskCarta: taskRefs != null && part.partId === primaCheCita(turn),
+                    taskCarta: taskRefs != null && part.partId === cartaSu,
                   })}</div>
 
                 {:else if part.kind === 'compact'}
@@ -1163,7 +1172,7 @@
                         <!-- svelte-ignore a11y_no_static_element_interactions -->
                         <div class="prose note" onclick={onProseClick}>{@html renderMarkdown(part.text, {
                           tasks: taskRefs ?? null,
-                          taskCarta: taskRefs != null && part.partId === primaCheCita(turn),
+                          taskCarta: taskRefs != null && part.partId === cartaSu,
                         })}</div>
                       {:else if part.kind === 'tool' || part.kind === 'reasoning'}
                         {@render opRow(part)}
