@@ -63,3 +63,6 @@
 {"timestamp":"2026-09-03T13:46:52.160357+02:00","action":"edit","task_id":19,"detail":"Sidebar collassabile con scorciatoia mod+b"}
 {"timestamp":"2026-09-03T13:46:52.161198+02:00","action":"claim","task_id":19,"detail":"veenz"}
 {"timestamp":"2026-09-03T13:46:52.181226+02:00","action":"move","task_id":19,"detail":"backlog -\u003e review"}
+{"timestamp":"2026-09-04T17:49:12.807012+02:00","action":"create","task_id":20,"detail":"Usage sincronizzato in cloud: statistiche unite fra i dispositivi"}
+{"timestamp":"2026-09-04T17:49:19.560265+02:00","action":"move","task_id":20,"detail":"backlog -\u003e in-progress"}
+{"timestamp":"2026-09-04T18:21:00.254176+02:00","action":"move","task_id":20,"detail":"in-progress -\u003e review"}
