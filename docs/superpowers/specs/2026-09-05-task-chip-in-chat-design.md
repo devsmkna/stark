@@ -43,10 +43,29 @@ STARK**:
 - **Claude Code**: `systemPrompt: { type: 'preset', preset: 'claude_code', append: '…' }`
   — documentato nell'SDK (`sdk.d.ts:2073`), il preset resta intero e l'istruzione si
   somma.
-- **OpenCode**: campo `system` sulla richiesta di prompt. **Da misurare prima di usarlo**:
-  i tipi non dicono se `system` si somma o *sostituisce* il prompt dell'agent — se
-  sostituisce, sarebbe un agent istruito meno del terminale (rovescio del Principio 5).
-  Regola nota: i default dell'SDK non sono i default del CLI, e si scoprono misurando.
+- **OpenCode**: campo `system` sulla richiesta di prompt. **Misurato il 5 settembre 2026**,
+  leggendo il sorgente del server (non i tipi — `types.gen.d.ts` dice solo `system?: string`,
+  senza dire come viene usato): **si somma**, non sostituisce. Nel repo `anomalyco/opencode`
+  (già `sst/opencode`, rinominato), branch `dev`, il percorso legacy che serve
+  `session.promptAsync` è `packages/opencode/src/session/llm/request.ts`, funzione `prepare`
+  (righe 58-66):
+  ```js
+  const system = [
+    [
+      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+      ...input.system,
+      ...(input.user.system ? [input.user.system] : []),
+    ].filter((x) => x).join("\n"),
+  ]
+  ```
+  `input.user.system` è il campo `system` della richiesta di prompt (schema `User` in
+  `packages/schema/src/v1/session.ts:352`, `system: Schema.optional(Schema.String)` — lo
+  stesso nome che compare nel tipo dell'SDK). Viene **concatenato con `\n`** al prompt
+  dell'agent (`input.agent.prompt`, o il default del provider se l'agent non ne ha uno) e a
+  un eventuale `input.system` aggiuntivo, non lo rimpiazza. Implementato in
+  `src/adapters/opencode/adapter.ts`, dentro `mandaAlRunner` (chiamata `session.promptAsync`):
+  `...(haBoard(this.spec.cwd) ? { system: ISTRUZIONE_BOARD } : {})`. Nessuna sonda live è
+  stata necessaria: il sorgente era conclusivo.
 
 I due canali **si sommano, non si escludono**: il blocco nei file di progetto resta,
 perché copre il CLI nel terminale e qualunque altro strumento che legga `CLAUDE.md`/

@@ -21,6 +21,7 @@ import type {
   SlashCommand,
 } from '../../core/events.ts'
 import { IMMAGINI, parteDi } from '../../core/allegati.ts'
+import { haBoard, ISTRUZIONE_BOARD } from '../../core/board-regola.ts'
 import { EMPTY_USAGE } from '../../core/events.ts'
 import { clientLegacyPer, clientPer, lascia } from './host.ts'
 import { messaggioErrore, modelloDa, OpenCodeTranslator, type OpenCodeEvent } from './translate.ts'
@@ -960,6 +961,9 @@ export class OpenCodeAdapter implements AgentSession {
       body: {
         ...(refLegacy(this.modello) ? { model: refLegacy(this.modello) } : {}),
         ...(this.modo ? { agent: this.modo } : {}),
+        // Il `system` della richiesta si SOMMA al prompt dell'agent, non lo sostituisce
+        // (verificato nel sorgente del server, non nei tipi — vedi §1-bis della spec).
+        ...(haBoard(this.spec.cwd) ? { system: ISTRUZIONE_BOARD } : {}),
         parts: invio.parts,
       },
     } as never)
