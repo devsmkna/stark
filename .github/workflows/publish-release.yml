@@ -134,7 +134,13 @@ jobs:
       # L'IP diretto e non l'hostname: `starkapp.dev` è dietro Cloudflare proxato
       # (utile per il CDN sui bundle), e l'SSH su quell'hostname non arriva da
       # nessuna parte — Cloudflare inoltra solo HTTP(S).
+      #
+      # Percorso **relativo**, non `/opt/stark-cloud/www/releases/...`: `rrsync`
+      # antepone da sé la radice configurata (`-wo /opt/stark-cloud/www/` in
+      # `authorized_keys`) a qualunque percorso il client mandi — un percorso già
+      # assoluto raddoppia il prefisso invece di sostituirlo. Misurato dal vivo:
+      # `mkdir ".../www/opt/stark-cloud/www/releases/..." failed`.
       - name: Pubblica su starkapp.dev
         run: |
-          rsync -av --delete bundles/ "deploy@45.77.53.112:/opt/stark-cloud/www/releases/$GITHUB_REF_NAME/"
-          rsync -av --delete bundles/ "deploy@45.77.53.112:/opt/stark-cloud/www/releases/latest/"
+          rsync -av --delete bundles/ "deploy@45.77.53.112:releases/$GITHUB_REF_NAME/"
+          rsync -av --delete bundles/ "deploy@45.77.53.112:releases/latest/"

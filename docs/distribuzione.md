@@ -139,6 +139,13 @@ un secondo e evita di rincorrere un pacchetto che magari non serve nemmeno.
 command="/usr/bin/rrsync -wo /opt/stark-cloud/www/",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions-deploy
 ```
 
+**Il client deve mandare percorsi relativi a quella radice, mai assoluti**: `rrsync`
+antepone da sé `-wo /opt/stark-cloud/www/` a qualunque percorso arrivi dal client, quindi
+`rsync ... deploy@45.77.53.112:/opt/stark-cloud/www/releases/` **raddoppia** il prefisso
+(`.../www/opt/stark-cloud/www/releases/`, `mkdir` fallisce) invece di risolverlo — misurato
+dal vivo, non dedotto dal manuale. La forma giusta è `deploy@45.77.53.112:releases/...`
+(o `deploy@45.77.53.112:` e basta per la radice), come fanno i due workflow.
+
 La radice è `/opt/stark-cloud/www/` intera — non solo `releases/`: sotto ci stanno sia
 `releases/` (i bundle) sia `install.sh`/`install.ps1` alla radice, accanto a qualunque
 `index.html` segnaposto ci sia già per l'apex. Il costo accettato, e vale la pena dirlo

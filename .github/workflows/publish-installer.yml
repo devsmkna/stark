@@ -30,5 +30,10 @@ jobs:
       # /opt/stark-cloud/www è la cartella che il container `home` serve già su
       # starkapp.dev (vedi docs/distribuzione.md) — non un webserver nuovo. L'IP
       # diretto e non l'hostname: stessa ragione di publish-release.yml.
+      #
+      # Destinazione `deploy@45.77.53.112:` (radice **relativa**, non
+      # `/opt/stark-cloud/www/`): `rrsync` antepone da sé la radice configurata a
+      # qualunque percorso il client mandi, quindi un percorso già assoluto la
+      # raddoppia — stessa causa, stesso fix di publish-release.yml.
       - name: Pubblica su starkapp.dev
-        run: rsync -av install.sh install.ps1 "deploy@45.77.53.112:/opt/stark-cloud/www/"
+        run: rsync -av install.sh install.ps1 "deploy@45.77.53.112:"
