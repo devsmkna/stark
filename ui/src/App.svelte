@@ -161,12 +161,18 @@ import Login from './components/Login.svelte'
   // ─── gate d'accesso: login cloud ───────────────────────────────────────────
   let loginErrore = $state('')
   let loginLavorando = $state(false)
-  async function faiLogin(email: string, password: string): Promise<void> {
+  // `loginMfa` diventa true quando il server dice che serve il codice: il gate mostra
+  // il campo e la chiamata dopo lo porta. Un errore non-MFA lo rispegne, così un
+  // ripensamento sull'account non lascia il campo appeso.
+  let loginMfa = $state(false)
+  async function faiLogin(email: string, password: string, code?: string): Promise<void> {
     loginLavorando = true
     loginErrore = ''
     try {
-      const esito = await store.loginCloud(email, password)
-      if (!esito.ok) loginErrore = esito.motivo ?? 'login fallito'
+      const esito = await store.loginCloud(email, password, code)
+      if (esito.ok) { loginMfa = false; return }
+      if (esito.mfa) { loginMfa = true; loginErrore = code ? (esito.motivo ?? 'codice sbagliato') : '' }
+      else { loginErrore = esito.motivo ?? 'login fallito' }
     } catch (e) {
       loginErrore = e instanceof Error ? e.message : String(e)
     } finally {
@@ -186,7 +192,8 @@ import Login from './components/Login.svelte'
     server={store.cloudGate?.server ?? 'ok'}
     errore={loginErrore}
     lavorando={loginLavorando}
-    onLogin={(e, p) => void faiLogin(e, p)}
+    mfa={loginMfa}
+    onLogin={(e, p, c) => void faiLogin(e, p, c)}
   />
 {:else}
 

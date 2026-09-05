@@ -90,18 +90,20 @@ async function chiama(url: string, path: string, init?: RequestInit): Promise<{ 
 
 /** Login: verifica le credenziali e salva il token. `null` se fallisce (con il motivo). */
 export async function loginCloud(
-  home: string, email: string, password: string,
-): Promise<{ ok: boolean; email?: string; motivo?: string }> {
+  home: string, email: string, password: string, code?: string,
+): Promise<{ ok: boolean; email?: string; motivo?: string; mfa?: boolean }> {
   const url = cloudUrl()
   if (!url) return { ok: false, motivo: 'server cloud non configurato (STARK_CLOUD_URL)' }
   const r = await chiama(url, '/api/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, ...(code ? { code } : {}) }),
   })
   if (!r.ok) {
-    const motivo = (r.body as { error?: string } | null)?.error ?? 'login fallito'
-    return { ok: false, motivo }
+    const b = r.body as { error?: string; mfa?: boolean } | null
+    // `mfa: true` risale fino alla UI, che mostra il campo del codice invece di
+    // ripetere «password sbagliata».
+    return { ok: false, motivo: b?.error ?? 'login fallito', ...(b?.mfa ? { mfa: true } : {}) }
   }
   const b = r.body as { token?: string; email?: string } | null
   if (!b?.token || !b?.email) return { ok: false, motivo: 'risposta del server non valida' }

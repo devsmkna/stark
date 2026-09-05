@@ -481,9 +481,9 @@ async function route(
       return send(res, 200, await cloudStatus(STARK_HOME))
     }
     if (method === 'POST' && path === '/api/cloud/login') {
-      const body = await readJson<{ email?: string; password?: string }>(req)
+      const body = await readJson<{ email?: string; password?: string; code?: string }>(req)
       if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
-      const esito = await loginCloud(STARK_HOME, body.email, body.password)
+      const esito = await loginCloud(STARK_HOME, body.email, body.password, body.code)
       return send(res, esito.ok ? 200 : 401, esito)
     }
     if (method === 'POST' && path === '/api/cloud/logout') {

@@ -421,11 +421,11 @@ export class Api {
   cloudStatus(): Promise<CloudStatus> { return this.json('/api/cloud/status') }
 
   /** Login verso il server cloud. `ok:false` con `motivo` se fallisce. */
-  cloudLogin(email: string, password: string): Promise<{ ok: boolean; email?: string; motivo?: string }> {
+  cloudLogin(email: string, password: string, code?: string): Promise<{ ok: boolean; email?: string; motivo?: string; mfa?: boolean }> {
     return this.json('/api/cloud/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...(code ? { code } : {}) }),
     })
   }
 

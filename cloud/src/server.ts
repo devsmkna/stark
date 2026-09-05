@@ -9,7 +9,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import {
   registra, login, revoca, chi, chiId, cambiaPassword, spazzaSessioni,
-  haTotp, verificaAccesso, preparaTotp, abilitaTotp, disabilitaTotp, statoTotp,
+  haTotp, loginMfa, verificaAccesso, preparaTotp, abilitaTotp, disabilitaTotp, statoTotp,
 } from './auth.ts'
 import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
 import { registraUso, leggiUso, type Invio } from './usage.ts'
@@ -154,11 +154,14 @@ export async function startCloud(): Promise<void> {
         return send(res, esito.ok ? 200 : 400, esito)
       }
       if (method === 'POST' && path === '/api/login') {
-        const body = await readJson<{ email?: string; password?: string }>(req)
+        const body = await readJson<{ email?: string; password?: string; code?: string }>(req)
         if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
-        const sessione = await login(body.email, body.password)
-        if (!sessione) return send(res, 401, { error: 'email o password sbagliate' })
-        return send(res, 200, { token: sessione.token, email: sessione.email })
+        const esito = await loginMfa(body.email, body.password, body.code)
+        if (esito.ok) return send(res, 200, { token: esito.token, email: esito.email })
+        // `mfa: true` dice al client (daemon, poi UI) di chiedere il codice invece di
+        // ripetere «password sbagliata»: sono due rimedi diversi.
+        if (esito.motivo === 'mfa') return send(res, 401, { error: 'serve il codice MFA', mfa: true })
+        return send(res, 401, { error: 'email o password sbagliate' })
       }
       if (method === 'POST' && path === '/api/logout') {
         await revoca(bearer(req))
