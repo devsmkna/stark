@@ -14,6 +14,11 @@ on:
   push:
     branches: [deploy-starkapp]
     paths: ['install.sh', 'install.ps1']
+  # Per ripubblicare senza dover toccare install.sh/install.ps1 solo per far scattare
+  # il filtro sui path qui sopra — è servito la prima volta che questo workflow è
+  # girato: il push era partito con STARK_DEPLOY_HOST_KEY ancora vuoto ("Host key
+  # verification failed"), e nessun commit successivo toccava questi due file.
+  workflow_dispatch: {}
 
 jobs:
   publish:
