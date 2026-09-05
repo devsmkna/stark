@@ -21,13 +21,16 @@ jobs:
             runner: ubuntu-24.04-arm
           # Non macos-13: quel parco runner Intel di GitHub è in restringimento (la
           # coda su questo job è restata vuota per minuti, run 33973707683, mentre
-          # darwin-arm64 sotto finiva in meno di un minuto). Non serve macOS vero per
-          # questo lavoro — `npm run ui:build` è JS puro, e l'unico pezzo per
-          # piattaforma è l'eseguibile di Claude Code, che npm sceglie da un
-          # `optionalDependencies` — quindi si builda su Linux **forzando** a chi
-          # npm deve credere di rivolgersi. Verificato dal vivo, non dedotto: `npm ci
-          # --os=darwin --cpu=x64` scarica `claude-agent-sdk-darwin-x64` anche su
-          # questa macchina Linux.
+          # darwin-arm64 sotto finiva in meno di un minuto). Si builda su Linux, ma
+          # **non** forzando `--os`/`--cpu` sull'intero `npm ci`: `vite` in questo
+          # progetto usa `rolldown`, che ha un binario nativo **per sé stesso** — non
+          # per il bundle finale — e forzare la piattaforma su tutto l'albero fa
+          # scaricare la variante *darwin* di quel binario invece di quella *linux*
+          # che serve a eseguire `vite build` proprio su questa macchina (misurato:
+          # `Cannot find module '@rolldown/binding-...'`, run 33978292094). Il
+          # binario di Claude Code — l'unico pezzo che deve davvero essere per
+          # `darwin-x64` — si scarica **a parte**, vedi lo step «Sostituisce il
+          # binario di Claude Code» più sotto.
           - target: darwin-x64
             runner: ubuntu-24.04
             npmOs: darwin
@@ -36,11 +39,10 @@ jobs:
             runner: macos-14
           - target: win-x64
             runner: windows-2022
-          # Stesso trucco di darwin-x64 qui sopra, verificato allo stesso modo: non
-          # c'è (ancora) un runner GitHub-hosted nativo win-arm64, ma non serve —
-          # `npm ci --os=win32 --cpu=arm64` porta a casa `claude-agent-sdk-win32-arm64`
-          # da Linux. Prima di questa riga il bundle per questa piattaforma non
-          # esisteva affatto (install.ps1 lo diceva invece di fingere).
+          # Stesso ragionamento di darwin-x64 qui sopra: non c'è (ancora) un runner
+          # GitHub-hosted nativo win-arm64. Prima di questo cambio il bundle per
+          # questa piattaforma non esisteva affatto (install.ps1 lo diceva invece di
+          # fingere).
           - target: win-arm64
             runner: ubuntu-24.04
             npmOs: win32
@@ -59,29 +61,36 @@ jobs:
       # run 33973387334). L'omissione arriva **dopo**, con `npm prune`, quando la UI
       # è già compilata e serve solo alleggerire il bundle di ciò che non gira più.
       #
-      # `--os`/`--cpu` solo per le voci della matrix che li dichiarano (il campo non
-      # è nemmeno definito per le altre, quindi la condizione bash è la cosa più
-      # leggibile — un'espressione GitHub Actions con format() qui sarebbe la stessa
-      # logica scritta più difficile da leggere). Vanno passati **due volte**, a `ci`
-      # e a `prune`: `prune` da solo ricontrolla contro la piattaforma vera della
-      # macchina e toglierebbe il pacchetto appena scaricato — misurato, non dedotto.
-      - name: Installa
-        shell: bash
-        run: |
-          if [ -n "${{ matrix.npmOs }}" ]; then
-            npm ci --os="${{ matrix.npmOs }}" --cpu="${{ matrix.npmCpu }}"
-          else
-            npm ci
-          fi
+      # Niente `--os`/`--cpu` qui: questa `npm ci` deve risolvere tutto per la
+      # macchina **vera** che sta girando, `rolldown` compreso — vedi il commento
+      # sulla voce `darwin-x64` della matrix qui sopra per il perché.
+      - run: npm ci
       - run: npm run ui:build
-      - name: Alleggerisce (via le devDependencies)
+      - run: npm prune --omit=dev
+      # Per le due piattaforme «finte» (buildate su Linux ma destinate a un'altra):
+      # `npm ci` ha appena installato `claude-agent-sdk-linux-x64` (quello giusto per
+      # QUESTA macchina, sbagliato per il bundle) — va tolto e sostituito con quello
+      # vero. Non lo si scarica con un `npm install <pacchetto>@<versione> --os=…
+      # --cpu=…` diretto: quella strada dà `EBADPLATFORM` (misurato, run locale) —
+      # il controllo di piattaforma sull'installazione di un singolo pacchetto non
+      # segue gli stessi override di un `npm ci` sull'intero progetto. Si scarica
+      # invece con un secondo `npm ci` **isolato**, in una copia a parte di
+      # `package.json`/`package-lock.json` dove l'override è l'unica cosa che deve
+      # risolvere — la stessa tecnica di prima, ma senza lasciarla toccare `rolldown`
+      # o qualunque altro attrezzo di build di questa cartella.
+      - name: Sostituisce il binario di Claude Code (piattaforme buildate incrociate)
+        if: matrix.npmOs != ''
         shell: bash
         run: |
-          if [ -n "${{ matrix.npmOs }}" ]; then
-            npm prune --omit=dev --os="${{ matrix.npmOs }}" --cpu="${{ matrix.npmCpu }}"
-          else
-            npm prune --omit=dev
-          fi
+          SDK_VERSION="$(node -p "require('./node_modules/@anthropic-ai/claude-agent-sdk/package.json').version")"
+          rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-*
+          mkdir -p /tmp/harvest
+          cp package.json package-lock.json /tmp/harvest/
+          (cd /tmp/harvest && npm ci --omit=dev --ignore-scripts \
+            --os="${{ matrix.npmOs }}" --cpu="${{ matrix.npmCpu }}")
+          cp -r "/tmp/harvest/node_modules/@anthropic-ai/claude-agent-sdk-${{ matrix.npmOs }}-${{ matrix.npmCpu }}" \
+            node_modules/@anthropic-ai/
+          echo "SDK $SDK_VERSION, variante ${{ matrix.npmOs }}-${{ matrix.npmCpu }} innestata."
       # Un formato solo (`tar.gz`) su ogni piattaforma, Windows compreso — `install.ps1`
       # lo estrae con lo stesso `tar` che Windows include dalla 1803 in poi, invece di
       # un secondo formato da gestire solo lì. Niente `--strip-components`: il

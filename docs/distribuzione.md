@@ -51,10 +51,10 @@ numero scritto a mano). Cambia solo cosa succede quando esce:
 |---|---|
 | linux-x64 | `ubuntu-24.04` |
 | linux-arm64 | `ubuntu-24.04-arm` |
-| darwin-x64 | `ubuntu-24.04`, con `npm ci`/`npm prune --os=darwin --cpu=x64` |
+| darwin-x64 | `ubuntu-24.04`, con il binario di Claude Code innestato a parte |
 | darwin-arm64 | `macos-14` |
 | win-x64 | `windows-2022` |
-| win-arm64 | `ubuntu-24.04`, con `npm ci`/`npm prune --os=win32 --cpu=arm64` |
+| win-arm64 | `ubuntu-24.04`, con il binario di Claude Code innestato a parte |
 
 Due voci non girano sul runner "naturale", e non per gusto — sono girate su Linux
 **perché il runner nativo non regge o non esiste**, verificato dal vivo entrambe le
@@ -68,14 +68,38 @@ volte (non dedotto dal manuale di npm):
   combinazione — prima di questo cambio il bundle semplicemente non veniva
   pubblicato, e `install.ps1` lo diceva invece di fingere.
 
-In entrambi i casi la build non ha bisogno del sistema operativo vero: `npm run
-ui:build` è bundling JS puro (nessun compilatore nativo coinvolto), e l'unico pezzo
-per-piattaforma di tutto il bundle è l'eseguibile di Claude Code, che npm sceglie da
-un `optionalDependencies` in base ai flag `--os`/`--cpu` — non all'host su cui gira
-davvero. Il tranello, misurato provandolo: quei flag vanno passati **due volte**, a
-`npm ci` **e** a `npm prune --omit=dev` — se si passano solo al primo, il secondo
-ricontrolla contro la piattaforma reale della macchina (Linux) e butta via il
-pacchetto appena scaricato, silenziosamente, senza un errore che lo segnali.
+**Il primo tentativo — forzare `--os`/`--cpu` sull'intero `npm ci` — sembrava
+funzionare e non funzionava.** L'unico pezzo di tutto il bundle che deve davvero
+essere per la piattaforma di destinazione è l'eseguibile di Claude Code, scelto da
+npm tramite `optionalDependencies`; l'idea era forzare quella scelta con `--os`/`--cpu`
+su tutta la `npm ci`. Provato dal vivo (non dal manuale): il pacchetto giusto arriva,
+ma **anche `vite` cambia di piattaforma con lui** — in questo progetto usa `rolldown`,
+che ha un **binario nativo proprio** per compilare (non per il bundle finale), e
+forzare `--os=darwin` fa scaricare la variante *darwin* di quel binario invece della
+*linux* che serve a eseguire `vite build` **su questa macchina**. Risultato misurato:
+`Cannot find module '@rolldown/binding-...'`, build fallita su entrambe le voci
+(run `33978292094`) — un errore che il test locale di prima non aveva preso, perché
+aveva verificato che npm *scaricasse* il pacchetto giusto senza mai eseguire
+`npm run ui:build` sotto lo stesso override.
+
+La cura che ha retto, verificata con lo stesso rigore (`npm ci`, `npm run ui:build`,
+`npm prune` normali, poi un innesto a parte):
+
+1. `npm ci` **senza override**: risolve tutto per la macchina vera, `rolldown`
+   compreso — la build gira.
+2. `npm run ui:build`, poi `npm prune --omit=dev`: identico alle altre piattaforme.
+3. Si toglie `claude-agent-sdk-linux-x64`(-musl) — quello che `npm ci` ha installato
+   perché è quello giusto **per la macchina**, sbagliato per il bundle.
+4. Si scarica la variante vera in una copia **isolata** di
+   `package.json`/`package-lock.json` (una `npm ci --omit=dev --ignore-scripts
+   --os=… --cpu=…` a parte, dentro `/tmp`), e si copia dentro quel solo pacchetto.
+   Un `npm install <pacchetto>@<versione> --os=… --cpu=…` diretto, senza il contesto
+   di un intero progetto, dà invece `EBADPLATFORM` — misurato anche questo: il
+   controllo su un'installazione di pacchetto singolo non segue lo stesso override.
+
+Isolare l'override a un `npm ci` **usa e getta**, che tocca solo la copia in `/tmp`,
+è ciò che impedisce al secondo tentativo di ripetere l'errore del primo: l'albero
+vero (`rolldown` compreso) non viene mai toccato da un flag di piattaforma.
 
 WSL non è una piattaforma a parte: `uname -s` dentro WSL2 risponde `Linux` come su
 qualunque altra distribuzione, quindi prende il bundle `linux-x64`/`linux-arm64` senza
