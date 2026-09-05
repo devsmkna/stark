@@ -112,6 +112,12 @@ else
     || muori "scp del compose fallito. Se è un problema di permessi, /opt/stark-cloud
 appartiene a un altro utente: copialo tu con sudo, o rifai il deploy con quell'identità."
 fi
+# La homepage dell'apex: un file statico, quindi viaggia com'è. Si copia sempre —
+# è piccola, e un diff per risparmiare un scp da 1 KB sarebbe più codice del file.
+ssh $SSH_OPTS "$HOST" "mkdir -p /opt/stark-cloud/www" || muori "mkdir www fallito."
+scp $SCP_OPTS cloud/www/index.html "$HOST:/opt/stark-cloud/www/index.html" \
+  || muori "scp della homepage fallito."
+
 ssh $SSH_OPTS "$HOST" "
   mkdir -p /opt/stark-cloud/data
   cd /opt/stark-cloud
@@ -120,10 +126,10 @@ ssh $SSH_OPTS "$HOST" "
 
 titolo "Fatto."
 echo "Il server cloud è su:"
-echo "   https://starkapp.dev  (Cloudflare → Traefik su $PUBLIC)"
+echo "   https://cloud.starkapp.dev  (Traefik su $PUBLIC; l'apex è la homepage)"
 echo ""
 echo "Verifica che risponde (401 = vivo, ma serve il login):"
-echo "   curl https://starkapp.dev/api/me"
+echo "   curl https://cloud.starkapp.dev/api/me"
 echo "   curl http://$PUBLIC:$PORTA/api/me   # la porta nuda, finché resta pubblicata"
 echo ""
 grigio "Il default del daemon è già questo; per un altro deploy:  STARK_CLOUD_URL=…"

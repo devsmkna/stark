@@ -2,19 +2,23 @@
 #
 # Questo compose NON builda il cloud: l'immagine arriva già caricata con `docker load`
 # (vedi deploy-dev.sh). Avvia il server cloud + il Postgres che gli serve + Traefik,
-# che termina il TLS per https://starkapp.dev.
+# più la homepage statica dell'apex.
 #
 #   docker compose -f docker-compose.dev.yml up -d
 #
-# Il dominio sta su Cloudflare **proxied**: il client parla col bordo di Cloudflare,
-# Cloudflare parla con Traefik. Il certificato Let's Encrypt sull'origin serve a
-# rendere onesta anche quella seconda tratta (modalità SSL «Full (strict)» sul
-# pannello Cloudflare — dal nostro lato è pronta, l'interruttore è di là).
+# Due nomi, due router, due certificati:
+#   cloud.starkapp.dev → il server cloud (l'API con cui parlano i daemon)
+#   starkapp.dev       → la homepage (cloud/www, un segnaposto finché non c'è la landing)
+#
+# L'apex sta su Cloudflare **proxied**: il certificato Let's Encrypt sull'origin serve
+# a rendere onesta anche la tratta Cloudflare→server (modalità SSL «Full (strict)» sul
+# pannello Cloudflare — dal nostro lato è pronta, l'interruttore è di là). Il CNAME
+# `cloud` invece è nato DNS-only, quindi lì i client parlano dritti con Traefik.
 #
 # La porta 8787 resta pubblicata NUDA per la transizione: i daemon già installati
 # hanno ancora `http://45.77.53.112:8787` come default. Quando tutte le macchine
-# saranno passate a https://starkapp.dev, quella riga va tolta: è HTTP in chiaro
-# con dentro password e token.
+# saranno passate a https://cloud.starkapp.dev, quella riga va tolta: è HTTP in
+# chiaro con dentro password e token.
 #
 # Dati (account, sessioni, DB) in bind mount su /opt/stark-cloud: file normali del
 # server, visibili e backuppabili. `letsencrypt/` conserva il certificato: si tiene
@@ -35,10 +39,22 @@ services:
       - /opt/stark-cloud/data:/data
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.stark-cloud.rule=Host(`starkapp.dev`)"
+      - "traefik.http.routers.stark-cloud.rule=Host(`cloud.starkapp.dev`)"
       - "traefik.http.routers.stark-cloud.entrypoints=websecure"
       - "traefik.http.routers.stark-cloud.tls.certresolver=letsencrypt"
       - "traefik.http.services.stark-cloud.loadbalancer.server.port=8787"
+
+  home:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - /opt/stark-cloud/www:/usr/share/nginx/html:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stark-home.rule=Host(`starkapp.dev`)"
+      - "traefik.http.routers.stark-home.entrypoints=websecure"
+      - "traefik.http.routers.stark-home.tls.certresolver=letsencrypt"
+      - "traefik.http.services.stark-home.loadbalancer.server.port=80"
 
   db:
     image: postgres:16-alpine

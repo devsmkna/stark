@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- La homepage di starkapp.dev: un segnaposto, non la landing (quella verrà).
+     Una riga di nome, una di spiegazione, un tasto. La palette è quella della UI
+     (ui/src/app.css) e la scritta spaziata è la stessa della pagina 403 del daemon:
+     chi arriva qui e chi sbatte su un daemon chiuso vede lo stesso prodotto. -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STARK</title>
+<meta name="description" content="A local web UI for your coding agents.">
+<style>
+  :root { --bg:#FBFBFD; --fg:#171A22; --mut:#767D90; --accent:#3B5BF5; --on:#FFFFFF }
+  @media (prefers-color-scheme:dark) {
+    :root { --bg:#0E1118; --fg:#E8EAF0; --mut:#767D90; --accent:#7A92FF; --on:#0E1118 }
+  }
+  body { margin:0; min-height:100dvh; display:flex; align-items:center; justify-content:center;
+         font:15px/1.6 system-ui,sans-serif; background:var(--bg); color:var(--fg);
+         padding:24px; text-align:center }
+  b { letter-spacing:.14em; font-size:22px }
+  p { max-width:340px; color:var(--mut); margin:14px auto 26px }
+  a { display:inline-block; padding:10px 22px; border-radius:8px; background:var(--accent);
+      color:var(--on); text-decoration:none; font-weight:600 }
+  a:hover { filter:brightness(1.08) }
+</style>
+<div>
+  <b>S T A R K</b>
+  <p>A local web UI for your coding agents — a GUI that replaces the TUI, not a terminal in the browser.</p>
+  <a href="https://github.com/devsmkna/stark">View on GitHub</a>
+</div>
+</html>
