@@ -42,18 +42,28 @@
     else if (progetti.length > 0) cwd = progetti[0].cwd
   })
 
+  // La sessione che fa da manico per la cartella scelta. È un `$derived` e non un
+  // calcolo dentro l'effetto qui sotto **apposta**: `store.rows` cambia a ogni token
+  // di qualunque chat viva, e leggerlo dentro l'effetto lo faceva ri-eseguire di
+  // continuo — stream staccato e riattaccato, `dati = null` a ripetizione, la board
+  // che sfarfalla (segnalato dall'utente il 5 settembre 2026). Un `$derived` che torna
+  // lo stesso id non risveglia chi lo legge: l'effetto riparte **solo** quando l'id
+  // cambia davvero, cioè quando si cambia progetto.
+  const sessione = $derived(cwd ? store.rows.find(r => r.cwd === cwd)?.id : undefined)
+
   // Il flusso della board del progetto scelto. Cambiare progetto stacca l'uno e
   // attacca l'altro da sé, come fa la colonna dei todo con `store.todoScope`.
   $effect(() => {
-    const sessione = cwd ? store.rows.find(r => r.cwd === cwd)?.id : undefined
-    if (!sessione) { dati = null; return }
+    const s = sessione
+    if (!s) { dati = null; return }
+    // Si azzera solo qui, all'apertura di un flusso nuovo (progetto cambiato): non è
+    // più un azzeramento a ogni evento globale, quindi non è più sfarfallio ma il
+    // «Reading…» giusto mentre arriva la prima board del progetto scelto.
     dati = null
     errore = ''
-    const perso = (s: string): void => { if (s === 'lost') errore = 'connessione persa' }
-    return store.api.boardStream(sessione, b => { dati = b; errore = '' }, perso)
+    const perso = (st: string): void => { if (st === 'lost') errore = 'connessione persa' }
+    return store.api.boardStream(s, b => { dati = b; errore = '' }, perso)
   })
-
-  const sessione = $derived(cwd ? store.rows.find(r => r.cwd === cwd)?.id : undefined)
 
   // Un click su un chip in chat arriva qui: si apre quel task, sempre — anche se la
   // Board era già aperta su un altro (regola del link prevedibile, come /chat/<id>).
