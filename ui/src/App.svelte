@@ -185,11 +185,19 @@ import Login from './components/Login.svelte'
 
 <!-- ─── gate d'accesso: login cloud obbligatorio ───────────────────────────────
      Finché `cloudGate` non dice chi è (email presente), la UI resta sulla schermata
-     di login: è il gate d'accesso a STARK. `null` = non si è ancora chiesto (bootstrap
-     in corso): si mostra il login comunque, che è la scelta sicura. -->
-{#if !store.cloudGate?.email}
+     di login: è il gate d'accesso a STARK.
+
+     I casi sono **tre**, non due, e tenerli separati è il punto: `null` vuol dire che
+     non si è ancora chiesto (il giro fino al cloud è in corso), ed è diverso da «non
+     autenticato». Collassarli mandava al login anche chi la sessione ce l'aveva, per
+     poi togliergliela di mezzo da solo un istante dopo — un lampo a ogni avvio. Lo
+     splash è sicuro quanto il login: non fa entrare nessuno, dice solo che sta
+     ancora guardando. -->
+{#if store.cloudGate === null}
+  <Splash />
+{:else if !store.cloudGate.email}
   <Login
-    server={store.cloudGate?.server ?? 'ok'}
+    server={store.cloudGate.server}
     errore={loginErrore}
     lavorando={loginLavorando}
     mfa={loginMfa}

@@ -77,9 +77,15 @@ function scriviToken(home: string, t: CloudToken): void {
   chmodSync(path, 0o600)
 }
 
+/** Oltre questo, il cloud lo si dà per irraggiungibile. Senza un tetto, un server che
+ *  non risponde (pacchetti persi, non rifiutati) tiene la richiesta appesa quanto vuole
+ *  il sistema operativo — e chi aspetta quella risposta per decidere cosa mostrare
+ *  resta appeso con lei. */
+const ATTESA_MS = 8000
+
 async function chiama(url: string, path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: unknown }> {
   try {
-    const res = await fetch(`${url}${path}`, init)
+    const res = await fetch(`${url}${path}`, { signal: AbortSignal.timeout(ATTESA_MS), ...init })
     let body: unknown = null
     try { body = await res.json() } catch { /* corpo non JSON */ }
     return { ok: res.ok, status: res.status, body }
