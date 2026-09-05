@@ -168,6 +168,12 @@ const box = await page.locator('.tsheet').boundingBox().catch(() => null)
 assert('desktop: la modale è centrata, non a tutto schermo',
   !!box && box.width < 900 && box.height < 800)
 
+// Escape chiude la modale come ogni altro dialog dell'app (gestore condiviso in
+// App.svelte): senza, sarebbe l'unico overlay a pretendere il mouse.
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+assert('desktop: Escape chiude la modale', await page.locator('.tsheet').count() === 0)
+
 if (boardAperta !== 0 || dettaglioTitolo !== 'Card permesso orfane') {
   console.log('\ncontenuto dopo il click:')
   console.log(await page.content())

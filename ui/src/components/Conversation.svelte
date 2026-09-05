@@ -303,8 +303,9 @@
     if (rv) { await store.reveal(rv.getAttribute('data-reveal-path') ?? '', snap.sessionId); return }
 
     // Il chip `#NNN` (o la card blocco, stesso `data-task`) generato da
-    // `decoraTaskDom`: apre quel task nella Board, invece di lasciare che il click
-    // cada nel vuoto o segua un eventuale link.
+    // `decoraTaskDom`: apre il dettaglio del task (TaskSheet — modale su desktop,
+    // foglio su telefono; card #35/#36), invece di lasciare che il click cada nel
+    // vuoto o segua un eventuale link. La Board intera resta al suo bottone.
     const chipEl = target.closest<HTMLElement>('[data-task]')
     if (chipEl) {
       e.preventDefault()

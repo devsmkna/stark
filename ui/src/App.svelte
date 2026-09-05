@@ -608,6 +608,7 @@ import Login from './components/Login.svelte'
     store.calls.unlock()
     if (e.key === 'Escape') {
       if (store.menu) store.menu = null
+      else if (store.taskSheet) store.taskSheet = null
       else if (store.dialog) store.dialog = null
       return
     }

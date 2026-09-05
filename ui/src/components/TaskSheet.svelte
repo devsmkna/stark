@@ -75,19 +75,24 @@
 {/if}
 
 <style>
-  /* Su telefono a tutto schermo (un "pannello a lato" lì non esiste, e un dialog
-     piccolo renderebbe illeggibile proprio il corpo); da 860px in su — la stessa
-     soglia di `store.narrow` — una modale centrata con la veste di `.dlg` (card #36).
+  /* Il default è la modale centrata con la veste di `.dlg` (card #36); sotto la
+     soglia diventa un foglio a tutto schermo, perché su telefono un dialog piccolo
+     renderebbe illeggibile proprio il corpo. L'override usa LO STESSO media query di
+     `store.narrow` in App.svelte — `(max-width: 860px)`, inclusivo — così al pixel
+     esatto della soglia le due metà dell'app non possono dirsi cose diverse (un
+     `min-width: 860px` qui sopra si sovrapponeva a 860 spaccato).
      z-index 9 = la scala dei dialog dell'app (scrim 8, dlg 9, Splash/Login 12):
      un numero fuori scala finirebbe SOPRA lo Splash, che deve coprire tutto. */
-  .tsheet { position: fixed; inset: 0; z-index: 9; background: var(--surface);
-            display: flex; flex-direction: column; }
-  @media (min-width: 860px) {
-    .tsheet { inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%);
-              width: min(520px, calc(100vw - 80px));
-              max-height: min(640px, calc(100vh - 80px));
-              border: 1px solid var(--line-2); border-radius: 12px;
-              box-shadow: 0 24px 60px rgba(16, 20, 32, .32); overflow: hidden; }
+  .tsheet { position: fixed; z-index: 9; background: var(--surface);
+            display: flex; flex-direction: column;
+            left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: min(520px, calc(100vw - 80px));
+            max-height: min(640px, calc(100vh - 80px));
+            border: 1px solid var(--line-2); border-radius: 12px;
+            box-shadow: 0 24px 60px rgba(16, 20, 32, .32); overflow: hidden; }
+  @media (max-width: 860px) {
+    .tsheet { inset: 0; transform: none; width: auto; max-height: none;
+              border: 0; border-radius: 0; box-shadow: none; }
   }
   .err { padding: 10px 14px; font-size: 11px; color: var(--stop); background: var(--stop-bg);
          border-top: 1px solid var(--line); }
