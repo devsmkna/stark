@@ -75,16 +75,43 @@ docker save "$IMG" | gzip > "$TAR"
 grigio "   $(du -h "$TAR" | cut -f1)"
 
 titolo "3/5 — trasferimento su $HOST"
-scp $SCP_OPTS "$TAR" "$HOST:/tmp/stark-cloud.tar.gz" || muori "scp fallito."
+# Nella **home** e non in /tmp, che su un server condiviso è di tutti: se un altro
+# utente ci ha già lasciato un `stark-cloud.tar.gz` (basta un deploy fatto da un'altra
+# macchina, con un'altra identità), lo `scp` si ferma con «Permission denied» su un
+# percorso che sembra proprio e non lo è. Successo il 5 settembre 2026: il file era di
+# `digitizers_agent`, del deploy di quattro giorni prima.
+#
+# `-o ServerAliveInterval`: il trasferimento è di ~57 MB e una connessione ferma per
+# qualche secondo viene chiusa da chi sta in mezzo. Visto cadere al 90%.
+REMOTO="stark-cloud-$(id -un).tar.gz"
+scp $SCP_OPTS -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+  "$TAR" "$HOST:~/$REMOTO" || muori "scp fallito."
 
 titolo "4/5 — load sul server"
-ssh $SSH_OPTS "$HOST" 'docker load < /tmp/stark-cloud.tar.gz' || muori "docker load fallito."
+# L'impronta si confronta **prima** di caricare: un `docker load` su un file troncato è
+# il modo migliore per rompere un servizio che funzionava. Il trasferimento sopra è già
+# caduto una volta a 51 MB su 57, lasciando un file che sembrava esserci.
+QUI="$(shasum -a 256 "$TAR" 2>/dev/null | cut -d' ' -f1 || sha256sum "$TAR" | cut -d' ' -f1)"
+LA="$(ssh $SSH_OPTS "$HOST" "sha256sum ~/$REMOTO | cut -d' ' -f1")"
+[ "$QUI" = "$LA" ] || muori "L'immagine è arrivata diversa da come è partita — non la carico."
+ssh $SSH_OPTS "$HOST" "docker load < ~/$REMOTO && rm -f ~/$REMOTO" || muori "docker load fallito."
 
 titolo "5/5 — compose sul server"
 # Il compose server-side non builda: dichiara solo come gira il container, usando
 # l'immagine appena caricata. I dati stanno in /opt/stark-cloud/data (bind mount).
-scp $SCP_OPTS cloud/docker-compose.server.yml "$HOST:/opt/stark-cloud/docker-compose.dev.yml" \
-  || muori "scp del compose fallito."
+# Si riscrive **solo se è cambiato**. Su un server dove /opt/stark-cloud appartiene a
+# chi ha fatto il primo deploy, un altro utente non ci può scrivere — e chiedere `sudo`
+# per riscrivere un file identico a quello che c'è già sarebbe pretendere un permesso
+# per non fare niente. Se differisce si copia, e se non si può il messaggio dice cosa
+# fare invece di lasciare un «Permission denied» nudo.
+if ssh $SSH_OPTS "$HOST" 'cat /opt/stark-cloud/docker-compose.dev.yml 2>/dev/null' \
+   | diff -q - cloud/docker-compose.server.yml >/dev/null 2>&1; then
+  grigio "   compose già identico sul server, non lo riscrivo"
+else
+  scp $SCP_OPTS cloud/docker-compose.server.yml "$HOST:/opt/stark-cloud/docker-compose.dev.yml" \
+    || muori "scp del compose fallito. Se è un problema di permessi, /opt/stark-cloud
+appartiene a un altro utente: copialo tu con sudo, o rifai il deploy con quell'identità."
+fi
 ssh $SSH_OPTS "$HOST" "
   mkdir -p /opt/stark-cloud/data
   cd /opt/stark-cloud
