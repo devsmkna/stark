@@ -52,8 +52,15 @@ export type PassoTelefono = {
 /** Su che sistema gira il **daemon** — non il browser da cui stai guardando. */
 export type SistemaOperativo = 'windows' | 'wsl' | 'macos' | 'linux'
 
+export type StatoTunnel = {
+  attivo: boolean; connesso: boolean; url: string; pairUrl: string; errore?: string
+}
+
 export type StatoTelefono = {
   tailscale: { passi: PassoTelefono[]; pronto: boolean; url?: string; host?: string }
+  /** La strada di default: il tunnel via tunnel.starkapp.dev. `null` da un daemon
+   *  più vecchio di questa voce. */
+  tunnel: StatoTunnel | null
   so: SistemaOperativo
   codice: { scade: number } | null
   devices: { id: string; nome: string; da: number; visto: number }[]
@@ -529,6 +536,9 @@ export class Api {
     return this.json('/api/phone/code', { method: 'POST' })
   }
   phoneCancel(): Promise<Ack> { return this.json('/api/phone/code', { method: 'DELETE' }) }
+  tunnelToggle(on: boolean): Promise<StatoTunnel> {
+    return this.json('/api/tunnel', { method: 'POST', body: JSON.stringify({ on }) })
+  }
   phoneRevoke(id: string): Promise<Ack> {
     return this.json(`/api/phone/device?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
   }

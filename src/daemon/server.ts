@@ -24,6 +24,7 @@ import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
 import { boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { creaUsageSync, type UsageSync } from './usage-sync.ts'
+import { creaTunnel, type TunnelClient } from './tunnel.ts'
 import { openApp } from './launch.ts'
 import { serviceFor } from '../core/services.ts'
 import type { Settings } from './settings.ts'
@@ -139,6 +140,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   })
   registry.onTurnEnded = () => usage.turnoFinito()
 
+  // Il tunnel verso tunnel.starkapp.dev, spento finché non lo si accende
+  // (`settings.tunnel`): stessa disciplina viva di `usageSync` qui sopra —
+  // l'interruttore si rilegge a ogni giro, spegnerlo spegne davvero. Vedi
+  // `tunnel.ts` per cosa apre e cosa no.
+  const tunnel = creaTunnel({
+    home: STARK_HOME,
+    porta: () => port,
+    accesa: () => registry.settings().tunnel,
+  })
+
   // La versione del CLI si chiede a un processo e ci mette qualche secondo: si scalda
   // adesso, mentre nessuno la sta aspettando.
   backendFor().warmDiagnostics?.()
@@ -182,7 +193,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
   vigila(registry, [push])
 
   const server = createServer((req, res) => {
-    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telefono, usage)
+    void route(req, res, guard, registry, guardToken, () => port, opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'], push, telefono, usage, tunnel)
   })
   // Ascolto esplicito su 127.0.0.1: il default di Node è tutte le interfacce, che qui
   // significherebbe esporre alla LAN un processo che esegue comandi come root.
@@ -195,6 +206,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<Daemon> {
     token: guard.token,
     registry,
     async stop() {
+      tunnel.ferma()
       await registry.shutdown()
       await closeServer(server)
     },
@@ -209,7 +221,7 @@ async function route(
   // La porta e la cartella di configurazione servono a una rotta sola — quella della
   // diagnostica — ma sono fatti del daemon, non del registro: passano da qui.
   port: () => number, configDir?: string, push?: Push, telefono?: Telefono,
-  usage?: UsageSync,
+  usage?: UsageSync, tunnel?: TunnelClient,
 ): Promise<void> {
   const motivo = guard.reject(req)
   if (motivo) {
@@ -504,6 +516,9 @@ async function route(
       const questo = mia ? telefono.idDi(mia) : null
       return send(res, 200, {
         tailscale: await statoTailscale(port()),
+        // Il tunnel sta nello stesso payload perché il pannello risponde a UNA
+        // domanda — «da dove mi raggiunge il telefono?» — e le strade sono due.
+        tunnel: tunnel?.stato() ?? null,
         // Su che sistema gira **questa** macchina. Serve a una cosa sola: scegliere il
         // comando di installazione giusto da mostrare quando Tailscale non c'è. Va qui
         // e non nella UI perché il browser non lo sa — e non può dedurlo dal proprio
@@ -537,6 +552,22 @@ async function route(
     }
     if (method === 'POST' && path === '/api/phone/publish') {
       return send(res, 200, await pubblica(port()))
+    }
+
+    // Il tunnel: stato, e interruttore. L'interruttore scrive `settings.tunnel` e
+    // sveglia il client subito — un toggle che aspetta il prossimo giro di lancette
+    // sembrerebbe rotto a chi lo guarda.
+    if (method === 'GET' && path === '/api/tunnel') {
+      if (!tunnel) return send(res, 503, { error: 'unavailable' })
+      return send(res, 200, tunnel.stato())
+    }
+    if (method === 'POST' && path === '/api/tunnel') {
+      if (!tunnel) return send(res, 503, { error: 'unavailable' })
+      const body = await readJson<{ on?: boolean }>(req)
+      if (typeof body?.on !== 'boolean') return send(res, 400, { error: 'on: boolean richiesto' })
+      registry.saveSettings({ ...registry.settings(), tunnel: body.on })
+      tunnel.tick()
+      return send(res, 200, tunnel.stato())
     }
 
     if (method === 'GET' && path === '/api/git') {

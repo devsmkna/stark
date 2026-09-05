@@ -42,6 +42,12 @@ services:
       - "traefik.http.routers.stark-cloud.rule=Host(`cloud.starkapp.dev`)"
       - "traefik.http.routers.stark-cloud.entrypoints=websecure"
       - "traefik.http.routers.stark-cloud.tls.certresolver=letsencrypt"
+      # Il tunnel è lo stesso processo con un altro nome davanti: è l'`Host` a
+      # decidere chi risponde (vedi cloud/src/tunnel.ts). Router suo, certificato suo;
+      # Traefik passa le WebSocket da sé, non serve dirglielo.
+      - "traefik.http.routers.stark-tunnel.rule=Host(`tunnel.starkapp.dev`)"
+      - "traefik.http.routers.stark-tunnel.entrypoints=websecure"
+      - "traefik.http.routers.stark-tunnel.tls.certresolver=letsencrypt"
       - "traefik.http.services.stark-cloud.loadbalancer.server.port=8787"
 
   home:

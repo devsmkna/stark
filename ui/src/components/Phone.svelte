@@ -29,13 +29,21 @@
    * unico, stesso elenco di dispositivi collegati alla fine.
    */
   $effect(() => {
+    // La strada di default è il **tunnel**: quando è connesso, il QR porta il suo
+    // link di accoppiamento (`/pair?m=<macchina>` — l'`m` dice al tunnel verso quale
+    // daemon instradare, e il cookie che pianta rende quello il default del
+    // telefono). Tailscale resta la seconda strada, com'era.
+    //
     // `tailscale.url` porta già la barra finale (`https://host/`): senza togliere quella,
     // `${url}/pair` diventava `https://host//pair`, un doppio slash che il telefono non
     // apriva. Misurato dall'utente il 3 settembre 2026.
+    const viaTunnel = stato?.tunnel?.connesso ? stato.tunnel.pairUrl : null
     const url = stato?.tailscale.url?.replace(/\/+$/, '')
-    if (!codice || !url) { qr = null; return }
+    const link = viaTunnel ? `${viaTunnel}&c=${codice?.codice}`
+      : url ? `${url}/pair?c=${codice?.codice}` : null
+    if (!codice || !link) { qr = null; return }
     let vivo = true
-    void QRCode.toDataURL(`${url}/pair?c=${codice.codice}`, { margin: 1, width: 220 })
+    void QRCode.toDataURL(link, { margin: 1, width: 220 })
       .then(d => { if (vivo) qr = d })
       .catch(() => { if (vivo) qr = null })
     return () => { vivo = false }
@@ -131,7 +139,7 @@
     void leggi()
     const t = setInterval(() => {
       adesso = Date.now()
-      if (!stato?.tailscale.pronto || codice) void leggi()
+      if ((!stato?.tailscale.pronto && !stato?.tunnel?.connesso) || codice) void leggi()
     }, 2000)
     return () => clearInterval(t)
   })
@@ -140,6 +148,14 @@
   // Il codice scaduto sparisce da solo: lasciarlo a schermo vorrebbe dire mostrare
   // qualcosa che non funziona più, e farlo scoprire al telefono.
   $effect(() => { if (codice && restano === 0) codice = null })
+
+  /** Accende l'interruttore e riguarda subito: il giro da 2s qui sotto continua a
+   *  rileggere finché non è tutto verde, quindi il «Connecting…» si aggiorna da sé. */
+  async function accendiTunnel(): Promise<void> {
+    errore = null
+    try { await store.api.tunnelToggle(true) } catch { errore = 'Could not enable the tunnel' }
+    await leggi()
+  }
 
   async function chiedi(): Promise<void> {
     errore = null
@@ -198,10 +214,15 @@
   <div class="dlgb" style="gap:0">
     {#if !stato}
       <div class="mid" style="padding:24px">Checking…</div>
-    {:else if stato.tailscale.pronto}
-      <!-- Tutto collegato: il pannello dice una cosa sola. -->
+    {:else if stato.tunnel?.connesso || stato.tailscale.pronto}
+      <!-- Tutto collegato: il pannello dice una cosa sola. Se le strade sono due,
+           vince il tunnel — è il default — e il QR porta il suo link. -->
       <p class="lead">
-        Open <b>{stato.tailscale.url}</b> on your phone and type this code.
+        {#if stato.tunnel?.connesso}
+          Scan the code with your phone — it connects through <b>{stato.tunnel.url.replace('https://', '')}</b>.
+        {:else}
+          Open <b>{stato.tailscale.url}</b> on your phone and type this code.
+        {/if}
       </p>
       {#if codice}
         {#if qr}
@@ -218,9 +239,27 @@
         </div>
       {/if}
     {:else}
+      <!-- La strada corta, prima della lista: il tunnel non chiede niente di tutto
+           quello che segue — solo il login al cloud, che chi usa la board ha già. -->
+      <div class="tbox">
+        <div class="t">Use the STARK tunnel <span class="def">default</span></div>
+        <div class="d">
+          {#if stato.tunnel?.attivo}
+            {stato.tunnel.errore ?? 'Connecting…'}
+          {:else}
+            No Tailscale, no setup: this machine connects out to
+            {stato.tunnel?.url.replace('https://', '') ?? 'the tunnel'} and your phone
+            reaches it there. Needs the cloud sign-in.
+          {/if}
+        </div>
+        {#if !stato.tunnel?.attivo}
+          <button class="btn pri" disabled={daFare !== null}
+            onclick={() => void accendiTunnel()}>Enable the tunnel</button>
+        {/if}
+      </div>
       <p class="lead">
-        A few things have to be true before a phone can reach STARK. It checks them
-        live, so the ticks turn on by themselves as you go — no need to close this.
+        Or with Tailscale: a few things have to be true before a phone can reach
+        STARK. It checks them live, so the ticks turn on by themselves as you go.
       </p>
       <div class="passi">
         {#each stato.tailscale.passi as p (p.id)}
@@ -321,6 +360,21 @@
 
 <style>
   .lead { margin: 0 0 12px; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
+
+  /* Il riquadro del tunnel: la strada corta, offerta prima della lista di passi.
+     Bordo d'accento e non un fondo pieno — è un'offerta, non un avviso. */
+  .tbox {
+    margin: 0 0 14px; padding: 12px 14px; border-radius: 11px;
+    border: 1px solid var(--accent); background: var(--accent-soft);
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  }
+  .tbox .t { font-size: 12px; font-weight: 600; }
+  .tbox .d { font-size: 10.5px; line-height: 1.5; color: var(--ink-2); }
+  .tbox .def {
+    margin-left: 6px; padding: 1px 7px; border-radius: 99px; font-size: 9px;
+    font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    background: var(--accent); color: var(--on-accent); vertical-align: 2px;
+  }
   .sub { margin-top: 7px; font-size: 10px; line-height: 1.45; color: var(--muted); }
   .sub.mid { text-align: center; margin: 10px 0 4px; }
 

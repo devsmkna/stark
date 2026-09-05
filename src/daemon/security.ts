@@ -7,6 +7,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { eseguiSync } from '../core/platform.ts'
 import { vieTailscale } from './tailscale.ts'
+import { tunnelHost } from './tunnel.ts'
 import type { IncomingMessage } from 'node:http'
 
 export type Guard = {
@@ -58,7 +59,7 @@ export type Ammesso = {
   /** L'Origin che un browser scriverebbe partendo da quel nome. Sempre `https://`. */
   origin: string
   /** Da dove viene: si mostra all'utente, non decide niente. */
-  fonte: 'tailscale' | 'env'
+  fonte: 'tailscale' | 'env' | 'tunnel'
 }
 
 export type Perimetro = {
@@ -164,7 +165,7 @@ export function perimetro(extra?: string[]): Perimetro {
   const scartate: { voce: string; perche: string }[] = []
   const visti = new Set<string>()
 
-  const aggiungi = (voce: string, fonte: 'tailscale' | 'env'): void => {
+  const aggiungi = (voce: string, fonte: Ammesso['fonte']): void => {
     const esito = normalizza(voce)
     if ('perche' in esito) {
       scartate.push({ voce, perche: esito.perche })
@@ -177,6 +178,14 @@ export function perimetro(extra?: string[]): Perimetro {
 
   const tailnet = detectTailnetHost()
   if (tailnet) aggiungi(tailnet, 'tailscale')
+
+  // L'hostname del tunnel entra **sempre**, acceso o spento che sia l'interruttore:
+  // è una costante di prodotto (come CLOUD_PREDEFINITO), e ammetterlo qui non apre
+  // niente — quel nome risolve sul VPS, non su questa macchina, quindi una pagina
+  // ostile non può presentarlo come `Host` arrivando dal loopback. Se restasse
+  // fuori, accendere il tunnel a caldo servirebbe un perimetro già chiuso: il guard
+  // si costruisce una volta, e questa è la voce che gli serve da subito.
+  aggiungi(tunnelHost(), 'tunnel')
 
   const dichiarati = extra ?? (process.env['STARK_PUBLIC_HOST'] ?? '').split(',')
   for (const voce of dichiarati) {

@@ -140,11 +140,23 @@ export type Settings = {
    * testo di un prompt, mai un output, mai un percorso di file.
    */
   usageSync: boolean
+  /**
+   * Il tunnel verso tunnel.starkapp.dev: la strada per raggiungere questa macchina
+   * da fuori senza Tailscale (vedi `tunnel.ts` e docs/tunnel.md).
+   *
+   * **Spento di default**, e qui il default è un requisito di sicurezza, non
+   * prudenza: acceso, chiunque conosca l'hostname pubblico del tunnel può bussare al
+   * guard di questa macchina — le difese restano intere (token, accoppiamento), ma
+   * il recinto della rete privata attorno non c'è più. «Apertura oltre localhost
+   * sempre come scelta esplicita, mai come default.»
+   */
+  tunnel: boolean
 }
 
 export const DEFAULTS: Settings = {
   permissions: { ...CATEGORY_DEFAULTS }, projects: {}, toolDescriptions: true,
   defaultMode: 'auto', historyArrowUp: true, interruptEscape: true, usageSync: false,
+  tunnel: false,
 }
 
 /**
@@ -237,6 +249,8 @@ export function readSettings(home: string): Settings {
       // ritrovarsi a mandare dati fuori dalla macchina per il modo in cui si legge un
       // campo assente.
       usageSync: raw.usageSync === true,
+      // Stessa lettura di `usageSync`, per la stessa ragione: spegne di default.
+      tunnel: raw.tunnel === true,
       ...(sanePerAgent(raw['defaultModes'])),
       ...(saneShortcuts(raw['shortcuts'])),
       ...(sanePreferred(raw['preferredModel']) ? { preferredModel: sanePreferred(raw['preferredModel']) } : {}),
@@ -256,6 +270,7 @@ export function writeSettings(home: string, s: Settings): Settings {
     historyArrowUp: s.historyArrowUp !== false,
     interruptEscape: s.interruptEscape !== false,
     usageSync: s.usageSync === true,
+    tunnel: s.tunnel === true,
     ...(sanePerAgent(s.defaultModes)),
     ...(saneShortcuts(s.shortcuts)),
     ...(sanePreferred(s.preferredModel) ? { preferredModel: sanePreferred(s.preferredModel) } : {}),

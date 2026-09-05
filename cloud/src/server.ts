@@ -11,6 +11,7 @@ import { registra, login, revoca, chi } from './auth.ts'
 import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
 import { registraUso, leggiUso, type Invio } from './usage.ts'
 import { sql } from './db/client.ts'
+import { TunnelHub } from './tunnel.ts'
 
 const PORTA = Number(process.env['PORT'] ?? 8787)
 
@@ -70,7 +71,24 @@ export async function startCloud(): Promise<void> {
   // il server arriva sempre su uno schema aggiornato senza un passo a parte.
   await migrate(drizzle(sql), { migrationsFolder: './src/db/migrations' })
 
+  // Il tunnel condivide il processo col cloud per una ragione sola: la verifica del
+  // token è la stessa `chi()` sullo stesso Postgres, e due processi vorrebbero dire
+  // due strade per la stessa domanda. Traefik gli instrada un hostname suo
+  // (tunnel.starkapp.dev): è l'`Host` a decidere chi risponde, non il percorso.
+  const tunnel = new TunnelHub(chi)
+  const suTunnel = (req: IncomingMessage): boolean =>
+    (req.headers.host ?? '').split(':')[0]?.toLowerCase().startsWith('tunnel.') ?? false
+
   const server = createServer(async (req, res) => {
+    if (suTunnel(req)) {
+      if (!tunnel.handleRequest(req, res)) {
+        // Nessuna macchina indicata (né `?m=` né cookie): non c'è dove instradare.
+        // Si spiega, perché chi arriva qui è di solito un link vecchio o un browser
+        // nuovo — non un errore del server.
+        send(res, 404, { error: 'nessuna macchina indicata: apri il QR dal pannello «Use STARK from your phone»' })
+      }
+      return
+    }
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
     const method = req.method ?? 'GET'
@@ -180,6 +198,16 @@ export async function startCloud(): Promise<void> {
     } catch (e) {
       send(res, 500, { error: String((e as Error).message ?? e) })
     }
+  })
+
+  // L'upgrade WebSocket esiste solo per i daemon che si collegano al tunnel: su
+  // qualunque altro percorso (o hostname) la connessione si chiude senza cerimonie.
+  server.on('upgrade', (req, socket, head) => {
+    if (suTunnel(req) && (req.url ?? '').split('?')[0] === '/connect') {
+      void tunnel.handleUpgrade(req, socket, head)
+      return
+    }
+    socket.destroy()
   })
 
   server.listen(PORTA, '0.0.0.0', () => {
