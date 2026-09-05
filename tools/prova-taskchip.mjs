@@ -167,6 +167,41 @@ if (!boardAperta || dettaglioTitolo !== 'Card permesso orfane') {
   console.log(await page.content())
 }
 
+// ── Mobile (card #35): su schermo stretto il click NON apre la Board intera ──
+//
+// Sotto gli 860px (`store.narrow`) la vista Board è un'impalcatura scomoda: colonne
+// larghe, dettaglio in-panel. Il chip apre invece un foglio col solo dettaglio
+// (`TaskSheet`), e la Board non compare. Pagina nuova con viewport da telefono,
+// stessi stub.
+const mob = await browser.newPage({ viewport: { width: 390, height: 844 } })
+await mob.route('**/api/cloud/status', r => r.fulfill({
+  json: { url: null, email: 'prova@stark.test', server: 'ok' },
+}))
+await mob.route('**/api/sessions/*/board', r => r.fulfill({ json: BOARD }))
+await mob.route('**/api/sessions/*/boardstream', r => r.fulfill({
+  status: 200, contentType: 'text/event-stream',
+  body: `data: ${JSON.stringify(BOARD)}\n\n`,
+}))
+await mob.goto(url, { waitUntil: 'load' })
+await mob.waitForSelector('.prose .taskchip', { timeout: 10_000 }).catch(() => {})
+await mob.locator('.taskchip').first().click()
+await mob.waitForSelector('.tsheet .dt', { timeout: 10_000 }).catch(() => {})
+
+assert('mobile: il click NON apre la vista Board', await mob.locator('.dlg.board').count() === 0)
+assert('mobile: si apre il foglio col dettaglio del task',
+  (await mob.locator('.tsheet .dt').first().textContent().catch(() => null)) === 'Card permesso orfane')
+const sheetAperto = await mob.locator('.tsheet').count() === 1
+await mob.locator('.tsheet .x').first().click().catch(() => {})
+await mob.waitForTimeout(300)
+assert('mobile: la X chiude il foglio e si torna in chat',
+  sheetAperto && await mob.locator('.tsheet').count() === 0)
+
+if (falli > 0) {
+  console.log('\ncontenuto mobile dopo il click:')
+  console.log(await mob.content().then(c => c.slice(0, 4000)))
+}
+await mob.close()
+
 console.log('-'.repeat(74))
 console.log(falli === 0 ? `OK   tutte le asserzioni passano` : `ROTT ${falli} asserzioni fallite`)
 

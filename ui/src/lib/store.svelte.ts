@@ -308,7 +308,18 @@ export class Store {
    *  chip `#NNN` in chat, lo consuma (e azzera) Board.svelte. */
   boardTask = $state<number | null>(null)
 
-  openBoardTask(id: number): void {
+  /** Il foglio del task su schermo stretto (card #35): id + la sessione con cui il
+   *  daemon risolve la board del progetto. Lo legge TaskSheet.svelte; `null` = chiuso. */
+  taskSheet = $state<{ id: number; sessione: string } | null>(null)
+
+  openBoardTask(id: number, sessione?: string): void {
+    // Su schermo stretto la Board intera è un'impalcatura scomoda: il chip apre il
+    // solo dettaglio. Serve la sessione per risolvere la board; senza (chiamanti
+    // futuri che non ce l'hanno) si ripiega sulla Board, che non ne ha bisogno.
+    if (this.narrow && sessione) {
+      this.taskSheet = { id, sessione }
+      return
+    }
     this.boardTask = id
     if (!this.boardOpen) this.toggleBoard()
   }
