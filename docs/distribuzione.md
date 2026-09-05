@@ -85,17 +85,28 @@ altrove per un DNS o un routing compromesso.
 nginx serve `/install.sh`, `/install.ps1` e `/releases/...` come file statici — niente
 CGI, niente backend, niente stato lato server oltre al filesystem. TLS via `certbot
 --nginx -d starkapp.dev`, rinnovo automatico (il pacchetto Debian/Ubuntu installa già il
-timer systemd: `systemctl list-timers | grep certbot` per verificarlo).
+timer systemd: `systemctl list-timers | grep certbot` per verificarlo). Funziona anche
+col DNS proxato: la sfida HTTP-01 di certbot passa da Cloudflare all'origine su
+`/.well-known/acme-challenge/` senza bisogno di disattivare il proxy. Nel pannello
+Cloudflare va impostato **Full (strict)** come modo SSL/TLS — non *Flexible*, che
+lascerebbe in chiaro il tratto Cloudflare→VPS anche con un certificato vero sull'origine.
 
 `ufw`: 22 (SSH — verificata **prima** di attivare il firewall, per non restare tagliati
 fuori), 80, 443. Nient'altro in ascolto verso l'esterno.
 
 ## DNS
 
-Un record `A` per `starkapp.dev` → `45.77.53.112`, su Cloudflare **DNS only** (nuvola
-grigia, non proxata) — la stessa scelta e la stessa ragione di `docs/fuori-casa.md`: un
-proxy che bufferizza o che si mette in mezzo al TLS non aggiunge niente qui e toglie
-semplicità nell'emettere il certificato con la sfida HTTP-01.
+Un record `A` per `starkapp.dev` → `45.77.53.112`, su Cloudflare **proxato** (nuvola
+arancione) — al contrario di `docs/fuori-casa.md`, e di proposito: quella pagina parla
+del **daemon**, che è privato, non bufferizzabile (SSE) e termina il TLS con mTLS suo.
+Qui non c'è niente di riservato — un installer e dei bundle sono pensati per essere
+pubblici — quindi il proxy è un vantaggio netto: CDN gratuito sui bundle (anche 350+ MB
+l'uno) e protezione da bot/DDoS su un endpoint `curl | sh`, che è un bersaglio naturale.
+
+L'unica cosa che il proxy **non** inoltra è SSH: per questo il deploy da CI
+(`.github/workflows/`) punta all'**IP diretto** (`45.77.53.112`), non all'hostname — le
+due cose sono disaccoppiate apposta, e restano tali anche se in futuro l'IP del VPS
+cambia (in quel caso si aggiorna il workflow, non il DNS pubblico, o viceversa).
 
 ## Cosa non è cambiato
 
@@ -131,7 +142,7 @@ curl -o v.txt https://starkapp.dev/releases/latest/version.txt && cat v.txt
 Push anonimo rifiutato (conferma che `rrsync -wo` non lascia scrivere da fuori la CI):
 
 ```sh
-echo test | ssh deploy@starkapp.dev   # deve rifiutare una shell interattiva
+echo test | ssh deploy@45.77.53.112   # deve rifiutare una shell interattiva
 ```
 
 Dopo un tag di prova, la pagina delle Actions del repo mostra la matrix a schermo:
