@@ -76,12 +76,18 @@ certificato in più: quel container **già risponde** su `starkapp.dev`, e i fil
 Un utente di sistema a bassi privilegi, `deploy`, sull'**host** (non dentro un
 container: Docker non serve a questo passo, `rsync` scrive su un bind mount che il
 container legge), la cui chiave SSH è ristretta con **`rrsync`** — lo script "rsync
-ristretto" incluso ufficialmente nel pacchetto `rsync` (`/usr/share/doc/rsync/scripts/rrsync`
-su Debian/Ubuntu), non uno strumento nostro:
+ristretto" del progetto `rsync` stesso, non uno strumento nostro. Dov'è cambia per
+versione del pacchetto: sulle build recenti sta già in `/usr/bin/rrsync` (parte del
+pacchetto `rsync` stesso); su alcune immagini più vecchie o minime va cercato in
+`/usr/share/doc/rsync/scripts/rrsync(.gz)`, in un pacchetto `rsync-doc` separato, o —
+se anche quello manca — preso dalla fonte ufficiale
+(`raw.githubusercontent.com/WayneD/rsync/master/support/rrsync`, lo stesso autore del
+progetto). `find / -iname 'rrsync*' 2>/dev/null` prima di installare niente: costa
+un secondo e evita di rincorrere un pacchetto che magari non serve nemmeno.
 
 ```
 # /home/deploy/.ssh/authorized_keys
-command="/usr/local/bin/rrsync -wo /opt/stark-cloud/www/",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions-deploy
+command="/usr/bin/rrsync -wo /opt/stark-cloud/www/",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions-deploy
 ```
 
 La radice è `/opt/stark-cloud/www/` intera — non solo `releases/`: sotto ci stanno sia
