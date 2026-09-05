@@ -51,10 +51,31 @@ numero scritto a mano). Cambia solo cosa succede quando esce:
 |---|---|
 | linux-x64 | `ubuntu-24.04` |
 | linux-arm64 | `ubuntu-24.04-arm` |
-| darwin-x64 | `macos-13` |
+| darwin-x64 | `ubuntu-24.04`, con `npm ci`/`npm prune --os=darwin --cpu=x64` |
 | darwin-arm64 | `macos-14` |
 | win-x64 | `windows-2022` |
-| win-arm64 | **non pubblicata**: nessun runner GitHub-hosted nativo per quella combinazione. `install.ps1` lo dice invece di scaricare un bundle che non esiste. Se serve davvero, la strada da provare è forzare `npm install --cpu=arm64 --os=win32` da un runner x64 — npm risolve gli `optionalDependencies` sui flag passati, non sull'host reale, ma non è stato ancora verificato dal vivo. |
+| win-arm64 | `ubuntu-24.04`, con `npm ci`/`npm prune --os=win32 --cpu=arm64` |
+
+Due voci non girano sul runner "naturale", e non per gusto — sono girate su Linux
+**perché il runner nativo non regge o non esiste**, verificato dal vivo entrambe le
+volte (non dedotto dal manuale di npm):
+
+- **darwin-x64**: `macos-13` è Intel, e il parco macOS Intel di GitHub si sta
+  restringendo — sulla prima run di collaudo (`33973707683`) quel job è restato in
+  coda per minuti senza un runner assegnato, mentre `darwin-arm64` (`macos-14`,
+  Apple Silicon) finiva in meno di un minuto.
+- **win-arm64**: non esiste (ancora) un runner GitHub-hosted nativo per questa
+  combinazione — prima di questo cambio il bundle semplicemente non veniva
+  pubblicato, e `install.ps1` lo diceva invece di fingere.
+
+In entrambi i casi la build non ha bisogno del sistema operativo vero: `npm run
+ui:build` è bundling JS puro (nessun compilatore nativo coinvolto), e l'unico pezzo
+per-piattaforma di tutto il bundle è l'eseguibile di Claude Code, che npm sceglie da
+un `optionalDependencies` in base ai flag `--os`/`--cpu` — non all'host su cui gira
+davvero. Il tranello, misurato provandolo: quei flag vanno passati **due volte**, a
+`npm ci` **e** a `npm prune --omit=dev` — se si passano solo al primo, il secondo
+ricontrolla contro la piattaforma reale della macchina (Linux) e butta via il
+pacchetto appena scaricato, silenziosamente, senza un errore che lo segnali.
 
 WSL non è una piattaforma a parte: `uname -s` dentro WSL2 risponde `Linux` come su
 qualunque altra distribuzione, quindi prende il bundle `linux-x64`/`linux-arm64` senza

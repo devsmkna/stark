@@ -19,15 +19,32 @@ jobs:
             runner: ubuntu-24.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
+          # Non macos-13: quel parco runner Intel di GitHub è in restringimento (la
+          # coda su questo job è restata vuota per minuti, run 33973707683, mentre
+          # darwin-arm64 sotto finiva in meno di un minuto). Non serve macOS vero per
+          # questo lavoro — `npm run ui:build` è JS puro, e l'unico pezzo per
+          # piattaforma è l'eseguibile di Claude Code, che npm sceglie da un
+          # `optionalDependencies` — quindi si builda su Linux **forzando** a chi
+          # npm deve credere di rivolgersi. Verificato dal vivo, non dedotto: `npm ci
+          # --os=darwin --cpu=x64` scarica `claude-agent-sdk-darwin-x64` anche su
+          # questa macchina Linux.
           - target: darwin-x64
-            runner: macos-13
+            runner: ubuntu-24.04
+            npmOs: darwin
+            npmCpu: x64
           - target: darwin-arm64
             runner: macos-14
           - target: win-x64
             runner: windows-2022
-          # win-arm64 manca: nessun runner GitHub-hosted nativo per quella
-          # combinazione. install.ps1 lo dice invece di scaricare un bundle che non
-          # esiste — vedi docs/distribuzione.md.
+          # Stesso trucco di darwin-x64 qui sopra, verificato allo stesso modo: non
+          # c'è (ancora) un runner GitHub-hosted nativo win-arm64, ma non serve —
+          # `npm ci --os=win32 --cpu=arm64` porta a casa `claude-agent-sdk-win32-arm64`
+          # da Linux. Prima di questa riga il bundle per questa piattaforma non
+          # esisteva affatto (install.ps1 lo diceva invece di fingere).
+          - target: win-arm64
+            runner: ubuntu-24.04
+            npmOs: win32
+            npmCpu: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -41,9 +58,30 @@ jobs:
       # con cui si compila (misurato: `sh: 1: vite: not found` su ogni piattaforma,
       # run 33973387334). L'omissione arriva **dopo**, con `npm prune`, quando la UI
       # è già compilata e serve solo alleggerire il bundle di ciò che non gira più.
-      - run: npm ci
+      #
+      # `--os`/`--cpu` solo per le voci della matrix che li dichiarano (il campo non
+      # è nemmeno definito per le altre, quindi la condizione bash è la cosa più
+      # leggibile — un'espressione GitHub Actions con format() qui sarebbe la stessa
+      # logica scritta più difficile da leggere). Vanno passati **due volte**, a `ci`
+      # e a `prune`: `prune` da solo ricontrolla contro la piattaforma vera della
+      # macchina e toglierebbe il pacchetto appena scaricato — misurato, non dedotto.
+      - name: Installa
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.npmOs }}" ]; then
+            npm ci --os="${{ matrix.npmOs }}" --cpu="${{ matrix.npmCpu }}"
+          else
+            npm ci
+          fi
       - run: npm run ui:build
-      - run: npm prune --omit=dev
+      - name: Alleggerisce (via le devDependencies)
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.npmOs }}" ]; then
+            npm prune --omit=dev --os="${{ matrix.npmOs }}" --cpu="${{ matrix.npmCpu }}"
+          else
+            npm prune --omit=dev
+          fi
       # Un formato solo (`tar.gz`) su ogni piattaforma, Windows compreso — `install.ps1`
       # lo estrae con lo stesso `tar` che Windows include dalla 1803 in poi, invece di
       # un secondo formato da gestire solo lì. Niente `--strip-components`: il
