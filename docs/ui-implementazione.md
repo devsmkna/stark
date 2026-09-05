@@ -489,7 +489,15 @@ in `app.css` non ne ha.
 che deve srotolarsi). La pagina System restava lì a «sto leggendo». Ora la risposta si tiene per
 tutta la vita del daemon e si **scalda all'avvio**, mentre nessuno la aspetta.
 
-### 5.12 Cosa resta
+### 5.12 Chip task nella conversazione
+
+Un `#NNN` nel testo della risposta si trasforma in un chip cliccabile che apre il dettaglio del task
+sulla board — se il task esiste. La logica sta in `ui/src/lib/boardref.ts`, che traduce il numero nel
+task della board locale. I chip entrano nel flusso da `renderMarkdown` (opzione `tasks`), e il click
+passa da `onProseClick` → `store.openBoardTask`. Come si prova senza spendere quota: `npm run taskchip:check`,
+che apre una sessione fittizia e verifica il rendering, il click e il dettaglio.
+
+### 5.13 Cosa resta
 
 **Richiedono lavoro sul daemon prima** — vedi la tabella al §4.
 
