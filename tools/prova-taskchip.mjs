@@ -151,18 +151,24 @@ if (falli > 0) {
   console.log(await page.locator('.prose').first().innerHTML())
 }
 
-// Il click: apre la vista Board e il dettaglio del task citato.
+// Il click (card #36): anche su desktop apre la modale del task, NON la Board con
+// il pannello laterale — quella resta per chi la apre dal suo bottone.
 await page.locator('.taskchip').first().click()
-await page.waitForSelector('.dlg.board', { timeout: 10_000 }).catch(() => {})
-await page.waitForSelector('.dt', { timeout: 10_000 }).catch(() => {})
+await page.waitForSelector('.tsheet .dt', { timeout: 10_000 }).catch(() => {})
 
-const boardAperta = await page.locator('.dlg.board').count() === 1
-assert('il click apre la vista Board', boardAperta)
+const boardAperta = await page.locator('.dlg.board').count()
+assert('desktop: il click NON apre la vista Board', boardAperta === 0)
 
-const dettaglioTitolo = await page.locator('.dt').first().textContent()
-assert('il dettaglio mostra il task citato', dettaglioTitolo === 'Card permesso orfane')
+const dettaglioTitolo = await page.locator('.tsheet .dt').first().textContent().catch(() => null)
+assert('desktop: la modale mostra il task citato', dettaglioTitolo === 'Card permesso orfane')
 
-if (!boardAperta || dettaglioTitolo !== 'Card permesso orfane') {
+// Su desktop è una modale centrata, non un foglio a tutto schermo: se coprisse
+// l'intera finestra sarebbe il layout mobile scappato dal media query.
+const box = await page.locator('.tsheet').boundingBox().catch(() => null)
+assert('desktop: la modale è centrata, non a tutto schermo',
+  !!box && box.width < 900 && box.height < 800)
+
+if (boardAperta !== 0 || dettaglioTitolo !== 'Card permesso orfane') {
   console.log('\ncontenuto dopo il click:')
   console.log(await page.content())
 }
