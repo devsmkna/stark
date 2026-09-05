@@ -238,8 +238,18 @@
   // indice nel ciclo sbagliato avrebbe confrontato cose diverse.
   function primaCheCita(turn: TurnView): string | undefined {
     if (taskRefs == null) return undefined
-    return turn.parts.find((p): p is Extract<PartView, { kind: 'text' }> =>
-      p.kind === 'text' && citaTask(p.text, taskRefs!))?.partId
+    // La card blocco deve stare su una superficie VISIBILE. Scegliere «la prima parte
+    // testuale nell'ordine grezzo» (come faceva prima) guarda dentro le narrazioni di
+    // servizio, che finiscono quasi sempre nel gruppo `done` — chiuso di default (vedi
+    // `gruppi.ts`: «dentro un turno il lavoro sta in un blocco solo»). Il risultato era
+    // una card che quasi non si vedeva mai. Qui si limita la scelta alle parti che
+    // `groupParts` rende FUORI da quel blocco: i gruppi `solo` (recap, testo che
+    // introduce una domanda/permesso, tagli del flusso).
+    for (const g of groupParts(turn.parts)) {
+      if (g.kind === 'solo' && g.part.kind === 'text' && citaTask(g.part.text, taskRefs))
+        return g.part.partId
+    }
+    return undefined
   }
 
   /**

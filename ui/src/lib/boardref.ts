@@ -34,9 +34,21 @@ export function classeStato(status: string): 'work' | 'wait' | 'done' | 'todo' {
 const RIF = /#(\d{1,4})(?!\d)/g
 
 /** C'è almeno un `#NNN` risolvibile FUORI dal codice? Serve a Conversation per
- *  decidere quale parte del turno porta la card blocco (la prima che cita). */
+ *  decidere quale parte del turno porta la card blocco (la prima che cita).
+ *
+ *  Simmetrico con `decoraTaskDom`: quel decoratore non entra dentro `code`, `pre`, `a`
+ *  o `button` (M2) — quindi un `#NNN` dentro un link markdown (`[vedi #31](url)`) non
+ *  produce mai un chip, anche se qui contasse come citazione. Si toglie anche il link
+ *  intero (etichetta compresa), non solo `()`, altrimenti il testo dell'etichetta
+ *  resterebbe e farebbe scegliere una parte che poi non decora nulla. `RIF` è globale
+ *  (`/g`) ma qui si usa `matchAll` su una stringa nuova a ogni chiamata: non c'è stato
+ *  condiviso da resettare (M3) — a differenza di `.test()`/`.exec()`, `matchAll` non
+ *  tocca `RIF.lastIndex`. */
 export function citaTask(testo: string, tasks: Map<number, TaskRef>): boolean {
-  const senzaCodice = testo.replace(/```[\s\S]*?```/g, '').replace(/`[^`]*`/g, '')
+  const senzaCodice = testo
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]*`/g, '')
+    .replace(/\[[^\]]*\]\([^)]*\)/g, '')
   for (const m of senzaCodice.matchAll(RIF)) if (tasks.has(Number(m[1]))) return true
   return false
 }
@@ -72,10 +84,16 @@ export function decoraTaskDom(
       frag.append(chip(doc, t))
       cursore = (m.index ?? 0) + m[0].length
       if (carta) {
-        carta = false
         // La card va DOPO il blocco che contiene la citazione, non dentro la frase.
+        // `carta` si azzera SOLO se `blocco` esiste davvero (M1): se il nodo non sta
+        // dentro nessuno dei tag previsti, `closest` torna `null` e senza questa
+        // guardia la card andrebbe persa in silenzio — azzerando il flag comunque, una
+        // citazione successiva in un blocco valido non potrebbe più riprovare.
         const blocco = nodo.parentElement?.closest('p, li, h1, h2, h3, h4, blockquote')
-        blocco?.after(cardBlocco(doc, t))
+        if (blocco) {
+          carta = false
+          blocco.after(cardBlocco(doc, t))
+        }
       }
     }
     if (cursore === 0) continue

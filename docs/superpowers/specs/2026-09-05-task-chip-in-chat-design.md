@@ -72,13 +72,21 @@ perché copre il CLI nel terminale e qualunque altro strumento che legga `CLAUDE
 `AGENTS.md`. Il canale interno copre ogni sessione STARK anche dove il blocco manca o è
 stato rimosso.
 
-Limite dichiarato: board creata a metà sessione → l'append entra al prossimo
-risveglio/sessione, non a caldo, perché l'append si fissa alla costruzione delle
-opzioni.
+Limite dichiarato — **vale per Claude Code**: board creata a metà sessione → l'append
+entra al prossimo risveglio/sessione, non a caldo, perché `systemPrompt` si fissa alla
+costruzione delle opzioni. **Non vale per OpenCode** (corretto il 5 settembre 2026 in
+review finale): `haBoard()` è valutato a ogni turno dentro `mandaAlRunner`, quindi una
+board creata a metà sessione entra già dal turno successivo, senza aspettare un
+risveglio.
 
 ## 2. Riconoscimento UI
 
-Pattern `#NNN` (1–4 cifre) nel testo della chat, **messaggi dell'utente compresi**.
+Pattern `#NNN` (1–4 cifre) nel testo della chat. **Limite dichiarato** (corretto il 5
+settembre 2026 in review finale — non era vero quando scritto): i messaggi
+**dell'utente** per ora NON sono decorati, perché il prompt utente passa da
+`decoraColoriTesto` (stringa), non da `renderMarkdown` (DOM) — due percorsi diversi, e
+solo il secondo chiama `decoraTaskDom`. Deciso di rimandarlo invece di farlo passare
+male: vedi la card board dedicata.
 La risoluzione è numerica: `#012` e `#12` sono lo stesso task — i file della board
 paddano a tre cifre, ma `id` è un numero e il confronto si fa su quello.
 Post-process **sul DOM dopo** il render markdown, stesso aggancio di `decoraColoriDom`
