@@ -1,12 +1,24 @@
-# Il server cloud di STARK sul server remoto, in dev.
+# Il server cloud di STARK sul server dedicato (45.77.53.112), dietro Traefik.
 #
 # Questo compose NON builda il cloud: l'immagine arriva già caricata con `docker load`
-# (vedi deploy-dev.sh). Avvia il server cloud + il Postgres che gli serve.
+# (vedi deploy-dev.sh). Avvia il server cloud + il Postgres che gli serve + Traefik,
+# che termina il TLS per https://starkapp.dev.
 #
 #   docker compose -f docker-compose.dev.yml up -d
 #
-# Dati (account, sessioni, DB) in bind mount su /opt/stark-cloud/data: stanno in file
-# normali del server, visibili e backuppabili.
+# Il dominio sta su Cloudflare **proxied**: il client parla col bordo di Cloudflare,
+# Cloudflare parla con Traefik. Il certificato Let's Encrypt sull'origin serve a
+# rendere onesta anche quella seconda tratta (modalità SSL «Full (strict)» sul
+# pannello Cloudflare — dal nostro lato è pronta, l'interruttore è di là).
+#
+# La porta 8787 resta pubblicata NUDA per la transizione: i daemon già installati
+# hanno ancora `http://45.77.53.112:8787` come default. Quando tutte le macchine
+# saranno passate a https://starkapp.dev, quella riga va tolta: è HTTP in chiaro
+# con dentro password e token.
+#
+# Dati (account, sessioni, DB) in bind mount su /opt/stark-cloud: file normali del
+# server, visibili e backuppabili. `letsencrypt/` conserva il certificato: si tiene
+# per non richiederlo a ogni ricambio del container (Let's Encrypt ha rate limit).
 
 services:
   cloud:
@@ -21,6 +33,12 @@ services:
       - DATABASE_URL=postgres://stark:stark@db:5432/stark
     volumes:
       - /opt/stark-cloud/data:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stark-cloud.rule=Host(`starkapp.dev`)"
+      - "traefik.http.routers.stark-cloud.entrypoints=websecure"
+      - "traefik.http.routers.stark-cloud.tls.certresolver=letsencrypt"
+      - "traefik.http.services.stark-cloud.loadbalancer.server.port=8787"
 
   db:
     image: postgres:16-alpine
@@ -31,3 +49,26 @@ services:
       - POSTGRES_DB=stark
     volumes:
       - /opt/stark-cloud/pgdata:/var/lib/postgresql/data
+
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      # Il traffico vero arriva su 443; l'80 serve alla sfida ACME (che Traefik
+      # intercetta prima del redirect) e a chi scrive l'indirizzo senza schema.
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=devops@digitizers.it"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/opt/stark-cloud/letsencrypt:/letsencrypt"

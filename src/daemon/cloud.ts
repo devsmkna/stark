@@ -24,13 +24,14 @@ import { resolve } from 'node:path'
  * autenticare, esattamente come non gli si chiede la porta del daemon. Chi ne ha uno
  * suo (un altro deploy, una prova in locale) lo dice con la variabile.
  *
- * L'indirizzo è quello che `cloud/deploy-dev.sh` pubblica, ed è stato verificato
- * rispondere prima di scriverlo qui: `GET /api/me` → 401, cioè vivo e in attesa di
- * credenziali. Dal 5 settembre 2026 è il server dedicato (Vultr), non più quello
- * condiviso: i dati sono stati migrati (dump Postgres, sessioni comprese — i login
- * fatti prima della migrazione valgono ancora).
+ * L'indirizzo è stato verificato rispondere prima di scriverlo qui: `GET /api/me`
+ * → 401, cioè vivo e in attesa di credenziali. Dal 5 settembre 2026 è il dominio,
+ * non più un IP nudo: Cloudflare al bordo, Traefik con Let's Encrypt sull'origin
+ * (il server dedicato Vultr, 45.77.53.112 — che risponde ancora anche su
+ * `http://45.77.53.112:8787` per i daemon non aggiornati, finché serve). Password e
+ * token adesso viaggiano su TLS, che per un login email+password non è un dettaglio.
  */
-const CLOUD_PREDEFINITO = 'http://45.77.53.112:8787'
+const CLOUD_PREDEFINITO = 'https://starkapp.dev'
 
 /**
  * L'indirizzo del server cloud, o `null` se il cloud è **spento**.
