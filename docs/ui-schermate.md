@@ -209,6 +209,23 @@ giusta.
 Il lampo dura e sparisce: dice «è questo» a chi è appena arrivato, e da lì in poi sarebbe un
 colore senza significato su una riga come le altre.
 
+### Quanto è larga (5 settembre 2026)
+
+La barra si allarga **trascinandone il bordo destro**: la maniglia compare sfiorandola, il
+doppio clic riporta al valore di partenza (212px), e da tastiera le frecce la muovono di
+sedici pixel alla volta. Fra 170 e 460px — sotto i 170 il nome di una chat non ci sta più e
+l'elenco diventa una colonna di ellissi, e per «via dai piedi» c'è già il collasso (mod+b),
+che si riapre da un bottone visibile invece che da una striscia da riafferrare.
+
+La larghezza è una preferenza **del dispositivo**, come il collasso e la disposizione dei
+pannelli: sta nel `localStorage`, non in `settings.json`. Lo stesso account su un portatile
+da 13" e su un monitor da 27" non vuole lo stesso numero.
+
+Sotto la soglia stretta (§8) non c'è nessuna maniglia: là la barra, quando c'è, è tutta la
+schermata. Per questo la larghezza passa da una variabile CSS e non da uno `style="width:…"`
+— uno stile in linea batterebbe la media query, e la barra resterebbe larga quanto l'ha
+lasciata il mouse su uno schermo dove quel numero non vuol dire niente.
+
 ### Il comportamento che conta
 
 Quando una conversazione si ferma ad aspettare una risposta, **non deve essere cercata**.

@@ -236,7 +236,14 @@ code{font-family:var(--mono);font-size:.9em;color:var(--code);background:var(--c
 svg.ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
 /* barra sinistra */
-.side{width:212px;flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line)}
+/* La larghezza arriva da `--side-w`, che la scrive Sidebar.svelte da `store.sidebarWidth`
+   (trascinando la maniglia sul bordo destro). Passa da una variabile e non da uno
+   `style="width:…"` per una ragione precisa: uno stile in linea batte la media query
+   qui sotto, quindi su schermo stretto la barra resterebbe larga quanto l'ha lasciata
+   il mouse invece di prendersi la schermata. Il 212px del fallback è il valore di
+   partenza, e resta scritto anche qui perché la barra deve avere una larghezza sensata
+   prima ancora che qualcuno la tocchi. */
+.side{width:var(--side-w,212px);flex:none;display:flex;flex-direction:column;background:var(--side);border-right:1px solid var(--line);position:relative}
 /* §8 di ui-schermate.md: sotto la soglia stretta la lista, quando c'è, è tutta la
    schermata — non una colonna di 212px scampata al rimpicciolimento. La soglia è la
    stessa di `store.narrow` in App.svelte: quel booleano decide SE mostrarla, questa
