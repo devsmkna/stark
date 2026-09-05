@@ -21,7 +21,7 @@ import { nativeFolderPickerAvailable, pickFolderNative } from './native-browse.t
 import { Push, type Subscription } from './push.ts'
 import { vigila } from './chiamate.ts'
 import { leggiTodo, guardaTodo, leggiTodoDiTutti } from './todo.ts'
-import { boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
+import { cambiaPasswordCloud, boardCloud, boardInitCloud, boardTaskCloud, boardEditCloud, originRepo, cloudUrl, tokenCloud } from './cloud.ts'
 import { loginCloud, logoutCloud, cloudStatus } from './cloud.ts'
 import { creaUsageSync, type UsageSync } from './usage-sync.ts'
 import { creaTunnel, type TunnelClient } from './tunnel.ts'
@@ -468,6 +468,12 @@ async function route(
     if (method === 'POST' && path === '/api/cloud/logout') {
       await logoutCloud(STARK_HOME)
       return send(res, 200, { ok: true })
+    }
+    if (method === 'POST' && path === '/api/cloud/password') {
+      const body = await readJson<{ current?: string; new?: string }>(req)
+      if (!body?.current || !body.new) return send(res, 400, { ok: false, error: 'current e new obbligatorie' })
+      const esito = await cambiaPasswordCloud(STARK_HOME, body.current, body.new)
+      return send(res, esito.ok ? 200 : 400, esito)
     }
     // Su quale ramo sta la cartella di una chat. Sta qui e non nel journal perché è un
     // fatto del filesystem, non dell'agent: chi fa `git checkout` in un terminale

@@ -515,6 +515,39 @@
     cloud = { url: cloud?.url ?? null, email: null, server: cloud?.server ?? 'ok' }
   }
 
+  // ─── cambio password del proprio account cloud ──────────────────────────────
+  let pwAttuale = $state('')
+  let pwNuova = $state('')
+  let pwConferma = $state('')
+  let pwLavoro = $state(false)
+  let pwErrore = $state('')
+  let pwFatto = $state(false)
+
+  /** Le stesse due difese del server, ma dette **prima** di partire: la lunghezza
+   *  minima (che il server richiede comunque) e le due copie della nuova che devono
+   *  coincidere — un refuso non deve diventare una password che non ricordi. */
+  const pwPronta = $derived(
+    pwAttuale.length > 0 && pwNuova.length >= 8 && pwNuova === pwConferma,
+  )
+
+  async function cambiaPassword(): Promise<void> {
+    if (!pwPronta) return
+    pwLavoro = true; pwErrore = ''; pwFatto = false
+    try {
+      const r = await store.api.cloudPassword(pwAttuale, pwNuova)
+      if (r.ok) {
+        pwFatto = true
+        pwAttuale = ''; pwNuova = ''; pwConferma = ''
+      } else {
+        pwErrore = r.error ?? 'cambio password fallito'
+      }
+    } catch (e) {
+      pwErrore = e instanceof Error ? e.message : String(e)
+    } finally {
+      pwLavoro = false
+    }
+  }
+
   const mb = (n: number): string =>
     n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`
 
@@ -1064,6 +1097,51 @@
           <div class="prow"><span class="o-body"><span class="o-t">Conversation width</span><span class="o-sub">how wide a line gets before it wraps</span></span><span class="seg perm"><button class:on={store.lettura.larghezza==='stretta'} onclick={() => store.lettura.setLarghezza('stretta')}>720px</button><button class:on={store.lettura.larghezza==='larga'} onclick={() => store.lettura.setLarghezza('larga')}>900px</button><button class:on={store.lettura.larghezza==='tutta'} onclick={() => store.lettura.setLarghezza('tutta')}>full</button></span></div>
           <div class="orow"><span class="o-body"><span class="o-t">Reduce animations</span><span class="o-sub">panels appear instead of sliding</span></span><button class="sw" class:on={store.lettura.riduciAnimazioni} aria-label="Reduce animations" onclick={() => store.lettura.setRiduciAnimazioni(!store.lettura.riduciAnimazioni)}><span class="kn"></span></button></div>
         </div>
+
+      <!-- ─── Cloud ────────────────────────────────────────────────────── -->
+      {:else if sez === 'cloud'}
+        {#if cloud === null}
+          <div class="sec"><div class="hint">Reading…</div></div>
+        {:else}
+          <div class="sec">
+            <div class="sec-h"><span class="t">Account</span><span class="line"></span></div>
+            {#if cloud.email}
+              <div class="sysrow"><span class="k">Signed in</span><span class="v">{cloud.email}</span>
+                <button class="linkbtn small" disabled={cloudLavoro} onclick={() => void faiLogout()}>Sign out</button></div>
+              {#if cloud.url}<div class="sysrow"><span class="k">Server</span><span class="v">{cloud.url.replace(/^https?:\/\//, '')}</span><span class="m {cloud.server === 'ok' ? 'ok' : 'warn'}">{cloud.server === 'ok' ? 'reachable' : 'unreachable'}</span></div>{/if}
+            {:else}
+              <div class="note info"><Icon name="i-warn" /><p>Not signed in.{#if cloud.server !== 'ok'} The cloud server is {cloud.server === 'giu' ? 'unreachable' : 'not configured'}.{/if}</p></div>
+            {/if}
+          </div>
+
+          {#if cloud.email}
+            <div class="sec">
+              <div class="sec-h"><span class="t">Change password</span><span class="line"></span></div>
+              <div class="pwform">
+                <input type="password" autocomplete="current-password" placeholder="Current password"
+                  bind:value={pwAttuale} disabled={pwLavoro} />
+                <input type="password" autocomplete="new-password" placeholder="New password (min 8)"
+                  bind:value={pwNuova} disabled={pwLavoro} />
+                <input type="password" autocomplete="new-password" placeholder="Repeat new password"
+                  bind:value={pwConferma} disabled={pwLavoro}
+                  onkeydown={(e) => { if (e.key === 'Enter' && pwPronta) void cambiaPassword() }} />
+                {#if pwNuova.length > 0 && pwNuova.length < 8}
+                  <div class="pwnote bad"><Icon name="i-warn" /><span>At least 8 characters.</span></div>
+                {:else if pwConferma.length > 0 && pwNuova !== pwConferma}
+                  <div class="pwnote bad"><Icon name="i-warn" /><span>The two new passwords don’t match.</span></div>
+                {:else if pwErrore}
+                  <div class="pwnote bad"><Icon name="i-warn" /><span>{pwErrore}</span></div>
+                {:else if pwFatto}
+                  <div class="pwnote ok"><Icon name="i-check" /><span>Password changed. Your other devices will have to sign in again.</span></div>
+                {/if}
+                <button class="btn pri" disabled={!pwPronta || pwLavoro} onclick={() => void cambiaPassword()}>
+                  {pwLavoro ? 'Changing…' : 'Change password'}
+                </button>
+              </div>
+              <div class="hint">Changing your password signs out every other device — this one stays. You’ll need the current password even while signed in.</div>
+            </div>
+          {/if}
+        {/if}
 
       <!-- ─── Usage — v11 ─────────────────────────────────────────────── -->
       {:else if sez === 'usage'}
@@ -1685,6 +1763,21 @@
   .numstack { flex:none; display:inline-flex; align-items:center; gap:10px; margin-left:auto; }
   .numstack .linkbtn { color:var(--accent); }
   .numstack .linkbtn :global(svg.ic) { width:11px; height:11px; }
+
+  /* Il form del cambio password: campi in colonna, larghi quanto la sezione, con la
+     stessa cornice degli input di ricerca ma verticali. */
+  .pwform { display:flex; flex-direction:column; gap:8px; align-items:stretch; }
+  .pwform input {
+    width:100%; box-sizing:border-box; padding:9px 11px; border-radius:8px;
+    border:1px solid var(--line-2); background:var(--surface-2); color:var(--ink);
+    font-family:inherit; font-size:13px;
+  }
+  .pwform input:focus { outline:none; border-color:var(--accent); }
+  .pwform .btn { align-self:flex-start; margin-top:2px; }
+  .pwnote { display:flex; align-items:center; gap:7px; font-size:11.5px; line-height:1.45; }
+  .pwnote :global(svg.ic) { width:13px; height:13px; flex:none; }
+  .pwnote.bad { color:var(--stop); }
+  .pwnote.ok { color:var(--done); }
 
   /* La riga di stato di System. Niente fondo, niente bordo: è un elenco chiave-valore,
      non un blocco dentro la conversazione. */

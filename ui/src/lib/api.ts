@@ -434,6 +434,16 @@ export class Api {
     return this.json('/api/cloud/logout', { method: 'POST' })
   }
 
+  /** Cambio password dell'account cloud. Il daemon fa da tramite; la sessione di
+   *  questa macchina resta valida, le altre si revocano (lato server). */
+  cloudPassword(current: string, next: string): Promise<{ ok: boolean; error?: string }> {
+    return this.json('/api/cloud/password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ current, new: next }),
+    })
+  }
+
   /**
    * Tutti i modelli guidabili su questa macchina, per agent (§17).
    *

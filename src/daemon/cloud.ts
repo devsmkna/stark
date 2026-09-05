@@ -120,6 +120,29 @@ export async function logoutCloud(home: string): Promise<void> {
   rmSync(cloudTokenPath(home), { force: true })
 }
 
+/**
+ * Cambio password dell'account cloud. Il daemon fa solo da tramite: la verifica
+ * della password attuale, la scadenza delle altre sessioni e ogni altra decisione
+ * stanno sul server (`cloud/src/auth.ts`, `cambiaPassword`). La sessione di QUESTA
+ * macchina resta valida per contratto del server, quindi il token locale non si
+ * tocca — le altre macchine dovranno rifare il login, ed è il punto.
+ */
+export async function cambiaPasswordCloud(
+  home: string, attuale: string, nuova: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const url = cloudUrl()
+  if (!url) return { ok: false, error: 'server cloud non configurato (STARK_CLOUD_URL)' }
+  const t = leggiToken(home)
+  if (!t) return { ok: false, error: 'non loggato' }
+  const r = await chiama(url, '/api/password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${t.token}` },
+    body: JSON.stringify({ current: attuale, new: nuova }),
+  })
+  if (r.ok) return { ok: true }
+  return { ok: false, error: (r.body as { error?: string } | null)?.error ?? 'cambio password fallito' }
+}
+
 /** Lo stato cloud: chi è loggato, e se il server è raggiungibile. */
 export async function cloudStatus(home: string): Promise<{
   url: string | null
