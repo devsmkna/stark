@@ -16,8 +16,53 @@
   import { quandoRiparte, quotaFerma } from '$core/quota.ts'
   import { longpress, longPressAppenaFatto } from '../lib/longpress.ts'
   import type { Store } from '../lib/store.svelte.ts'
+  import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from '../lib/store.svelte.ts'
+  import { zoomRoot } from '../lib/zoom.ts'
 
   let { store }: { store: Store } = $props()
+
+  // ─── la maniglia che allarga la barra ─────────────────────────────────────
+  //
+  // Stessa meccanica dei divisori fra pannelli affiancati (`Workspace.svelte`): la
+  // maniglia **prende il puntatore**, invece di lasciare l'ascolto a un contenitore.
+  // Senza cattura, uscire dalla striscia col tasto premuto — cosa che capita di
+  // continuo, è larga cinque pixel — interromperebbe il trascinamento a metà.
+  let trascinando = $state(false)
+
+  function giuManiglia(e: PointerEvent): void {
+    trascinando = true
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  /**
+   * `clientX` è in **pixel veri della finestra**; la larghezza che scriviamo è un
+   * valore dichiarato su un figlio del root, che `Sizer` può avere zoomato. Senza la
+   * divisione, al 135% la barra insegue il puntatore a una volta e mezza la sua
+   * distanza e non lo raggiunge mai. Vedi `lib/zoom.ts` — è la stessa correzione del
+   * menu contestuale in App.svelte.
+   */
+  function muoviManiglia(e: PointerEvent): void {
+    if (!trascinando) return
+    // Il bordo sinistro della barra, non zero: con la barra a filo di finestra è la
+    // stessa cosa, ma qui non ci si affida a una coincidenza di layout.
+    const sinistra = (e.currentTarget as HTMLElement).parentElement?.getBoundingClientRect().left ?? 0
+    store.setSidebarWidth((e.clientX - sinistra) / zoomRoot(), false)
+  }
+
+  function suManiglia(): void {
+    if (!trascinando) return
+    trascinando = false
+    store.setSidebarWidth(store.sidebarWidth) // su disco solo qui, non a ogni pixel
+  }
+
+  /** Da tastiera, per chi il trascinamento non lo può fare: frecce di 16px alla volta,
+   *  Home riporta al valore di partenza. */
+  function tastoManiglia(e: KeyboardEvent): void {
+    const passo = e.key === 'ArrowLeft' ? -16 : e.key === 'ArrowRight' ? 16 : 0
+    if (passo === 0 && e.key !== 'Home') return
+    e.preventDefault()
+    store.setSidebarWidth(e.key === 'Home' ? SIDEBAR_DEFAULT : store.sidebarWidth + passo)
+  }
 
   const palette = $derived(colours(store.rows, store.settings?.projects ?? {}))
 
@@ -351,7 +396,28 @@
   })
 </script>
 
-<div class="side">
+<div class="side" style="--side-w:{store.sidebarWidth}px">
+  <!-- La maniglia del bordo destro. Sta dentro `.side` e non fra le due colonne
+       perché la larghezza è una proprietà della barra, non del vuoto accanto: così
+       sparisce da sé quando la barra è collassata o quando lo schermo è stretto, senza
+       che nessun altro debba saperlo.
+       Su schermo stretto non c'è (§8 di docs/ui-schermate.md: là la barra è tutta la
+       schermata, e stringerla non vorrebbe dire niente). -->
+  {#if !store.narrow}
+    <div
+      class="side-hdl" class:drag={trascinando}
+      role="separator" aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={store.sidebarWidth} aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX}
+      tabindex="0"
+      onpointerdown={giuManiglia}
+      onpointermove={muoviManiglia}
+      onpointerup={suManiglia}
+      onpointercancel={suManiglia}
+      ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
+      onkeydown={tastoManiglia}
+    ></div>
+  {/if}
   <div class="sidetop">
     <Logo height={16} />
     <div class="acts">
@@ -682,6 +748,23 @@
     --line:var(--panel-line); --line-2:var(--panel-line-2);
     --accent:var(--panel-accent); --accent-soft:var(--panel-accent-soft);
   }
+  /* La maniglia: invisibile finché non la si sfiora, come i divisori fra pannelli.
+     Sta sopra il bordo destro e sborda di due pixel verso l'interno — una linea da un
+     pixel si vede ma non si afferra, e cinque pixel di area sensibile sono il minimo
+     per prenderla al primo colpo senza rubare clic alle righe dell'elenco. */
+  .side-hdl {
+    position: absolute; top: 0; bottom: 0; right: -2px; width: 5px;
+    z-index: 5; cursor: col-resize; touch-action: none;
+  }
+  .side-hdl::after {
+    content: ''; position: absolute; inset: 0 2px; border-radius: 2px;
+    background: transparent; transition: background .12s;
+  }
+  .side-hdl:hover::after, .side-hdl.drag::after, .side-hdl:focus-visible::after {
+    background: var(--accent);
+  }
+  .side-hdl:focus-visible { outline: none; }
+
   /* Header senza linea — nello screenshot non c'è separatore. */
   :global(.side .sidetop) { border-bottom: none; padding: 10px 10px 8px 12px; }
   .find {

@@ -90,6 +90,27 @@ function leggiPreferenza(chiave: string): boolean {
   try { return localStorage.getItem(chiave) === '1' } catch { return false }
 }
 
+/**
+ * I limiti della barra laterale, e il valore di partenza.
+ *
+ * Il minimo non è un gusto: sotto i 170px il nome di una chat non ci sta più e
+ * l'elenco diventa una colonna di ellissi. Per «via dai piedi» esiste già il collasso
+ * (mod+b), che è un'altra cosa e si riapre da un bottone visibile — una maniglia che
+ * porta a zero lascerebbe invece qualcosa di largo tre pixel da riafferrare.
+ * Il massimo tiene la conversazione più larga dell'elenco su uno schermo normale.
+ */
+export const SIDEBAR_MIN = 170
+export const SIDEBAR_MAX = 460
+export const SIDEBAR_DEFAULT = 212
+
+function leggiLarghezza(): number {
+  try {
+    const n = Number.parseInt(localStorage.getItem('stark.sidebar-w') ?? '', 10)
+    if (Number.isFinite(n)) return Math.min(Math.max(n, SIDEBAR_MIN), SIDEBAR_MAX)
+  } catch { /* modalità privata: si riparte dal default, e va bene */ }
+  return SIDEBAR_DEFAULT
+}
+
 export class Store {
   readonly api = new Api(bootToken())
   /** Come vieni chiamato quando guardi altrove. Vedi `notify.svelte.ts`. */
@@ -324,6 +345,26 @@ export class Store {
   toggleSidebar(): void {
     this.sidebarCollapsed = !this.sidebarCollapsed
     try { localStorage.setItem('stark.sidebar', this.sidebarCollapsed ? '1' : '0') } catch { /* privato */ }
+  }
+
+  /**
+   * Quanto è larga la barra laterale, in pixel dichiarati (non pixel veri: se il root
+   * è zoomato valgono di più — vedi `lib/zoom.ts`, ed è chi trascina a doverne tenere
+   * conto, non chi la scrive qui).
+   *
+   * Sta nel browser accanto a `sidebarCollapsed`, e per la stessa ragione: quanto
+   * spazio dare a un elenco è una preferenza **dello schermo che hai davanti**, non
+   * del progetto né della macchina. Lo stesso account su un portatile da 13" e su un
+   * monitor da 27" non vuole lo stesso numero.
+   */
+  sidebarWidth = $state(leggiLarghezza())
+
+  /** La larghezza nuova, tenuta dentro i limiti. Il salvataggio è a parte perché
+   *  durante un trascinamento si scrive a ogni pixel: sul disco ci va solo al rilascio. */
+  setSidebarWidth(px: number, salva = true): void {
+    this.sidebarWidth = Math.round(Math.min(Math.max(px, SIDEBAR_MIN), SIDEBAR_MAX))
+    if (!salva) return
+    try { localStorage.setItem('stark.sidebar-w', String(this.sidebarWidth)) } catch { /* privato */ }
   }
 
   /**
