@@ -25,10 +25,12 @@ import { resolve } from 'node:path'
  * suo (un altro deploy, una prova in locale) lo dice con la variabile.
  *
  * L'indirizzo è quello che `cloud/deploy-dev.sh` pubblica, ed è stato verificato
- * rispondere prima di scriverlo qui: `GET /api/me` → 401 in 0,2s, cioè vivo e in
- * attesa di credenziali.
+ * rispondere prima di scriverlo qui: `GET /api/me` → 401, cioè vivo e in attesa di
+ * credenziali. Dal 5 settembre 2026 è il server dedicato (Vultr), non più quello
+ * condiviso: i dati sono stati migrati (dump Postgres, sessioni comprese — i login
+ * fatti prima della migrazione valgono ancora).
  */
-const CLOUD_PREDEFINITO = 'http://80.211.239.109:8787'
+const CLOUD_PREDEFINITO = 'http://45.77.53.112:8787'
 
 /**
  * L'indirizzo del server cloud, o `null` se il cloud è **spento**.

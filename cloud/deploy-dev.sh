@@ -50,7 +50,7 @@ SCP_OPTS=""
 # L'indirizzo pubblico per l'URL NON è l'host SSH: un alias come
 # `digitizers.dev.agent` è un nome che solo ssh conosce, non un IP raggiungibile.
 # Default: l'IP pubblico del server cloud. Sovrascrivibile con PUBLIC.
-PUBLIC="${PUBLIC:-80.211.239.109}"
+PUBLIC="${PUBLIC:-45.77.53.112}"
 
 rosso()  { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 verde()  { printf '\033[32m%s\033[0m\n' "$*"; }
