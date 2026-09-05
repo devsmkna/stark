@@ -15,10 +15,14 @@
 # pannello Cloudflare — dal nostro lato è pronta, l'interruttore è di là). Il CNAME
 # `cloud` invece è nato DNS-only, quindi lì i client parlano dritti con Traefik.
 #
-# La porta 8787 resta pubblicata NUDA per la transizione: i daemon già installati
-# hanno ancora `http://45.77.53.112:8787` come default. Quando tutte le macchine
-# saranno passate a https://cloud.starkapp.dev, quella riga va tolta: è HTTP in
-# chiaro con dentro password e token.
+# La porta 8787 NON è più pubblicata (hardening del 5 settembre, card #25): era
+# HTTP in chiaro con dentro password e token, tenuta aperta per la transizione dei
+# daemon vecchi — che puntavano a un server ormai spento comunque. Dentro la rete
+# di Docker ci arriva solo Traefik, ed è anche ciò che rende affidabile
+# l'X-Forwarded-For su cui il tunnel calcola il rate limit per IP.
+#
+# CLOUD_INVITE: il codice che /api/register pretende. Senza la variabile la
+# registrazione è chiusa del tutto.
 #
 # Dati (account, sessioni, DB) in bind mount su /opt/stark-cloud: file normali del
 # server, visibili e backuppabili. `letsencrypt/` conserva il certificato: si tiene
@@ -30,11 +34,10 @@ services:
     restart: unless-stopped
     depends_on:
       - db
-    ports:
-      - "8787:8787"
     environment:
       - PORT=8787
       - DATABASE_URL=postgres://stark:stark@db:5432/stark
+      - CLOUD_INVITE=${CLOUD_INVITE:-}
     volumes:
       - /opt/stark-cloud/data:/data
     labels:

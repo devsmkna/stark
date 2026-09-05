@@ -32,11 +32,22 @@ nasce. La prova che lo verifica misura **quando** arrivano i pezzi, non quanti:
 
 ## L'instradamento
 
-Il QR di accoppiamento porta `https://tunnel.starkapp.dev/pair?m=<macchina>&c=<codice>`.
+Il QR di accoppiamento porta `https://tunnel.starkapp.dev/pair?m=<slug>&c=<codice>`.
 La `m` dice all'hub verso quale daemon girare la richiesta, la risposta pianta un
 cookie `stark-m`, e da lì in poi i percorsi sono quelli veri (`/`, `/chat/<id>`): la
 UI non sa di stare dietro un tunnel, e non deve. La `m` viene tolta dal percorso che
 il daemon vede — è un fatto dell'instradamento, non della richiesta.
+
+**Lo slug non è il machine-id** (hardening del 5 settembre, card #25): è
+`sha256(userId:machineKey)` troncato a 16 esadecimali, derivato **dall'hub** e
+comunicato al daemon nel frame `benvenuto`. La differenza è la difesa dal
+dirottamento: con la chiave dichiarata dal daemon, chiunque avesse un account e
+conoscesse il machine-id di un altro poteva presentarsi con quella chiave e rubarsi
+l'instradamento (Bearer dei telefoni compreso). Con la chiave derivata
+dall'identità, lo stesso machine-id sotto un altro account produce un'ALTRA chiave:
+per catturare il traffico di qualcuno serve il suo token cloud. Bonus: il QR ora
+espone lo slug, non il machine-id — e due account sulla stessa macchina (che sono
+legittimi) convivono con due slug.
 
 Limite noto: **due macchine nello stesso browser si contendono il cookie**. Si
 risolve ri-scansionando il QR dell'altra macchina; un selettore è lavoro futuro, e
@@ -64,16 +75,27 @@ va disegnato prima che scritto.
   il cloud; il tunnel non ce lo mette, ce lo conferma.
 - Il token cloud del daemon viaggia nei sottoprotocolli dentro il TLS, mai in URL.
 
-## Cosa resta fuori (v1, scelto non dimenticato)
+## I freni sull'hub (card #25)
 
-- **Rate limiting sull'hub**: oggi il freno è la difesa del daemon, non un contatore
-  sul VPS. Da aggiungere se il nome diventa noto.
+- **Rate limit per IP**, finestra fissa da un minuto: 300 richieste generali, 20
+  su `/pair` e `/api/phone/claim` (la superficie senza credenziale), 30 handshake
+  `/connect`. L'IP è l'X-Forwarded-For scritto da Traefik, affidabile da quando la
+  porta 8787 non è più pubblicata: al processo arriva solo Traefik.
+- **Tetti di memoria**: corpi in salita oltre 32 MB rifiutati, 64 MB totali di
+  buffer in volo, 128 richieste pendenti per macchina. Oltre: 503 con retry-after.
+- **Registrazione dietro invito** (`CLOUD_INVITE` sull'ambiente del server; senza
+  la variabile è chiusa): «autenticato» non è più una soglia che chiunque supera da
+  solo. La UI di registrazione (card #17) dovrà chiedere il codice.
+- **Sessioni cloud a scadenza**: 90 giorni dalla nascita, poi il daemon rifà il
+  login. La revoca resta la difesa pronta; la scadenza è la rete sotto. Cambio
+  password: `POST /api/password {current,new}` — revoca le altre sessioni.
+
+## Cosa resta fuori (scelto, non dimenticato)
+
 - **Backpressure sulla WebSocket**: una risposta enorme verso un telefono lento si
   accumula nel buffer dell'hub. I payload di STARK sono piccoli; da rifare se
   cambiano.
 - **Selettore multi-macchina** sul telefono (vedi sopra).
-- Corpi in salita oltre **32 MB** rifiutati (più grandi del più grande allegato
-  ragionevole).
 
 ## Come si accende
 

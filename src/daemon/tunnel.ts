@@ -63,6 +63,7 @@ export type TunnelClient = {
 }
 
 type Frame =
+  | { t: 'benvenuto'; m: string }
   | { t: 'req'; id: number; method: string; path: string; headers: Record<string, string | string[]>; body?: string }
 
 /**
@@ -84,6 +85,10 @@ export function creaTunnel(opts: {
 
   let ws: WebSocket | null = null
   let connesso = false
+  /** Lo slug d'instradamento, assegnato dall'hub al `benvenuto`: è derivato
+   *  dall'identità (sha256 di userId:macchina) e il daemon non può calcolarselo —
+   *  vedi cloud/src/tunnel.ts per il perché (difesa dal dirottamento, card #25). */
+  let slug: string | null = null
   let fermo = false
   let errore: string | undefined
   /** Backoff: si parte gentili e si arriva a un minuto. Un tunnel che non c'è non
@@ -126,11 +131,15 @@ export function creaTunnel(opts: {
       return
     }
     ws = sock
-    sock.addEventListener('open', () => { connesso = true; attesa = 1_000 })
+    // `connesso` non scatta all'open ma al `benvenuto` (vedi suFrame): senza slug
+    // non c'è un pairUrl da mostrare, e un pannello che dice «connesso» senza poter
+    // fare il QR direbbe una cosa a metà.
+    sock.addEventListener('open', () => { attesa = 1_000 })
     sock.addEventListener('message', ev => { void suFrame(String(ev.data), sock) })
     sock.addEventListener('error', () => { errore = 'connessione al tunnel fallita' })
     sock.addEventListener('close', ev => {
       connesso = false
+      slug = null
       if (ws === sock) ws = null
       // Un 401 all'handshake arriva come chiusura: se il token non vale più non è
       // un guasto di rete, e martellare non lo farà valere. Si ritenta piano.
@@ -142,6 +151,7 @@ export function creaTunnel(opts: {
   async function suFrame(testo: string, sock: WebSocket): Promise<void> {
     let f: Frame
     try { f = JSON.parse(testo) as Frame } catch { return }
+    if (f.t === 'benvenuto') { slug = f.m; connesso = true; return }
     if (f.t !== 'req') return
     const manda = (obj: unknown): void => {
       if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj))
@@ -173,7 +183,9 @@ export function creaTunnel(opts: {
       attivo: opts.accesa(),
       connesso,
       url: tunnelUrl(),
-      pairUrl: `${tunnelUrl()}/pair?m=${macchina}`,
+      // Con lo slug quando c'è; vuoto altrimenti — e `connesso` è false finché non
+      // c'è, quindi nessuno lo legge vuoto per sbaglio.
+      pairUrl: slug ? `${tunnelUrl()}/pair?m=${slug}` : '',
       ...(errore ? { errore } : {}),
     }),
     tick: () => { attesa = 1_000; giro() },

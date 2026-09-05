@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { registra, login, revoca, chi } from './auth.ts'
+import { registra, login, revoca, chi, chiId, cambiaPassword, spazzaSessioni } from './auth.ts'
 import { leggiBoard, initBoard, creaTask, modificaTask } from './board.ts'
 import { registraUso, leggiUso, type Invio } from './usage.ts'
 import { sql } from './db/client.ts'
@@ -70,12 +70,15 @@ export async function startCloud(): Promise<void> {
   // Le migrazioni si applicano a ogni avvio: sono cumulative e idempotenti, quindi
   // il server arriva sempre su uno schema aggiornato senza un passo a parte.
   await migrate(drizzle(sql), { migrationsFolder: './src/db/migrations' })
+  // Le sessioni oltre i 90 giorni muoiono da sole (`chiId`); quelle mai più
+  // presentate le spazza questo giro, a ogni avvio.
+  await spazzaSessioni()
 
   // Il tunnel condivide il processo col cloud per una ragione sola: la verifica del
   // token è la stessa `chi()` sullo stesso Postgres, e due processi vorrebbero dire
   // due strade per la stessa domanda. Traefik gli instrada un hostname suo
   // (tunnel.starkapp.dev): è l'`Host` a decidere chi risponde, non il percorso.
-  const tunnel = new TunnelHub(chi)
+  const tunnel = new TunnelHub(chiId)
   const suTunnel = (req: IncomingMessage): boolean =>
     (req.headers.host ?? '').split(':')[0]?.toLowerCase().startsWith('tunnel.') ?? false
 
@@ -95,7 +98,15 @@ export async function startCloud(): Promise<void> {
     const origin = (url.searchParams.get('origin') ?? '').trim()
     try {
       if (method === 'POST' && path === '/api/register') {
-        const body = await readJson<{ email?: string; password?: string }>(req)
+        // Registrazione dietro invito (hardening del 5 settembre, card #25): con la
+        // porta aperta «autenticato» era una soglia che chiunque superava da solo, e
+        // il tunnel ne fa una capability. L'invito sta in CLOUD_INVITE sull'ambiente
+        // del server: non impostato = registrazione chiusa, e lo si dice — una porta
+        // che finge di non esserci è peggio di una chiusa (card #17 per la UI).
+        const invito = process.env['CLOUD_INVITE']?.trim()
+        const body = await readJson<{ email?: string; password?: string; invite?: string }>(req)
+        if (!invito) return send(res, 403, { error: 'registrazione chiusa su questo server' })
+        if ((body?.invite ?? '') !== invito) return send(res, 403, { error: 'serve un codice di invito valido' })
         if (!body?.email || !body?.password) return send(res, 400, { error: 'email e password obbligatorie' })
         try {
           const fatto = await registra(body.email, body.password)
@@ -103,6 +114,12 @@ export async function startCloud(): Promise<void> {
         } catch (e) {
           return send(res, 400, { error: String((e as Error).message ?? e) })
         }
+      }
+      if (method === 'POST' && path === '/api/password') {
+        const body = await readJson<{ current?: string; new?: string }>(req)
+        if (!body?.current || !body.new) return send(res, 400, { error: 'current e new obbligatorie' })
+        const esito = await cambiaPassword(bearer(req), body.current, body.new)
+        return send(res, esito.ok ? 200 : 400, esito)
       }
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson<{ email?: string; password?: string }>(req)

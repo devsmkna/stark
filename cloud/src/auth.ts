@@ -10,7 +10,7 @@
 // più file JSONL: il cloud è un modulo a sé, con un DB vero.
 
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, eq, lt, ne } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { sql } from './db/client.ts'
 import { users, sessions } from './db/schema.ts'
@@ -59,16 +59,69 @@ export async function login(email: string, password: string): Promise<{ token: s
   return { token, email: e }
 }
 
+/**
+ * Quanto vive una sessione: 90 giorni dalla nascita, poi il token smette di valere e
+ * il daemon rifà il login (il suo `verifica()` gestisce già il 401 buttando il token
+ * locale). Novanta e non trenta: tre macchine che chiedono la password ogni mese
+ * sono attrito che spinge a password peggiori. La revoca resta la difesa pronta
+ * (`/api/logout`, cambio password); la scadenza è la rete sotto — un token
+ * dimenticato su una macchina dismessa muore da solo.
+ */
+const VITA_SESSIONE_MS = 90 * 24 * 60 * 60 * 1000
+
+function scaduta(creata: Date): boolean {
+  return Date.now() - creata.getTime() > VITA_SESSIONE_MS
+}
+
 /** Chi possiede questo token, o `null` se non c'è una sessione viva. */
 export async function chi(token: string): Promise<string | null> {
+  return (await chiId(token))?.email ?? null
+}
+
+/** Come `chi`, ma con l'id: serve al tunnel, che deriva la chiave d'instradamento
+ *  dall'identità e non può accontentarsi dell'email (che può cambiare). */
+export async function chiId(token: string): Promise<{ id: string; email: string } | null> {
   if (!token) return null
   const [sessione] = await db.select().from(sessions).where(eq(sessions.token, token))
   if (!sessione) return null
+  if (scaduta(sessione.createdAt)) {
+    // Si toglie adesso, non con un cron: la riga morta sparisce alla prima volta che
+    // qualcuno la presenta, e le mai più presentate le pulisce `spazzaSessioni`.
+    await db.delete(sessions).where(eq(sessions.token, token))
+    return null
+  }
   const [account] = await db.select().from(users).where(eq(users.id, sessione.userId))
-  return account?.email ?? null
+  return account ? { id: account.id, email: account.email } : null
+}
+
+/** Le sessioni scadute e mai più presentate. Da chiamare ogni tanto (all'avvio). */
+export async function spazzaSessioni(): Promise<void> {
+  await db.delete(sessions).where(lt(sessions.createdAt, new Date(Date.now() - VITA_SESSIONE_MS)))
 }
 
 /** Revoca una sessione (logout). */
 export async function revoca(token: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.token, token))
+}
+
+/**
+ * Cambio password. Chiede quella vecchia anche a sessione valida: un telefono
+ * rubato con la sessione aperta non deve poter chiudere fuori il proprietario.
+ * Le ALTRE sessioni si revocano: se la password cambia perché era compromessa,
+ * lasciarle vive vanificherebbe il cambio. La corrente resta — chi cambia la
+ * password non va sbattuto fuori nel farlo.
+ */
+export async function cambiaPassword(
+  token: string, attuale: string, nuova: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const utente = await chiId(token)
+  if (!utente) return { ok: false, error: 'non autenticato' }
+  if (nuova.length < 8) return { ok: false, error: 'password troppo corta (minimo 8 caratteri)' }
+  const [account] = await db.select().from(users).where(eq(users.id, utente.id))
+  if (!account || !verificaPassword(attuale, account.passwordHash)) {
+    return { ok: false, error: 'password attuale sbagliata' }
+  }
+  await db.update(users).set({ passwordHash: hashPassword(nuova) }).where(eq(users.id, utente.id))
+  await db.delete(sessions).where(and(eq(sessions.userId, utente.id), ne(sessions.token, token)))
+  return { ok: true }
 }

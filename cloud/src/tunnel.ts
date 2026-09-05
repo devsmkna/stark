@@ -17,7 +17,18 @@
 //   - non tocca i corpi: quello che entra esce identico. L'unica intestazione che
 //     aggiunge è il Set-Cookie dell'instradamento (vedi sotto).
 //
-// L'instradamento: la prima visita porta `?m=<machine>` nel QR di accoppiamento, e la
+// La chiave d'instradamento NON è il machine-id: è uno **slug derivato qui**,
+// `sha256(userId:machineKey)` troncato. La differenza è la difesa dal dirottamento
+// (hardening del 5 settembre, card #25): con la chiave nuda, chiunque avesse un
+// account — la registrazione era aperta — e conoscesse il machine-id di un altro
+// (sta nei QR, nella cronologia, nell'usage) poteva presentarsi con quella chiave e
+// rubarsi l'instradamento, Bearer dei telefoni compreso. Con lo slug derivato
+// dall'identità, lo stesso machine-id sotto un altro account produce un'ALTRA
+// chiave: per catturare il traffico di qualcuno serve il suo token cloud — e a quel
+// punto la partita era già persa altrove. Bonus: il QR ora espone lo slug, non il
+// machine-id.
+//
+// L'instradamento: la prima visita porta `?m=<slug>` nel QR di accoppiamento, e la
 // risposta pianta un cookie `stark-m`. Da lì in poi il cookie basta, e i percorsi
 // restano quelli veri (`/`, `/chat/<id>`): la UI del daemon non sa di essere dietro
 // un tunnel, e non deve. Due macchine nello stesso browser si contendono il cookie —
@@ -25,22 +36,25 @@
 //
 // Onestà sul perimetro: qui il TLS termina, quindi questo processo vede il traffico
 // in chiaro. È la stessa TCB del cloud (il VPS è già dentro), ed è il motivo per cui
-// il tunnel sta su un server nostro e non su un tunnel di terzi — la premessa
-// dell'ADR sull'accesso da fuori casa non cambia, cambia solo chi fa la fatica.
+// il tunnel sta su un server nostro e non su un tunnel di terzi.
 
+import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, WebSocket } from 'ws'
 
 /** Da token cloud a identità, o `null`. Iniettabile: la prova automatica non ha un
  *  Postgres, e il tunnel non deve pretenderne uno per essere provato. */
-export type TunnelAuth = (token: string) => Promise<string | null>
+export type TunnelAuth = (token: string) => Promise<{ id: string } | null>
 
-/** Cosa il server manda al daemon. Il corpo viaggia intero nella `req`: i corpi veri
- *  di STARK sono JSON piccoli e allegati nell'ordine dei MB, e bufferizzarli è più
- *  semplice di un framing a pezzi in salita. In discesa invece si framma (`chunk`),
- *  perché una risposta SSE non finisce mai e va consegnata mentre nasce. */
+/** Cosa il server manda al daemon. `benvenuto` arriva una volta, subito dopo
+ *  l'handshake, e porta lo slug d'instradamento: il daemon non può calcolarselo da
+ *  solo perché non conosce il proprio userId — ed è giusto così, la chiave la
+ *  decide chi instrada. Il corpo di una `req` viaggia intero: i corpi veri di STARK
+ *  sono JSON piccoli e allegati nell'ordine dei MB. In discesa invece si framma
+ *  (`chunk`), perché una risposta SSE non finisce mai e va consegnata mentre nasce. */
 type VersoDaemon =
+  | { t: 'benvenuto'; m: string }
   | { t: 'req'; id: number; method: string; path: string; headers: Record<string, string | string[]>; body?: string }
 type DalDaemon =
   | { t: 'res'; id: number; status: number; headers: Record<string, string | string[]> }
@@ -57,14 +71,56 @@ const COOKIE_MACCHINA = 'stark-m'
 /** Un corpo in salita oltre questo si rifiuta: più grande del più grande allegato
  *  ragionevole, più piccolo di quel che farebbe male bufferizzare. */
 const MAX_CORPO = 32 * 1024 * 1024
+/** Corpi in salita bufferizzati, in totale: oltre, 503. Il VPS ha 4 GB e non è
+ *  solo per il tunnel — un flood di upload non deve poterselo mangiare. */
+const MAX_BUFFER_TOTALE = 64 * 1024 * 1024
+/** Richieste in volo per macchina: oltre, 503. Nessun uso legittimo di STARK ne
+ *  tiene aperte cento; un martello sì. */
+const MAX_PENDENTI = 128
 
-type Collegata = { ws: WebSocket; email: string; viva: boolean }
+// ─── il freno per IP ─────────────────────────────────────────────────────────
+// Finestra fissa da un minuto, in memoria: non deve essere perfetto, deve rendere
+// il martellamento inutile. L'IP è l'X-Forwarded-For scritto da Traefik: da quando
+// la porta 8787 non è più pubblicata (stesso hardening), a questo processo arriva
+// solo Traefik, quindi quell'intestazione non è falsificabile da fuori.
+const LIMITE_GENERALE = 300      // richieste/min per IP: una UI che si carica ne fa decine
+const LIMITE_ACCOPPIAMENTO = 20  // /pair e /claim: la superficie senza credenziale
+const LIMITE_CONNECT = 30        // handshake di daemon/min per IP
+
+class Freno {
+  #conta = new Map<string, { n: number; scade: number }>()
+  supera(chiave: string, limite: number): boolean {
+    const ora = Date.now()
+    const voce = this.#conta.get(chiave)
+    if (!voce || voce.scade < ora) {
+      this.#conta.set(chiave, { n: 1, scade: ora + 60_000 })
+      // La pulizia si paga qui, ogni tanto, invece che con un timer: la mappa non
+      // può crescere oltre gli IP visti in un minuto.
+      if (this.#conta.size > 10_000) {
+        for (const [k, v] of this.#conta) { if (v.scade < ora) this.#conta.delete(k) }
+      }
+      return false
+    }
+    voce.n++
+    return voce.n > limite
+  }
+}
+
+function ipDi(req: IncomingMessage): string {
+  const xff = req.headers['x-forwarded-for']
+  const primo = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim()
+  return primo || req.socket.remoteAddress || '?'
+}
+
+type Collegata = { ws: WebSocket; viva: boolean }
 
 export class TunnelHub {
   #auth: TunnelAuth
   #macchine = new Map<string, Collegata>()
   #pendenti = new Map<WebSocket, Map<number, ServerResponse>>()
   #prossimoId = 1
+  #bufferInVolo = 0
+  #freno = new Freno()
   #battito: ReturnType<typeof setInterval> | null = null
   #wss = new WebSocketServer({ noServer: true, handleProtocols: (ps) => ps.has('stark-tunnel') ? 'stark-tunnel' : false })
 
@@ -100,27 +156,39 @@ export class TunnelHub {
    * qualunque access log qualcuno accenda in mezzo.
    */
   async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    if (this.#freno.supera(`up:${ipDi(req)}`, LIMITE_CONNECT)) {
+      socket.write('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
     const protocolli = (req.headers['sec-websocket-protocol'] ?? '').split(',').map(s => s.trim())
     const token = protocolli.find(p => p.startsWith('tok.'))?.slice(4) ?? ''
     const macchina = protocolli.find(p => p.startsWith('mac.'))?.slice(4) ?? ''
-    const email = token ? await this.#auth(token) : null
-    if (!email || !macchina) {
+    const utente = token ? await this.#auth(token) : null
+    if (!utente || !macchina) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
     }
+    // La chiave d'instradamento si deriva QUI, dall'identità: vedi il commento in
+    // testa al file. Sedici esadecimali (64 bit) bastano — è una capability di
+    // instradamento, l'autorizzazione resta del daemon.
+    const slug = createHash('sha256').update(`${utente.id}:${macchina}`).digest('hex').slice(0, 16)
     this.#wss.handleUpgrade(req, socket, head, ws => {
       // Ultimo che arriva vince: un daemon riavviato si ripresenta prima che il
       // battito scopra il cadavere della connessione vecchia, e deve poter entrare.
-      const vecchia = this.#macchine.get(macchina)
+      // Vincere è legittimo per costruzione: lo slug contiene l'identità, quindi chi
+      // arriva qui con lo stesso slug È lo stesso utente sulla stessa macchina.
+      const vecchia = this.#macchine.get(slug)
       if (vecchia) vecchia.ws.terminate()
-      const c: Collegata = { ws, email, viva: true }
-      this.#macchine.set(macchina, c)
+      const c: Collegata = { ws, viva: true }
+      this.#macchine.set(slug, c)
       this.#pendenti.set(ws, new Map())
+      ws.send(JSON.stringify({ t: 'benvenuto', m: slug } satisfies VersoDaemon))
       ws.on('pong', () => { c.viva = true })
       ws.on('message', (dati) => this.#dalDaemon(ws, dati.toString()))
       ws.on('close', () => {
-        if (this.#macchine.get(macchina)?.ws === ws) this.#macchine.delete(macchina)
+        if (this.#macchine.get(slug)?.ws === ws) this.#macchine.delete(slug)
         // Le richieste rimaste appese muoiono col daemon: meglio un errore subito
         // che un telefono che aspetta un timeout.
         for (const res of this.#pendenti.get(ws)?.values() ?? []) {
@@ -139,6 +207,17 @@ export class TunnelHub {
    */
   handleRequest(req: IncomingMessage, res: ServerResponse): boolean {
     const url = new URL(req.url ?? '/', 'http://x')
+    const ip = ipDi(req)
+    // Il freno sta davanti a tutto, compresi i 404: un martello non merita nemmeno
+    // la fatica di guardare dove voleva andare. Quello dell'accoppiamento è più
+    // stretto perché è l'unica superficie che il daemon attraversa senza credenziale.
+    const accoppiamento = url.pathname === '/pair' || url.pathname === '/api/phone/claim'
+    if (this.#freno.supera(`ip:${ip}`, LIMITE_GENERALE)
+      || (accoppiamento && this.#freno.supera(`pair:${ip}`, LIMITE_ACCOPPIAMENTO))) {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' })
+      res.end(JSON.stringify({ error: 'troppe richieste: riprova fra un minuto' }))
+      return true
+    }
     const dalQuery = url.searchParams.get('m')
     const macchina = dalQuery ?? leggiCookie(req, COOKIE_MACCHINA)
     if (!macchina) return false
@@ -149,6 +228,12 @@ export class TunnelHub {
       // un telefono, e il caso tipico è il computer spento o il tunnel spento.
       res.writeHead(502, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       res.end(paginaScollegata())
+      return true
+    }
+    const inVolo = this.#pendenti.get(c.ws)
+    if ((inVolo?.size ?? 0) >= MAX_PENDENTI || this.#bufferInVolo > MAX_BUFFER_TOTALE) {
+      res.writeHead(503, { 'content-type': 'application/json', 'retry-after': '10' })
+      res.end(JSON.stringify({ error: 'tunnel saturo: riprova' }))
       return true
     }
 
@@ -167,9 +252,11 @@ export class TunnelHub {
     let totale = 0
     req.on('data', (d: Buffer) => {
       totale += d.length
+      this.#bufferInVolo += d.length
       if (totale > MAX_CORPO) { req.destroy(); res.destroy(); return }
       pezzi.push(d)
     })
+    req.on('close', () => { this.#bufferInVolo -= totale })
     req.on('end', () => {
       const id = this.#prossimoId++
       this.#pendenti.get(c.ws)?.set(id, res)
@@ -205,8 +292,6 @@ export class TunnelHub {
           headers['set-cookie'] = [...(Array.isArray(esistenti) ? esistenti : esistenti ? [esistenti] : []), nostro]
         }
         res.writeHead(f.status, headers)
-        // `flushHeaders` non serve: writeHead + il primo chunk partono da soli, e per
-        // una SSE il daemon manda subito il primo evento.
         break
       }
       case 'chunk':
